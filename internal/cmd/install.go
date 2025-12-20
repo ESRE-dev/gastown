@@ -28,23 +28,23 @@ var (
 
 var installCmd = &cobra.Command{
 	Use:   "install [path]",
-	Short: "Create a new Gas Town harness (workspace)",
-	Long: `Create a new Gas Town harness at the specified path.
+	Short: "Create a new Gas Town HQ (workspace)",
+	Long: `Create a new Gas Town HQ at the specified path.
 
-A harness is the top-level directory where Gas Town is installed - the root of
-your workspace where all rigs and agents live. It contains:
-  - CLAUDE.md            Mayor role context (Mayor runs from harness root)
+The HQ (headquarters) is the top-level directory where Gas Town is installed -
+the root of your workspace where all rigs and agents live. It contains:
+  - CLAUDE.md            Mayor role context (Mayor runs from HQ root)
   - mayor/               Mayor config, state, and rig registry
   - rigs/                Managed rig containers (created by 'gt rig add')
-  - .beads/              Town-level beads DB (gm-* prefix for mayor mail)
+  - .beads/              Town-level beads DB (hq-* prefix for mayor mail)
 
 If path is omitted, uses the current directory.
 
-See docs/harness.md for advanced harness configurations including beads
-redirects, multi-system setups, and harness templates.
+See docs/hq.md for advanced HQ configurations including beads
+redirects, multi-system setups, and HQ templates.
 
 Examples:
-  gt install ~/gt                         # Create harness at ~/gt
+  gt install ~/gt                         # Create HQ at ~/gt
   gt install . --name my-workspace        # Initialize current dir
   gt install ~/gt --no-beads              # Skip .beads/ initialization
   gt install ~/gt --git                   # Also init git with .gitignore
@@ -54,7 +54,7 @@ Examples:
 }
 
 func init() {
-	installCmd.Flags().BoolVarP(&installForce, "force", "f", false, "Overwrite existing harness")
+	installCmd.Flags().BoolVarP(&installForce, "force", "f", false, "Overwrite existing HQ")
 	installCmd.Flags().StringVarP(&installName, "name", "n", "", "Town name (defaults to directory name)")
 	installCmd.Flags().BoolVar(&installNoBeads, "no-beads", false, "Skip town beads initialization")
 	installCmd.Flags().BoolVar(&installGit, "git", false, "Initialize git with .gitignore")
@@ -92,16 +92,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	// Check if already a workspace
 	if isWS, _ := workspace.IsWorkspace(absPath); isWS && !installForce {
-		return fmt.Errorf("directory is already a Gas Town harness (use --force to reinitialize)")
+		return fmt.Errorf("directory is already a Gas Town HQ (use --force to reinitialize)")
 	}
 
 	// Check if inside an existing workspace
 	if existingRoot, _ := workspace.Find(absPath); existingRoot != "" && existingRoot != absPath {
-		fmt.Printf("%s Warning: Creating harness inside existing workspace at %s\n",
+		fmt.Printf("%s Warning: Creating HQ inside existing workspace at %s\n",
 			style.Dim.Render("⚠"), existingRoot)
 	}
 
-	fmt.Printf("%s Creating Gas Town harness at %s\n\n",
+	fmt.Printf("%s Creating Gas Town HQ at %s\n\n",
 		style.Bold.Render("🏭"), style.Dim.Render(absPath))
 
 	// Create directory structure
@@ -158,7 +158,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("   ✓ Created mayor/state.json\n")
 
-	// Create Mayor CLAUDE.md at harness root (Mayor runs from there)
+	// Create Mayor CLAUDE.md at HQ root (Mayor runs from there)
 	if err := createMayorCLAUDEmd(absPath, absPath); err != nil {
 		fmt.Printf("   %s Could not create CLAUDE.md: %v\n", style.Dim.Render("⚠"), err)
 	} else {
@@ -191,7 +191,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("\n%s Harness created successfully!\n", style.Bold.Render("✓"))
+	fmt.Printf("\n%s HQ created successfully!\n", style.Bold.Render("✓"))
 	fmt.Println()
 	fmt.Println("Next steps:")
 	step := 1
@@ -206,7 +206,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func createMayorCLAUDEmd(harnessRoot, townRoot string) error {
+func createMayorCLAUDEmd(hqRoot, townRoot string) error {
 	tmpl, err := templates.New()
 	if err != nil {
 		return err
@@ -215,7 +215,7 @@ func createMayorCLAUDEmd(harnessRoot, townRoot string) error {
 	data := templates.RoleData{
 		Role:     "mayor",
 		TownRoot: townRoot,
-		WorkDir:  harnessRoot,
+		WorkDir:  hqRoot,
 	}
 
 	content, err := tmpl.RenderRole("mayor", data)
@@ -223,7 +223,7 @@ func createMayorCLAUDEmd(harnessRoot, townRoot string) error {
 		return err
 	}
 
-	claudePath := filepath.Join(harnessRoot, "CLAUDE.md")
+	claudePath := filepath.Join(hqRoot, "CLAUDE.md")
 	return os.WriteFile(claudePath, []byte(content), 0644)
 }
 

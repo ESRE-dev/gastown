@@ -134,10 +134,10 @@ func BootstrapGasTownMolecule() BuiltinMolecule {
 		Description: `Complete setup of a new Gas Town installation.
 
 Run this after installing gt and bd via Homebrew. This molecule guides you through
-creating a harness, setting up rigs, and configuring your environment.
+creating an HQ, setting up rigs, and configuring your environment.
 
-## Step: locate-harness
-Determine where to install the Gas Town harness.
+## Step: locate-hq
+Determine where to install the Gas Town HQ.
 
 Ask the user for their preferred location. Common choices:
 - ~/gt (recommended - short, easy to type)
@@ -151,29 +151,29 @@ Validate the path:
 
 Store the chosen path for subsequent steps.
 
-## Step: create-harness
-Create the harness directory structure.
+## Step: create-hq
+Create the HQ directory structure.
 
 ` + "```" + `bash
-mkdir -p {{harness_path}}
-cd {{harness_path}}
-gt install . --name {{harness_name}}
+mkdir -p {{hq_path}}
+cd {{hq_path}}
+gt install . --name {{hq_name}}
 ` + "```" + `
 
-If the user wants to track the harness in git:
+If the user wants to track the HQ in git:
 ` + "```" + `bash
 gt git-init --github={{github_repo}} --private
 ` + "```" + `
 
-The harness now has:
+The HQ now has:
 - mayor/ directory
 - .beads/ for town-level tracking
 - CLAUDE.md for mayor context
 
-Needs: locate-harness
+Needs: locate-hq
 
 ## Step: setup-rigs
-Configure which rigs to add to the harness.
+Configure which rigs to add to the HQ.
 
 Default rigs for Gas Town development:
 - gastown (git@github.com:steveyegge/gastown.git)
@@ -191,13 +191,13 @@ This creates the full rig structure:
 - witness/ (polecat monitor)
 - polecats/ (worker directory)
 
-Needs: create-harness
+Needs: create-hq
 
 ## Step: build-gt
 Build the gt binary from source.
 
 ` + "```" + `bash
-cd {{harness_path}}/gastown/mayor/rig
+cd {{hq_path}}/gastown/mayor/rig
 go build -o gt ./cmd/gt
 ` + "```" + `
 
@@ -220,7 +220,7 @@ echo $PATH | tr ':' '\n' | grep -E '(~/bin|~/.local/bin|/home/.*/bin)'
 Copy the binary:
 ` + "```" + `bash
 mkdir -p ~/bin
-cp {{harness_path}}/gastown/mayor/rig/gt ~/bin/gt
+cp {{hq_path}}/gastown/mayor/rig/gt ~/bin/gt
 ` + "```" + `
 
 If ~/bin is not in PATH, add to shell config:
@@ -243,14 +243,14 @@ Initialize beads databases in all clones.
 
 For each rig's mayor clone:
 ` + "```" + `bash
-cd {{harness_path}}/<rig>/mayor/rig
+cd {{hq_path}}/<rig>/mayor/rig
 bd init --prefix <rig-prefix>
 ` + "```" + `
 
 For the town-level beads:
 ` + "```" + `bash
-cd {{harness_path}}
-bd init --prefix gm
+cd {{hq_path}}
+bd init --prefix hq
 ` + "```" + `
 
 Configure sync-branch for multi-clone setups:
@@ -291,7 +291,7 @@ gt spawn --help
 ` + "```" + `
 
 Print summary:
-- Harness location
+- HQ location
 - Installed rigs
 - gt version
 - bd version

@@ -19,8 +19,8 @@ var (
 
 var gitInitCmd = &cobra.Command{
 	Use:   "git-init",
-	Short: "Initialize git repository for a Gas Town harness",
-	Long: `Initialize or configure git for an existing Gas Town harness.
+	Short: "Initialize git repository for a Gas Town HQ",
+	Long: `Initialize or configure git for an existing Gas Town HQ.
 
 This command:
   1. Creates a comprehensive .gitignore for Gas Town
@@ -50,8 +50,8 @@ func init() {
 	rootCmd.AddCommand(gitInitCmd)
 }
 
-// HarnessGitignore is the standard .gitignore for Gas Town harnesses
-const HarnessGitignore = `# Gas Town Harness .gitignore
+// HQGitignore is the standard .gitignore for Gas Town HQs
+const HQGitignore = `# Gas Town HQ .gitignore
 # Track: Role context, handoff docs, beads config/data, rig configs
 # Ignore: Git clones (polecats, mayor/refinery rigs), runtime state
 
@@ -112,30 +112,30 @@ const HarnessGitignore = `# Gas Town Harness .gitignore
 `
 
 func runGitInit(cmd *cobra.Command, args []string) error {
-	// Find the harness root
+	// Find the HQ root
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting current directory: %w", err)
 	}
 
-	harnessRoot, err := workspace.Find(cwd)
-	if err != nil || harnessRoot == "" {
-		return fmt.Errorf("not inside a Gas Town harness (run 'gt install' first)")
+	hqRoot, err := workspace.Find(cwd)
+	if err != nil || hqRoot == "" {
+		return fmt.Errorf("not inside a Gas Town HQ (run 'gt install' first)")
 	}
 
-	fmt.Printf("%s Initializing git for harness at %s\n\n",
-		style.Bold.Render("🔧"), style.Dim.Render(harnessRoot))
+	fmt.Printf("%s Initializing git for HQ at %s\n\n",
+		style.Bold.Render("🔧"), style.Dim.Render(hqRoot))
 
 	// Create .gitignore
-	gitignorePath := filepath.Join(harnessRoot, ".gitignore")
+	gitignorePath := filepath.Join(hqRoot, ".gitignore")
 	if err := createGitignore(gitignorePath); err != nil {
 		return err
 	}
 
 	// Initialize git if needed
-	gitDir := filepath.Join(harnessRoot, ".git")
+	gitDir := filepath.Join(hqRoot, ".git")
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		if err := initGitRepo(harnessRoot); err != nil {
+		if err := initGitRepo(hqRoot); err != nil {
 			return err
 		}
 	} else {
@@ -144,7 +144,7 @@ func runGitInit(cmd *cobra.Command, args []string) error {
 
 	// Create GitHub repo if requested
 	if gitInitGitHub != "" {
-		if err := createGitHubRepo(harnessRoot, gitInitGitHub, gitInitPrivate); err != nil {
+		if err := createGitHubRepo(hqRoot, gitInitGitHub, gitInitPrivate); err != nil {
 			return err
 		}
 	}
@@ -156,7 +156,7 @@ func runGitInit(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		fmt.Println("Next steps:")
 		fmt.Printf("  1. Create initial commit: %s\n",
-			style.Dim.Render("git add . && git commit -m 'Initial Gas Town harness'"))
+			style.Dim.Render("git add . && git commit -m 'Initial Gas Town HQ'"))
 		fmt.Printf("  2. Create remote repo: %s\n",
 			style.Dim.Render("gt git-init --github=user/repo"))
 	}
@@ -174,13 +174,13 @@ func createGitignore(path string) error {
 		}
 
 		// Check if it already has Gas Town section
-		if strings.Contains(string(content), "Gas Town Harness") {
+		if strings.Contains(string(content), "Gas Town HQ") {
 			fmt.Printf("   ✓ .gitignore already configured for Gas Town\n")
 			return nil
 		}
 
 		// Append to existing
-		combined := string(content) + "\n" + HarnessGitignore
+		combined := string(content) + "\n" + HQGitignore
 		if err := os.WriteFile(path, []byte(combined), 0644); err != nil {
 			return fmt.Errorf("updating .gitignore: %w", err)
 		}
@@ -189,7 +189,7 @@ func createGitignore(path string) error {
 	}
 
 	// Create new .gitignore
-	if err := os.WriteFile(path, []byte(HarnessGitignore), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(HQGitignore), 0644); err != nil {
 		return fmt.Errorf("creating .gitignore: %w", err)
 	}
 	fmt.Printf("   ✓ Created .gitignore\n")
@@ -209,7 +209,7 @@ func initGitRepo(path string) error {
 	return nil
 }
 
-func createGitHubRepo(harnessRoot, repo string, private bool) error {
+func createGitHubRepo(hqRoot, repo string, private bool) error {
 	// Check if gh CLI is available
 	if _, err := exec.LookPath("gh"); err != nil {
 		return fmt.Errorf("GitHub CLI (gh) not found. Install it with: brew install gh")
@@ -224,7 +224,7 @@ func createGitHubRepo(harnessRoot, repo string, private bool) error {
 	fmt.Printf("   → Creating GitHub repository %s...\n", repo)
 
 	// Build gh repo create command
-	args := []string{"repo", "create", repo, "--source", harnessRoot}
+	args := []string{"repo", "create", repo, "--source", hqRoot}
 	if private {
 		args = append(args, "--private")
 	} else {
@@ -233,7 +233,7 @@ func createGitHubRepo(harnessRoot, repo string, private bool) error {
 	args = append(args, "--push")
 
 	cmd := exec.Command("gh", args...)
-	cmd.Dir = harnessRoot
+	cmd.Dir = hqRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -246,17 +246,18 @@ func createGitHubRepo(harnessRoot, repo string, private bool) error {
 
 // InitGitForHarness is the shared implementation for git initialization.
 // It can be called from both 'gt git-init' and 'gt install --git'.
-func InitGitForHarness(harnessRoot string, github string, private bool) error {
+// Note: Function name kept for backwards compatibility.
+func InitGitForHarness(hqRoot string, github string, private bool) error {
 	// Create .gitignore
-	gitignorePath := filepath.Join(harnessRoot, ".gitignore")
+	gitignorePath := filepath.Join(hqRoot, ".gitignore")
 	if err := createGitignore(gitignorePath); err != nil {
 		return err
 	}
 
 	// Initialize git if needed
-	gitDir := filepath.Join(harnessRoot, ".git")
+	gitDir := filepath.Join(hqRoot, ".git")
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		if err := initGitRepo(harnessRoot); err != nil {
+		if err := initGitRepo(hqRoot); err != nil {
 			return err
 		}
 	} else {
@@ -265,7 +266,7 @@ func InitGitForHarness(harnessRoot string, github string, private bool) error {
 
 	// Create GitHub repo if requested
 	if github != "" {
-		if err := createGitHubRepo(harnessRoot, github, private); err != nil {
+		if err := createGitHubRepo(hqRoot, github, private); err != nil {
 			return err
 		}
 	}

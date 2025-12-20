@@ -1,6 +1,6 @@
-# Bootstrapping Gas Town from a Harness
+# Bootstrapping Gas Town from an HQ
 
-This guide documents how to bootstrap a full Gas Town installation from a harness repository (e.g., `steveyegge/stevey-gt`).
+This guide documents how to bootstrap a full Gas Town installation from an HQ repository (e.g., `steveyegge/stevey-gt`).
 
 ## Prerequisites
 
@@ -10,17 +10,17 @@ This guide documents how to bootstrap a full Gas Town installation from a harnes
 
 ## Overview
 
-A Gas Town harness is a template repository containing:
+A Gas Town HQ is a template repository containing:
 - Town-level configuration (`mayor/`, `.beads/`)
 - Rig configs (`gastown/config.json`, `beads/config.json`)
 - CLAUDE.md for Mayor context
 
-The harness does NOT contain:
+The HQ does NOT contain:
 - The actual gt binary (must be built)
 - Full rig structures (must be populated)
 - Agent state files (must be created)
 
-## Step 1: Clone the Harness
+## Step 1: Clone the HQ
 
 ```bash
 git clone git@github.com:steveyegge/stevey-gt.git ~/gt
@@ -62,7 +62,7 @@ cp gt ~/bin/gt
 
 ## Step 5: Populate Rig Structures
 
-For each rig in your harness (gastown, beads, etc.), create the full agent structure:
+For each rig in your HQ (gastown, beads, etc.), create the full agent structure:
 
 ### Gastown Rig
 
@@ -165,13 +165,13 @@ Here's a condensed script for bootstrapping:
 set -e
 
 # Configuration
-HARNESS_REPO="git@github.com:steveyegge/stevey-gt.git"
+HQ_REPO="git@github.com:steveyegge/stevey-gt.git"
 GASTOWN_REPO="git@github.com:steveyegge/gastown.git"
 BEADS_REPO="git@github.com:steveyegge/beads.git"
 TOWN_ROOT="$HOME/gt"
 
-# Clone harness
-git clone "$HARNESS_REPO" "$TOWN_ROOT"
+# Clone HQ
+git clone "$HQ_REPO" "$TOWN_ROOT"
 cd "$TOWN_ROOT"
 
 # Install Go if needed

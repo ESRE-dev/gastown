@@ -47,28 +47,28 @@ graph TB
 
 ## Core Concepts
 
-### Harness (Town)
+### HQ (Town)
 
-A **Harness** is the installation directory where Gas Town lives - the physical root of your workspace. The terms "harness" and "town" are often used interchangeably:
-- **Harness** = physical (the directory at `~/gt/`)
+The **HQ** (headquarters) is the installation directory where Gas Town lives - the physical root of your workspace. The terms "HQ" and "town" are often used interchangeably:
+- **HQ** = physical (the directory at `~/gt/`)
 - **Town** = logical (the Gas Town workspace concept)
 
-A harness contains:
-- `CLAUDE.md` - Mayor role context (Mayor runs from harness root)
+An HQ contains:
+- `CLAUDE.md` - Mayor role context (Mayor runs from HQ root)
 - `mayor/` - Mayor configuration, state, and registry
-- `.beads/` - Town-level beads (gm-* prefix for mayor mail)
+- `.beads/` - Town-level beads (hq-* prefix for mayor mail)
 - `rigs/` or rig directories - Managed project containers
 
-Create a harness with `gt install`:
+Create an HQ with `gt install`:
 ```bash
-gt install ~/gt --git  # Create harness with git
+gt install ~/gt --git  # Create HQ with git
 ```
 
-**See**: [docs/harness.md](harness.md) for comprehensive harness documentation, including:
+**See**: [docs/hq.md](hq.md) for comprehensive HQ documentation, including:
 - Beads redirect patterns for complex setups
 - Multi-system sharing (PGT/GGT coexistence)
-- Harness templates for organizations
-- Migration between harnesses
+- HQ templates for organizations
+- Migration between HQs
 
 ### Rig
 
@@ -765,14 +765,14 @@ Both patterns are valid. Use static molecules for well-defined workflows (engine
 
 ## Directory Structure
 
-### Harness Level
+### HQ Level
 
-The harness (town root) is created by `gt install`:
+The HQ (town root) is created by `gt install`:
 
 ```
-~/gt/                              # HARNESS ROOT (Gas Town installation)
+~/gt/                              # HQ ROOT (Gas Town installation)
 ├── CLAUDE.md                      # Mayor role context (runs from here)
-├── .beads/                        # Town-level beads (prefix: gm-)
+├── .beads/                        # Town-level beads (prefix: hq-)
 │   ├── beads.db                   # Mayor mail, coordination, handoffs
 │   └── config.yaml
 │
@@ -785,13 +785,13 @@ The harness (town root) is created by `gt install`:
 │   ├── gastown/                   # A rig (project container)
 │   └── wyvern/                    # Another rig
 │
-└── <rig>/                         # OR rigs at harness root (legacy)
+└── <rig>/                         # OR rigs at HQ root (legacy)
 ```
 
 **Notes**:
-- Mayor's mail is in town beads (`gm-*` issues), not JSONL files
-- Rigs can be in `rigs/` or at harness root (both work)
-- See [docs/harness.md](harness.md) for advanced harness configurations
+- Mayor's mail is in town beads (`hq-*` issues), not JSONL files
+- Rigs can be in `rigs/` or at HQ root (both work)
+- See [docs/hq.md](hq.md) for advanced HQ configurations
 
 ### Rig Level
 
@@ -873,10 +873,10 @@ graph TB
 
 ### ASCII Directory Layout
 
-For reference without mermaid rendering (see [harness.md](harness.md) for creation/setup):
+For reference without mermaid rendering (see [hq.md](hq.md) for creation/setup):
 
 ```
-~/gt/                                    # HARNESS ROOT (Gas Town installation)
+~/gt/                                    # HQ ROOT (Gas Town installation)
 ├── CLAUDE.md                            # Mayor role context
 ├── .beads/                              # Town-level beads (gm-* prefix)
 │   ├── beads.db                         # Mayor mail, coordination
@@ -1599,13 +1599,13 @@ This ensures all agents in the rig share a single beads database, separate from 
 
 ## CLI Commands
 
-### Harness Management
+### HQ Management
 
 ```bash
-gt install [path]      # Create Gas Town harness (see harness.md)
+gt install [path]      # Create Gas Town HQ (see hq.md)
 gt install --git       # Also initialize git with .gitignore
 gt install --github=u/r  # Also create GitHub repo
-gt git-init            # Initialize git for existing harness
+gt git-init            # Initialize git for existing HQ
 gt doctor              # Check workspace health
 gt doctor --fix        # Auto-fix issues
 ```
@@ -1758,7 +1758,7 @@ The **plan-oracle** plugin helps decompose work:
 The **beads-hygiene** plugin detects and fixes cross-pollution between nested beads databases.
 
 **Background**: Gas Town has a two-level beads architecture:
-- **Town-level** (`~/gt/.beads/`): Mayor mail, cross-rig coordination, harness-level issues
+- **Town-level** (`~/gt/.beads/`): Mayor mail, cross-rig coordination, HQ-level issues
 - **Rig-level** (`~/gt/<rig>/.beads/`): Project-specific work (bugs, features, tasks)
 
 Workers sometimes get confused about which database they're in, especially when:
@@ -1778,7 +1778,7 @@ Workers sometimes get confused about which database they're in, especially when:
 2. Check for cross-level dependency references
    - Flag `gt-*` issues that depend on `hq-*` (usually wrong)
 3. Analyze recent activity for context confusion
-   - Agent in `gastown/` creating harness-level issues
+   - Agent in `gastown/` creating HQ-level issues
    - Agent at town level creating rig-specific issues
 4. Identify misfiled issues that should be moved
 
@@ -1800,9 +1800,9 @@ Workers sometimes get confused about which database they're in, especially when:
 You are reviewing beads databases for cross-pollution between Gas Town's
 two-level architecture:
 
-TOWN LEVEL (~/gt/.beads/): Coordination, mayor mail, harness issues
+TOWN LEVEL (~/gt/.beads/): Coordination, mayor mail, HQ issues
   - Prefix: hq-* (headquarters)
-  - Contains: cross-rig coordination, strategic planning, harness bugs
+  - Contains: cross-rig coordination, strategic planning, HQ bugs
 
 RIG LEVEL (~/gt/<rig>/.beads/): Project-specific work
   - Prefix: <rig>-* (e.g., gt-* for gastown rig)
