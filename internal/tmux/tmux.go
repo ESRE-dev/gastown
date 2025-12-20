@@ -138,6 +138,25 @@ func (t *Tmux) SendKeysRaw(session, keys string) error {
 	return err
 }
 
+// SendKeysReplace sends keystrokes, clearing any pending input first.
+// This is useful for "replaceable" notifications where only the latest matters.
+// Uses Ctrl-U to clear the input line before sending the new message.
+// The delay parameter controls how long to wait after clearing before sending (ms).
+func (t *Tmux) SendKeysReplace(session, keys string, clearDelayMs int) error {
+	// Send Ctrl-U to clear any pending input on the line
+	if _, err := t.run("send-keys", "-t", session, "C-u"); err != nil {
+		return err
+	}
+
+	// Small delay to let the clear take effect
+	if clearDelayMs > 0 {
+		time.Sleep(time.Duration(clearDelayMs) * time.Millisecond)
+	}
+
+	// Now send the actual message
+	return t.SendKeys(session, keys)
+}
+
 // SendKeysDelayed sends keystrokes after a delay (in milliseconds).
 // Useful for waiting for a process to be ready before sending input.
 func (t *Tmux) SendKeysDelayed(session, keys string, delayMs int) error {

@@ -22,12 +22,13 @@ import (
 
 // Daemon is the town-level background service.
 type Daemon struct {
-	config  *Config
-	tmux    *tmux.Tmux
-	logger  *log.Logger
-	ctx     context.Context
-	cancel  context.CancelFunc
-	backoff *BackoffManager
+	config       *Config
+	tmux         *tmux.Tmux
+	logger       *log.Logger
+	ctx          context.Context
+	cancel       context.CancelFunc
+	backoff      *BackoffManager
+	notifications *NotificationManager
 }
 
 // New creates a new daemon instance.
@@ -47,13 +48,18 @@ func New(config *Config) (*Daemon, error) {
 	logger := log.New(logFile, "", log.LstdFlags)
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Initialize notification manager for slot-based deduplication
+	notifDir := filepath.Join(daemonDir, "notifications")
+	notifMaxAge := 5 * time.Minute // Notifications expire after 5 minutes
+
 	return &Daemon{
-		config:  config,
-		tmux:    tmux.NewTmux(),
-		logger:  logger,
-		ctx:     ctx,
-		cancel:  cancel,
-		backoff: NewBackoffManager(DefaultBackoffConfig()),
+		config:       config,
+		tmux:         tmux.NewTmux(),
+		logger:       logger,
+		ctx:          ctx,
+		cancel:       cancel,
+		backoff:      NewBackoffManager(DefaultBackoffConfig()),
+		notifications: NewNotificationManager(notifDir, notifMaxAge),
 	}, nil
 }
 
@@ -109,6 +115,9 @@ func (d *Daemon) Run() error {
 // heartbeat performs one heartbeat cycle.
 func (d *Daemon) heartbeat(state *State) {
 	d.logger.Println("Heartbeat starting")
+
+	// 0. Clean up stale notification slots periodically
+	_ = d.notifications.ClearStaleSlots()
 
 	// 1. Ensure Deacon is running (the Deacon is the heartbeat of the system)
 	d.ensureDeaconRunning()
@@ -205,8 +214,9 @@ func (d *Daemon) pokeDeacon() {
 	}
 
 	if isFresh {
-		// Deacon is actively working, reset backoff
+		// Deacon is actively working, reset backoff and mark notifications consumed
 		d.backoff.RecordActivity(agentID)
+		_ = d.notifications.MarkConsumed(DeaconSessionName, SlotHeartbeat)
 		d.logger.Println("Deacon is fresh, skipping poke")
 		return
 	}
@@ -218,13 +228,22 @@ func (d *Daemon) pokeDeacon() {
 		return
 	}
 
-	// Send heartbeat message via tmux
+	// Check if we should send (slot-based deduplication)
+	shouldSend, _ := d.notifications.ShouldSend(DeaconSessionName, SlotHeartbeat)
+	if !shouldSend {
+		d.logger.Println("Heartbeat already pending for Deacon, skipping")
+		return
+	}
+
+	// Send heartbeat message via tmux, replacing any pending input
 	msg := "HEARTBEAT: run your rounds"
-	if err := d.tmux.SendKeys(DeaconSessionName, msg); err != nil {
+	if err := d.tmux.SendKeysReplace(DeaconSessionName, msg, 50); err != nil {
 		d.logger.Printf("Error poking Deacon: %v", err)
 		return
 	}
 
+	// Record the send for slot deduplication
+	_ = d.notifications.RecordSend(DeaconSessionName, SlotHeartbeat, msg)
 	d.backoff.RecordPoke(agentID)
 
 	// Adjust backoff based on staleness
@@ -258,8 +277,9 @@ func (d *Daemon) pokeMayor() {
 	// Check keepalive to see if agent is active
 	state := keepalive.Read(d.config.TownRoot)
 	if state != nil && state.IsFresh() {
-		// Agent is actively working, reset backoff
+		// Agent is actively working, reset backoff and mark notifications consumed
 		d.backoff.RecordActivity(agentID)
+		_ = d.notifications.MarkConsumed(mayorSession, SlotHeartbeat)
 		d.logger.Printf("Mayor is fresh (cmd: %s), skipping poke", state.LastCommand)
 		return
 	}
@@ -271,13 +291,22 @@ func (d *Daemon) pokeMayor() {
 		return
 	}
 
-	// Send heartbeat message via tmux
+	// Check if we should send (slot-based deduplication)
+	shouldSend, _ := d.notifications.ShouldSend(mayorSession, SlotHeartbeat)
+	if !shouldSend {
+		d.logger.Println("Heartbeat already pending for Mayor, skipping")
+		return
+	}
+
+	// Send heartbeat message via tmux, replacing any pending input
 	msg := "HEARTBEAT: check your rigs"
-	if err := d.tmux.SendKeys(mayorSession, msg); err != nil {
+	if err := d.tmux.SendKeysReplace(mayorSession, msg, 50); err != nil {
 		d.logger.Printf("Error poking Mayor: %v", err)
 		return
 	}
 
+	// Record the send for slot deduplication
+	_ = d.notifications.RecordSend(mayorSession, SlotHeartbeat, msg)
 	d.backoff.RecordPoke(agentID)
 
 	// If agent is stale or very stale, record a miss (increase backoff)
@@ -399,8 +428,9 @@ func (d *Daemon) pokeWitness(session string) {
 	// Check keepalive to see if the witness is active
 	state := keepalive.Read(rigWorkspace)
 	if state != nil && state.IsFresh() {
-		// Witness is actively working, reset backoff
+		// Witness is actively working, reset backoff and mark notifications consumed
 		d.backoff.RecordActivity(agentID)
+		_ = d.notifications.MarkConsumed(session, SlotHeartbeat)
 		d.logger.Printf("Witness %s is fresh (cmd: %s), skipping poke", session, state.LastCommand)
 		return
 	}
@@ -412,13 +442,22 @@ func (d *Daemon) pokeWitness(session string) {
 		return
 	}
 
-	// Send heartbeat message
+	// Check if we should send (slot-based deduplication)
+	shouldSend, _ := d.notifications.ShouldSend(session, SlotHeartbeat)
+	if !shouldSend {
+		d.logger.Printf("Heartbeat already pending for Witness %s, skipping", session)
+		return
+	}
+
+	// Send heartbeat message, replacing any pending input
 	msg := "HEARTBEAT: check your workers"
-	if err := d.tmux.SendKeys(session, msg); err != nil {
+	if err := d.tmux.SendKeysReplace(session, msg, 50); err != nil {
 		d.logger.Printf("Error poking Witness %s: %v", session, err)
 		return
 	}
 
+	// Record the send for slot deduplication
+	_ = d.notifications.RecordSend(session, SlotHeartbeat, msg)
 	d.backoff.RecordPoke(agentID)
 
 	// If agent is stale or very stale, record a miss (increase backoff)
