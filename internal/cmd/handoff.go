@@ -116,13 +116,28 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Warning: failed to set state: %v\n", err)
 	}
 
-	// Wait for retirement
+	// Wait for retirement with timeout warning
 	fmt.Println()
 	fmt.Printf("%s Waiting for retirement...\n", style.Dim.Render("◌"))
 	fmt.Println(style.Dim.Render("(Manager will terminate this session)"))
 
-	// Block forever - manager will kill us
-	select {}
+	// Wait with periodic warnings - manager should kill us
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	waitStart := time.Now()
+	for {
+		select {
+		case <-ticker.C:
+			elapsed := time.Since(waitStart).Round(time.Second)
+			fmt.Printf("%s Still waiting (%v elapsed)...\n", style.Dim.Render("◌"), elapsed)
+			if elapsed >= 2*time.Minute {
+				fmt.Println(style.Dim.Render("  Hint: If manager isn't responding, you may need to:"))
+				fmt.Println(style.Dim.Render("  - Check if daemon/witness is running"))
+				fmt.Println(style.Dim.Render("  - Use Ctrl+C to abort and manually exit"))
+			}
+		}
+	}
 }
 
 // detectHandoffRole figures out what kind of agent we are.
