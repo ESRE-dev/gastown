@@ -69,6 +69,9 @@ type Info struct {
 
 	// Windows is the number of tmux windows.
 	Windows int `json:"windows,omitempty"`
+
+	// LastActivity is when the session last had activity.
+	LastActivity time.Time `json:"last_activity,omitempty"`
 }
 
 // sessionName generates the tmux session name for a polecat.
@@ -251,6 +254,14 @@ func (m *Manager) Status(polecat string) (*Info, error) {
 				info.Created = t
 				break
 			}
+		}
+	}
+
+	// Parse activity time (unix timestamp from tmux)
+	if tmuxInfo.Activity != "" {
+		var activityUnix int64
+		if _, err := fmt.Sscanf(tmuxInfo.Activity, "%d", &activityUnix); err == nil && activityUnix > 0 {
+			info.LastActivity = time.Unix(activityUnix, 0)
 		}
 	}
 

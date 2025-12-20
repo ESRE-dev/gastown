@@ -219,6 +219,24 @@ func ParsePriority(s string) Priority {
 	}
 }
 
+// PriorityFromInt converts a beads-style integer priority to a Priority.
+// Accepts: 0=urgent, 1=high, 2=normal, 3=low, 4=backlog (treated as low).
+// Invalid values default to PriorityNormal.
+func PriorityFromInt(p int) Priority {
+	switch p {
+	case 0:
+		return PriorityUrgent
+	case 1:
+		return PriorityHigh
+	case 2:
+		return PriorityNormal
+	case 3, 4:
+		return PriorityLow
+	default:
+		return PriorityNormal
+	}
+}
+
 // ParseMessageType parses a message type string, returning TypeNotification for invalid values.
 func ParseMessageType(s string) MessageType {
 	switch MessageType(s) {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -169,9 +170,29 @@ Examples:
 	RunE: runPolecatSync,
 }
 
+var polecatStatusCmd = &cobra.Command{
+	Use:   "status <rig>/<polecat>",
+	Short: "Show detailed status for a polecat",
+	Long: `Show detailed status for a polecat.
+
+Displays comprehensive information including:
+  - Current lifecycle state (working, done, stuck, idle)
+  - Assigned issue (if any)
+  - Session status (running/stopped, attached/detached)
+  - Session creation time
+  - Last activity time
+
+Examples:
+  gt polecat status gastown/Toast
+  gt polecat status gastown/Toast --json`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPolecatStatus,
+}
+
 var (
 	polecatSyncAll      bool
 	polecatSyncFromMain bool
+	polecatStatusJSON   bool
 )
 
 func init() {
@@ -186,6 +207,9 @@ func init() {
 	polecatSyncCmd.Flags().BoolVar(&polecatSyncAll, "all", false, "Sync all polecats in the rig")
 	polecatSyncCmd.Flags().BoolVar(&polecatSyncFromMain, "from-main", false, "Pull only, no push")
 
+	// Status flags
+	polecatStatusCmd.Flags().BoolVar(&polecatStatusJSON, "json", false, "Output as JSON")
+
 	// Add subcommands
 	polecatCmd.AddCommand(polecatListCmd)
 	polecatCmd.AddCommand(polecatAddCmd)
@@ -195,6 +219,7 @@ func init() {
 	polecatCmd.AddCommand(polecatDoneCmd)
 	polecatCmd.AddCommand(polecatResetCmd)
 	polecatCmd.AddCommand(polecatSyncCmd)
+	polecatCmd.AddCommand(polecatStatusCmd)
 
 	rootCmd.AddCommand(polecatCmd)
 }
@@ -576,4 +601,153 @@ func runPolecatSync(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// PolecatStatus represents detailed polecat status for JSON output.
+type PolecatStatus struct {
+	Rig            string        `json:"rig"`
+	Name           string        `json:"name"`
+	State          polecat.State `json:"state"`
+	Issue          string        `json:"issue,omitempty"`
+	ClonePath      string        `json:"clone_path"`
+	Branch         string        `json:"branch"`
+	SessionRunning bool          `json:"session_running"`
+	SessionID      string        `json:"session_id,omitempty"`
+	Attached       bool          `json:"attached,omitempty"`
+	Windows        int           `json:"windows,omitempty"`
+	CreatedAt      string        `json:"created_at,omitempty"`
+	LastActivity   string        `json:"last_activity,omitempty"`
+}
+
+func runPolecatStatus(cmd *cobra.Command, args []string) error {
+	rigName, polecatName, err := parseAddress(args[0])
+	if err != nil {
+		return err
+	}
+
+	mgr, r, err := getPolecatManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	// Get polecat info
+	p, err := mgr.Get(polecatName)
+	if err != nil {
+		return fmt.Errorf("polecat '%s' not found in rig '%s'", polecatName, rigName)
+	}
+
+	// Get session info
+	t := tmux.NewTmux()
+	sessMgr := session.NewManager(t, r)
+	sessInfo, err := sessMgr.Status(polecatName)
+	if err != nil {
+		// Non-fatal - continue without session info
+		sessInfo = &session.Info{
+			Polecat: polecatName,
+			Running: false,
+		}
+	}
+
+	// JSON output
+	if polecatStatusJSON {
+		status := PolecatStatus{
+			Rig:            rigName,
+			Name:           polecatName,
+			State:          p.State,
+			Issue:          p.Issue,
+			ClonePath:      p.ClonePath,
+			Branch:         p.Branch,
+			SessionRunning: sessInfo.Running,
+			SessionID:      sessInfo.SessionID,
+			Attached:       sessInfo.Attached,
+			Windows:        sessInfo.Windows,
+		}
+		if !sessInfo.Created.IsZero() {
+			status.CreatedAt = sessInfo.Created.Format("2006-01-02 15:04:05")
+		}
+		if !sessInfo.LastActivity.IsZero() {
+			status.LastActivity = sessInfo.LastActivity.Format("2006-01-02 15:04:05")
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(status)
+	}
+
+	// Human-readable output
+	fmt.Printf("%s\n\n", style.Bold.Render(fmt.Sprintf("Polecat: %s/%s", rigName, polecatName)))
+
+	// State with color
+	stateStr := string(p.State)
+	switch p.State {
+	case polecat.StateWorking:
+		stateStr = style.Info.Render(stateStr)
+	case polecat.StateStuck:
+		stateStr = style.Warning.Render(stateStr)
+	case polecat.StateDone:
+		stateStr = style.Success.Render(stateStr)
+	default:
+		stateStr = style.Dim.Render(stateStr)
+	}
+	fmt.Printf("  State:         %s\n", stateStr)
+
+	// Issue
+	if p.Issue != "" {
+		fmt.Printf("  Issue:         %s\n", p.Issue)
+	} else {
+		fmt.Printf("  Issue:         %s\n", style.Dim.Render("(none)"))
+	}
+
+	// Clone path and branch
+	fmt.Printf("  Clone:         %s\n", style.Dim.Render(p.ClonePath))
+	fmt.Printf("  Branch:        %s\n", style.Dim.Render(p.Branch))
+
+	// Session info
+	fmt.Println()
+	fmt.Printf("%s\n", style.Bold.Render("Session"))
+
+	if sessInfo.Running {
+		fmt.Printf("  Status:        %s\n", style.Success.Render("running"))
+		fmt.Printf("  Session ID:    %s\n", style.Dim.Render(sessInfo.SessionID))
+
+		if sessInfo.Attached {
+			fmt.Printf("  Attached:      %s\n", style.Info.Render("yes"))
+		} else {
+			fmt.Printf("  Attached:      %s\n", style.Dim.Render("no"))
+		}
+
+		if sessInfo.Windows > 0 {
+			fmt.Printf("  Windows:       %d\n", sessInfo.Windows)
+		}
+
+		if !sessInfo.Created.IsZero() {
+			fmt.Printf("  Created:       %s\n", sessInfo.Created.Format("2006-01-02 15:04:05"))
+		}
+
+		if !sessInfo.LastActivity.IsZero() {
+			// Show relative time for activity
+			ago := formatActivityTime(sessInfo.LastActivity)
+			fmt.Printf("  Last Activity: %s (%s)\n",
+				sessInfo.LastActivity.Format("15:04:05"),
+				style.Dim.Render(ago))
+		}
+	} else {
+		fmt.Printf("  Status:        %s\n", style.Dim.Render("not running"))
+	}
+
+	return nil
+}
+
+// formatActivityTime returns a human-readable relative time string.
+func formatActivityTime(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%d seconds ago", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%d minutes ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%d hours ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+	}
 }

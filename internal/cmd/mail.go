@@ -19,7 +19,8 @@ import (
 var (
 	mailSubject       string
 	mailBody          string
-	mailPriority      string
+	mailPriority      int
+	mailUrgent        bool
 	mailType          string
 	mailReplyTo       string
 	mailNotify        bool
@@ -61,14 +62,21 @@ Message types:
   notification  - Informational (default)
   reply         - Response to message
 
-Priority levels:
-  low, normal (default), high, urgent
+Priority levels (compatible with bd mail send):
+  0 - urgent/critical
+  1 - high
+  2 - normal (default)
+  3 - low
+  4 - backlog
+
+Use --urgent as shortcut for --priority 0.
 
 Examples:
   gt mail send gastown/Toast -s "Status check" -m "How's that bug fix going?"
   gt mail send mayor/ -s "Work complete" -m "Finished gt-abc"
   gt mail send gastown/ -s "All hands" -m "Swarm starting" --notify
-  gt mail send gastown/Toast -s "Task" -m "Fix bug" --type task --priority high
+  gt mail send gastown/Toast -s "Task" -m "Fix bug" --type task --priority 1
+  gt mail send gastown/Toast -s "Urgent" -m "Help!" --urgent
   gt mail send mayor/ -s "Re: Status" -m "Done" --reply-to msg-abc123`,
 	Args: cobra.ExactArgs(1),
 	RunE: runMailSend,
@@ -167,7 +175,8 @@ func init() {
 	// Send flags
 	mailSendCmd.Flags().StringVarP(&mailSubject, "subject", "s", "", "Message subject (required)")
 	mailSendCmd.Flags().StringVarP(&mailBody, "message", "m", "", "Message body")
-	mailSendCmd.Flags().StringVar(&mailPriority, "priority", "normal", "Message priority (low, normal, high, urgent)")
+	mailSendCmd.Flags().IntVar(&mailPriority, "priority", 2, "Message priority (0=urgent, 1=high, 2=normal, 3=low, 4=backlog)")
+	mailSendCmd.Flags().BoolVar(&mailUrgent, "urgent", false, "Set priority=0 (urgent)")
 	mailSendCmd.Flags().StringVar(&mailType, "type", "notification", "Message type (task, scavenge, notification, reply)")
 	mailSendCmd.Flags().StringVar(&mailReplyTo, "reply-to", "", "Message ID this is replying to")
 	mailSendCmd.Flags().BoolVarP(&mailNotify, "notify", "n", false, "Send tmux notification to recipient")
@@ -226,8 +235,12 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 		Body:    mailBody,
 	}
 
-	// Set priority
-	msg.Priority = mail.ParsePriority(mailPriority)
+	// Set priority (--urgent overrides --priority)
+	if mailUrgent {
+		msg.Priority = mail.PriorityUrgent
+	} else {
+		msg.Priority = mail.PriorityFromInt(mailPriority)
+	}
 	if mailNotify && msg.Priority == mail.PriorityNormal {
 		msg.Priority = mail.PriorityHigh
 	}
