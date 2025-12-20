@@ -22,9 +22,10 @@ import (
 
 // Polecat command flags
 var (
-	polecatListJSON bool
-	polecatListAll  bool
-	polecatForce    bool
+	polecatListJSON  bool
+	polecatListAll   bool
+	polecatForce     bool
+	polecatRemoveAll bool
 )
 
 var polecatCmd = &cobra.Command{
@@ -70,18 +71,20 @@ Example:
 }
 
 var polecatRemoveCmd = &cobra.Command{
-	Use:   "remove <rig>/<polecat>",
-	Short: "Remove a polecat from a rig",
-	Long: `Remove a polecat from a rig.
+	Use:   "remove <rig>/<polecat>... | <rig> --all",
+	Short: "Remove polecats from a rig",
+	Long: `Remove one or more polecats from a rig.
 
 Fails if session is running (stop first).
 Warns if uncommitted changes exist.
 Use --force to bypass checks.
 
-Example:
+Examples:
   gt polecat remove gastown/Toast
-  gt polecat remove gastown/Toast --force`,
-	Args: cobra.ExactArgs(1),
+  gt polecat remove gastown/Toast gastown/Furiosa
+  gt polecat remove gastown --all
+  gt polecat remove gastown --all --force`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: runPolecatRemove,
 }
 
@@ -202,6 +205,7 @@ func init() {
 
 	// Remove flags
 	polecatRemoveCmd.Flags().BoolVarP(&polecatForce, "force", "f", false, "Force removal, bypassing checks")
+	polecatRemoveCmd.Flags().BoolVar(&polecatRemoveAll, "all", false, "Remove all polecats in the rig")
 
 	// Sync flags
 	polecatSyncCmd.Flags().BoolVar(&polecatSyncAll, "all", false, "Sync all polecats in the rig")
@@ -384,36 +388,115 @@ func runPolecatAdd(cmd *cobra.Command, args []string) error {
 }
 
 func runPolecatRemove(cmd *cobra.Command, args []string) error {
-	rigName, polecatName, err := parseAddress(args[0])
-	if err != nil {
-		return err
+	// Build list of polecats to remove
+	type polecatToRemove struct {
+		rigName     string
+		polecatName string
+		mgr         *polecat.Manager
+		r           *rig.Rig
 	}
+	var toRemove []polecatToRemove
 
-	mgr, r, err := getPolecatManager(rigName)
-	if err != nil {
-		return err
-	}
+	if polecatRemoveAll {
+		// --all flag: first arg is just the rig name
+		rigName := args[0]
+		// Check if it looks like rig/polecat format
+		if _, _, err := parseAddress(rigName); err == nil {
+			return fmt.Errorf("with --all, provide just the rig name (e.g., 'gt polecat remove gastown --all')")
+		}
 
-	// Check if session is running
-	if !polecatForce {
-		t := tmux.NewTmux()
-		sessMgr := session.NewManager(t, r)
-		running, _ := sessMgr.IsRunning(polecatName)
-		if running {
-			return fmt.Errorf("session is running. Stop it first with: gt session stop %s/%s", rigName, polecatName)
+		mgr, r, err := getPolecatManager(rigName)
+		if err != nil {
+			return err
+		}
+
+		polecats, err := mgr.List()
+		if err != nil {
+			return fmt.Errorf("listing polecats: %w", err)
+		}
+
+		if len(polecats) == 0 {
+			fmt.Println("No polecats to remove.")
+			return nil
+		}
+
+		for _, p := range polecats {
+			toRemove = append(toRemove, polecatToRemove{
+				rigName:     rigName,
+				polecatName: p.Name,
+				mgr:         mgr,
+				r:           r,
+			})
+		}
+	} else {
+		// Multiple rig/polecat arguments
+		for _, arg := range args {
+			rigName, polecatName, err := parseAddress(arg)
+			if err != nil {
+				return fmt.Errorf("invalid address '%s': %w", arg, err)
+			}
+
+			mgr, r, err := getPolecatManager(rigName)
+			if err != nil {
+				return err
+			}
+
+			toRemove = append(toRemove, polecatToRemove{
+				rigName:     rigName,
+				polecatName: polecatName,
+				mgr:         mgr,
+				r:           r,
+			})
 		}
 	}
 
-	fmt.Printf("Removing polecat %s/%s...\n", rigName, polecatName)
+	// Remove each polecat
+	t := tmux.NewTmux()
+	var removeErrors []string
+	removed := 0
 
-	if err := mgr.Remove(polecatName, polecatForce); err != nil {
-		if errors.Is(err, polecat.ErrHasChanges) {
-			return fmt.Errorf("polecat has uncommitted changes. Use --force to remove anyway")
+	for _, p := range toRemove {
+		// Check if session is running
+		if !polecatForce {
+			sessMgr := session.NewManager(t, p.r)
+			running, _ := sessMgr.IsRunning(p.polecatName)
+			if running {
+				removeErrors = append(removeErrors, fmt.Sprintf("%s/%s: session is running (stop first or use --force)", p.rigName, p.polecatName))
+				continue
+			}
 		}
-		return fmt.Errorf("removing polecat: %w", err)
+
+		fmt.Printf("Removing polecat %s/%s...\n", p.rigName, p.polecatName)
+
+		if err := p.mgr.Remove(p.polecatName, polecatForce); err != nil {
+			if errors.Is(err, polecat.ErrHasChanges) {
+				removeErrors = append(removeErrors, fmt.Sprintf("%s/%s: has uncommitted changes (use --force)", p.rigName, p.polecatName))
+			} else {
+				removeErrors = append(removeErrors, fmt.Sprintf("%s/%s: %v", p.rigName, p.polecatName, err))
+			}
+			continue
+		}
+
+		fmt.Printf("  %s removed\n", style.Success.Render("✓"))
+		removed++
 	}
 
-	fmt.Printf("%s Polecat %s removed.\n", style.SuccessPrefix, polecatName)
+	// Report results
+	if len(removeErrors) > 0 {
+		fmt.Printf("\n%s Some removals failed:\n", style.Warning.Render("Warning:"))
+		for _, e := range removeErrors {
+			fmt.Printf("  - %s\n", e)
+		}
+	}
+
+	if removed > 0 {
+		fmt.Printf("\n%s Removed %d polecat(s).\n", style.SuccessPrefix, removed)
+	}
+
+	if len(removeErrors) > 0 {
+		return fmt.Errorf("%d removal(s) failed", len(removeErrors))
+	}
+
 	return nil
 }
 
