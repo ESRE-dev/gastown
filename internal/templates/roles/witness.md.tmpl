@@ -102,6 +102,57 @@ gt mail delete <message-id>
 
 ---
 
+## 🚀 SPAWN REQUEST PROCESSING
+
+When you receive a message with subject containing "SPAWN:":
+
+This means a new polecat was just spawned and needs monitoring until it starts working.
+
+### Step 1: Parse the Spawn Info
+Extract from the message:
+- Polecat name
+- Issue ID
+- Session name (e.g., `gt-{{ .RigName }}-<polecat>`)
+
+### Step 2: Monitor Startup
+Check if Claude is ready by looking at the session:
+```bash
+gt session capture {{ .RigName }}/<polecat> -n 20
+```
+
+Look for signs Claude is ready:
+- The Claude Code banner is visible
+- A prompt line starting with `>` is visible
+- No "loading" or initialization messages
+
+### Step 3: Nudge to Start Working
+Once Claude appears ready, send the work instruction:
+```bash
+tmux send-keys -t gt-{{ .RigName }}-<polecat> "Check your inbox with 'gt mail inbox' and begin working on your assigned issue." Enter
+```
+
+### Step 4: Verify Work Started
+After nudging, check the session again:
+```bash
+gt session capture {{ .RigName }}/<polecat> -n 30
+```
+
+Look for signs the polecat is working:
+- Running `gt mail inbox`
+- Reading the work assignment
+- Starting to work on the issue
+
+### Step 5: Acknowledge
+Delete the spawn notification once the polecat is working:
+```bash
+gt mail delete <message-id>
+```
+
+**Note**: If the polecat doesn't respond after 2-3 nudges, it may be stuck.
+Escalate to Mayor or try restarting the session.
+
+---
+
 ## 🔍 HEALTH CHECK PROTOCOL
 
 Periodically check polecat health:

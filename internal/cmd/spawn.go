@@ -337,20 +337,31 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		style.Bold.Render("✓"),
 		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
 
-	// TODO: Proper solution requires Witness/Deacon to monitor polecat startup
-	// and detect when Claude is ready using AI intelligence. See gt-polecat-ready issue.
-	// For now, use a fixed delay - SessionStart hook runs gt prime which tells polecat
-	// to check mail, but we also send an explicit instruction as backup.
-	sessionName := sessMgr.SessionName(polecatName)
-	time.Sleep(5 * time.Second)
+	// Notify Witness about the spawn - Witness will monitor startup and nudge when ready
+	witnessAddr := fmt.Sprintf("%s/witness", rigName)
+	spawnNotification := &mail.Message{
+		To:      witnessAddr,
+		From:    "mayor/",
+		Subject: fmt.Sprintf("SPAWN: %s starting on %s", polecatName, assignmentID),
+		Body: fmt.Sprintf(`Polecat spawn notification.
 
-	// Send work instruction - backup in case SessionStart hook doesn't trigger action
-	workInstruction := "Check your inbox with `gt mail inbox` and begin working on your assigned issue."
-	if err := t.SendKeys(sessionName, workInstruction); err != nil {
-		fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not send work instruction: %v", err)))
+Polecat: %s
+Issue: %s
+Session: %s
+
+Please monitor this polecat's startup. When Claude is ready (you can see the prompt
+in the tmux session), send a nudge to start working:
+
+    tmux send-keys -t %s "Check your inbox with 'gt mail inbox' and begin working." Enter
+
+The polecat has a work assignment in its inbox.`, polecatName, assignmentID, sessMgr.SessionName(polecatName), sessMgr.SessionName(polecatName)),
 	}
 
-	fmt.Printf("  %s\n", style.Dim.Render("Work instruction sent to polecat"))
+	if err := router.Send(spawnNotification); err != nil {
+		fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not notify witness: %v", err)))
+	} else {
+		fmt.Printf("  %s\n", style.Dim.Render("Witness notified to monitor startup"))
+	}
 
 	return nil
 }
