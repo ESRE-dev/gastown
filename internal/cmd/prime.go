@@ -20,6 +20,7 @@ type Role string
 
 const (
 	RoleMayor    Role = "mayor"
+	RoleDeacon   Role = "deacon"
 	RoleWitness  Role = "witness"
 	RoleRefinery Role = "refinery"
 	RolePolecat  Role = "polecat"
@@ -118,6 +119,12 @@ func detectRole(cwd, townRoot string) RoleContext {
 		return ctx
 	}
 
+	// Check for deacon role: deacon/
+	if len(parts) >= 1 && parts[0] == "deacon" {
+		ctx.Role = RoleDeacon
+		return ctx
+	}
+
 	// At this point, first part should be a rig name
 	if len(parts) < 1 {
 		return ctx
@@ -168,6 +175,8 @@ func outputPrimeContext(ctx RoleContext) error {
 	switch ctx.Role {
 	case RoleMayor:
 		roleName = "mayor"
+	case RoleDeacon:
+		roleName = "deacon"
 	case RoleWitness:
 		roleName = "witness"
 	case RoleRefinery:
