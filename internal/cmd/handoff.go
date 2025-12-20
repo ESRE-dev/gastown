@@ -222,19 +222,41 @@ func preFlightChecks() error {
 }
 
 // getManager returns the address of our lifecycle manager.
+// For polecats and refineries, it detects the rig from context.
 func getManager(role Role) string {
 	switch role {
 	case RoleMayor, RoleWitness:
 		return "deacon/"
 	case RolePolecat, RoleRefinery:
-		// Would need rig context to determine witness address
-		// For now, use a placeholder pattern
-		return "<rig>/witness"
+		// Detect rig from current directory context
+		rig := detectRigFromContext()
+		if rig == "" {
+			// Fallback if rig detection fails - this shouldn't happen
+			// in normal operation but is better than a literal placeholder
+			return "deacon/"
+		}
+		return rig + "/witness"
 	case RoleCrew:
 		return "human" // Crew is human-managed
 	default:
 		return "deacon/"
 	}
+}
+
+// detectRigFromContext determines the rig name from the current directory.
+func detectRigFromContext() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return ""
+	}
+
+	ctx := detectRole(cwd, townRoot)
+	return ctx.Rig
 }
 
 // sendHandoffMail updates the pinned handoff bead for the successor to read.
