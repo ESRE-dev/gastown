@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
@@ -63,9 +67,15 @@ func runTheme(cmd *cobra.Command, args []string) error {
 
 	// Show current theme assignment
 	if len(args) == 0 {
-		theme := tmux.AssignTheme(rigName)
+		theme := getThemeForRig(rigName)
 		fmt.Printf("Rig: %s\n", rigName)
 		fmt.Printf("Theme: %s (%s)\n", theme.Name, theme.Style())
+		// Show if it's configured vs default
+		if configured := loadRigTheme(rigName); configured != "" {
+			fmt.Printf("(configured in .gastown/config.json)\n")
+		} else {
+			fmt.Printf("(default, based on rig name hash)\n")
+		}
 		return nil
 	}
 
@@ -76,10 +86,13 @@ func runTheme(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown theme: %s (use --list to see available themes)", themeName)
 	}
 
-	// TODO: Save to rig config.json
-	fmt.Printf("Theme '%s' selected for rig '%s'\n", themeName, rigName)
-	fmt.Println("Note: Run 'gt theme apply' to apply to running sessions")
-	fmt.Println("(Persistent config not yet implemented)")
+	// Save to rig config
+	if err := saveRigTheme(rigName, themeName); err != nil {
+		return fmt.Errorf("saving theme config: %w", err)
+	}
+
+	fmt.Printf("Theme '%s' saved for rig '%s'\n", themeName, rigName)
+	fmt.Println("Run 'gt theme apply' to apply to running sessions")
 
 	return nil
 }
@@ -133,7 +146,8 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 				role = "polecat"
 			}
 
-			theme = tmux.AssignTheme(rig)
+			// Use configured theme, fall back to hash-based assignment
+			theme = getThemeForRig(rig)
 		}
 
 		// Apply theme and status format
@@ -165,29 +179,115 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 
 // detectCurrentRig determines the rig from environment or cwd.
 func detectCurrentRig() string {
-	// Try environment first
-	if rig := detectCurrentSession(); rig != "" {
-		// Extract rig from session name
-		parts := strings.SplitN(rig, "-", 3)
-		if len(parts) >= 2 && parts[0] == "gt" {
+	// Try environment first (GT_RIG is set in tmux sessions)
+	if rig := os.Getenv("GT_RIG"); rig != "" {
+		return rig
+	}
+
+	// Try to extract from tmux session name
+	if session := detectCurrentSession(); session != "" {
+		// Extract rig from session name: gt-<rig>-...
+		parts := strings.SplitN(session, "-", 3)
+		if len(parts) >= 2 && parts[0] == "gt" && parts[1] != "mayor" && parts[1] != "deacon" {
 			return parts[1]
 		}
 	}
 
-	// Try to detect from cwd
-	cwd, err := findBeadsWorkDir()
+	// Try to detect from actual cwd path
+	cwd, err := os.Getwd()
 	if err != nil {
 		return ""
 	}
 
-	// Extract rig name from path
-	// Typical paths: /Users/stevey/gt/<rig>/...
-	parts := strings.Split(cwd, "/")
-	for i, p := range parts {
-		if p == "gt" && i+1 < len(parts) {
-			return parts[i+1]
-		}
+	// Find town root to extract rig name
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return ""
+	}
+
+	// Get path relative to town root
+	rel, err := filepath.Rel(townRoot, cwd)
+	if err != nil {
+		return ""
+	}
+
+	// Extract first path component (rig name)
+	// Patterns: <rig>/..., mayor/..., deacon/...
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) > 0 && parts[0] != "." && parts[0] != "mayor" && parts[0] != "deacon" {
+		return parts[0]
 	}
 
 	return ""
+}
+
+// getThemeForRig returns the theme for a rig, checking config first.
+func getThemeForRig(rigName string) tmux.Theme {
+	// Try to load configured theme
+	if themeName := loadRigTheme(rigName); themeName != "" {
+		if theme := tmux.GetThemeByName(themeName); theme != nil {
+			return *theme
+		}
+	}
+	// Fall back to hash-based assignment
+	return tmux.AssignTheme(rigName)
+}
+
+// loadRigTheme loads the theme name from rig config.
+func loadRigTheme(rigName string) string {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return ""
+	}
+
+	configPath := filepath.Join(townRoot, rigName, ".gastown", "config.json")
+	cfg, err := config.LoadRigConfig(configPath)
+	if err != nil {
+		return ""
+	}
+
+	if cfg.Theme != nil && cfg.Theme.Name != "" {
+		return cfg.Theme.Name
+	}
+	return ""
+}
+
+// saveRigTheme saves the theme name to rig config.
+func saveRigTheme(rigName, themeName string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding workspace: %w", err)
+	}
+	if townRoot == "" {
+		return fmt.Errorf("not in a Gas Town workspace")
+	}
+
+	configPath := filepath.Join(townRoot, rigName, ".gastown", "config.json")
+
+	// Load existing config or create new
+	var cfg *config.RigConfig
+	cfg, err = config.LoadRigConfig(configPath)
+	if err != nil {
+		// Create new config if not found
+		if os.IsNotExist(err) || strings.Contains(err.Error(), "not found") {
+			cfg = &config.RigConfig{
+				Type:    "rig",
+				Version: config.CurrentRigConfigVersion,
+			}
+		} else {
+			return fmt.Errorf("loading config: %w", err)
+		}
+	}
+
+	// Set theme
+	cfg.Theme = &config.ThemeConfig{
+		Name: themeName,
+	}
+
+	// Save
+	if err := config.SaveRigConfig(configPath, cfg); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+
+	return nil
 }

@@ -506,6 +506,10 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		_ = t.SetEnvironment(sessionID, "GT_RIG", r.Name)
 		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
 
+		// Apply rig-based theming (uses config if set, falls back to hash)
+		theme := getThemeForRig(r.Name)
+		_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
+
 		// Wait for shell to be ready after session creation
 		if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
 			return fmt.Errorf("waiting for shell: %w", err)
@@ -846,6 +850,10 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 	// Set environment
 	t.SetEnvironment(sessionID, "GT_RIG", r.Name)
 	t.SetEnvironment(sessionID, "GT_CREW", name)
+
+	// Apply rig-based theming (uses config if set, falls back to hash)
+	theme := getThemeForRig(r.Name)
+	_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
 
 	// Wait for shell to be ready
 	if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
