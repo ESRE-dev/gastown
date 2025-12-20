@@ -203,7 +203,7 @@ func runGracefulShutdown(t *tmux.Tmux) error {
 }
 
 func runImmediateShutdown(t *tmux.Tmux) error {
-	fmt.Println("Shutting down Gas Town...\n")
+	fmt.Println("Shutting down Gas Town...")
 
 	stopped := 0
 
