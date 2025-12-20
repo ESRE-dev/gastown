@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -78,6 +80,12 @@ func runPrime(cmd *cobra.Command, args []string) error {
 
 	// Output handoff content if present
 	outputHandoffContent(ctx)
+
+	// Run bd prime to output beads workflow context
+	runBdPrime(cwd)
+
+	// Run gt mail check --inject to inject any pending mail
+	runMailCheckInject(cwd)
 
 	return nil
 }
@@ -342,4 +350,48 @@ func outputHandoffContent(ctx RoleContext) {
 	fmt.Println(issue.Description)
 	fmt.Println()
 	fmt.Println(style.Dim.Render("(Clear with: gt rig reset --handoff)"))
+}
+
+// runBdPrime runs `bd prime` and outputs the result.
+// This provides beads workflow context to the agent.
+func runBdPrime(workDir string) {
+	cmd := exec.Command("bd", "prime")
+	cmd.Dir = workDir
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = nil // Ignore stderr
+
+	if err := cmd.Run(); err != nil {
+		// Silently skip if bd prime fails (beads might not be available)
+		return
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	if output != "" {
+		fmt.Println()
+		fmt.Println(output)
+	}
+}
+
+// runMailCheckInject runs `gt mail check --inject` and outputs the result.
+// This injects any pending mail into the agent's context.
+func runMailCheckInject(workDir string) {
+	cmd := exec.Command("gt", "mail", "check", "--inject")
+	cmd.Dir = workDir
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = nil // Ignore stderr
+
+	if err := cmd.Run(); err != nil {
+		// Silently skip if mail check fails
+		return
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	if output != "" {
+		fmt.Println()
+		fmt.Println(output)
+	}
 }
