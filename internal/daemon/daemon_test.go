@@ -12,8 +12,8 @@ func TestDefaultConfig(t *testing.T) {
 	townRoot := "/tmp/test-town"
 	config := DefaultConfig(townRoot)
 
-	if config.HeartbeatInterval != 60*time.Second {
-		t.Errorf("expected HeartbeatInterval 60s, got %v", config.HeartbeatInterval)
+	if config.HeartbeatInterval != 5*time.Minute {
+		t.Errorf("expected HeartbeatInterval 5m, got %v", config.HeartbeatInterval)
 	}
 	if config.TownRoot != townRoot {
 		t.Errorf("expected TownRoot %q, got %q", townRoot, config.TownRoot)

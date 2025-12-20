@@ -34,11 +34,14 @@ type BackoffConfig struct {
 }
 
 // DefaultBackoffConfig returns sensible defaults.
+// Base interval is 5 minutes since deacon rounds may take a while
+// (health checks, plugins, syncing clones, complex remediation).
+// Max interval is 30 minutes - beyond that, something is likely wrong.
 func DefaultBackoffConfig() *BackoffConfig {
 	return &BackoffConfig{
 		Strategy:     StrategyGeometric,
-		BaseInterval: 60 * time.Second,
-		MaxInterval:  10 * time.Minute,
+		BaseInterval: 5 * time.Minute,
+		MaxInterval:  30 * time.Minute,
 		Factor:       1.5,
 	}
 }

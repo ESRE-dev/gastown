@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -73,12 +75,27 @@ Stops the current session (if running) and starts a fresh one.`,
 	RunE: runDeaconRestart,
 }
 
+var deaconHeartbeatCmd = &cobra.Command{
+	Use:   "heartbeat [action]",
+	Short: "Update the Deacon heartbeat",
+	Long: `Update the Deacon heartbeat file.
+
+The heartbeat signals to the daemon that the Deacon is alive and working.
+Call this at the start of each wake cycle to prevent daemon pokes.
+
+Examples:
+  gt deacon heartbeat                    # Touch heartbeat with timestamp
+  gt deacon heartbeat "checking mayor"   # Touch with action description`,
+	RunE: runDeaconHeartbeat,
+}
+
 func init() {
 	deaconCmd.AddCommand(deaconStartCmd)
 	deaconCmd.AddCommand(deaconStopCmd)
 	deaconCmd.AddCommand(deaconAttachCmd)
 	deaconCmd.AddCommand(deaconStatusCmd)
 	deaconCmd.AddCommand(deaconRestartCmd)
+	deaconCmd.AddCommand(deaconHeartbeatCmd)
 
 	rootCmd.AddCommand(deaconCmd)
 }
@@ -246,4 +263,30 @@ func runDeaconRestart(cmd *cobra.Command, args []string) error {
 
 	// Not running, start fresh
 	return runDeaconStart(cmd, args)
+}
+
+func runDeaconHeartbeat(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	action := ""
+	if len(args) > 0 {
+		action = strings.Join(args, " ")
+	}
+
+	if action != "" {
+		if err := deacon.TouchWithAction(townRoot, action, 0, 0); err != nil {
+			return fmt.Errorf("updating heartbeat: %w", err)
+		}
+		fmt.Printf("%s Heartbeat updated: %s\n", style.Bold.Render("✓"), action)
+	} else {
+		if err := deacon.Touch(townRoot); err != nil {
+			return fmt.Errorf("updating heartbeat: %w", err)
+		}
+		fmt.Printf("%s Heartbeat updated\n", style.Bold.Render("✓"))
+	}
+
+	return nil
 }

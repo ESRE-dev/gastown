@@ -219,7 +219,7 @@ func (d *Daemon) pokeDeacon() {
 	}
 
 	// Send heartbeat message via tmux
-	msg := "HEARTBEAT: check Mayor and Witnesses"
+	msg := "HEARTBEAT: run your rounds"
 	if err := d.tmux.SendKeys(DeaconSessionName, msg); err != nil {
 		d.logger.Printf("Error poking Deacon: %v", err)
 		return

@@ -11,11 +11,11 @@ func TestDefaultBackoffConfig(t *testing.T) {
 	if config.Strategy != StrategyGeometric {
 		t.Errorf("expected strategy Geometric, got %v", config.Strategy)
 	}
-	if config.BaseInterval != 60*time.Second {
-		t.Errorf("expected base interval 60s, got %v", config.BaseInterval)
+	if config.BaseInterval != 5*time.Minute {
+		t.Errorf("expected base interval 5m, got %v", config.BaseInterval)
 	}
-	if config.MaxInterval != 10*time.Minute {
-		t.Errorf("expected max interval 10m, got %v", config.MaxInterval)
+	if config.MaxInterval != 30*time.Minute {
+		t.Errorf("expected max interval 30m, got %v", config.MaxInterval)
 	}
 	if config.Factor != 1.5 {
 		t.Errorf("expected factor 1.5, got %v", config.Factor)
@@ -29,11 +29,11 @@ func TestNewAgentBackoff(t *testing.T) {
 	if ab.AgentID != "test-agent" {
 		t.Errorf("expected agent ID 'test-agent', got %s", ab.AgentID)
 	}
-	if ab.BaseInterval != 60*time.Second {
-		t.Errorf("expected base interval 60s, got %v", ab.BaseInterval)
+	if ab.BaseInterval != 5*time.Minute {
+		t.Errorf("expected base interval 5m, got %v", ab.BaseInterval)
 	}
-	if ab.CurrentInterval != 60*time.Second {
-		t.Errorf("expected current interval 60s, got %v", ab.CurrentInterval)
+	if ab.CurrentInterval != 5*time.Minute {
+		t.Errorf("expected current interval 5m, got %v", ab.CurrentInterval)
 	}
 	if ab.ConsecutiveMiss != 0 {
 		t.Errorf("expected consecutive miss 0, got %d", ab.ConsecutiveMiss)

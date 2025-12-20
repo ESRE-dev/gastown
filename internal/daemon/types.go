@@ -34,7 +34,7 @@ type Config struct {
 func DefaultConfig(townRoot string) *Config {
 	daemonDir := filepath.Join(townRoot, "daemon")
 	return &Config{
-		HeartbeatInterval: 60 * time.Second,
+		HeartbeatInterval: 5 * time.Minute, // Deacon wakes on mail too, no need to poke often
 		TownRoot:          townRoot,
 		LogFile:           filepath.Join(daemonDir, "daemon.log"),
 		PidFile:           filepath.Join(daemonDir, "daemon.pid"),
