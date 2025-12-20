@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Molecule command flags
@@ -16,6 +18,8 @@ var (
 	moleculeJSON          bool
 	moleculeInstParent    string
 	moleculeInstContext   []string
+	moleculeCatalogOnly   bool // List only catalog templates
+	moleculeDBOnly        bool // List only database molecules
 )
 
 var moleculeCmd = &cobra.Command{
@@ -32,8 +36,32 @@ var moleculeListCmd = &cobra.Command{
 	Short: "List molecules",
 	Long: `List all molecule definitions.
 
-Molecules are issues with type=molecule.`,
+By default, lists molecules from all sources:
+- Built-in molecules (shipped with gt)
+- Town-level: <town>/.beads/molecules.jsonl
+- Rig-level: <rig>/.beads/molecules.jsonl
+- Project-level: .beads/molecules.jsonl
+- Database: molecules stored as issues
+
+Use --catalog to show only template molecules (not instantiated).
+Use --db to show only database molecules.`,
 	RunE: runMoleculeList,
+}
+
+var moleculeExportCmd = &cobra.Command{
+	Use:   "export <path>",
+	Short: "Export built-in molecules to JSONL",
+	Long: `Export built-in molecule templates to a JSONL file.
+
+This creates a molecules.jsonl file containing all built-in molecules.
+You can place this in:
+- <town>/.beads/molecules.jsonl (town-level)
+- <rig>/.beads/molecules.jsonl (rig-level)
+- .beads/molecules.jsonl (project-level)
+
+The file can be edited to customize or add new molecules.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runMoleculeExport,
 }
 
 var moleculeShowCmd = &cobra.Command{
@@ -88,6 +116,8 @@ Lists each instantiation with its status and progress.`,
 func init() {
 	// List flags
 	moleculeListCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
+	moleculeListCmd.Flags().BoolVar(&moleculeCatalogOnly, "catalog", false, "Show only catalog templates")
+	moleculeListCmd.Flags().BoolVar(&moleculeDBOnly, "db", false, "Show only database molecules")
 
 	// Show flags
 	moleculeShowCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
@@ -109,6 +139,7 @@ func init() {
 	moleculeCmd.AddCommand(moleculeParseCmd)
 	moleculeCmd.AddCommand(moleculeInstantiateCmd)
 	moleculeCmd.AddCommand(moleculeInstancesCmd)
+	moleculeCmd.AddCommand(moleculeExportCmd)
 
 	rootCmd.AddCommand(moleculeCmd)
 }
@@ -119,45 +150,137 @@ func runMoleculeList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
 
-	b := beads.New(workDir)
-	issues, err := b.List(beads.ListOptions{
-		Type:     "molecule",
-		Status:   "all",
-		Priority: -1,
-	})
-	if err != nil {
-		return fmt.Errorf("listing molecules: %w", err)
+	// Collect molecules from requested sources
+	type moleculeEntry struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Source      string `json:"source"`
+		StepCount   int    `json:"step_count,omitempty"`
+		Status      string `json:"status,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+
+	var entries []moleculeEntry
+
+	// Load from catalog (unless --db only)
+	if !moleculeDBOnly {
+		catalog, err := loadMoleculeCatalog(workDir)
+		if err != nil {
+			return fmt.Errorf("loading catalog: %w", err)
+		}
+
+		for _, mol := range catalog.List() {
+			steps, _ := beads.ParseMoleculeSteps(mol.Description)
+			entries = append(entries, moleculeEntry{
+				ID:          mol.ID,
+				Title:       mol.Title,
+				Source:      mol.Source,
+				StepCount:   len(steps),
+				Description: mol.Description,
+			})
+		}
+	}
+
+	// Load from database (unless --catalog only)
+	if !moleculeCatalogOnly {
+		b := beads.New(workDir)
+		issues, err := b.List(beads.ListOptions{
+			Type:     "molecule",
+			Status:   "all",
+			Priority: -1,
+		})
+		if err != nil {
+			return fmt.Errorf("listing molecules: %w", err)
+		}
+
+		// Track catalog IDs to avoid duplicates
+		catalogIDs := make(map[string]bool)
+		for _, e := range entries {
+			catalogIDs[e.ID] = true
+		}
+
+		for _, mol := range issues {
+			// Skip if already in catalog (catalog takes precedence)
+			if catalogIDs[mol.ID] {
+				continue
+			}
+
+			steps, _ := beads.ParseMoleculeSteps(mol.Description)
+			entries = append(entries, moleculeEntry{
+				ID:          mol.ID,
+				Title:       mol.Title,
+				Source:      "database",
+				StepCount:   len(steps),
+				Status:      mol.Status,
+				Description: mol.Description,
+			})
+		}
 	}
 
 	if moleculeJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(issues)
+		return enc.Encode(entries)
 	}
 
 	// Human-readable output
-	fmt.Printf("%s Molecules (%d)\n\n", style.Bold.Render("🧬"), len(issues))
+	fmt.Printf("%s Molecules (%d)\n\n", style.Bold.Render("🧬"), len(entries))
 
-	if len(issues) == 0 {
+	if len(entries) == 0 {
 		fmt.Printf("  %s\n", style.Dim.Render("(no molecules defined)"))
 		return nil
 	}
 
-	for _, mol := range issues {
+	for _, mol := range entries {
+		sourceMarker := style.Dim.Render(fmt.Sprintf("[%s]", mol.Source))
+
+		stepCount := ""
+		if mol.StepCount > 0 {
+			stepCount = fmt.Sprintf(" (%d steps)", mol.StepCount)
+		}
+
 		statusMarker := ""
 		if mol.Status == "closed" {
 			statusMarker = " " + style.Dim.Render("[closed]")
 		}
 
-		// Parse steps to show count
-		steps, _ := beads.ParseMoleculeSteps(mol.Description)
-		stepCount := ""
-		if len(steps) > 0 {
-			stepCount = fmt.Sprintf(" (%d steps)", len(steps))
-		}
-
-		fmt.Printf("  %s: %s%s%s\n", style.Bold.Render(mol.ID), mol.Title, stepCount, statusMarker)
+		fmt.Printf("  %s: %s%s%s %s\n",
+			style.Bold.Render(mol.ID), mol.Title, stepCount, statusMarker, sourceMarker)
 	}
+
+	return nil
+}
+
+// loadMoleculeCatalog loads the molecule catalog with hierarchical sources.
+func loadMoleculeCatalog(workDir string) (*beads.MoleculeCatalog, error) {
+	var townRoot, rigPath, projectPath string
+
+	// Try to find town root
+	townRoot, _ = workspace.FindFromCwd()
+
+	// Try to find rig path
+	if townRoot != "" {
+		rigName, _, err := findCurrentRig(townRoot)
+		if err == nil && rigName != "" {
+			rigPath = filepath.Join(townRoot, rigName)
+		}
+	}
+
+	// Project path is the work directory
+	projectPath = workDir
+
+	return beads.LoadCatalog(townRoot, rigPath, projectPath)
+}
+
+func runMoleculeExport(cmd *cobra.Command, args []string) error {
+	path := args[0]
+
+	if err := beads.ExportBuiltinMolecules(path); err != nil {
+		return fmt.Errorf("exporting molecules: %w", err)
+	}
+
+	fmt.Printf("%s Exported %d built-in molecules to %s\n",
+		style.Bold.Render("✓"), len(beads.BuiltinMolecules()), path)
 
 	return nil
 }
@@ -170,10 +293,26 @@ func runMoleculeShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
 
-	b := beads.New(workDir)
-	mol, err := b.Show(molID)
+	// Try catalog first
+	catalog, err := loadMoleculeCatalog(workDir)
 	if err != nil {
-		return fmt.Errorf("getting molecule: %w", err)
+		return fmt.Errorf("loading catalog: %w", err)
+	}
+
+	var mol *beads.Issue
+	var source string
+
+	if catalogMol := catalog.Get(molID); catalogMol != nil {
+		mol = catalogMol.ToIssue()
+		source = catalogMol.Source
+	} else {
+		// Fall back to database
+		b := beads.New(workDir)
+		mol, err = b.Show(molID)
+		if err != nil {
+			return fmt.Errorf("getting molecule: %w", err)
+		}
+		source = "database"
 	}
 
 	if mol.Type != "molecule" {
@@ -182,15 +321,17 @@ func runMoleculeShow(cmd *cobra.Command, args []string) error {
 
 	// Parse steps
 	steps, parseErr := beads.ParseMoleculeSteps(mol.Description)
+	_ = source // Used below in output
 
 	// For JSON, include parsed steps
 	if moleculeJSON {
 		type moleculeOutput struct {
 			*beads.Issue
+			Source     string               `json:"source"`
 			Steps      []beads.MoleculeStep `json:"steps,omitempty"`
 			ParseError string               `json:"parse_error,omitempty"`
 		}
-		out := moleculeOutput{Issue: mol, Steps: steps}
+		out := moleculeOutput{Issue: mol, Source: source, Steps: steps}
 		if parseErr != nil {
 			out.ParseError = parseErr.Error()
 		}
@@ -200,7 +341,7 @@ func runMoleculeShow(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Printf("\n%s: %s\n", style.Bold.Render(mol.ID), mol.Title)
+	fmt.Printf("\n%s: %s %s\n", style.Bold.Render(mol.ID), mol.Title, style.Dim.Render(fmt.Sprintf("[%s]", source)))
 	fmt.Printf("Type: %s\n", mol.Type)
 
 	if parseErr != nil {
@@ -230,7 +371,8 @@ func runMoleculeShow(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Count instances
+	// Count instances (need beads client for this)
+	b := beads.New(workDir)
 	instances, _ := findMoleculeInstances(b, molID)
 	fmt.Printf("\nInstances: %d\n", len(instances))
 
@@ -327,10 +469,22 @@ func runMoleculeInstantiate(cmd *cobra.Command, args []string) error {
 
 	b := beads.New(workDir)
 
-	// Get the molecule
-	mol, err := b.Show(molID)
+	// Try catalog first
+	catalog, err := loadMoleculeCatalog(workDir)
 	if err != nil {
-		return fmt.Errorf("getting molecule: %w", err)
+		return fmt.Errorf("loading catalog: %w", err)
+	}
+
+	var mol *beads.Issue
+
+	if catalogMol := catalog.Get(molID); catalogMol != nil {
+		mol = catalogMol.ToIssue()
+	} else {
+		// Fall back to database
+		mol, err = b.Show(molID)
+		if err != nil {
+			return fmt.Errorf("getting molecule: %w", err)
+		}
 	}
 
 	if mol.Type != "molecule" {
