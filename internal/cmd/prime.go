@@ -409,6 +409,15 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("1. Check mail: `gt mail inbox`")
 		fmt.Println("2. If assigned work, begin immediately")
 		fmt.Println("3. If no work, announce ready and await assignment")
+	case RoleRefinery:
+		fmt.Println()
+		fmt.Println("---")
+		fmt.Println()
+		fmt.Println("**STARTUP PROTOCOL**: You are the Refinery. Please:")
+		fmt.Println("1. Check mail: `gt mail inbox`")
+		fmt.Printf("2. Check merge queue: `gt refinery queue %s`\n", ctx.Rig)
+		fmt.Println("3. If MRs pending, process them one at a time")
+		fmt.Println("4. If no work, monitor for new MRs periodically")
 	}
 }
 

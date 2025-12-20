@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -77,6 +78,20 @@ Lists all pending merge requests waiting to be processed.`,
 	RunE: runRefineryQueue,
 }
 
+var refineryAttachCmd = &cobra.Command{
+	Use:   "attach <rig>",
+	Short: "Attach to refinery session",
+	Long: `Attach to a running Refinery's Claude session.
+
+Allows interactive access to the Refinery agent for debugging
+or manual intervention.
+
+Examples:
+  gt refinery attach gastown`,
+	Args: cobra.ExactArgs(1),
+	RunE: runRefineryAttach,
+}
+
 func init() {
 	// Start flags
 	refineryStartCmd.Flags().BoolVar(&refineryForeground, "foreground", false, "Run in foreground (default: background)")
@@ -92,6 +107,7 @@ func init() {
 	refineryCmd.AddCommand(refineryStopCmd)
 	refineryCmd.AddCommand(refineryStatusCmd)
 	refineryCmd.AddCommand(refineryQueueCmd)
+	refineryCmd.AddCommand(refineryAttachCmd)
 
 	rootCmd.AddCommand(refineryCmd)
 }
@@ -314,4 +330,42 @@ func runRefineryQueue(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runRefineryAttach(cmd *cobra.Command, args []string) error {
+	rigName := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Session name follows the same pattern as refinery manager
+	sessionID := fmt.Sprintf("gt-%s-refinery", rigName)
+
+	// Check if session exists
+	t := tmux.NewTmux()
+	running, err := t.HasSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !running {
+		return fmt.Errorf("refinery is not running for rig '%s'", rigName)
+	}
+
+	// Verify rig exists
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+	if _, err := rigMgr.GetRig(rigName); err != nil {
+		return fmt.Errorf("rig '%s' not found", rigName)
+	}
+
+	// Attach to the session
+	return t.AttachSession(sessionID)
 }
