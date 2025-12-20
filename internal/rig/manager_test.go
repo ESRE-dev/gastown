@@ -37,6 +37,12 @@ func createTestRig(t *testing.T, root, name string) {
 		}
 	}
 
+	// Create witness state.json (witnesses don't have clones, just state)
+	witnessState := filepath.Join(rigPath, "witness", "state.json")
+	if err := os.WriteFile(witnessState, []byte(`{"role":"witness"}`), 0644); err != nil {
+		t.Fatalf("write witness state: %v", err)
+	}
+
 	// Create some polecats
 	polecatsDir := filepath.Join(rigPath, "polecats")
 	for _, polecat := range []string{"Toast", "Cheedo"} {

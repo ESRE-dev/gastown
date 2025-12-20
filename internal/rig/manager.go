@@ -128,9 +128,9 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 		}
 	}
 
-	// Check for witness
-	witnessPath := filepath.Join(rigPath, "witness", "rig")
-	if _, err := os.Stat(witnessPath); err == nil {
+	// Check for witness (witnesses don't have clones, just state.json)
+	witnessStatePath := filepath.Join(rigPath, "witness", "state.json")
+	if _, err := os.Stat(witnessStatePath); err == nil {
 		rig.HasWitness = true
 	}
 

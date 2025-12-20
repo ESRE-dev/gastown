@@ -37,11 +37,12 @@ type Rig struct {
 }
 
 // AgentDirs are the standard agent directories in a rig.
+// Note: witness doesn't have a /rig subdirectory (no clone needed).
 var AgentDirs = []string{
 	"polecats",
 	"crew",
 	"refinery/rig",
-	"witness/rig",
+	"witness",
 	"mayor/rig",
 }
 
