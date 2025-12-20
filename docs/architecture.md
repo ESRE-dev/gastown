@@ -564,6 +564,166 @@ Needs: kill-core
 - Batch processing (swarm coordination)
 - Recovery procedures (doctor --fix)
 
+### Pluggable Molecules
+
+Some workflows benefit from **pluggable steps** - dimensions that can be added or removed by creating/deleting directories. The canonical example is **code review**, where each review dimension (security, performance, test coverage) is a plugin.
+
+#### Philosophy: Plugins Are Directories
+
+In Gas Town, a plugin is just a directory that agents notice. If the directory exists, the plugin exists. No registration, no manifests, no YAML configs.
+
+```
+~/gt/molecules/code-review/
+├── discovery/
+│   ├── file-census/
+│   │   └── CLAUDE.md          # Instructions for this step
+│   ├── dep-graph/
+│   │   └── CLAUDE.md
+│   └── duplication-scan/
+│       └── CLAUDE.md
+├── structural/
+│   ├── architecture-review/
+│   │   └── CLAUDE.md
+│   └── missing-abstractions/
+│       └── CLAUDE.md
+└── tactical/
+    ├── security-scan/
+    │   └── CLAUDE.md
+    ├── performance-review/
+    │   └── CLAUDE.md
+    └── test-gaps/
+        └── CLAUDE.md
+```
+
+**Add a dimension**: Create a directory with CLAUDE.md
+**Remove a dimension**: Delete the directory
+**Customize a dimension**: Edit its CLAUDE.md
+
+#### Plugin Metadata
+
+Each plugin can include frontmatter in its CLAUDE.md:
+
+```markdown
+---
+phase: tactical
+needs: [structural-complete]
+tier: sonnet
+---
+
+# Security Scan
+
+Look for OWASP Top 10 vulnerabilities...
+```
+
+| Field | Description |
+|-------|-------------|
+| `phase` | Grouping for ordering (discovery, structural, tactical, synthesis) |
+| `needs` | Dependencies - other steps that must complete first |
+| `tier` | Model hint (haiku, sonnet, opus) |
+
+#### Dynamic Molecule Assembly
+
+When instantiating a pluggable molecule, the system:
+
+1. **Scans** plugin directories under the molecule root
+2. **Parses** metadata from each plugin's CLAUDE.md
+3. **Assembles** the DAG based on phase groupings and dependencies
+4. **Creates** beads for each discovered step
+
+```bash
+gt molecule instantiate code-review --parent=gt-xyz --scope=src/auth
+```
+
+Creates beads like:
+```
+gt-xyz.discovery-file-census
+gt-xyz.discovery-dep-graph
+gt-xyz.structural-architecture-review    # blocks tactical
+gt-xyz.tactical-src-auth-security
+gt-xyz.tactical-src-auth-performance
+gt-xyz.synthesis
+```
+
+The **directory structure IS the molecule**. No separate molecule definition needed.
+
+#### Phases and Ordering
+
+Pluggable molecules support phased execution:
+
+| Phase | Purpose | Parallelism |
+|-------|---------|-------------|
+| `discovery` | Inventory, analyze codebase | Fully parallel |
+| `structural` | Big picture issues (architecture, abstractions) | Sequential for coherence |
+| `tactical` | Per-component detailed review | Parallel per component |
+| `synthesis` | Aggregate, dedupe, prioritize | Single coordinator |
+
+Steps in earlier phases block steps in later phases. Within a phase, parallelism depends on explicit `needs` declarations.
+
+#### Code Review Molecule
+
+The **code-review** molecule is the reference implementation:
+
+**Discovery Phase** (parallel scouts):
+- `file-census` - Inventory: sizes, ages, churn rates
+- `dep-graph` - Dependencies, cycles, inversions
+- `coverage-map` - Test coverage, dead code
+- `duplication-scan` - Near-duplicate files, copy-paste debt
+
+**Structural Phase** (sequential):
+- `architecture-review` - Does structure match domain?
+- `abstraction-analysis` - Wrangling at wrong layers?
+- `consolidation-planner` - What should be unified?
+
+**Tactical Phase** (parallel per hotspot):
+- `security-scan` - OWASP Top 10, injection, auth bypass
+- `performance-review` - N+1 queries, missing caching
+- `complexity-analysis` - Cyclomatic > 10, deep nesting
+- `test-gaps` - Untested branches, missing edge cases
+- `elegance-review` - Magic numbers, unclear names
+
+**Synthesis Phase** (single coordinator):
+- Deduplicate findings
+- Establish dependencies between fix-beads
+- Prioritize by impact
+- Sequence recommendations
+
+#### Findings Become Beads
+
+Each review step generates findings as beads:
+
+```
+gt-sec-001  SQL injection in login()     discovered-from: gt-xyz.tactical-security
+gt-sec-002  Missing CSRF token           discovered-from: gt-xyz.tactical-security
+gt-perf-001 N+1 query in dashboard       discovered-from: gt-xyz.tactical-performance
+```
+
+These are the work that "feeds the beast" - the review molecule generates fix beads.
+
+#### Iteration Without Built-In Loops
+
+You don't need convergence built into the molecule. Just run it again:
+
+1. Run `gt molecule instantiate code-review`
+2. Swarm closes all review beads, generates fix beads
+3. Fix beads get closed
+4. Run `gt molecule instantiate code-review` again
+5. Fewer findings this time
+6. Repeat until noise floor
+
+Each instantiation is independent. The ledger shows all runs, enabling comparison.
+
+#### Static vs Pluggable
+
+| Aspect | Static Molecule | Pluggable Molecule |
+|--------|-----------------|-------------------|
+| Definition | Steps in issue description | Steps from directory scan |
+| Add step | Edit molecule bead | Create directory |
+| Remove step | Edit molecule bead | Delete directory |
+| Customization | Edit description | Edit plugin CLAUDE.md |
+| Use case | Fixed workflows | Extensible workflows |
+
+Both patterns are valid. Use static molecules for well-defined workflows (engineer-in-box, polecat-work). Use pluggable molecules when dimensions should be customizable (code-review, migration-analysis).
+
 ## Directory Structure
 
 ### Harness Level
