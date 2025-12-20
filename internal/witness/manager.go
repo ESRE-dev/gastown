@@ -177,7 +177,7 @@ func (m *Manager) run(w *Witness) error {
 	return nil
 }
 
-// checkAndProcess performs health check and processes shutdown requests.
+// checkAndProcess performs health check, shutdown processing, and auto-spawn.
 func (m *Manager) checkAndProcess(w *Witness) {
 	// Perform health check
 	if err := m.healthCheck(w); err != nil {
@@ -188,6 +188,13 @@ func (m *Manager) checkAndProcess(w *Witness) {
 	if err := m.processShutdownRequests(w); err != nil {
 		fmt.Printf("Shutdown request error: %v\n", err)
 	}
+
+	// Auto-spawn for ready work (if enabled)
+	if w.Config.AutoSpawn {
+		if err := m.autoSpawnForReadyWork(w); err != nil {
+			fmt.Printf("Auto-spawn error: %v\n", err)
+		}
+	}
 }
 
 // healthCheck performs a health check on all monitored polecats.
@@ -197,7 +204,182 @@ func (m *Manager) healthCheck(w *Witness) error {
 	w.Stats.TotalChecks++
 	w.Stats.TodayChecks++
 
+	// List polecats
+	polecatMgr := polecat.NewManager(m.rig, git.NewGit(m.rig.Path))
+	polecats, err := polecatMgr.List()
+	if err != nil {
+		return fmt.Errorf("listing polecats: %w", err)
+	}
+
+	t := tmux.NewTmux()
+	sessMgr := session.NewManager(t, m.rig)
+
+	// Update monitored polecats list
+	var active []string
+	for _, p := range polecats {
+		running, _ := sessMgr.IsRunning(p.Name)
+		if running {
+			active = append(active, p.Name)
+
+			// Check health of each active polecat
+			status := m.checkPolecatHealth(p.Name, p.ClonePath)
+			if status == PolecatStuck {
+				m.handleStuckPolecat(w, p.Name)
+			}
+		}
+	}
+	w.MonitoredPolecats = active
+
 	return m.saveState(w)
+}
+
+// PolecatHealthStatus represents the health status of a polecat.
+type PolecatHealthStatus int
+
+const (
+	// PolecatHealthy means the polecat is working normally.
+	PolecatHealthy PolecatHealthStatus = iota
+	// PolecatStuck means the polecat has no recent activity.
+	PolecatStuck
+	// PolecatDead means the polecat session is not responding.
+	PolecatDead
+)
+
+// StuckThresholdMinutes is the default time without activity before a polecat is considered stuck.
+const StuckThresholdMinutes = 30
+
+// checkPolecatHealth checks if a polecat is healthy based on recent activity.
+func (m *Manager) checkPolecatHealth(name, path string) PolecatHealthStatus {
+	threshold := time.Duration(StuckThresholdMinutes) * time.Minute
+
+	// Check 1: Git activity (most reliable indicator of work)
+	gitPath := filepath.Join(path, ".git")
+	if info, err := os.Stat(gitPath); err == nil {
+		if time.Since(info.ModTime()) < threshold {
+			return PolecatHealthy
+		}
+	}
+
+	// Check 2: State file activity
+	stateFile := filepath.Join(path, ".gastown", "state.json")
+	if info, err := os.Stat(stateFile); err == nil {
+		if time.Since(info.ModTime()) < threshold {
+			return PolecatHealthy
+		}
+	}
+
+	// Check 3: Any file modification in the polecat directory
+	latestMod := m.getLatestModTime(path)
+	if !latestMod.IsZero() && time.Since(latestMod) < threshold {
+		return PolecatHealthy
+	}
+
+	return PolecatStuck
+}
+
+// getLatestModTime finds the most recent modification time in a directory.
+func (m *Manager) getLatestModTime(dir string) time.Time {
+	var latest time.Time
+
+	// Quick check: just look at a few key locations
+	locations := []string{
+		filepath.Join(dir, ".git", "logs", "HEAD"),
+		filepath.Join(dir, ".git", "index"),
+		filepath.Join(dir, ".beads", "issues.jsonl"),
+	}
+
+	for _, loc := range locations {
+		if info, err := os.Stat(loc); err == nil {
+			if info.ModTime().After(latest) {
+				latest = info.ModTime()
+			}
+		}
+	}
+
+	return latest
+}
+
+// handleStuckPolecat handles a polecat that appears to be stuck.
+func (m *Manager) handleStuckPolecat(w *Witness, polecatName string) {
+	fmt.Printf("Polecat %s appears stuck (no activity for %d minutes)\n",
+		polecatName, StuckThresholdMinutes)
+
+	// Check nudge history for this polecat
+	nudgeCount := m.getNudgeCount(w, polecatName)
+
+	if nudgeCount == 0 {
+		// First stuck detection: send a nudge
+		fmt.Printf("  Sending nudge to %s...\n", polecatName)
+		if err := m.sendNudge(polecatName, "No activity detected. Are you still working?"); err != nil {
+			fmt.Printf("  Warning: failed to send nudge: %v\n", err)
+		}
+		m.recordNudge(w, polecatName)
+		w.Stats.TotalNudges++
+		w.Stats.TodayNudges++
+	} else if nudgeCount == 1 {
+		// Second stuck detection: escalate to Mayor
+		fmt.Printf("  Escalating %s to Mayor (no response to nudge)...\n", polecatName)
+		if err := m.escalateToMayor(polecatName); err != nil {
+			fmt.Printf("  Warning: failed to escalate: %v\n", err)
+		}
+		w.Stats.TotalEscalations++
+		m.recordNudge(w, polecatName)
+	} else {
+		// Third+ stuck detection: log but wait for human confirmation
+		fmt.Printf("  %s still stuck (waiting for human intervention)\n", polecatName)
+	}
+}
+
+// getNudgeCount returns how many times a polecat has been nudged.
+func (m *Manager) getNudgeCount(w *Witness, polecatName string) int {
+	// Count occurrences in SpawnedIssues that start with "nudge:" prefix
+	// We reuse SpawnedIssues to track nudges with a "nudge:<name>" pattern
+	count := 0
+	nudgeKey := "nudge:" + polecatName
+	for _, entry := range w.SpawnedIssues {
+		if entry == nudgeKey {
+			count++
+		}
+	}
+	return count
+}
+
+// recordNudge records that a nudge was sent to a polecat.
+func (m *Manager) recordNudge(w *Witness, polecatName string) {
+	nudgeKey := "nudge:" + polecatName
+	w.SpawnedIssues = append(w.SpawnedIssues, nudgeKey)
+}
+
+// escalateToMayor sends an escalation message to the Mayor.
+func (m *Manager) escalateToMayor(polecatName string) error {
+	subject := fmt.Sprintf("ESCALATION: Polecat %s stuck", polecatName)
+	body := fmt.Sprintf(`Polecat %s in rig %s appears stuck.
+
+This polecat has been unresponsive for over %d minutes despite nudging.
+
+Recommended actions:
+1. Check 'gt session attach %s/%s' to see current state
+2. If truly stuck, run 'gt session stop %s/%s' to kill the session
+3. Investigate root cause
+
+Rig: %s
+Time: %s
+`, polecatName, m.rig.Name, StuckThresholdMinutes*2,
+		m.rig.Name, polecatName,
+		m.rig.Name, polecatName,
+		m.rig.Name, time.Now().Format(time.RFC3339))
+
+	cmd := exec.Command("bd", "mail", "send", "mayor/",
+		"-s", subject,
+		"-m", body,
+	)
+	cmd.Dir = m.workDir
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%w: %s", err, string(out))
+	}
+
+	return nil
 }
 
 // processShutdownRequests checks mail for lifecycle requests and handles them.
@@ -223,6 +405,19 @@ func (m *Manager) processShutdownRequests(w *Witness) error {
 
 			fmt.Printf("  Polecat: %s\n", polecatName)
 
+			// Verify polecat state before cleanup
+			if err := m.verifyPolecatState(polecatName); err != nil {
+				fmt.Printf("  Verification failed: %v\n", err)
+
+				// Send nudge to polecat
+				if err := m.sendNudge(polecatName, err.Error()); err != nil {
+					fmt.Printf("  Warning: failed to send nudge: %v\n", err)
+				}
+
+				// Don't ack message - will retry on next check
+				continue
+			}
+
 			// Perform cleanup
 			if err := m.cleanupPolecat(polecatName); err != nil {
 				fmt.Printf("  Cleanup error: %v\n", err)
@@ -235,6 +430,63 @@ func (m *Manager) processShutdownRequests(w *Witness) error {
 			// Acknowledge the message
 			m.ackMessage(msg.ID)
 		}
+	}
+
+	return nil
+}
+
+// verifyPolecatState checks that a polecat is safe to clean up.
+func (m *Manager) verifyPolecatState(polecatName string) error {
+	polecatPath := filepath.Join(m.rig.Path, "polecats", polecatName)
+
+	// Check if polecat directory exists
+	if _, err := os.Stat(polecatPath); os.IsNotExist(err) {
+		// Already cleaned up, that's fine
+		return nil
+	}
+
+	// 1. Check git status is clean
+	polecatGit := git.NewGit(polecatPath)
+	status, err := polecatGit.Status()
+	if err != nil {
+		return fmt.Errorf("checking git status: %w", err)
+	}
+	if !status.Clean {
+		return fmt.Errorf("git working tree is not clean")
+	}
+
+	// Note: beads changes would be reflected in git status above,
+	// since beads files are tracked in git.
+
+	// Note: MR submission is now done automatically by polecat's handoff command,
+	// so we don't need to verify it here - the polecat wouldn't have requested
+	// shutdown if that step failed
+
+	return nil
+}
+
+// sendNudge sends a message to a polecat asking it to fix its state.
+func (m *Manager) sendNudge(polecatName, reason string) error {
+	subject := fmt.Sprintf("NUDGE: Cannot shutdown - %s", reason)
+	body := fmt.Sprintf(`Your shutdown request was denied because: %s
+
+Please fix the issue and run 'gt handoff' again.
+
+Polecat: %s
+Rig: %s
+Time: %s
+`, reason, polecatName, m.rig.Name, time.Now().Format(time.RFC3339))
+
+	// Send via bd mail
+	recipient := fmt.Sprintf("%s/%s", m.rig.Name, polecatName)
+	cmd := exec.Command("bd", "mail", "send", recipient,
+		"-s", subject,
+		"-m", body,
+	)
+	cmd.Dir = m.workDir
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%w: %s", err, string(out))
 	}
 
 	return nil
@@ -355,4 +607,173 @@ func processExists(pid int) bool {
 	// On Unix, FindProcess always succeeds; signal 0 tests existence
 	err = proc.Signal(nil)
 	return err == nil
+}
+
+// ReadyIssue represents an issue from bd ready --json output.
+type ReadyIssue struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Type   string `json:"issue_type"`
+	Status string `json:"status"`
+}
+
+// autoSpawnForReadyWork spawns polecats for ready work up to capacity.
+func (m *Manager) autoSpawnForReadyWork(w *Witness) error {
+	// Get current active polecat count
+	activeCount, err := m.getActivePolecatCount()
+	if err != nil {
+		return fmt.Errorf("counting polecats: %w", err)
+	}
+
+	maxWorkers := w.Config.MaxWorkers
+	if maxWorkers <= 0 {
+		maxWorkers = 4 // Default
+	}
+
+	if activeCount >= maxWorkers {
+		// At capacity, nothing to do
+		return nil
+	}
+
+	// Get ready issues
+	issues, err := m.getReadyIssues()
+	if err != nil {
+		return fmt.Errorf("getting ready issues: %w", err)
+	}
+
+	// Filter issues (exclude merge-requests, epics, and already-spawned issues)
+	var spawnableIssues []ReadyIssue
+	for _, issue := range issues {
+		// Skip merge-requests and epics
+		if issue.Type == "merge-request" || issue.Type == "epic" {
+			continue
+		}
+
+		// Skip if already spawned
+		if m.isAlreadySpawned(w, issue.ID) {
+			continue
+		}
+
+		// Filter by epic if configured
+		if w.Config.EpicID != "" {
+			// TODO: Check if issue is a child of the configured epic
+			// For now, we skip this filter
+		}
+
+		// Filter by prefix if configured
+		if w.Config.IssuePrefix != "" {
+			if !strings.HasPrefix(issue.ID, w.Config.IssuePrefix) {
+				continue
+			}
+		}
+
+		spawnableIssues = append(spawnableIssues, issue)
+	}
+
+	// Spawn up to capacity
+	spawnDelay := w.Config.SpawnDelayMs
+	if spawnDelay <= 0 {
+		spawnDelay = 5000 // Default 5 seconds
+	}
+
+	spawned := 0
+	for _, issue := range spawnableIssues {
+		if activeCount+spawned >= maxWorkers {
+			break
+		}
+
+		fmt.Printf("Auto-spawning for issue %s: %s\n", issue.ID, issue.Title)
+
+		if err := m.spawnPolecat(issue.ID); err != nil {
+			fmt.Printf("  Spawn failed: %v\n", err)
+			continue
+		}
+
+		// Track that we spawned for this issue
+		w.SpawnedIssues = append(w.SpawnedIssues, issue.ID)
+		spawned++
+
+		// Delay between spawns
+		if spawned < len(spawnableIssues) && activeCount+spawned < maxWorkers {
+			time.Sleep(time.Duration(spawnDelay) * time.Millisecond)
+		}
+	}
+
+	if spawned > 0 {
+		// Save state to persist spawned issues list
+		return m.saveState(w)
+	}
+
+	return nil
+}
+
+// getActivePolecatCount returns the number of polecats with active tmux sessions.
+func (m *Manager) getActivePolecatCount() (int, error) {
+	polecatMgr := polecat.NewManager(m.rig, git.NewGit(m.rig.Path))
+	polecats, err := polecatMgr.List()
+	if err != nil {
+		return 0, err
+	}
+
+	t := tmux.NewTmux()
+	sessMgr := session.NewManager(t, m.rig)
+
+	count := 0
+	for _, p := range polecats {
+		running, _ := sessMgr.IsRunning(p.Name)
+		if running {
+			count++
+		}
+	}
+
+	return count, nil
+}
+
+// getReadyIssues returns issues ready to work (no blockers).
+func (m *Manager) getReadyIssues() ([]ReadyIssue, error) {
+	cmd := exec.Command("bd", "ready", "--json")
+	cmd.Dir = m.workDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%s", stderr.String())
+	}
+
+	if stdout.Len() == 0 {
+		return nil, nil
+	}
+
+	var issues []ReadyIssue
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return nil, fmt.Errorf("parsing ready issues: %w", err)
+	}
+
+	return issues, nil
+}
+
+// isAlreadySpawned checks if an issue has already been spawned.
+func (m *Manager) isAlreadySpawned(w *Witness, issueID string) bool {
+	for _, id := range w.SpawnedIssues {
+		if id == issueID {
+			return true
+		}
+	}
+	return false
+}
+
+// spawnPolecat spawns a polecat for an issue using gt spawn.
+func (m *Manager) spawnPolecat(issueID string) error {
+	cmd := exec.Command("gt", "spawn", "--rig", m.rig.Name, "--issue", issueID)
+	cmd.Dir = m.workDir
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(string(output)))
+	}
+
+	fmt.Printf("  Spawned: %s\n", strings.TrimSpace(string(output)))
+	return nil
 }

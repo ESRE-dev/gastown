@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -124,27 +125,42 @@ func getWitnessManager(rigName string) (*witness.Manager, *rig.Rig, error) {
 func runWitnessStart(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
-	mgr, _, err := getWitnessManager(rigName)
+	mgr, r, err := getWitnessManager(rigName)
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("Starting witness for %s...\n", rigName)
 
-	if err := mgr.Start(witnessForeground); err != nil {
-		if err == witness.ErrAlreadyRunning {
-			fmt.Printf("%s Witness is already running\n", style.Dim.Render("⚠"))
-			return nil
-		}
-		return fmt.Errorf("starting witness: %w", err)
-	}
-
 	if witnessForeground {
-		// This will block until stopped
+		// Foreground mode: run monitoring loop in current process (blocking)
+		if err := mgr.Start(true); err != nil {
+			if err == witness.ErrAlreadyRunning {
+				fmt.Printf("%s Witness is already running\n", style.Dim.Render("⚠"))
+				return nil
+			}
+			return fmt.Errorf("starting witness: %w", err)
+		}
 		return nil
 	}
 
+	// Background mode: create tmux session with Claude
+	created, err := ensureWitnessSession(rigName, r)
+	if err != nil {
+		return err
+	}
+
+	if !created {
+		fmt.Printf("%s Witness session already running\n", style.Dim.Render("⚠"))
+		fmt.Printf("  %s\n", style.Dim.Render("Use 'gt witness attach' to connect"))
+		return nil
+	}
+
+	// Update manager state to reflect running session
+	_ = mgr.Start(false) // Mark as running in state file
+
 	fmt.Printf("%s Witness started for %s\n", style.Bold.Render("✓"), rigName)
+	fmt.Printf("  %s\n", style.Dim.Render("Use 'gt witness attach' to connect"))
 	fmt.Printf("  %s\n", style.Dim.Render("Use 'gt witness status' to check progress"))
 	return nil
 }
@@ -157,12 +173,26 @@ func runWitnessStop(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Kill tmux session if it exists
+	t := tmux.NewTmux()
+	sessionName := witnessSessionName(rigName)
+	running, _ := t.HasSession(sessionName)
+	if running {
+		if err := t.KillSession(sessionName); err != nil {
+			fmt.Printf("%s Warning: failed to kill session: %v\n", style.Dim.Render("⚠"), err)
+		}
+	}
+
+	// Update state file
 	if err := mgr.Stop(); err != nil {
-		if err == witness.ErrNotRunning {
+		if err == witness.ErrNotRunning && !running {
 			fmt.Printf("%s Witness is not running\n", style.Dim.Render("⚠"))
 			return nil
 		}
-		return fmt.Errorf("stopping witness: %w", err)
+		// Even if manager.Stop fails, if we killed the session it's stopped
+		if !running {
+			return fmt.Errorf("stopping witness: %w", err)
+		}
 	}
 
 	fmt.Printf("%s Witness stopped for %s\n", style.Bold.Render("✓"), rigName)
@@ -180,6 +210,18 @@ func runWitnessStatus(cmd *cobra.Command, args []string) error {
 	w, err := mgr.Status()
 	if err != nil {
 		return fmt.Errorf("getting status: %w", err)
+	}
+
+	// Check actual tmux session state (more reliable than state file)
+	t := tmux.NewTmux()
+	sessionName := witnessSessionName(rigName)
+	sessionRunning, _ := t.HasSession(sessionName)
+
+	// Reconcile state: tmux session is the source of truth for background mode
+	if sessionRunning && w.State != witness.StateRunning {
+		w.State = witness.StateRunning
+	} else if !sessionRunning && w.State == witness.StateRunning {
+		w.State = witness.StateStopped
 	}
 
 	// JSON output
@@ -202,6 +244,9 @@ func runWitnessStatus(cmd *cobra.Command, args []string) error {
 		stateStr = style.Dim.Render("⏸ paused")
 	}
 	fmt.Printf("  State: %s\n", stateStr)
+	if sessionRunning {
+		fmt.Printf("  Session: %s\n", sessionName)
+	}
 
 	if w.StartedAt != nil {
 		fmt.Printf("  Started: %s\n", w.StartedAt.Format("2006-01-02 15:04:05"))
@@ -236,6 +281,52 @@ func witnessSessionName(rigName string) string {
 	return fmt.Sprintf("gt-witness-%s", rigName)
 }
 
+// ensureWitnessSession creates a witness tmux session if it doesn't exist.
+// Returns true if a new session was created, false if it already existed.
+func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
+	t := tmux.NewTmux()
+	sessionName := witnessSessionName(rigName)
+
+	// Check if session already exists
+	running, err := t.HasSession(sessionName)
+	if err != nil {
+		return false, fmt.Errorf("checking session: %w", err)
+	}
+
+	if running {
+		return false, nil
+	}
+
+	// Create new tmux session
+	if err := t.NewSession(sessionName, r.Path); err != nil {
+		return false, fmt.Errorf("creating session: %w", err)
+	}
+
+	// Set environment
+	t.SetEnvironment(sessionName, "GT_ROLE", "witness")
+	t.SetEnvironment(sessionName, "GT_RIG", rigName)
+
+	// Apply Gas Town theming
+	theme := tmux.AssignTheme(rigName)
+	_ = t.ConfigureGasTownSession(sessionName, theme, rigName, "witness", "witness")
+
+	// Launch Claude in a respawn loop
+	loopCmd := `while true; do echo "👁️ Starting Witness for ` + rigName + `..."; claude --dangerously-skip-permissions; echo ""; echo "Witness exited. Restarting in 2s... (Ctrl-C to stop)"; sleep 2; done`
+	if err := t.SendKeysDelayed(sessionName, loopCmd, 200); err != nil {
+		return false, fmt.Errorf("sending command: %w", err)
+	}
+
+	// Wait briefly then send gt prime to initialize context
+	// This runs after Claude starts up in the respawn loop
+	time.Sleep(3 * time.Second)
+	if err := t.SendKeys(sessionName, "gt prime"); err != nil {
+		// Non-fatal - Claude will still work, just without auto-priming
+		fmt.Printf("Warning: failed to send gt prime: %v\n", err)
+	}
+
+	return true, nil
+}
+
 func runWitnessAttach(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
@@ -245,42 +336,16 @@ func runWitnessAttach(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	t := tmux.NewTmux()
 	sessionName := witnessSessionName(rigName)
 
-	// Check if session exists
-	running, err := t.HasSession(sessionName)
+	// Ensure session exists (creates if needed)
+	created, err := ensureWitnessSession(rigName, r)
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+		return err
 	}
 
-	// Witness working directory - use <rig>/witness/ for proper role detection
-	witnessDir := filepath.Join(r.Path, "witness")
-	if err := os.MkdirAll(witnessDir, 0755); err != nil {
-		return fmt.Errorf("creating witness directory: %w", err)
-	}
-
-	if !running {
-		// Start witness session (like Mayor)
-		fmt.Printf("Starting witness session for %s...\n", rigName)
-
-		if err := t.NewSession(sessionName, witnessDir); err != nil {
-			return fmt.Errorf("creating session: %w", err)
-		}
-
-		// Set environment
-		t.SetEnvironment(sessionName, "GT_ROLE", "witness")
-		t.SetEnvironment(sessionName, "GT_RIG", rigName)
-
-		// Apply theme (same as rig polecats)
-		theme := tmux.AssignTheme(rigName)
-		_ = t.ConfigureGasTownSession(sessionName, theme, rigName, "witness", "witness")
-
-		// Launch Claude in a respawn loop
-		loopCmd := `while true; do echo "👁️ Starting Witness for ` + rigName + `..."; claude --dangerously-skip-permissions; echo ""; echo "Witness exited. Restarting in 2s... (Ctrl-C to stop)"; sleep 2; done`
-		if err := t.SendKeysDelayed(sessionName, loopCmd, 200); err != nil {
-			return fmt.Errorf("sending command: %w", err)
-		}
+	if created {
+		fmt.Printf("Started witness session for %s\n", rigName)
 	}
 
 	// Attach to the session

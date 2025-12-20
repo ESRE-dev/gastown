@@ -41,6 +41,30 @@ type Witness struct {
 
 	// Stats contains cumulative statistics.
 	Stats WitnessStats `json:"stats"`
+
+	// Config contains auto-spawn configuration.
+	Config WitnessConfig `json:"config"`
+
+	// SpawnedIssues tracks which issues have been spawned (to avoid duplicates).
+	SpawnedIssues []string `json:"spawned_issues,omitempty"`
+}
+
+// WitnessConfig contains configuration for the witness.
+type WitnessConfig struct {
+	// MaxWorkers is the maximum number of concurrent polecats (default: 4).
+	MaxWorkers int `json:"max_workers"`
+
+	// SpawnDelayMs is the delay between spawns in milliseconds (default: 5000).
+	SpawnDelayMs int `json:"spawn_delay_ms"`
+
+	// AutoSpawn enables automatic spawning for ready issues (default: true).
+	AutoSpawn bool `json:"auto_spawn"`
+
+	// EpicID limits spawning to children of this epic (optional).
+	EpicID string `json:"epic_id,omitempty"`
+
+	// IssuePrefix limits spawning to issues with this prefix (optional).
+	IssuePrefix string `json:"issue_prefix,omitempty"`
 }
 
 // WitnessStats contains cumulative witness statistics.

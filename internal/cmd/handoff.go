@@ -321,6 +321,25 @@ Check gt mail inbox for messages received during transition.
 	return nil
 }
 
+// getPolecatName extracts the polecat name from the tmux session.
+// Returns empty string if not a polecat session.
+func getPolecatName() string {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	if err != nil {
+		return ""
+	}
+	sessionName := strings.TrimSpace(string(out))
+
+	// Polecat sessions: gt-<rig>-<name>
+	if strings.HasPrefix(sessionName, "gt-") {
+		parts := strings.SplitN(sessionName, "-", 3)
+		if len(parts) >= 3 {
+			return parts[2] // The polecat name
+		}
+	}
+	return ""
+}
+
 // sendLifecycleRequest sends the lifecycle request to our manager.
 func sendLifecycleRequest(manager string, role Role, action HandoffAction, townRoot string) error {
 	if manager == "human" {
@@ -329,14 +348,21 @@ func sendLifecycleRequest(manager string, role Role, action HandoffAction, townR
 		return nil
 	}
 
+	// For polecats, include the specific name
+	polecatName := ""
+	if role == RolePolecat {
+		polecatName = getPolecatName()
+	}
+
 	subject := fmt.Sprintf("LIFECYCLE: %s requesting %s", role, action)
 	body := fmt.Sprintf(`Lifecycle request from %s.
 
 Action: %s
 Time: %s
+Polecat: %s
 
 Please verify state and execute lifecycle action.
-`, role, action, time.Now().Format(time.RFC3339))
+`, role, action, time.Now().Format(time.RFC3339), polecatName)
 
 	// Send via bd mail (syntax: bd mail send <recipient> -s <subject> -m <body>)
 	cmd := exec.Command("bd", "mail", "send", manager,
