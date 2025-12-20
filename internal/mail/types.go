@@ -234,16 +234,21 @@ func ParseMessageType(s string) MessageType {
 // Examples:
 //   - "mayor/" → "mayor/"
 //   - "mayor" → "mayor/"
+//   - "deacon/" → "deacon/"
+//   - "deacon" → "deacon/"
 //   - "gastown/Toast" → "gastown-Toast"
 //   - "gastown/refinery" → "gastown-refinery"
 //   - "gastown/" → "gastown" (rig broadcast)
 func addressToIdentity(address string) string {
-	// Mayor special case - always use "mayor/" for consistency
+	// Town-level agents: mayor and deacon keep trailing slash
 	if address == "mayor" || address == "mayor/" {
 		return "mayor/"
 	}
+	if address == "deacon" || address == "deacon/" {
+		return "deacon/"
+	}
 
-	// Trim trailing slash for non-mayor addresses
+	// Trim trailing slash for rig-level addresses
 	if len(address) > 0 && address[len(address)-1] == '/' {
 		address = address[:len(address)-1]
 	}
@@ -265,11 +270,18 @@ func addressToIdentity(address string) string {
 //
 // Examples:
 //   - "mayor" → "mayor/"
+//   - "mayor/" → "mayor/"
+//   - "deacon" → "deacon/"
+//   - "deacon/" → "deacon/"
 //   - "gastown-Toast" → "gastown/Toast"
 //   - "gastown-refinery" → "gastown/refinery"
 func identityToAddress(identity string) string {
-	if identity == "mayor" {
+	// Town-level agents
+	if identity == "mayor" || identity == "mayor/" {
 		return "mayor/"
+	}
+	if identity == "deacon" || identity == "deacon/" {
+		return "deacon/"
 	}
 
 	// Find first dash and replace with /
