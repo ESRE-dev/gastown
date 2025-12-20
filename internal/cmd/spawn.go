@@ -338,23 +338,27 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
 
 	// Notify Witness about the spawn - Witness will monitor startup and nudge when ready
+	// Note: If Witness is down, Deacon's health check will wake it and Witness will
+	// process the SPAWN message from its inbox on startup.
 	witnessAddr := fmt.Sprintf("%s/witness", rigName)
+	sender := detectSender()
 	spawnNotification := &mail.Message{
 		To:      witnessAddr,
-		From:    "mayor/",
+		From:    sender,
 		Subject: fmt.Sprintf("SPAWN: %s starting on %s", polecatName, assignmentID),
 		Body: fmt.Sprintf(`Polecat spawn notification.
 
 Polecat: %s
 Issue: %s
 Session: %s
+Spawned by: %s
 
 Please monitor this polecat's startup. When Claude is ready (you can see the prompt
 in the tmux session), send a nudge to start working:
 
     tmux send-keys -t %s "Check your inbox with 'gt mail inbox' and begin working." Enter
 
-The polecat has a work assignment in its inbox.`, polecatName, assignmentID, sessMgr.SessionName(polecatName), sessMgr.SessionName(polecatName)),
+The polecat has a work assignment in its inbox.`, polecatName, assignmentID, sessMgr.SessionName(polecatName), sender, sessMgr.SessionName(polecatName)),
 	}
 
 	if err := router.Send(spawnNotification); err != nil {
