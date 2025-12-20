@@ -123,6 +123,10 @@ func startDeaconSession(t *tmux.Tmux) error {
 	// Set environment
 	_ = t.SetEnvironment(DeaconSessionName, "GT_ROLE", "deacon")
 
+	// Apply Deacon theme
+	theme := tmux.DeaconTheme()
+	_ = t.ConfigureGasTownSession(DeaconSessionName, theme, "", "Deacon", "health-check")
+
 	// Launch Claude in a respawn loop - session survives restarts
 	// The startup hook handles context loading automatically
 	// Use SendKeysDelayed to allow shell initialization after NewSession
