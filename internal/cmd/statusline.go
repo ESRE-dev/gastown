@@ -97,13 +97,19 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	polecatCount := 0
 	rigs := make(map[string]bool)
 	for _, s := range sessions {
-		if strings.HasPrefix(s, "gt-") && s != "gt-mayor" {
+		if !strings.HasPrefix(s, "gt-") || s == "gt-mayor" || s == "gt-deacon" {
+			continue
+		}
+
+		// Extract rig name based on session type
+		rig := extractRigFromSession(s)
+		if rig != "" {
+			rigs[rig] = true
+		}
+
+		// Only count actual polecats (not witness, refinery, crew)
+		if isPolecatSession(s) {
 			polecatCount++
-			// Extract rig name: gt-<rig>-<worker>
-			parts := strings.SplitN(s, "-", 3)
-			if len(parts) >= 2 {
-				rigs[parts[1]] = true
-			}
 		}
 	}
 	rigCount := len(rigs)
@@ -142,4 +148,47 @@ func getUnreadMailCount(identity string) int {
 	}
 
 	return unread
+}
+
+// extractRigFromSession extracts the rig name from a tmux session name.
+// Handles different session naming patterns:
+//   - gt-<rig>-<worker>  (polecats)
+//   - gt-<rig>-crew-<name>  (crew workers)
+//   - gt-<rig>-witness  (daemon-style witness)
+//   - gt-witness-<rig>  (witness.go-style witness)
+//   - gt-<rig>-refinery  (refinery)
+func extractRigFromSession(s string) string {
+	parts := strings.SplitN(s, "-", 4)
+	if len(parts) < 3 {
+		return ""
+	}
+
+	// Handle gt-witness-<rig> pattern (inconsistent naming from witness.go)
+	if parts[1] == "witness" {
+		return parts[2]
+	}
+
+	// Standard pattern: gt-<rig>-<something>
+	return parts[1]
+}
+
+// isPolecatSession returns true if the session is a polecat worker session.
+// Excludes witness, refinery, and crew sessions.
+func isPolecatSession(s string) bool {
+	// Not a polecat if it ends with known suffixes or contains crew marker
+	if strings.HasSuffix(s, "-witness") {
+		return false
+	}
+	if strings.HasSuffix(s, "-refinery") {
+		return false
+	}
+	if strings.Contains(s, "-crew-") {
+		return false
+	}
+	// Also handle gt-witness-<rig> pattern
+	parts := strings.SplitN(s, "-", 3)
+	if len(parts) >= 2 && parts[1] == "witness" {
+		return false
+	}
+	return true
 }
