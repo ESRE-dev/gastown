@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -109,11 +110,11 @@ func (d *Daemon) Run() error {
 func (d *Daemon) heartbeat(state *State) {
 	d.logger.Println("Heartbeat starting")
 
-	// 1. Poke Mayor
-	d.pokeMayor()
+	// 1. Ensure Deacon is running (the Deacon is the heartbeat of the system)
+	d.ensureDeaconRunning()
 
-	// 2. Poke Witnesses (for each rig)
-	d.pokeWitnesses()
+	// 2. Poke Deacon - the Deacon monitors Mayor and Witnesses
+	d.pokeDeacon()
 
 	// 3. Process lifecycle requests
 	d.processLifecycleRequests()
@@ -126,6 +127,116 @@ func (d *Daemon) heartbeat(state *State) {
 	}
 
 	d.logger.Printf("Heartbeat complete (#%d)", state.HeartbeatCount)
+}
+
+// DeaconSessionName is the tmux session name for the Deacon.
+const DeaconSessionName = "gt-deacon"
+
+// ensureDeaconRunning checks if the Deacon session exists and starts it if not.
+// The Deacon is the system's heartbeat - it must always be running.
+func (d *Daemon) ensureDeaconRunning() {
+	running, err := d.tmux.HasSession(DeaconSessionName)
+	if err != nil {
+		d.logger.Printf("Error checking Deacon session: %v", err)
+		return
+	}
+
+	if running {
+		return // Deacon is running, nothing to do
+	}
+
+	// Deacon is not running - start it
+	d.logger.Println("Deacon session not running, starting...")
+
+	// Create session in town root
+	if err := d.tmux.NewSession(DeaconSessionName, d.config.TownRoot); err != nil {
+		d.logger.Printf("Error creating Deacon session: %v", err)
+		return
+	}
+
+	// Set environment
+	_ = d.tmux.SetEnvironment(DeaconSessionName, "GT_ROLE", "deacon")
+
+	// Launch Claude in a respawn loop - session survives restarts
+	loopCmd := `while true; do echo "⛪ Starting Deacon session..."; claude --dangerously-skip-permissions; echo ""; echo "Deacon exited. Restarting in 2s... (Ctrl-C to stop)"; sleep 2; done`
+	if err := d.tmux.SendKeysDelayed(DeaconSessionName, loopCmd, 200); err != nil {
+		d.logger.Printf("Error launching Claude in Deacon session: %v", err)
+		return
+	}
+
+	d.logger.Println("Deacon session started successfully")
+}
+
+// pokeDeacon sends a heartbeat message to the Deacon session.
+// The Deacon is responsible for monitoring Mayor and Witnesses.
+func (d *Daemon) pokeDeacon() {
+	const agentID = "deacon"
+
+	running, err := d.tmux.HasSession(DeaconSessionName)
+	if err != nil {
+		d.logger.Printf("Error checking Deacon session: %v", err)
+		return
+	}
+
+	if !running {
+		d.logger.Println("Deacon session not running after ensure, skipping poke")
+		return
+	}
+
+	// Check deacon heartbeat to see if it's active
+	deaconHeartbeatFile := filepath.Join(d.config.TownRoot, "deacon", "heartbeat.json")
+	var isFresh, isStale, isVeryStale bool
+
+	data, err := os.ReadFile(deaconHeartbeatFile)
+	if err == nil {
+		var hb struct {
+			Timestamp time.Time `json:"timestamp"`
+		}
+		if json.Unmarshal(data, &hb) == nil {
+			age := time.Since(hb.Timestamp)
+			isFresh = age < 2*time.Minute
+			isStale = age >= 2*time.Minute && age < 5*time.Minute
+			isVeryStale = age >= 5*time.Minute
+		} else {
+			isVeryStale = true
+		}
+	} else {
+		isVeryStale = true // No heartbeat file
+	}
+
+	if isFresh {
+		// Deacon is actively working, reset backoff
+		d.backoff.RecordActivity(agentID)
+		d.logger.Println("Deacon is fresh, skipping poke")
+		return
+	}
+
+	// Check if we should poke based on backoff interval
+	if !d.backoff.ShouldPoke(agentID) {
+		interval := d.backoff.GetInterval(agentID)
+		d.logger.Printf("Deacon backoff in effect (interval: %v), skipping poke", interval)
+		return
+	}
+
+	// Send heartbeat message via tmux
+	msg := "HEARTBEAT: run your rounds"
+	if err := d.tmux.SendKeys(DeaconSessionName, msg); err != nil {
+		d.logger.Printf("Error poking Deacon: %v", err)
+		return
+	}
+
+	d.backoff.RecordPoke(agentID)
+
+	// Adjust backoff based on staleness
+	if isVeryStale {
+		d.backoff.RecordMiss(agentID)
+		interval := d.backoff.GetInterval(agentID)
+		d.logger.Printf("Poked Deacon (very stale, backoff now: %v)", interval)
+	} else if isStale {
+		d.logger.Println("Poked Deacon (stale)")
+	} else {
+		d.logger.Println("Poked Deacon")
+	}
 }
 
 // pokeMayor sends a heartbeat to the Mayor session.

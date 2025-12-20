@@ -85,26 +85,26 @@ func (hb *Heartbeat) Age() time.Duration {
 	return time.Since(hb.Timestamp)
 }
 
-// IsFresh returns true if the heartbeat is less than 2 minutes old.
-// A fresh heartbeat means the Deacon is actively working.
+// IsFresh returns true if the heartbeat is less than 5 minutes old.
+// A fresh heartbeat means the Deacon is actively working or recently finished.
 func (hb *Heartbeat) IsFresh() bool {
-	return hb != nil && hb.Age() < 2*time.Minute
+	return hb != nil && hb.Age() < 5*time.Minute
 }
 
-// IsStale returns true if the heartbeat is 2-5 minutes old.
-// A stale heartbeat may indicate the Deacon is slow or stuck.
+// IsStale returns true if the heartbeat is 5-15 minutes old.
+// A stale heartbeat may indicate the Deacon is doing a long operation.
 func (hb *Heartbeat) IsStale() bool {
 	if hb == nil {
 		return false
 	}
 	age := hb.Age()
-	return age >= 2*time.Minute && age < 5*time.Minute
+	return age >= 5*time.Minute && age < 15*time.Minute
 }
 
-// IsVeryStale returns true if the heartbeat is more than 5 minutes old.
+// IsVeryStale returns true if the heartbeat is more than 15 minutes old.
 // A very stale heartbeat means the Deacon should be poked.
 func (hb *Heartbeat) IsVeryStale() bool {
-	return hb == nil || hb.Age() >= 5*time.Minute
+	return hb == nil || hb.Age() >= 15*time.Minute
 }
 
 // ShouldPoke returns true if the daemon should poke the Deacon.

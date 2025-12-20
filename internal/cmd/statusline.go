@@ -93,17 +93,17 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		return nil // Silent fail
 	}
 
-	// Count gt-* sessions (polecats) and rigs
+	// Count only actual polecats (not witnesses, refineries, deacon, crew)
 	polecatCount := 0
 	rigs := make(map[string]bool)
 	for _, s := range sessions {
-		if strings.HasPrefix(s, "gt-") && s != "gt-mayor" {
+		agent := categorizeSession(s)
+		if agent == nil {
+			continue
+		}
+		if agent.Type == AgentPolecat {
 			polecatCount++
-			// Extract rig name: gt-<rig>-<worker>
-			parts := strings.SplitN(s, "-", 3)
-			if len(parts) >= 2 {
-				rigs[parts[1]] = true
-			}
+			rigs[agent.Rig] = true
 		}
 	}
 	rigCount := len(rigs)

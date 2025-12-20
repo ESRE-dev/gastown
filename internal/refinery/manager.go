@@ -126,8 +126,8 @@ func (m *Manager) Status() (*Refinery, error) {
 }
 
 // Start starts the refinery.
-// If foreground is true, runs in the current process (blocking).
-// Otherwise, spawns a tmux session running the refinery in foreground mode.
+// If foreground is true, runs in the current process (blocking) using the Go-based polling loop.
+// Otherwise, spawns a Claude agent in a tmux session to process the merge queue.
 func (m *Manager) Start(foreground bool) error {
 	ref, err := m.loadState()
 	if err != nil {
@@ -148,7 +148,8 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	if foreground {
-		// Running in foreground - update state and run
+		// Running in foreground - update state and run the Go-based polling loop
+		// This is the legacy mode, kept for backwards compatibility
 		now := time.Now()
 		ref.State = StateRunning
 		ref.StartedAt = &now
@@ -162,26 +163,52 @@ func (m *Manager) Start(foreground bool) error {
 		return m.run(ref)
 	}
 
-	// Background mode: spawn a tmux session running the refinery
-	if err := t.NewSession(sessionID, m.workDir); err != nil {
+	// Background mode: spawn a Claude agent in a tmux session
+	// The Claude agent handles MR processing using git commands and beads
+
+	// Working directory is the refinery's rig clone (canonical main branch view)
+	refineryRigDir := filepath.Join(m.rig.Path, "refinery", "rig")
+	if _, err := os.Stat(refineryRigDir); os.IsNotExist(err) {
+		// Fall back to rig path if refinery/rig doesn't exist
+		refineryRigDir = m.workDir
+	}
+
+	if err := t.NewSession(sessionID, refineryRigDir); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
 	// Set environment variables
 	_ = t.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
 	_ = t.SetEnvironment(sessionID, "GT_REFINERY", "1")
+	_ = t.SetEnvironment(sessionID, "GT_ROLE", "refinery")
+
+	// Set beads environment - refinery uses rig-level beads
+	beadsDir := filepath.Join(m.rig.Path, "mayor", "rig", ".beads")
+	_ = t.SetEnvironment(sessionID, "BEADS_DIR", beadsDir)
+	_ = t.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1")
+	_ = t.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/refinery", m.rig.Name))
 
 	// Apply theme (same as rig polecats)
 	theme := tmux.AssignTheme(m.rig.Name)
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "refinery", "refinery")
 
-	// Send the command to start refinery in foreground mode
-	// The foreground mode handles state updates and the processing loop
-	command := fmt.Sprintf("gt refinery start %s --foreground", m.rig.Name)
+	// Update state to running
+	now := time.Now()
+	ref.State = StateRunning
+	ref.StartedAt = &now
+	ref.PID = 0 // Claude agent doesn't have a PID we track
+	if err := m.saveState(ref); err != nil {
+		_ = t.KillSession(sessionID)
+		return fmt.Errorf("saving state: %w", err)
+	}
+
+	// Start Claude agent with full permissions (like polecats)
+	// The agent will run gt prime to load refinery context and start processing
+	command := "claude --dangerously-skip-permissions"
 	if err := t.SendKeys(sessionID, command); err != nil {
 		// Clean up the session on failure
 		_ = t.KillSession(sessionID)
-		return fmt.Errorf("starting refinery: %w", err)
+		return fmt.Errorf("starting Claude agent: %w", err)
 	}
 
 	return nil

@@ -348,25 +348,25 @@ bd list --type=merge-request --assignee=Nux
             └─────────────────┴─────────┘
 ```
 
-## Integration with HOP
+## Audit and Observability
 
-In the HOP framing, the merge queue is a **validation layer**:
+The merge queue creates a complete audit trail for all integrated work:
 
-| MQ Concept | HOP Concept |
-|------------|-------------|
-| Merge request | Work completion claim |
-| Engineer | Validator node |
-| Merge commit | Validation record |
-| Tests passing | Quality proof |
-| Rejection | Stake loss (reputation) |
+| MQ Event | Record Created |
+|----------|----------------|
+| Merge request submitted | Work completion claim with author |
+| Tests pass | Quality verification record |
+| Refinery approves | Validation with reviewer attribution |
+| Merge commit | Immutable integration record |
+| Rejection | Feedback record with reason |
 
 Every merge creates an immutable record:
-- Who did the work (entity chain entry)
-- Who validated it (Engineer attestation)
+- Who did the work (author attribution)
+- Who validated it (Refinery attestation)
 - When it landed (timestamp)
 - What changed (commit diff)
 
-This is the foundation for skill embeddings - successful merges build your chain.
+This enables full work attribution and quality tracking across the swarm.
 
 ## Configuration
 
