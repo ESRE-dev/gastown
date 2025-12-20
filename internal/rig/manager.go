@@ -329,6 +329,7 @@ func (m *Manager) initAgentStates(rigPath string) error {
 }
 
 // initBeads initializes the beads database at rig level.
+// Rig beads use sync-branch for multi-clone coordination (polecats, crew, etc.)
 func (m *Manager) initBeads(rigPath, prefix string) error {
 	beadsDir := filepath.Join(rigPath, ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
@@ -341,9 +342,19 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	if err := cmd.Run(); err != nil {
 		// bd might not be installed or --no-agents not supported, create minimal structure
 		configPath := filepath.Join(beadsDir, "config.yaml")
-		configContent := fmt.Sprintf("prefix: %s\n", prefix)
+		// Rig beads need sync-branch for multi-clone coordination
+		configContent := fmt.Sprintf("prefix: %s\nsync-branch: beads-sync\n", prefix)
 		if writeErr := os.WriteFile(configPath, []byte(configContent), 0644); writeErr != nil {
 			return writeErr
+		}
+	} else {
+		// bd init succeeded, but we still need to add sync-branch
+		// Append to config.yaml (bd init doesn't set sync-branch by default)
+		configPath := filepath.Join(beadsDir, "config.yaml")
+		f, err := os.OpenFile(configPath, os.O_APPEND|os.O_WRONLY, 0644)
+		if err == nil {
+			defer f.Close()
+			f.WriteString("sync-branch: beads-sync\n")
 		}
 	}
 	return nil
