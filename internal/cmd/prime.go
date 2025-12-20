@@ -88,6 +88,9 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	// Run gt mail check --inject to inject any pending mail
 	runMailCheckInject(cwd)
 
+	// Output startup directive for roles that should announce themselves
+	outputStartupDirective(ctx)
+
 	return nil
 }
 
@@ -382,6 +385,30 @@ func runBdPrime(workDir string) {
 	if output != "" {
 		fmt.Println()
 		fmt.Println(output)
+	}
+}
+
+// outputStartupDirective outputs role-specific instructions for the agent.
+// This tells agents like Mayor to announce themselves on startup.
+func outputStartupDirective(ctx RoleContext) {
+	switch ctx.Role {
+	case RoleMayor:
+		fmt.Println()
+		fmt.Println("---")
+		fmt.Println()
+		fmt.Println("**STARTUP PROTOCOL**: You are the Mayor. Please:")
+		fmt.Println("1. Announce: \"Mayor, checking in.\"")
+		fmt.Println("2. Check mail: `gt mail inbox`")
+		fmt.Println("3. If there's a 🤝 HANDOFF message, read it and summarize")
+		fmt.Println("4. If no mail, await user instruction")
+	case RolePolecat:
+		fmt.Println()
+		fmt.Println("---")
+		fmt.Println()
+		fmt.Println("**STARTUP PROTOCOL**: You are a polecat. Please:")
+		fmt.Println("1. Check mail: `gt mail inbox`")
+		fmt.Println("2. If assigned work, begin immediately")
+		fmt.Println("3. If no work, announce ready and await assignment")
 	}
 }
 

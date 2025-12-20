@@ -373,8 +373,9 @@ func runMailRead(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting message: %w", err)
 	}
 
-	// Mark as read
-	_ = mailbox.MarkRead(msgID)
+	// Note: We intentionally do NOT mark as read/ack on read.
+	// User must explicitly delete/ack the message.
+	// This preserves handoff messages for reference.
 
 	// JSON output
 	if mailReadJSON {
