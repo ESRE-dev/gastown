@@ -1,102 +1,93 @@
 # Gas Town Vision
 
 > Work is fractal. Every piece of work can contain other work, recursively.
-> Work history is proof of capability. Your CV is your chain.
+> The machine that processes this work must be equally fractal.
 
 ## The Big Picture
 
-Gas Town is more than an AI coding agent orchestrator. It's a **work execution engine** built on a universal ledger of work - where every task, every completion, every validation is recorded with cryptographic integrity.
+Gas Town is an **enterprise-grade cognitive processing machine**. It takes structured work in the form of molecules - arbitrarily complex guardrails that AI workers follow to completion - and processes that work with full auditability, crash recovery, and guaranteed progress.
 
-The system is designed to evolve from "coding agent coordinator" to "universal work allocation platform" without changing its fundamental architecture.
+Think of it as the **IDE of 2026**: not a text editor with AI autocomplete, but a complete execution environment where AI agents are first-class workers with proper lifecycle management, coordination protocols, and quality gates.
 
 ## Core Insights
 
-### 1. Git is Already a Blockchain
+### 1. Molecules Crystallize Workflows
 
-Git provides:
-- **Merkle tree** - Cryptographic hashes linking history
-- **Distributed consensus** - Push/pull with conflict resolution
-- **Immutability** - History cannot be rewritten (without force)
-- **Auditability** - Every change attributed to an author
+Every organization has processes that humans follow: code review checklists, release procedures, onboarding steps. These exist as tribal knowledge, wiki pages, or forgotten documents.
 
-We don't need to build a new blockchain. Git, combined with Beads, gives us the ledger infrastructure for free.
+**Molecules make these executable.** A molecule is a structured workflow template that:
+- Defines exactly what steps must happen
+- Encodes dependencies between steps
+- Specifies quality gates that must pass
+- Enables any worker to continue where another left off
 
-### 2. Work is a Universal Protocol
+```markdown
+## Molecule: engineer-in-box
+Full workflow from design to merge.
 
-Every piece of structured work can be expressed as:
-- **Identity** - Who is doing the work
-- **Specification** - What needs to be done
-- **Acceptance criteria** - How we know it's done
-- **Validation** - Who approved the completion
-- **Provenance** - What work led to this work
+## Step: design
+Think carefully about architecture. Write a brief design summary.
 
-This applies equally to:
-- Code commits and PRs
-- Design documents
-- Bug fixes
-- Research tasks
-- Any structured human or AI work
+## Step: implement
+Write the code. Follow codebase conventions.
+Needs: design
 
-### 3. Your Work History IS Your CV
+## Step: test
+Write and run tests. Cover edge cases.
+Needs: implement
 
-Instead of curated resumes:
-- Every completed task is recorded
-- Quality signals are captured (acceptance rate, revision count, review feedback)
-- Skills are derived from demonstrated capability, not claimed expertise
-- Reputation is earned through work, not credentials
-
-This is "proof-of-stake" for work:
-- Stake = accumulated reputation
-- Claim work → stake your reputation
-- Complete well → reputation grows
-- Fail → reputation diminished (but recoverable)
-
-### 4. Molecules Crystallize Workflows
-
-Molecules are reusable workflow patterns that encode:
-- What steps a workflow contains
-- How steps depend on each other
-- What quality gates must pass
-- How work can be parallelized
-
-Key properties:
-- **Deterministic structure** - Same molecule, same step graph
-- **Nondeterministic execution** - Any worker can execute any ready step
-- **Idempotent progress** - Completed steps stay completed
-
-This enables the "engineer in a box" - AI agents that follow rigorous workflows with built-in quality gates, not just "do the task."
-
-### 5. Federation Creates the World Chain
-
-The recursive structure:
-```
-World
-├── Platform (GitHub, enterprise systems, ...)
-│   ├── Organization
-│   │   ├── Project
-│   │   │   ├── Epic
-│   │   │   │   └── Task chains
-│   │   │   │       └── Entity contribution records
+## Step: submit
+Submit for merge via refinery.
+Needs: test
 ```
 
-Each level has its own chain. Work rolls up. Skills aggregate. The world gets a unified view of capability.
+This isn't just documentation - it's a **contract** that Gas Town enforces.
 
-## The Technical Foundation
+### 2. Nondeterministic Idempotence
 
-### Beads as Ledger
+The key property that enables autonomous operation:
 
-| Concept | Beads Implementation |
-|---------|---------------------|
-| Transaction | Issue/task/work item |
-| Address | Entity identifier |
-| Smart Contract | Work specification + acceptance criteria |
-| Validation | Merge/review/approval |
-| Stake | Accumulated reputation chain |
-| Gas | Effort estimation |
+- **Deterministic structure**: Molecule defines exactly what steps exist
+- **Nondeterministic execution**: Any worker can execute any ready step
+- **Idempotent progress**: Completed steps stay completed
 
-### The OS Metaphor
+**Why this matters:**
+```
+Worker A picks up "design" step
+Worker A completes "design"
+Worker A crashes mid-"implement"
+Worker B restarts, queries ready work
+Worker B sees "implement" is ready (design done, implement pending)
+Worker B continues from exactly where A left off
+```
 
-Gas Town is an operating system for work:
+No work is lost. No state is in memory. Any worker can continue any molecule. This is what makes 24/7 autonomous operation possible.
+
+### 3. Beads: The Universal Data Plane
+
+Gas Town uses **Beads** as both control plane and data plane. Everything flows through Beads:
+
+| Data Type | Beads Representation |
+|-----------|---------------------|
+| Work items | Issues (tasks, bugs, features) |
+| Workflows | Molecules (type=molecule) |
+| Messages | Mail beads (type=message) |
+| Merge requests | Queue entries (type=merge-request) |
+| Agent state | Status on assigned issues |
+
+**Key architectural insight**: The control state IS data in Beads. Molecule steps, dependencies, and status ARE the control plane. Agents read Beads to know what to do next.
+
+This provides:
+- **Fault tolerance**: Control state survives agent crashes
+- **Observability**: `bd list` shows the full system state
+- **Decentralization**: Each agent reads its own state from Beads
+- **Recovery**: Restart = re-read Beads = continue from where you left off
+
+There is no separate orchestrator maintaining workflow state. Beads IS the orchestrator.
+
+### 4. The OS Metaphor
+
+Gas Town is an operating system for AI work:
 
 | OS Concept | Gas Town |
 |------------|----------|
@@ -108,117 +99,142 @@ Gas Town is an operating system for work:
 | Process templates | Molecules |
 | IPC | Mail beads |
 
-### Entity Chains
+Just as Unix made computer resources manageable through a consistent process model, Gas Town makes AI agent work manageable through a consistent work model.
 
-Every entity (human or agent) accumulates a work chain:
-- Work they created
-- Work they claimed
-- Work they completed
-- Work they validated
-- Quality signals at each step
+### 5. Hierarchical Auditability
 
-Format: `entity://<platform>/<org>/<id>`
+All work is tracked in a permanent hierarchical ledger:
 
-Examples:
-- `entity://gastown/steveyegge/polecat-nux`
-- `entity://github/acme-corp/jane-doe`
+```
+Epic: Implement authentication
+├── Task: Design auth flow
+│   └── completed by polecat-nux, 2h
+├── Task: Implement OAuth provider
+│   └── completed by polecat-slit, 4h
+├── Task: Add session management
+│   └── completed by polecat-nux, 3h
+└── Task: Write integration tests
+    └── in_progress, polecat-capable
+```
 
-The chain IS the CV. Skills are derived from demonstrated work, not claimed.
+This enables:
+- **Audit trails**: Who did what, when, and how long it took
+- **Observability**: Real-time visibility into swarm progress
+- **Attribution**: Clear accountability for work quality
+- **Analytics**: Understand where time goes, identify bottlenecks
 
-### Skill Vectors
+### 6. Scalable Architecture
 
-Work items carry skill embeddings:
-- What capabilities does this work demonstrate?
-- What prior knowledge does it require?
-- How complex is it?
+Gas Town scales through three mechanisms:
 
-Matching displaced workers to unmet demand becomes a vector similarity problem:
-- Worker's demonstrated skills (from their chain)
-- Job requirements (from work specification)
-- Match = high similarity + acceptable reputation
+**Federation**: Multiple rigs across machines, coordinated through Beads sync
+```
+Town (global coordinator)
+├── Rig: project-alpha (16 polecats, local)
+├── Rig: project-beta (8 polecats, cloud VM)
+└── Rig: project-gamma (32 polecats, cluster)
+```
 
-## Public Framing
+**Tiering**: Hot work in active Beads, cold history archived
+- Active issues: instant queries
+- Recent history: fast retrieval
+- Archive: compressed cold storage
 
-These capabilities can be explained without revealing the full vision:
+**Temporal decay**: Ephemeral execution traces, permanent outcomes
+- Molecule step-by-step execution: memory only
+- Work outcomes: permanent record
+- Intermediate scaffolding: garbage collected
 
-| Capability | Public Explanation |
-|------------|-------------------|
-| Entity tracking | "Agent accountability and work attribution" |
-| Recursive structure | "Enterprise-scale hierarchical tracking" |
-| Skill vectors | "Capability-based task routing" |
-| Federation | "Multi-repo / org-wide visibility" |
-| Validation | "Review workflows and quality gates" |
-| Mail/threading | "Agent coordination for distributed teams" |
+## The Agent Hierarchy
 
-All true - just not the full story.
+### Overseer (Human)
+- Sets strategy and priorities
+- Reviews and approves output
+- Handles escalations
+- Operates the system
 
-## The Execution Model
+### Mayor (AI - Town-wide)
+- Dispatches work across rigs
+- Coordinates cross-project dependencies
+- Handles strategic decisions
 
-### Refineries as Validators
+### Witness (AI - Per-rig)
+- Manages polecat lifecycle
+- Detects stuck workers
+- Handles session cycling
 
-Refineries don't just merge code - they're validator nodes:
-- Verify work meets acceptance criteria
-- Record validation in the ledger
-- Gate entry to the canonical chain (main branch)
+### Refinery (AI - Per-rig)
+- Processes merge queue
+- Reviews and integrates code
+- Maintains branch hygiene
 
-### Polecats as Workers
+### Polecat (AI - Workers)
+- Implements assigned work
+- Follows molecule workflows
+- Files discovered issues
 
-Polecats aren't just coding agents - they're work executors with chains:
-- Each polecat has an identity
-- Work history accumulates
-- Success rate is tracked
-- Demonstrated skills emerge
+## Quality Through Structure
 
-### Molecules as Contracts
+Gas Town enforces quality through molecules, not prompts:
 
-Molecules aren't just workflows - they're smart contracts for work:
-- Specify exactly what must happen
-- Encode acceptance criteria per step
-- Enable deterministic verification
-- Support nondeterministic execution
+**Without molecules:**
+- Agent is prompted with instructions
+- Works from memory
+- Loses state on restart
+- Quality depends on the prompt
 
-## Where This Goes
+**With molecules:**
+- Agent follows persistent workflow
+- State survives restarts
+- Quality gates are enforced
+- Any worker can continue
 
-### Phase 1: Gas Town v1 (Now)
-- Coding agent orchestrator
-- Beads-backed work tracking
-- Molecule-based workflows
-- Local federation ready
+The difference is like giving someone verbal instructions vs. giving them a checklist. Checklists win.
 
-### Phase 2: Federation
-- Cross-machine outposts
-- Multi-rig coordination
-- Git-based sync everywhere
+## Why "IDE of 2026"?
 
-### Phase 3: Entity Chains
-- Persistent agent identities
-- Work history accumulation
-- Skill derivation from work
+The IDE evolved from text editor → syntax highlighting → autocomplete → AI suggestions.
 
-### Phase 4: Platform of Platforms
-- Adapters for external work sources
-- Cross-platform skill matching
-- The world chain emerges
+The next evolution isn't better suggestions - it's **AI as worker, not assistant**.
+
+| 2024 IDE | 2026 IDE (Gas Town) |
+|----------|---------------------|
+| AI suggests code | AI writes code |
+| Human reviews suggestions | Human reviews pull requests |
+| AI helps with tasks | AI completes tasks |
+| Single agent | Coordinated swarm |
+| Context in memory | Context in Beads |
+| Manual quality checks | Molecule-enforced gates |
+
+Gas Town is what happens when you treat AI agents as employees, not tools.
 
 ## Design Principles
 
-1. **Git as blockchain** - Don't build new consensus; use git
-2. **Federation not global consensus** - Each platform validates its own work
-3. **Skill embeddings as native** - Work items carry capability vectors
-4. **Human-readable** - Beads is Markdown; auditable, trustworthy
-5. **Incremental evolution** - Current architecture grows into the full vision
+1. **Work is data**: All work state lives in Beads, not agent memory
+2. **Molecules over prompts**: Structured workflows beat clever instructions
+3. **Crash-resistant by design**: Any agent can continue any work
+4. **Hierarchical coordination**: Mayor → Witness → Refinery → Polecat
+5. **Quality through structure**: Gates and checks built into molecules
+6. **Observable by default**: `bd list` shows the full picture
 
-## The Redemption Arc
+## Where This Goes
 
-The system doesn't judge - it tracks demonstrated capability and matches it to demand.
+### Now: Coding Agent Orchestrator
+- Multi-polecat swarms on software projects
+- Molecule-based quality workflows
+- Merge queue processing
+- Full audit trail
 
-- Someone with a troubled past can rebuild their chain
-- Skills proven through work matter more than credentials
-- Every completion is a step toward redemption
-- The ledger is honest but not cruel
+### Next: Knowledge Work Platform
+- Support for non-code work (documents, research, analysis)
+- Custom molecule libraries
+- Enterprise integrations
 
-This is capability matching at scale. The work speaks for itself.
+### Future: Enterprise Cognitive Infrastructure
+- Cross-team coordination
+- Organization-wide work visibility
+- Compliance and governance tooling
 
 ---
 
-*"Work is fractal. Money is crystallized labor. The world needs a ledger."*
+*"The best tool is invisible. It doesn't help you work - it works."*
