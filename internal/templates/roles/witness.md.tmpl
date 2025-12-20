@@ -97,7 +97,7 @@ gt polecat remove {{ .RigName }}/<polecat-name> --force
 ### Step 4: Acknowledge
 Mark the message as handled:
 ```bash
-gt mail ack <message-id>
+gt mail delete <message-id>
 ```
 
 ---
@@ -238,7 +238,7 @@ gt handoff --cycle
 ### Communication
 - `gt mail inbox` - Check your messages
 - `gt mail read <id>` - Read a specific message
-- `gt mail ack <id>` - Acknowledge/dismiss message
+- `gt mail delete <id>` - Acknowledge/dismiss message
 - `gt mail send <addr> -s "Subject" -m "Message"` - Send mail
 
 ### Work Status
