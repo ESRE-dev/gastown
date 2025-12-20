@@ -1672,6 +1672,7 @@ Existing agents can be configured to notify plugins at specific points. This is 
 | Before work dispatch | Mayor | plan-oracle |
 | On worker stuck | Witness | debug-oracle |
 | On PR ready | Refinery | review-oracle |
+| Periodic / on-demand | Mayor | beads-hygiene |
 
 Configuration is minimal - perhaps a line in the agent's CLAUDE.md or state.json noting which plugins to consult.
 
@@ -1712,6 +1713,74 @@ The **plan-oracle** plugin helps decompose work:
 - Beads for the sub-tasks (created via `bd create`)
 - Dependency links (via `bd dep add`)
 - Mail back with summary and recommendations
+
+### Example: Beads Hygiene
+
+The **beads-hygiene** plugin detects and fixes cross-pollution between nested beads databases.
+
+**Background**: Gas Town has a two-level beads architecture:
+- **Town-level** (`~/gt/.beads/`): Mayor mail, cross-rig coordination, harness-level issues
+- **Rig-level** (`~/gt/<rig>/.beads/`): Project-specific work (bugs, features, tasks)
+
+Workers sometimes get confused about which database they're in, especially when:
+- Their cwd is in a rig but they interact with town-level beads
+- They reference issues from the wrong level as dependencies
+- They create issues with mismatched prefixes for their context
+
+**Input** (periodic scan or on-demand via mail):
+- List of all beads databases in the town
+- Recent issue creation/update activity
+- Agent identity and expected context
+
+**Processing**:
+1. Scan each beads database for prefix mismatches
+   - Town-level should have harness prefix (e.g., `stevetown-*`)
+   - Rig-level should have rig prefix (e.g., `gt-*` for gastown)
+2. Check for cross-level dependency references
+   - Flag `gt-*` issues that depend on `stevetown-*` (usually wrong)
+3. Analyze recent activity for context confusion
+   - Agent in `gastown/` creating harness-level issues
+   - Agent at town level creating rig-specific issues
+4. Identify misfiled issues that should be moved
+
+**Output**:
+- Report of detected issues (via mail to Mayor)
+- For each misfiled issue:
+  - Original location and ID
+  - Suggested correct location
+  - Confidence level (definite misfile vs. ambiguous)
+- Optionally: auto-move with `--fix` flag
+
+**Hook Points**:
+- Witness can invoke before spawning polecats (sanity check)
+- Mayor can invoke periodically (nightly hygiene scan)
+- Any agent can invoke on-demand when confused
+
+**CLAUDE.md prompt core**:
+```
+You are reviewing beads databases for cross-pollution between Gas Town's
+two-level architecture:
+
+TOWN LEVEL (~/gt/.beads/): Coordination, mayor mail, harness issues
+  - Prefix: stevetown-* (or configured harness prefix)
+  - Contains: cross-rig coordination, strategic planning, harness bugs
+
+RIG LEVEL (~/gt/<rig>/.beads/): Project-specific work
+  - Prefix: <rig>-* (e.g., gt-* for gastown rig)
+  - Contains: bugs, features, tasks for that project
+
+COMMON MISTAKES TO DETECT:
+1. Issue created at wrong level (check prefix vs location)
+2. Cross-level dependencies (usually wrong unless intentional)
+3. Agent identity mismatch (polecat creating town-level issues)
+4. Duplicate issues across levels (same title/description)
+
+For each issue found, report:
+- Issue ID and title
+- Current location
+- Why it appears misfiled
+- Recommended action (move, merge, or leave with note)
+```
 
 ### Why This Design
 
