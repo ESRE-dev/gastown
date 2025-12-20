@@ -324,18 +324,29 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Session already running, notifying to check inbox...\n")
 		time.Sleep(500 * time.Millisecond) // Brief pause for notification
 	} else {
-		// Start new session - polecat will check inbox via gt prime startup hook
+		// Start new session
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 		if err := sessMgr.Start(polecatName, session.StartOptions{}); err != nil {
 			return fmt.Errorf("starting session: %w", err)
 		}
-		// Wait briefly for session to stabilize
-		time.Sleep(1 * time.Second)
+		// Wait for Claude Code to fully initialize (banner, prompt ready)
+		// 3 seconds is enough for the UI to stabilize
+		time.Sleep(3 * time.Second)
 	}
 
 	fmt.Printf("%s Session started. Attach with: %s\n",
 		style.Bold.Render("✓"),
 		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
+
+	// Send direct nudge to start working - don't rely on hooks or witness coordination
+	// The polecat has a work assignment in its inbox; just tell it to check
+	sessionName := sessMgr.SessionName(polecatName)
+	nudgeMsg := fmt.Sprintf("You have a work assignment. Run 'gt mail inbox' to see it, then start working on issue %s.", assignmentID)
+	if err := t.SendKeysDebounced(sessionName, nudgeMsg, 500); err != nil {
+		fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not nudge polecat: %v", err)))
+	} else {
+		fmt.Printf("  %s\n", style.Dim.Render("Polecat nudged to start working"))
+	}
 
 	// Notify Witness about the spawn - Witness will monitor startup and nudge when ready
 	// Note: If Witness is down, Deacon's health check will wake it and Witness will
