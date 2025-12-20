@@ -125,9 +125,9 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	_ = m.tmux.SetEnvironment(sessionID, "GT_POLECAT", polecat)
 
 	// CRITICAL: Set beads environment for worktree polecats
-	// Polecats share the rig's beads directory (in mayor/rig/.beads)
+	// Polecats share the rig's beads directory (at rig root, not mayor/rig)
 	// BEADS_NO_DAEMON=1 prevents daemon from committing to wrong branch
-	beadsDir := filepath.Join(m.rig.Path, "mayor", "rig", ".beads")
+	beadsDir := filepath.Join(m.rig.Path, ".beads")
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_DIR", beadsDir)
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1")
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/%s", m.rig.Name, polecat))

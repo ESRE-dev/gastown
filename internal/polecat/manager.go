@@ -30,8 +30,8 @@ type Manager struct {
 
 // NewManager creates a new polecat manager.
 func NewManager(r *rig.Rig, g *git.Git) *Manager {
-	// Use the mayor's rig directory for beads operations (rig-level beads)
-	mayorRigPath := filepath.Join(r.Path, "mayor", "rig")
+	// Use the rig root for beads operations (rig-level beads at .beads/)
+	rigPath := r.Path
 
 	// Try to load rig config for namepool settings
 	rigConfigPath := filepath.Join(r.Path, ".gastown", "config.json")
@@ -56,7 +56,7 @@ func NewManager(r *rig.Rig, g *git.Git) *Manager {
 	return &Manager{
 		rig:      r,
 		git:      g,
-		beads:    beads.New(mayorRigPath),
+		beads:    beads.New(rigPath),
 		namePool: pool,
 	}
 }
