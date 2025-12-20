@@ -26,8 +26,10 @@ var (
 	mailInboxJSON     bool
 	mailReadJSON      bool
 	mailInboxUnread   bool
+	mailInboxIdentity string
 	mailCheckInject   bool
 	mailCheckJSON     bool
+	mailCheckIdentity string
 	mailThreadJSON    bool
 	mailReplySubject  string
 	mailReplyMessage  string
@@ -78,11 +80,13 @@ var mailInboxCmd = &cobra.Command{
 	Long: `Check messages in an inbox.
 
 If no address is specified, shows the current context's inbox.
+Use --identity for polecats to explicitly specify their identity.
 
 Examples:
-  gt mail inbox             # Current context
-  gt mail inbox mayor/      # Mayor's inbox
-  gt mail inbox gastown/Toast  # Polecat's inbox`,
+  gt mail inbox                       # Current context (auto-detected)
+  gt mail inbox mayor/                # Mayor's inbox
+  gt mail inbox gastown/Toast         # Polecat's inbox
+  gt mail inbox --identity gastown/Toast  # Explicit polecat identity`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runMailInbox,
 }
@@ -120,9 +124,12 @@ Exit codes (--inject mode):
   0 - Always (hooks should never block)
   Output: system-reminder if mail exists, silent if no mail
 
+Use --identity for polecats to explicitly specify their identity.
+
 Examples:
-  gt mail check             # Simple check
-  gt mail check --inject    # For hooks`,
+  gt mail check                           # Simple check (auto-detect identity)
+  gt mail check --inject                  # For hooks
+  gt mail check --identity gastown/Toast  # Explicit polecat identity`,
 	RunE: runMailCheck,
 }
 
@@ -169,6 +176,7 @@ func init() {
 	// Inbox flags
 	mailInboxCmd.Flags().BoolVar(&mailInboxJSON, "json", false, "Output as JSON")
 	mailInboxCmd.Flags().BoolVarP(&mailInboxUnread, "unread", "u", false, "Show only unread messages")
+	mailInboxCmd.Flags().StringVar(&mailInboxIdentity, "identity", "", "Explicit identity for inbox (e.g., gastown/Toast)")
 
 	// Read flags
 	mailReadCmd.Flags().BoolVar(&mailReadJSON, "json", false, "Output as JSON")
@@ -176,6 +184,7 @@ func init() {
 	// Check flags
 	mailCheckCmd.Flags().BoolVar(&mailCheckInject, "inject", false, "Output format for Claude Code hooks")
 	mailCheckCmd.Flags().BoolVar(&mailCheckJSON, "json", false, "Output as JSON")
+	mailCheckCmd.Flags().StringVar(&mailCheckIdentity, "identity", "", "Explicit identity for inbox (e.g., gastown/Toast)")
 
 	// Thread flags
 	mailThreadCmd.Flags().BoolVar(&mailThreadJSON, "json", false, "Output as JSON")
@@ -270,9 +279,11 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Determine which inbox to check
+	// Determine which inbox to check (priority: --identity flag, positional arg, auto-detect)
 	address := ""
-	if len(args) > 0 {
+	if mailInboxIdentity != "" {
+		address = mailInboxIdentity
+	} else if len(args) > 0 {
 		address = args[0]
 	} else {
 		address = detectSender()
@@ -519,8 +530,13 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Determine which inbox
-	address := detectSender()
+	// Determine which inbox (priority: --identity flag, auto-detect)
+	address := ""
+	if mailCheckIdentity != "" {
+		address = mailCheckIdentity
+	} else {
+		address = detectSender()
+	}
 
 	// Get mailbox
 	router := mail.NewRouter(workDir)

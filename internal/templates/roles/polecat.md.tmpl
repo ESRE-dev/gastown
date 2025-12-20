@@ -61,9 +61,22 @@ Agent-friendly UX is critical. Your guesses reveal what's intuitive.
 - `gt done` - Signal work ready for merge queue
 - `bd sync` - Sync beads changes
 
+## Startup Protocol
+
+When your session starts, follow this protocol:
+
+1. **Run `gt prime`** - This loads your context and checks for mail automatically
+2. **Check your inbox** - If `gt prime` shows mail, read it with `gt mail read <id>`
+3. **Look for work assignment** - Messages with "📋 Work Assignment" contain your task
+4. **If no mail** - Check `bd list --status=in_progress` for existing assignments
+5. **Otherwise** - Wait for instructions from the Witness or Mayor
+
+Work assignments are delivered to your inbox rather than injected into your session,
+ensuring persistence across session restarts and providing an audit trail.
+
 ## Work Protocol
 
-1. **Start**: Check mail for assignment, or `bd show <assigned-issue>`
+1. **Start**: Read your work assignment from mail, or `bd show <assigned-issue>`
 2. **Work**: Implement the solution in your clone
 3. **Commit**: Regular commits with clear messages
 4. **Test**: Verify your changes work

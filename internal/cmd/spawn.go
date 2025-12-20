@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -30,6 +31,7 @@ var (
 	spawnPolecat  string
 	spawnRig      string
 	spawnMolecule string
+	spawnForce    bool
 )
 
 var spawnCmd = &cobra.Command{
@@ -68,6 +70,7 @@ func init() {
 	spawnCmd.Flags().StringVar(&spawnPolecat, "polecat", "", "Polecat name (alternative to positional arg)")
 	spawnCmd.Flags().StringVar(&spawnRig, "rig", "", "Rig name (defaults to current directory's rig)")
 	spawnCmd.Flags().StringVar(&spawnMolecule, "molecule", "", "Molecule ID to instantiate on the issue")
+	spawnCmd.Flags().BoolVar(&spawnForce, "force", false, "Force spawn even if polecat has unread mail")
 
 	rootCmd.AddCommand(spawnCmd)
 }
@@ -179,6 +182,21 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("polecat '%s' is already working on %s", polecatName, pc.Issue)
 	}
 
+	// Check for unread mail in polecat's inbox (indicates existing unstarted work)
+	polecatAddress := fmt.Sprintf("%s/%s", rigName, polecatName)
+	router := mail.NewRouter(r.Path)
+	mailbox, err := router.GetMailbox(polecatAddress)
+	if err == nil {
+		_, unread, _ := mailbox.Count()
+		if unread > 0 && !spawnForce {
+			return fmt.Errorf("polecat '%s' has %d unread message(s) in inbox (possible existing work assignment)\nUse --force to override, or let the polecat process its inbox first",
+				polecatName, unread)
+		} else if unread > 0 {
+			fmt.Printf("%s Polecat has %d unread message(s), proceeding with --force\n",
+				style.Dim.Render("Warning:"), unread)
+		}
+	}
+
 	// Beads operations use mayor/rig directory (rig-level beads)
 	beadsPath := filepath.Join(r.Path, "mayor", "rig")
 
@@ -285,6 +303,16 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Send work assignment mail to polecat inbox (before starting session)
+	// polecatAddress and router already defined above when checking for unread mail
+	workMsg := buildWorkAssignmentMail(issue, spawnMessage, polecatAddress)
+
+	fmt.Printf("Sending work assignment to %s inbox...\n", polecatAddress)
+	if err := router.Send(workMsg); err != nil {
+		return fmt.Errorf("sending work assignment: %w", err)
+	}
+	fmt.Printf("%s Work assignment sent\n", style.Bold.Render("✓"))
+
 	// Start session
 	t := tmux.NewTmux()
 	sessMgr := session.NewManager(t, r)
@@ -292,29 +320,23 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// Check if already running
 	running, _ := sessMgr.IsRunning(polecatName)
 	if running {
-		// Just inject the context
-		fmt.Printf("Session already running, injecting context...\n")
+		// Session already running - send notification to check inbox
+		fmt.Printf("Session already running, notifying to check inbox...\n")
+		time.Sleep(500 * time.Millisecond) // Brief pause for notification
 	} else {
-		// Start new session
+		// Start new session - polecat will check inbox via gt prime startup hook
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 		if err := sessMgr.Start(polecatName, session.StartOptions{}); err != nil {
 			return fmt.Errorf("starting session: %w", err)
 		}
-		// Wait for Claude to fully initialize (needs 4-5s for prompt)
-		fmt.Printf("Waiting for Claude to initialize...\n")
-		time.Sleep(5 * time.Second)
-	}
-
-	// Inject initial context
-	context := buildSpawnContext(issue, spawnMessage)
-	fmt.Printf("Injecting work assignment...\n")
-	if err := sessMgr.Inject(polecatName, context); err != nil {
-		return fmt.Errorf("injecting context: %w", err)
+		// Wait briefly for session to stabilize
+		time.Sleep(1 * time.Second)
 	}
 
 	fmt.Printf("%s Session started. Attach with: %s\n",
 		style.Bold.Render("✓"),
 		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
+	fmt.Printf("  %s\n", style.Dim.Render("Polecat will read work assignment from inbox on startup"))
 
 	return nil
 }
@@ -450,6 +472,7 @@ func syncBeads(workDir string, fromMain bool) error {
 }
 
 // buildSpawnContext creates the initial context message for the polecat.
+// Deprecated: Use buildWorkAssignmentMail instead for mail-based work assignment.
 func buildSpawnContext(issue *BeadsIssue, message string) string {
 	var sb strings.Builder
 
@@ -477,4 +500,49 @@ func buildSpawnContext(issue *BeadsIssue, message string) string {
 	sb.WriteString("7. Signal DONE with summary\n")
 
 	return sb.String()
+}
+
+// buildWorkAssignmentMail creates a work assignment mail message for a polecat.
+// This replaces tmux-based context injection with persistent mailbox delivery.
+func buildWorkAssignmentMail(issue *BeadsIssue, message, polecatAddress string) *mail.Message {
+	var subject string
+	var body strings.Builder
+
+	if issue != nil {
+		subject = fmt.Sprintf("📋 Work Assignment: %s", issue.Title)
+
+		body.WriteString(fmt.Sprintf("Issue: %s\n", issue.ID))
+		body.WriteString(fmt.Sprintf("Title: %s\n", issue.Title))
+		body.WriteString(fmt.Sprintf("Priority: P%d\n", issue.Priority))
+		body.WriteString(fmt.Sprintf("Type: %s\n", issue.Type))
+		if issue.Description != "" {
+			body.WriteString(fmt.Sprintf("\nDescription:\n%s\n", issue.Description))
+		}
+	} else if message != "" {
+		// Truncate for subject if too long
+		titleText := message
+		if len(titleText) > 50 {
+			titleText = titleText[:47] + "..."
+		}
+		subject = fmt.Sprintf("📋 Work Assignment: %s", titleText)
+		body.WriteString(fmt.Sprintf("Task: %s\n", message))
+	}
+
+	body.WriteString("\n## Workflow\n")
+	body.WriteString("1. Run `gt prime` to load polecat context\n")
+	body.WriteString("2. Run `bd sync --from-main` to get fresh beads\n")
+	body.WriteString("3. Work on your task, commit changes\n")
+	body.WriteString("4. Run `bd close <issue-id>` when done\n")
+	body.WriteString("5. Run `bd sync` to push beads changes\n")
+	body.WriteString("6. Push code: `git push origin HEAD`\n")
+	body.WriteString("7. Signal DONE with summary\n")
+
+	return &mail.Message{
+		From:     "mayor/",
+		To:       polecatAddress,
+		Subject:  subject,
+		Body:     body.String(),
+		Priority: mail.PriorityHigh,
+		Type:     mail.TypeTask,
+	}
 }
