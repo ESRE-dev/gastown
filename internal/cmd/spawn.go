@@ -197,8 +197,8 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Beads operations use mayor/rig directory (rig-level beads)
-	beadsPath := filepath.Join(r.Path, "mayor", "rig")
+	// Beads operations use rig-level beads (at rig root, not mayor/rig)
+	beadsPath := r.Path
 
 	// Sync beads to ensure fresh state before spawn operations
 	if err := syncBeads(beadsPath, true); err != nil {
