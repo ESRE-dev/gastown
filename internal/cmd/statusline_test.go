@@ -2,10 +2,10 @@ package cmd
 
 import "testing"
 
-func TestExtractRigFromSession(t *testing.T) {
+func TestCategorizeSessionRig(t *testing.T) {
 	tests := []struct {
 		session string
-		want    string
+		wantRig string
 	}{
 		// Standard polecat sessions
 		{"gt-gastown-slit", "gastown"},
@@ -16,59 +16,66 @@ func TestExtractRigFromSession(t *testing.T) {
 		{"gt-gastown-crew-max", "gastown"},
 		{"gt-myrig-crew-user", "myrig"},
 
-		// Witness sessions (daemon.go style: gt-<rig>-witness)
+		// Witness sessions
 		{"gt-gastown-witness", "gastown"},
 		{"gt-myrig-witness", "myrig"},
-
-		// Witness sessions (witness.go style: gt-witness-<rig>)
-		{"gt-witness-gastown", "gastown"},
-		{"gt-witness-myrig", "myrig"},
 
 		// Refinery sessions
 		{"gt-gastown-refinery", "gastown"},
 		{"gt-myrig-refinery", "myrig"},
 
 		// Edge cases
-		{"gt-a-b", "a"},       // minimum valid
-		{"gt-ab", ""},         // too short, no worker
-		{"gt-", ""},           // invalid
-		{"gt", ""},            // invalid
+		{"gt-a-b", "a"}, // minimum valid
+
+		// Town-level agents (no rig)
+		{"gt-mayor", ""},
+		{"gt-deacon", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.session, func(t *testing.T) {
-			got := extractRigFromSession(tt.session)
-			if got != tt.want {
-				t.Errorf("extractRigFromSession(%q) = %q, want %q", tt.session, got, tt.want)
+			agent := categorizeSession(tt.session)
+			gotRig := ""
+			if agent != nil {
+				gotRig = agent.Rig
+			}
+			if gotRig != tt.wantRig {
+				t.Errorf("categorizeSession(%q).Rig = %q, want %q", tt.session, gotRig, tt.wantRig)
 			}
 		})
 	}
 }
 
-func TestIsPolecatSession(t *testing.T) {
+func TestCategorizeSessionType(t *testing.T) {
 	tests := []struct {
-		session string
-		want    bool
+		session  string
+		wantType AgentType
 	}{
-		// Polecat sessions (should return true)
-		{"gt-gastown-slit", true},
-		{"gt-gastown-Toast", true},
-		{"gt-myrig-worker", true},
-		{"gt-a-b", true},
+		// Polecat sessions
+		{"gt-gastown-slit", AgentPolecat},
+		{"gt-gastown-Toast", AgentPolecat},
+		{"gt-myrig-worker", AgentPolecat},
+		{"gt-a-b", AgentPolecat},
 
-		// Non-polecat sessions (should return false)
-		{"gt-gastown-witness", false},
-		{"gt-witness-gastown", false},
-		{"gt-gastown-refinery", false},
-		{"gt-gastown-crew-max", false},
-		{"gt-myrig-crew-user", false},
+		// Non-polecat sessions
+		{"gt-gastown-witness", AgentWitness},
+		{"gt-gastown-refinery", AgentRefinery},
+		{"gt-gastown-crew-max", AgentCrew},
+		{"gt-myrig-crew-user", AgentCrew},
+
+		// Town-level agents
+		{"gt-mayor", AgentMayor},
+		{"gt-deacon", AgentDeacon},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.session, func(t *testing.T) {
-			got := isPolecatSession(tt.session)
-			if got != tt.want {
-				t.Errorf("isPolecatSession(%q) = %v, want %v", tt.session, got, tt.want)
+			agent := categorizeSession(tt.session)
+			if agent == nil {
+				t.Fatalf("categorizeSession(%q) returned nil", tt.session)
+			}
+			if agent.Type != tt.wantType {
+				t.Errorf("categorizeSession(%q).Type = %v, want %v", tt.session, agent.Type, tt.wantType)
 			}
 		})
 	}

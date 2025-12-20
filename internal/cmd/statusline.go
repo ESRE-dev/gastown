@@ -93,7 +93,9 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		return nil // Silent fail
 	}
 
-	// Count only actual polecats (not witnesses, refineries, deacon, crew)
+	// Count polecats and rigs
+	// Polecats: only actual polecats (not witnesses, refineries, deacon, crew)
+	// Rigs: any rig with active sessions (witness, refinery, crew, or polecat)
 	polecatCount := 0
 	rigs := make(map[string]bool)
 	for _, s := range sessions {
@@ -101,9 +103,13 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		if agent == nil {
 			continue
 		}
+		// Count rigs from any rig-level agent (has non-empty Rig field)
+		if agent.Rig != "" {
+			rigs[agent.Rig] = true
+		}
+		// Count only polecats for polecat count
 		if agent.Type == AgentPolecat {
 			polecatCount++
-			rigs[agent.Rig] = true
 		}
 	}
 	rigCount := len(rigs)
