@@ -71,8 +71,8 @@ type Info struct {
 	Windows int `json:"windows,omitempty"`
 }
 
-// sessionName generates the tmux session name for a polecat.
-func (m *Manager) sessionName(polecat string) string {
+// SessionName generates the tmux session name for a polecat.
+func (m *Manager) SessionName(polecat string) string {
 	return fmt.Sprintf("gt-%s-%s", m.rig.Name, polecat)
 }
 
@@ -98,7 +98,7 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 		return fmt.Errorf("%w: %s", ErrPolecatNotFound, polecat)
 	}
 
-	sessionID := m.sessionName(polecat)
+	sessionID := m.SessionName(polecat)
 
 	// Check if session already exists
 	running, err := m.tmux.HasSession(sessionID)
@@ -159,7 +159,7 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 // Stop terminates a polecat session.
 // If force is true, skips graceful shutdown and kills immediately.
 func (m *Manager) Stop(polecat string, force bool) error {
-	sessionID := m.sessionName(polecat)
+	sessionID := m.SessionName(polecat)
 
 	// Check if session exists
 	running, err := m.tmux.HasSession(sessionID)
@@ -203,13 +203,13 @@ func (m *Manager) syncBeads(workDir string) error {
 
 // IsRunning checks if a polecat session is active.
 func (m *Manager) IsRunning(polecat string) (bool, error) {
-	sessionID := m.sessionName(polecat)
+	sessionID := m.SessionName(polecat)
 	return m.tmux.HasSession(sessionID)
 }
 
 // Status returns detailed status for a polecat session.
 func (m *Manager) Status(polecat string) (*Info, error) {
-	sessionID := m.sessionName(polecat)
+	sessionID := m.SessionName(polecat)
 
 	running, err := m.tmux.HasSession(sessionID)
 	if err != nil {
@@ -286,7 +286,7 @@ func (m *Manager) List() ([]Info, error) {
 
 // Attach attaches to a polecat session.
 func (m *Manager) Attach(polecat string) error {
-	sessionID := m.sessionName(polecat)
+	sessionID := m.SessionName(polecat)
 
 	running, err := m.tmux.HasSession(sessionID)
 	if err != nil {
@@ -301,7 +301,7 @@ func (m *Manager) Attach(polecat string) error {
 
 // Capture returns the recent output from a polecat session.
 func (m *Manager) Capture(polecat string, lines int) (string, error) {
-	sessionID := m.sessionName(polecat)
+	sessionID := m.SessionName(polecat)
 
 	running, err := m.tmux.HasSession(sessionID)
 	if err != nil {
@@ -317,7 +317,7 @@ func (m *Manager) Capture(polecat string, lines int) (string, error) {
 // Inject sends a message to a polecat session.
 // Uses a longer debounce delay for large messages to ensure paste completes.
 func (m *Manager) Inject(polecat, message string) error {
-	sessionID := m.sessionName(polecat)
+	sessionID := m.SessionName(polecat)
 
 	running, err := m.tmux.HasSession(sessionID)
 	if err != nil {
