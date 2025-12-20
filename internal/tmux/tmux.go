@@ -218,10 +218,12 @@ func (t *Tmux) RenameSession(oldName, newName string) error {
 
 // SessionInfo contains information about a tmux session.
 type SessionInfo struct {
-	Name      string
-	Windows   int
-	Created   string
-	Attached  bool
+	Name         string
+	Windows      int
+	Created      string
+	Attached     bool
+	Activity     string // Last activity time
+	LastAttached string // Last time the session was attached
 }
 
 // DisplayMessage shows a message in the tmux status line.
@@ -316,7 +318,7 @@ func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
 
 // GetSessionInfo returns detailed information about a session.
 func (t *Tmux) GetSessionInfo(name string) (*SessionInfo, error) {
-	format := "#{session_name}|#{session_windows}|#{session_created_string}|#{session_attached}"
+	format := "#{session_name}|#{session_windows}|#{session_created_string}|#{session_attached}|#{session_activity}|#{session_last_attached}"
 	out, err := t.run("list-sessions", "-F", format, "-f", fmt.Sprintf("#{==:#{session_name},%s}", name))
 	if err != nil {
 		return nil, err
@@ -326,19 +328,29 @@ func (t *Tmux) GetSessionInfo(name string) (*SessionInfo, error) {
 	}
 
 	parts := strings.Split(out, "|")
-	if len(parts) != 4 {
+	if len(parts) < 4 {
 		return nil, fmt.Errorf("unexpected session info format: %s", out)
 	}
 
 	windows := 0
 	_, _ = fmt.Sscanf(parts[1], "%d", &windows)
 
-	return &SessionInfo{
+	info := &SessionInfo{
 		Name:     parts[0],
 		Windows:  windows,
 		Created:  parts[2],
 		Attached: parts[3] == "1",
-	}, nil
+	}
+
+	// Activity and last attached are optional (may not be present in older tmux)
+	if len(parts) > 4 {
+		info.Activity = parts[4]
+	}
+	if len(parts) > 5 {
+		info.LastAttached = parts[5]
+	}
+
+	return info, nil
 }
 
 // ApplyTheme sets the status bar style for a session.
