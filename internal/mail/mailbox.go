@@ -85,11 +85,15 @@ func (m *Mailbox) List() ([]*Message, error) {
 }
 
 func (m *Mailbox) listBeads() ([]*Message, error) {
-	// bd mail inbox --json
-	cmd := exec.Command("bd", "mail", "inbox", "--json")
+	// bd list --type=message --assignee=<identity> --json --status=open
+	cmd := exec.Command("bd", "list",
+		"--type", "message",
+		"--assignee", m.identity,
+		"--status", "open",
+		"--json",
+	)
 	cmd.Dir = m.workDir
 	cmd.Env = append(cmd.Environ(),
-		"BD_IDENTITY="+m.identity,
 		"BEADS_DIR="+m.beadsDir,
 	)
 
@@ -189,7 +193,7 @@ func (m *Mailbox) Get(id string) (*Message, error) {
 }
 
 func (m *Mailbox) getBeads(id string) (*Message, error) {
-	cmd := exec.Command("bd", "mail", "read", id, "--json")
+	cmd := exec.Command("bd", "show", id, "--json")
 	cmd.Dir = m.workDir
 	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+m.beadsDir)
 
@@ -208,12 +212,16 @@ func (m *Mailbox) getBeads(id string) (*Message, error) {
 		return nil, err
 	}
 
-	var bm BeadsMessage
-	if err := json.Unmarshal(stdout.Bytes(), &bm); err != nil {
+	// bd show --json returns an array
+	var bms []BeadsMessage
+	if err := json.Unmarshal(stdout.Bytes(), &bms); err != nil {
 		return nil, err
 	}
+	if len(bms) == 0 {
+		return nil, ErrMessageNotFound
+	}
 
-	return bm.ToMessage(), nil
+	return bms[0].ToMessage(), nil
 }
 
 func (m *Mailbox) getLegacy(id string) (*Message, error) {
@@ -238,7 +246,7 @@ func (m *Mailbox) MarkRead(id string) error {
 }
 
 func (m *Mailbox) markReadBeads(id string) error {
-	cmd := exec.Command("bd", "mail", "ack", id)
+	cmd := exec.Command("bd", "close", id)
 	cmd.Dir = m.workDir
 	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+m.beadsDir)
 

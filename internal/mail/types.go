@@ -94,6 +94,9 @@ type Message struct {
 
 	// ReplyTo is the ID of the message this is replying to.
 	ReplyTo string `json:"reply_to,omitempty"`
+
+	// Pinned marks the message as pinned (won't be auto-archived).
+	Pinned bool `json:"pinned,omitempty"`
 }
 
 // NewMessage creates a new message with a generated ID and thread ID.

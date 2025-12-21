@@ -105,31 +105,31 @@ func isTownLevelAddress(address string) bool {
 func (r *Router) Send(msg *Message) error {
 	// Convert addresses to beads identities
 	toIdentity := addressToIdentity(msg.To)
-	fromIdentity := addressToIdentity(msg.From)
 
-	// Build command: bd mail send <recipient> -s <subject> -m <body>
-	args := []string{"mail", "send", toIdentity,
-		"-s", msg.Subject,
-		"-m", msg.Body,
+	// Build labels for from/thread/reply-to
+	var labels []string
+	labels = append(labels, "from:"+msg.From)
+	if msg.ThreadID != "" {
+		labels = append(labels, "thread:"+msg.ThreadID)
+	}
+	if msg.ReplyTo != "" {
+		labels = append(labels, "reply-to:"+msg.ReplyTo)
+	}
+
+	// Build command: bd create <subject> --type=message --assignee=<recipient> -d <body>
+	args := []string{"create", msg.Subject,
+		"--type", "message",
+		"--assignee", toIdentity,
+		"-d", msg.Body,
 	}
 
 	// Add priority flag
 	beadsPriority := PriorityToBeads(msg.Priority)
 	args = append(args, "--priority", fmt.Sprintf("%d", beadsPriority))
 
-	// Add message type if set
-	if msg.Type != "" && msg.Type != TypeNotification {
-		args = append(args, "--type", string(msg.Type))
-	}
-
-	// Add thread ID if set
-	if msg.ThreadID != "" {
-		args = append(args, "--thread-id", msg.ThreadID)
-	}
-
-	// Add reply-to if set
-	if msg.ReplyTo != "" {
-		args = append(args, "--reply-to", msg.ReplyTo)
+	// Add labels
+	if len(labels) > 0 {
+		args = append(args, "--labels", strings.Join(labels, ","))
 	}
 
 	// Resolve the correct beads directory for the recipient
@@ -137,7 +137,6 @@ func (r *Router) Send(msg *Message) error {
 
 	cmd := exec.Command("bd", args...)
 	cmd.Env = append(cmd.Environ(),
-		"BEADS_AGENT_NAME="+fromIdentity,
 		"BEADS_DIR="+beadsDir,
 	)
 	cmd.Dir = filepath.Dir(beadsDir) // Run in parent of .beads
