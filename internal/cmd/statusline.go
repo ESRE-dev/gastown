@@ -52,8 +52,8 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 		return runMayorStatusLine(t)
 	}
 
-	// Witness status line
-	if role == "witness" || strings.HasSuffix(statusLineSession, "-witness") {
+	// Witness status line (session naming: gt-witness-<rig>)
+	if role == "witness" || strings.HasPrefix(statusLineSession, "gt-witness-") {
 		return runWitnessStatusLine(t, rigName)
 	}
 
@@ -143,10 +143,9 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 // Shows: polecat count under management, mail count
 func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 	if rigName == "" {
-		// Try to extract from session name: gt-<rig>-witness
-		if strings.HasPrefix(statusLineSession, "gt-") && strings.HasSuffix(statusLineSession, "-witness") {
-			rigName = strings.TrimPrefix(statusLineSession, "gt-")
-			rigName = strings.TrimSuffix(rigName, "-witness")
+		// Try to extract from session name: gt-witness-<rig>
+		if strings.HasPrefix(statusLineSession, "gt-witness-") {
+			rigName = strings.TrimPrefix(statusLineSession, "gt-witness-")
 		}
 	}
 
