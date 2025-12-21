@@ -82,12 +82,15 @@ func (d *Daemon) parseLifecycleRequest(msg *BeadsMessage) *LifecycleRequest {
 	var action LifecycleAction
 	var from string
 
-	if strings.Contains(title, "cycle") || strings.Contains(title, "cycling") {
-		action = ActionCycle
-	} else if strings.Contains(title, "restart") {
+	// Check restart/shutdown before cycle.
+	// Note: Can't use Contains(title, "cycle") because "lifecycle:" contains "cycle".
+	// Use " cycle" (with leading space) to match the word, not the prefix.
+	if strings.Contains(title, "restart") {
 		action = ActionRestart
 	} else if strings.Contains(title, "shutdown") || strings.Contains(title, "stop") {
 		action = ActionShutdown
+	} else if strings.Contains(title, " cycle") || strings.Contains(title, "cycling") {
+		action = ActionCycle
 	} else {
 		return nil
 	}

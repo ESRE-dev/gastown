@@ -23,9 +23,6 @@ func TestParseLifecycleRequest_Cycle(t *testing.T) {
 		{"LIFECYCLE: mayor requesting cycle", ActionCycle},
 		{"lifecycle: gastown-witness requesting cycling", ActionCycle},
 		{"LIFECYCLE: witness requesting cycle now", ActionCycle},
-		// NOTE: Due to implementation detail, "lifecycle" contains "cycle",
-		// so any LIFECYCLE: message matches cycle first. This test documents
-		// current behavior. See TestParseLifecycleRequest_PrefixMatchesCycle.
 	}
 
 	for _, tc := range tests {
@@ -44,22 +41,20 @@ func TestParseLifecycleRequest_Cycle(t *testing.T) {
 	}
 }
 
-func TestParseLifecycleRequest_PrefixMatchesCycle(t *testing.T) {
-	// NOTE: This test documents a quirk in the implementation:
-	// The word "lifecycle" contains "cycle", so when parsing checks
-	// strings.Contains(title, "cycle"), ALL lifecycle: messages match.
-	// This means restart and shutdown are effectively unreachable via
-	// the current implementation. This test documents actual behavior.
+func TestParseLifecycleRequest_RestartAndShutdown(t *testing.T) {
+	// Verify that restart and shutdown are correctly parsed.
+	// Previously, the "lifecycle:" prefix contained "cycle", which caused
+	// all messages to match as cycle. Fixed by checking restart/shutdown
+	// before cycle, and using " cycle" (with space) to avoid prefix match.
 	d := testDaemon()
 
 	tests := []struct {
 		title    string
 		expected LifecycleAction
 	}{
-		// These all match "cycle" due to "lifecycle" containing "cycle"
-		{"LIFECYCLE: mayor requesting restart", ActionCycle},
-		{"LIFECYCLE: mayor requesting shutdown", ActionCycle},
-		{"lifecycle: witness requesting stop", ActionCycle},
+		{"LIFECYCLE: mayor requesting restart", ActionRestart},
+		{"LIFECYCLE: mayor requesting shutdown", ActionShutdown},
+		{"lifecycle: witness requesting stop", ActionShutdown},
 	}
 
 	for _, tc := range tests {
@@ -73,7 +68,7 @@ func TestParseLifecycleRequest_PrefixMatchesCycle(t *testing.T) {
 			continue
 		}
 		if result.Action != tc.expected {
-			t.Errorf("parseLifecycleRequest(%q) action = %s, expected %s (documents current behavior)", tc.title, result.Action, tc.expected)
+			t.Errorf("parseLifecycleRequest(%q) action = %s, expected %s", tc.title, result.Action, tc.expected)
 		}
 	}
 }
