@@ -243,6 +243,62 @@ Gas Town uses a **two-level beads architecture**. This is critical to understand
 - The real project beads live in the **gastown.git clones** (e.g., `crew/max/.beads/`)
 - All clones share the same beads via git sync on the `beads-sync` branch
 
+#### Mail Routing
+
+Mail is routed to the correct beads database based on recipient address. The `Router` (in `internal/mail/router.go`) handles this:
+
+```
+Sender → Router.Send() → resolveBeadsDir(recipient) → bd mail send with BEADS_DIR
+```
+
+**Routing logic (`resolveBeadsDir`):**
+
+| Recipient | Beads Location | Example |
+|-----------|----------------|---------|
+| Town-level (`mayor/`, `deacon/`) | `{townRoot}/.beads` | `~/gt/.beads` |
+| Rig-level (`rig/polecat`) | `{townRoot}/{rig}/.beads` | `~/gt/gastown/.beads` |
+| Unknown/fallback | Town-level beads | `~/gt/.beads` |
+
+**Town root detection:**
+The router finds the town root by walking up directories looking for `mayor/town.json`. If not found, it falls back to the caller's workDir.
+
+**Environment setup:**
+All `bd` commands are invoked with:
+- `BEADS_DIR=<resolved-path>` - Routes to correct database
+- `BEADS_AGENT_NAME=<sender-identity>` - Identifies sender
+
+#### Shared Beads for Polecats
+
+Polecats use **redirect files** instead of their own beads databases. This eliminates git sync overhead between polecat worktrees.
+
+**Structure:**
+```
+rig/
+  .beads/                    ← Shared database (rig-level)
+  polecats/
+    <name>/
+      .beads/
+        redirect             ← Contains "../../.beads"
+```
+
+**How it works:**
+1. When a polecat is spawned, `setupSharedBeads()` (in `internal/polecat/manager.go`) creates the redirect file
+2. The beads CLI reads the redirect file and follows it to the rig's shared database
+3. All polecats read/write the same beads database - no git sync needed
+
+**Benefits:**
+- No JSONL merge conflicts between polecats
+- Instant visibility of issue updates across all workers
+- Reduced git operations (no beads-sync branch coordination for polecats)
+
+**Redirect vs Clone beads:**
+
+| Agent Type | Beads Location | Method |
+|------------|----------------|--------|
+| Polecat (worktree) | Redirect to `rig/.beads` | `.beads/redirect` file |
+| Crew worker (clone) | Own `.beads/` | Git sync on `beads-sync` |
+| Mayor/Refinery | Rig's `.beads/` | Direct or symlink |
+
 **Molecules** are crystallized workflow patterns that can be attached to work items. See the dedicated **Molecules** section below for full details on composition, nondeterministic idempotence, and built-in workflows.
 
 **The OS Metaphor**: Gas Town is an operating system for work:
