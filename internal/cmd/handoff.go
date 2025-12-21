@@ -126,6 +126,17 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 
 	// Send lifecycle request to manager
 	manager := getManager(role)
+
+	// Crew workers are human-managed - no automated manager to wait for
+	if role == RoleCrew {
+		fmt.Printf("\n%s Handoff complete\n", style.Bold.Render("✓"))
+		fmt.Println(style.Dim.Render("Crew workers are human-managed. To complete the cycle:"))
+		fmt.Println(style.Dim.Render("  1. Exit this session (Ctrl+D or 'exit')"))
+		fmt.Println(style.Dim.Render("  2. Run 'gt crew attach' to start fresh"))
+		fmt.Println(style.Dim.Render("  3. New session will see handoff message in inbox"))
+		return nil
+	}
+
 	if err := sendLifecycleRequest(manager, role, action, townRoot); err != nil {
 		return fmt.Errorf("sending lifecycle request: %w", err)
 	}
@@ -201,6 +212,10 @@ func detectHandoffRole() Role {
 		}
 		if strings.HasSuffix(sessionName, "-refinery") {
 			return RoleRefinery
+		}
+		// Crew sessions: gt-<rig>-crew-<name>
+		if strings.Contains(sessionName, "-crew-") {
+			return RoleCrew
 		}
 		// Polecat sessions: gt-<rig>-<name>
 		if strings.HasPrefix(sessionName, "gt-") && strings.Count(sessionName, "-") >= 2 {
