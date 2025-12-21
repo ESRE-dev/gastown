@@ -12,15 +12,16 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// BeadsMessage represents a message from beads mail.
+// BeadsMessage represents a message from gt mail inbox --json.
 type BeadsMessage struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Sender      string `json:"sender"`
-	Assignee    string `json:"assignee"`
-	Priority    int    `json:"priority"`
-	Status      string `json:"status"`
+	ID       string `json:"id"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Subject  string `json:"subject"`
+	Body     string `json:"body"`
+	Read     bool   `json:"read"`
+	Priority string `json:"priority"`
+	Type     string `json:"type"`
 }
 
 // ProcessLifecycleRequests checks for and processes lifecycle requests from the deacon inbox.
@@ -46,7 +47,7 @@ func (d *Daemon) ProcessLifecycleRequests() {
 	}
 
 	for _, msg := range messages {
-		if msg.Status == "closed" {
+		if msg.Read {
 			continue // Already processed
 		}
 
@@ -71,37 +72,37 @@ func (d *Daemon) ProcessLifecycleRequests() {
 
 // parseLifecycleRequest extracts a lifecycle request from a message.
 func (d *Daemon) parseLifecycleRequest(msg *BeadsMessage) *LifecycleRequest {
-	// Look for lifecycle keywords in subject/title
+	// Look for lifecycle keywords in subject
 	// Expected format: "LIFECYCLE: <role> requesting <action>"
-	title := strings.ToLower(msg.Title)
+	subject := strings.ToLower(msg.Subject)
 
-	if !strings.HasPrefix(title, "lifecycle:") {
+	if !strings.HasPrefix(subject, "lifecycle:") {
 		return nil
 	}
 
 	var action LifecycleAction
 	var from string
 
-	if strings.Contains(title, "cycle") || strings.Contains(title, "cycling") {
+	if strings.Contains(subject, "cycle") || strings.Contains(subject, "cycling") {
 		action = ActionCycle
-	} else if strings.Contains(title, "restart") {
+	} else if strings.Contains(subject, "restart") {
 		action = ActionRestart
-	} else if strings.Contains(title, "shutdown") || strings.Contains(title, "stop") {
+	} else if strings.Contains(subject, "shutdown") || strings.Contains(subject, "stop") {
 		action = ActionShutdown
 	} else {
 		return nil
 	}
 
-	// Extract role from title: "LIFECYCLE: <role> requesting ..."
+	// Extract role from subject: "LIFECYCLE: <role> requesting ..."
 	// Parse between "lifecycle: " and " requesting"
-	parts := strings.Split(title, " requesting")
+	parts := strings.Split(subject, " requesting")
 	if len(parts) >= 1 {
 		rolePart := strings.TrimPrefix(parts[0], "lifecycle:")
 		from = strings.TrimSpace(rolePart)
 	}
 
 	if from == "" {
-		from = msg.Sender // fallback
+		from = msg.From // fallback
 	}
 
 	return &LifecycleRequest{
@@ -159,6 +160,11 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 			return fmt.Errorf("restarting session: %w", err)
 		}
 		d.logger.Printf("Restarted session %s", sessionName)
+
+		// Clear the requesting state so we don't cycle again
+		if err := d.clearAgentRequestingState(request.From, request.Action); err != nil {
+			d.logger.Printf("Warning: failed to clear agent state: %v", err)
+		}
 		return nil
 
 	default:
@@ -259,10 +265,8 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 		return fmt.Errorf("sending startup command: %w", err)
 	}
 
-	// Prime after delay
-	if err := d.tmux.SendKeysDelayed(sessionName, "gt prime", 2000); err != nil {
-		d.logger.Printf("Warning: could not send prime: %v", err)
-	}
+	// Note: gt prime is handled by Claude's SessionStart hook, not injected here.
+	// Injecting it via SendKeysDelayed causes rogue text to appear in the terminal.
 
 	return nil
 }
@@ -339,6 +343,44 @@ func (d *Daemon) verifyAgentRequestingState(identity string, action LifecycleAct
 	}
 
 	d.logger.Printf("Verified agent %s has %s=true", identity, key)
+	return nil
+}
+
+// clearAgentRequestingState clears the requesting_<action>=true flag after
+// successfully completing a lifecycle action. This prevents the daemon from
+// repeatedly cycling the same session.
+func (d *Daemon) clearAgentRequestingState(identity string, action LifecycleAction) error {
+	stateFile := d.identityToStateFile(identity)
+	if stateFile == "" {
+		return fmt.Errorf("cannot determine state file for %s", identity)
+	}
+
+	data, err := os.ReadFile(stateFile)
+	if err != nil {
+		return fmt.Errorf("reading state file: %w", err)
+	}
+
+	var state map[string]interface{}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return fmt.Errorf("parsing state: %w", err)
+	}
+
+	// Remove the requesting_<action> key
+	key := "requesting_" + string(action)
+	delete(state, key)
+	delete(state, "requesting_time") // Also clean up the timestamp
+
+	// Write back
+	newData, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling state: %w", err)
+	}
+
+	if err := os.WriteFile(stateFile, newData, 0644); err != nil {
+		return fmt.Errorf("writing state file: %w", err)
+	}
+
+	d.logger.Printf("Cleared %s from agent %s state", key, identity)
 	return nil
 }
 
