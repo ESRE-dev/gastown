@@ -141,6 +141,9 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	polecatGit := git.NewGit(r.Path)
 	polecatMgr := polecat.NewManager(r, polecatGit)
 
+	// Router for mail operations (used for checking inbox and sending assignments)
+	router := mail.NewRouter(r.Path)
+
 	// Auto-select polecat if not specified
 	if polecatName == "" {
 		polecatName, err = selectIdlePolecat(polecatMgr, r)
@@ -159,6 +162,9 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Auto-selected polecat: %s\n", polecatName)
 		}
 	}
+
+	// Address for this polecat (used for mail operations)
+	polecatAddress := fmt.Sprintf("%s/%s", rigName, polecatName)
 
 	// Check if polecat exists
 	existingPolecat, err := polecatMgr.Get(polecatName)
@@ -196,8 +202,6 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		}
 
 		// Check for unread mail (indicates existing unstarted work)
-		polecatAddress := fmt.Sprintf("%s/%s", rigName, polecatName)
-		router := mail.NewRouter(r.Path)
 		mailbox, mailErr := router.GetMailbox(polecatAddress)
 		if mailErr == nil {
 			_, unread, _ := mailbox.Count()
@@ -228,10 +232,6 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	} else {
 		return fmt.Errorf("getting polecat: %w", err)
 	}
-
-	// Define polecatAddress and router for later use (mail sending)
-	polecatAddress := fmt.Sprintf("%s/%s", rigName, polecatName)
-	router := mail.NewRouter(r.Path)
 
 	// Beads operations use rig-level beads (at rig root, not mayor/rig)
 	beadsPath := r.Path

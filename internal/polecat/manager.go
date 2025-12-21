@@ -281,11 +281,27 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 	_ = mayorGit.WorktreePrune()
 
 	// Delete the old branch so worktree starts fresh from current HEAD
-	_ = mayorGit.DeleteBranch(branchName, true) // force delete
+	// Ignore error - branch may not exist (first recreate) or may fail to delete
+	_ = mayorGit.DeleteBranch(branchName, true)
 
-	// Create fresh worktree with new branch from current HEAD
-	if err := mayorGit.WorktreeAdd(polecatPath, branchName); err != nil {
-		return nil, fmt.Errorf("creating fresh worktree: %w", err)
+	// Check if branch still exists (deletion may have failed or branch was protected)
+	branchExists, err := mayorGit.BranchExists(branchName)
+	if err != nil {
+		return nil, fmt.Errorf("checking branch existence: %w", err)
+	}
+
+	// Create worktree - handle both cases like Add() does
+	if branchExists {
+		// Branch still exists, create worktree using existing branch
+		// This happens if delete failed (e.g., protected branch)
+		if err := mayorGit.WorktreeAddExisting(polecatPath, branchName); err != nil {
+			return nil, fmt.Errorf("creating worktree with existing branch: %w", err)
+		}
+	} else {
+		// Branch was deleted, create fresh worktree with new branch from HEAD
+		if err := mayorGit.WorktreeAdd(polecatPath, branchName); err != nil {
+			return nil, fmt.Errorf("creating fresh worktree: %w", err)
+		}
 	}
 
 	// Set up shared beads
