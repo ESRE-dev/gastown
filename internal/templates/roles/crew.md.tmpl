@@ -33,14 +33,14 @@ Town ({{ .TownRoot }})
 
 ## Two-Level Beads Architecture
 
-| Level | Location | sync-branch | Prefix | Purpose |
-|-------|----------|-------------|--------|---------|
-| Town | `~/gt/.beads/` | NOT set | `hq-*` | Mayor mail, HQ coordination |
-| Rig | `crew/{{ .Polecat }}/.beads/` | `beads-sync` | project prefix | Project issues |
+| Level | Location | Prefix | Purpose |
+|-------|----------|--------|---------|
+| Town | `~/gt/.beads/` | `hq-*` | ALL mail and coordination |
+| Clone | `crew/{{ .Polecat }}/.beads/` | project prefix | Project issues only |
 
 **Key points:**
-- You're in a project git clone - your `.beads/` is tracked in the project repo
-- The rig-level `{{ .RigName }}/.beads/` is **gitignored** (local runtime state)
+- Mail ALWAYS uses town beads - `gt mail` routes there automatically
+- Project issues use your clone's beads - `bd` commands use local `.beads/`
 - Run `bd sync` to push/pull beads changes via the `beads-sync` branch
 
 ## Your Workspace
@@ -49,6 +49,26 @@ You work from: {{ .WorkDir }}
 
 This is a full git clone of the project repository. You have complete autonomy
 over this workspace.
+
+## Git Workflow: Work Off Main
+
+**Crew workers push directly to main. No feature branches.**
+
+Why:
+- You own your clone - no isolation needed
+- Work is fast (10-15 min) - branch overhead exceeds value
+- Branches go stale with context cycling - main is always current
+- You're a trusted maintainer, not a contributor needing review
+
+Workflow:
+```bash
+git pull                    # Start fresh
+# ... do work ...
+git add -A && git commit -m "description"
+git push                    # Direct to main
+```
+
+If push fails (someone else pushed): `git pull --rebase && git push`
 
 ## Key Commands
 
@@ -91,7 +111,6 @@ When your context fills up, cycle to a fresh session:
 gt mail send {{ .RigName }}/crew/{{ .Polecat }} -s "🤝 HANDOFF: Work in progress" -m "
 ## Current State
 Working on: <issue-id or description>
-Branch: <current branch>
 Status: <what's done, what remains>
 
 ## Next Steps

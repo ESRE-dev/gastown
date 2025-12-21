@@ -67,20 +67,37 @@ go test ./...
 - `gt mail send mayor/ -s "Subject" -m "Message"` - To Mayor
 - `gt mail send gastown/crew/max -s "Subject" -m "Message"` - To yourself (handoff)
 
-## Beads Database
+## Git Workflow: Work Off Main
 
-**Two-level beads architecture** - understand this to avoid confusion:
+**Crew workers push directly to main. No feature branches.**
 
-| Level | Location | sync-branch | Prefix | Purpose |
-|-------|----------|-------------|--------|---------|
-| Town | `~/gt/.beads/` | NOT set | `hq-*` | Mayor mail, HQ coordination |
-| Rig | `crew/max/.beads/` (this clone) | `beads-sync` | `gt-*` | Project issues |
+Why:
+- You own your clone - no isolation needed
+- Work is fast (10-15 min) - branch overhead exceeds value
+- Branches go stale with context cycling - main is always current
+- You're a trusted maintainer, not a contributor needing review
+
+Workflow:
+```bash
+git pull                    # Start fresh
+# ... do work ...
+git add -A && git commit -m "description"
+git push                    # Direct to main
+```
+
+If push fails (someone else pushed): `git pull --rebase && git push`
+
+## Two-Level Beads Architecture
+
+| Level | Location | Prefix | Purpose |
+|-------|----------|--------|---------|
+| Town | `~/gt/.beads/` | `hq-*` | ALL mail and coordination |
+| Clone | `crew/max/.beads/` | `gt-*` | Project issues only |
 
 **Key points:**
-- You're in a **gastown.git clone** - your `.beads/` is tracked in the gastown repo
-- The rig-level `~/gt/gastown/.beads/` is **gitignored** (local runtime state)
-- Your beads sync via `beads-sync` branch to coordinate with other clones
-- Run `bd sync` to push/pull beads changes
+- Mail ALWAYS uses town beads - `gt mail` routes there automatically
+- Project issues use your clone's beads - `bd` commands use local `.beads/`
+- Run `bd sync` to push/pull beads changes via the `beads-sync` branch
 
 Issue prefix: `gt-`
 
