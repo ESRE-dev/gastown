@@ -3,8 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -165,6 +167,20 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  Priority: P%d\n", priority)
 
+	// Auto-cleanup for polecats: if this is a polecat branch and cleanup not disabled,
+	// send lifecycle request and wait for termination
+	if worker != "" && !mqSubmitNoCleanup {
+		fmt.Println()
+		fmt.Printf("%s Auto-cleanup: polecat work submitted\n", style.Bold.Render("✓"))
+		if err := polecatCleanup(rigName, worker, townRoot); err != nil {
+			// Non-fatal: warn but return success (MR was created)
+			fmt.Printf("%s Could not auto-cleanup: %v\n", style.Warning.Render("Warning:"), err)
+			fmt.Println(style.Dim.Render("  You may need to run 'gt handoff --shutdown' manually"))
+			return nil
+		}
+		// polecatCleanup blocks forever waiting for termination, so we never reach here
+	}
+
 	return nil
 }
 
@@ -216,4 +232,54 @@ func detectIntegrationBranch(bd *beads.Beads, g *git.Git, issueID string) (strin
 	}
 
 	return "", nil // No integration branch found
+}
+
+// polecatCleanup sends a lifecycle shutdown request to the witness and waits for termination.
+// This is called after a polecat successfully submits an MR.
+func polecatCleanup(rigName, worker, townRoot string) error {
+	// Send lifecycle request to witness
+	manager := rigName + "/witness"
+	subject := fmt.Sprintf("LIFECYCLE: polecat-%s requesting shutdown", worker)
+	body := fmt.Sprintf(`Lifecycle request from polecat %s.
+
+Action: shutdown
+Reason: MR submitted to merge queue
+Time: %s
+
+Please verify state and execute lifecycle action.
+`, worker, time.Now().Format(time.RFC3339))
+
+	// Send via gt mail
+	cmd := exec.Command("gt", "mail", "send", manager,
+		"-s", subject,
+		"-m", body,
+	)
+	cmd.Dir = townRoot
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("sending lifecycle request: %w: %s", err, string(out))
+	}
+	fmt.Printf("%s Sent shutdown request to %s\n", style.Bold.Render("✓"), manager)
+
+	// Wait for retirement with periodic status
+	fmt.Println()
+	fmt.Printf("%s Waiting for retirement...\n", style.Dim.Render("◌"))
+	fmt.Println(style.Dim.Render("(Witness will terminate this session)"))
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	waitStart := time.Now()
+	for {
+		select {
+		case <-ticker.C:
+			elapsed := time.Since(waitStart).Round(time.Second)
+			fmt.Printf("%s Still waiting (%v elapsed)...\n", style.Dim.Render("◌"), elapsed)
+			if elapsed >= 2*time.Minute {
+				fmt.Println(style.Dim.Render("  Hint: If witness isn't responding, you may need to:"))
+				fmt.Println(style.Dim.Render("  - Check if witness is running"))
+				fmt.Println(style.Dim.Render("  - Use Ctrl+C to abort and manually exit"))
+			}
+		}
+	}
 }

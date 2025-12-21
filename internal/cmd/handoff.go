@@ -436,8 +436,8 @@ func submitMRForPolecat() error {
 		return nil
 	}
 
-	// Run gt mq submit
-	submitCmd := exec.Command("gt", "mq", "submit")
+	// Run gt mq submit --no-cleanup (handoff manages lifecycle itself)
+	submitCmd := exec.Command("gt", "mq", "submit", "--no-cleanup")
 	submitOutput, err := submitCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s", strings.TrimSpace(string(submitOutput)))

@@ -17,10 +17,11 @@ import (
 // MQ command flags
 var (
 	// Submit flags
-	mqSubmitBranch   string
-	mqSubmitIssue    string
-	mqSubmitEpic     string
-	mqSubmitPriority int
+	mqSubmitBranch    string
+	mqSubmitIssue     string
+	mqSubmitEpic      string
+	mqSubmitPriority  int
+	mqSubmitNoCleanup bool
 
 	// Retry flags
 	mqRetryNow bool
@@ -62,7 +63,7 @@ var mqSubmitCmd = &cobra.Command{
 	Short: "Submit current branch to the merge queue",
 	Long: `Submit the current branch to the merge queue.
 
-Creates a merge-request bead that will be processed by the Engineer.
+Creates a merge-request bead that will be processed by the Refinery.
 
 Auto-detection:
   - Branch: current git branch
@@ -79,11 +80,20 @@ Target branch auto-detection:
 
 This ensures batch work on epics automatically flows to integration branches.
 
+Polecat auto-cleanup:
+  When run from a polecat work branch (polecat/<worker>/<issue>), this command
+  automatically triggers polecat shutdown after submitting the MR. The polecat
+  sends a lifecycle request to its Witness and waits for termination.
+
+  Use --no-cleanup to disable this behavior (e.g., if you want to submit
+  multiple MRs or continue working).
+
 Examples:
-  gt mq submit                           # Auto-detect everything
+  gt mq submit                           # Auto-detect everything + auto-cleanup
   gt mq submit --issue gt-abc            # Explicit issue
   gt mq submit --epic gt-xyz             # Target integration branch explicitly
-  gt mq submit --priority 0              # Override priority (P0)`,
+  gt mq submit --priority 0              # Override priority (P0)
+  gt mq submit --no-cleanup              # Submit without auto-cleanup`,
 	RunE: runMqSubmit,
 }
 
@@ -243,6 +253,7 @@ func init() {
 	mqSubmitCmd.Flags().StringVar(&mqSubmitIssue, "issue", "", "Source issue ID (default: parse from branch name)")
 	mqSubmitCmd.Flags().StringVar(&mqSubmitEpic, "epic", "", "Target epic's integration branch instead of main")
 	mqSubmitCmd.Flags().IntVarP(&mqSubmitPriority, "priority", "p", -1, "Override priority (0-4, default: inherit from issue)")
+	mqSubmitCmd.Flags().BoolVar(&mqSubmitNoCleanup, "no-cleanup", false, "Don't auto-cleanup after submit (for polecats)")
 
 	// Retry flags
 	mqRetryCmd.Flags().BoolVar(&mqRetryNow, "now", false, "Immediately process instead of waiting for refinery loop")
