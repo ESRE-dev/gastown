@@ -25,42 +25,49 @@ func NewRouter(workDir string) *Router {
 	}
 }
 
-// Send delivers a message via beads message.
+// Send delivers a message via beads create.
 func (r *Router) Send(msg *Message) error {
 	// Convert addresses to beads identities
 	toIdentity := addressToIdentity(msg.To)
 	fromIdentity := addressToIdentity(msg.From)
 
-	// Build command: bd mail send <recipient> -s <subject> -m <body>
-	args := []string{"mail", "send", toIdentity,
-		"-s", msg.Subject,
-		"-m", msg.Body,
+	// Build labels for sender and thread
+	labels := []string{"from:" + fromIdentity}
+	if msg.ThreadID != "" {
+		labels = append(labels, "thread:"+msg.ThreadID)
+	}
+	if msg.ReplyTo != "" {
+		labels = append(labels, "reply-to:"+msg.ReplyTo)
+	}
+	if msg.Type != "" && msg.Type != TypeNotification {
+		labels = append(labels, "msg-type:"+string(msg.Type))
+	}
+
+	// Build command: bd create --type message --assignee <to> --title <subject> -d <body>
+	args := []string{"create",
+		"--type", "message",
+		"--assignee", toIdentity,
+		"--title", msg.Subject,
+		"-d", msg.Body,
 	}
 
 	// Add priority flag
 	beadsPriority := PriorityToBeads(msg.Priority)
 	args = append(args, "--priority", fmt.Sprintf("%d", beadsPriority))
 
-	// Add message type if set
-	if msg.Type != "" && msg.Type != TypeNotification {
-		args = append(args, "--type", string(msg.Type))
+	// Add labels
+	if len(labels) > 0 {
+		args = append(args, "--labels", strings.Join(labels, ","))
 	}
 
-	// Add thread ID if set
-	if msg.ThreadID != "" {
-		args = append(args, "--thread-id", msg.ThreadID)
-	}
-
-	// Add reply-to if set
-	if msg.ReplyTo != "" {
-		args = append(args, "--reply-to", msg.ReplyTo)
-	}
+	// Add --silent to get just the issue ID
+	args = append(args, "--silent")
 
 	cmd := exec.Command("bd", args...)
-	cmd.Env = append(cmd.Environ(), "BEADS_AGENT_NAME="+fromIdentity)
 	cmd.Dir = r.workDir
 
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
@@ -69,6 +76,16 @@ func (r *Router) Send(msg *Message) error {
 			return errors.New(errMsg)
 		}
 		return fmt.Errorf("sending message: %w", err)
+	}
+
+	// Get the created issue ID
+	issueID := strings.TrimSpace(stdout.String())
+
+	// Pin the message if requested
+	if msg.Pinned && issueID != "" {
+		pinCmd := exec.Command("bd", "pin", issueID)
+		pinCmd.Dir = r.workDir
+		_ = pinCmd.Run() // Best effort - don't fail if pin fails
 	}
 
 	// Notify recipient if they have an active session

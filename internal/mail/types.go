@@ -4,6 +4,7 @@ package mail
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"strings"
 	"time"
 )
 
@@ -145,20 +146,18 @@ func generateThreadID() string {
 	return "thread-" + hex.EncodeToString(b)
 }
 
-// BeadsMessage represents a message as returned by bd mail commands.
+// BeadsMessage represents a message as returned by bd list/show commands.
+// Sender, thread, reply-to, and message type are stored in labels.
 type BeadsMessage struct {
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`       // Subject
 	Description string    `json:"description"` // Body
-	Sender      string    `json:"sender"`      // From identity
 	Assignee    string    `json:"assignee"`    // To identity
 	Priority    int       `json:"priority"`    // 0=urgent, 1=high, 2=normal, 3=low
 	Status      string    `json:"status"`      // open=unread, closed=read
 	Pinned      bool      `json:"pinned"`      // Persistent context marker
 	CreatedAt   time.Time `json:"created_at"`
-	Type        string    `json:"type,omitempty"`      // Message type
-	ThreadID    string    `json:"thread_id,omitempty"` // Thread identifier
-	ReplyTo     string    `json:"reply_to,omitempty"`  // Original message ID
+	Labels      []string  `json:"labels"` // Contains from:, thread:, reply-to:, msg-type:
 }
 
 // ToMessage converts a BeadsMessage to a GGT Message.
@@ -176,16 +175,29 @@ func (bm *BeadsMessage) ToMessage() *Message {
 		priority = PriorityNormal
 	}
 
-	// Convert message type, default to notification
+	// Extract sender, thread, reply-to, and type from labels
+	var sender, threadID, replyTo string
 	msgType := TypeNotification
-	switch MessageType(bm.Type) {
-	case TypeTask, TypeScavenge, TypeReply:
-		msgType = MessageType(bm.Type)
+	for _, label := range bm.Labels {
+		switch {
+		case strings.HasPrefix(label, "from:"):
+			sender = strings.TrimPrefix(label, "from:")
+		case strings.HasPrefix(label, "thread:"):
+			threadID = strings.TrimPrefix(label, "thread:")
+		case strings.HasPrefix(label, "reply-to:"):
+			replyTo = strings.TrimPrefix(label, "reply-to:")
+		case strings.HasPrefix(label, "msg-type:"):
+			t := strings.TrimPrefix(label, "msg-type:")
+			switch MessageType(t) {
+			case TypeTask, TypeScavenge, TypeReply:
+				msgType = MessageType(t)
+			}
+		}
 	}
 
 	return &Message{
 		ID:        bm.ID,
-		From:      identityToAddress(bm.Sender),
+		From:      identityToAddress(sender),
 		To:        identityToAddress(bm.Assignee),
 		Subject:   bm.Title,
 		Body:      bm.Description,
@@ -194,8 +206,8 @@ func (bm *BeadsMessage) ToMessage() *Message {
 		Pinned:    bm.Pinned,
 		Priority:  priority,
 		Type:      msgType,
-		ThreadID:  bm.ThreadID,
-		ReplyTo:   bm.ReplyTo,
+		ThreadID:  threadID,
+		ReplyTo:   replyTo,
 	}
 }
 

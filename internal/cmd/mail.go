@@ -21,6 +21,7 @@ var (
 	mailBody          string
 	mailPriority      int
 	mailUrgent        bool
+	mailPinned        bool
 	mailType          string
 	mailReplyTo       string
 	mailNotify        bool
@@ -180,6 +181,7 @@ func init() {
 	mailSendCmd.Flags().StringVar(&mailType, "type", "notification", "Message type (task, scavenge, notification, reply)")
 	mailSendCmd.Flags().StringVar(&mailReplyTo, "reply-to", "", "Message ID this is replying to")
 	mailSendCmd.Flags().BoolVarP(&mailNotify, "notify", "n", false, "Send tmux notification to recipient")
+	mailSendCmd.Flags().BoolVar(&mailPinned, "pinned", false, "Pin message (for handoff context that persists)")
 	_ = mailSendCmd.MarkFlagRequired("subject")
 
 	// Inbox flags
@@ -249,6 +251,9 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 
 	// Set message type
 	msg.Type = mail.ParseMessageType(mailType)
+
+	// Set pinned flag
+	msg.Pinned = mailPinned
 
 	// Handle reply-to: auto-set type to reply and look up thread
 	if mailReplyTo != "" {
