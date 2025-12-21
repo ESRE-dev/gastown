@@ -302,7 +302,7 @@ func (t *Tmux) SendNotificationBanner(session, from, subject string) error {
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📬 NEW MAIL from %s
 Subject: %s
-Run: bd mail inbox
+Run: gt mail inbox
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 '`, from, subject)
 
