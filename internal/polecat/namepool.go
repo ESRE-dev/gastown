@@ -156,11 +156,11 @@ func (p *NamePool) Load() error {
 		return err
 	}
 
-	// Preserve the theme and custom names if already set
-	if p.Theme == "" && loaded.Theme != "" {
+	// Load theme and custom names from disk (overrides constructor defaults)
+	if loaded.Theme != "" {
 		p.Theme = loaded.Theme
 	}
-	if len(p.CustomNames) == 0 && len(loaded.CustomNames) > 0 {
+	if len(loaded.CustomNames) > 0 {
 		p.CustomNames = loaded.CustomNames
 	}
 
