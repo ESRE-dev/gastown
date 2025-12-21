@@ -139,12 +139,12 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 		}
 	}
 
-	// Create beads redirect to share rig-level beads database
-	// This eliminates git sync overhead - all polecats use same daemon
-	if err := m.createBeadsRedirect(polecatPath); err != nil {
-		// Non-fatal - polecat can still work with its own .beads/ if needed
+	// Set up shared beads: polecat uses rig's .beads via redirect file.
+	// This eliminates git sync overhead - all polecats share one database.
+	if err := m.setupSharedBeads(polecatPath); err != nil {
+		// Non-fatal - polecat can still work with local beads
 		// Log warning but don't fail the spawn
-		fmt.Fprintf(os.Stderr, "Warning: could not create beads redirect: %v\n", err)
+		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
 	// Return polecat with derived state (no issue assigned yet = idle)
@@ -522,47 +522,37 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	}, nil
 }
 
-// createBeadsRedirect creates a .beads/redirect file in the polecat directory
-// that points to the rig-level shared beads database. This eliminates the need
-// for git sync between polecats - they all share the same daemon and database.
+// setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.
+// This eliminates the need for git sync between polecat clones - all polecats share one database.
 //
-// Directory structure:
-//   gastown/
-//     .beads/              <- Shared database (created if missing)
-//     polecats/
-//       nux/
-//         .beads/
-//           redirect       <- Contains "../../.beads"
-func (m *Manager) createBeadsRedirect(polecatPath string) error {
-	// Rig-level beads path
-	rigBeadsPath := filepath.Join(m.rig.Path, ".beads")
-
-	// Ensure rig-level .beads/ exists
-	if _, err := os.Stat(rigBeadsPath); os.IsNotExist(err) {
-		// Initialize rig-level beads if it doesn't exist
-		// This creates the database and config
-		if err := os.MkdirAll(rigBeadsPath, 0755); err != nil {
-			return fmt.Errorf("creating rig beads dir: %w", err)
-		}
-		// Note: bd will auto-initialize when first used
+// Structure:
+//
+//	rig/
+//	  .beads/              <- Shared database (ensured to exist)
+//	  polecats/
+//	    <name>/
+//	      .beads/
+//	        redirect       <- Contains "../../.beads"
+func (m *Manager) setupSharedBeads(polecatPath string) error {
+	// Ensure rig root has .beads/ directory
+	rigBeadsDir := filepath.Join(m.rig.Path, ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		return fmt.Errorf("creating rig .beads dir: %w", err)
 	}
 
-	// Create polecat .beads directory
-	polecatBeadsPath := filepath.Join(polecatPath, ".beads")
-	if err := os.MkdirAll(polecatBeadsPath, 0755); err != nil {
-		return fmt.Errorf("creating polecat beads dir: %w", err)
+	// Create polecat's .beads directory
+	polecatBeadsDir := filepath.Join(polecatPath, ".beads")
+	if err := os.MkdirAll(polecatBeadsDir, 0755); err != nil {
+		return fmt.Errorf("creating polecat .beads dir: %w", err)
 	}
 
-	// Calculate relative path from polecat to rig beads
-	// polecatPath is like: <rig>/polecats/<name>
-	// rigBeadsPath is like: <rig>/.beads
-	// So relative path is: ../../.beads
-	redirectPath := filepath.Join(polecatBeadsPath, "redirect")
-	relativePath := "../../.beads"
+	// Create redirect file pointing to rig's .beads
+	// Path is relative from polecats/<name>/.beads/ to rig/.beads/
+	redirectPath := filepath.Join(polecatBeadsDir, "redirect")
+	redirectContent := "../../.beads\n"
 
-	// Write redirect file
-	if err := os.WriteFile(redirectPath, []byte(relativePath+"\n"), 0644); err != nil {
-		return fmt.Errorf("writing redirect file: %w", err)
+	if err := os.WriteFile(redirectPath, []byte(redirectContent), 0644); err != nil {
+		return fmt.Errorf("creating redirect file: %w", err)
 	}
 
 	return nil

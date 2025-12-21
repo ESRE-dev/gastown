@@ -4,72 +4,143 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // Router handles message delivery via beads.
+// It routes messages to the correct beads database based on address:
+// - Town-level (mayor/, deacon/) -> {townRoot}/.beads
+// - Rig-level (rig/polecat) -> {townRoot}/{rig}/.beads
 type Router struct {
-	workDir string // directory to run bd commands in
-	tmux    *tmux.Tmux
+	workDir  string // fallback directory to run bd commands in
+	townRoot string // town root directory (e.g., ~/gt)
+	tmux     *tmux.Tmux
 }
 
 // NewRouter creates a new mail router.
 // workDir should be a directory containing a .beads database.
+// The town root is auto-detected from workDir if possible.
 func NewRouter(workDir string) *Router {
+	// Try to detect town root from workDir
+	townRoot := detectTownRoot(workDir)
+
 	return &Router{
-		workDir: workDir,
-		tmux:    tmux.NewTmux(),
+		workDir:  workDir,
+		townRoot: townRoot,
+		tmux:     tmux.NewTmux(),
 	}
 }
 
-// Send delivers a message via beads issue creation.
-// Messages are stored as beads issues with type=message.
-func (r *Router) Send(msg *Message) error {
-	// Use address directly for assignee (maintains compatibility with old messages)
-	// The from address is converted to identity format for the labels
-	fromIdentity := addressToIdentity(msg.From)
+// NewRouterWithTownRoot creates a router with an explicit town root.
+func NewRouterWithTownRoot(workDir, townRoot string) *Router {
+	return &Router{
+		workDir:  workDir,
+		townRoot: townRoot,
+		tmux:     tmux.NewTmux(),
+	}
+}
 
-	// Build command: bd create --type=message --title="subject" --assignee=recipient
-	// Assignee uses the original address format to match how bd mail stored them
-	args := []string{"create",
-		"--type", "message",
-		"--title", msg.Subject,
-		"--assignee", msg.To,
+// detectTownRoot finds the town root by looking for mayor/town.json.
+func detectTownRoot(startDir string) string {
+	dir := startDir
+	for {
+		// Check for primary marker (mayor/town.json)
+		markerPath := filepath.Join(dir, "mayor", "town.json")
+		if _, err := os.Stat(markerPath); err == nil {
+			return dir
+		}
+
+		// Move up
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// resolveBeadsDir returns the correct .beads directory for the given address.
+// Town-level addresses (mayor/, deacon/) use {townRoot}/.beads.
+// Rig-level addresses (rig/polecat) use {townRoot}/{rig}/.beads.
+func (r *Router) resolveBeadsDir(address string) string {
+	// If no town root, fall back to workDir's .beads
+	if r.townRoot == "" {
+		return filepath.Join(r.workDir, ".beads")
 	}
 
-	// Add body if present
-	if msg.Body != "" {
-		args = append(args, "--description", msg.Body)
+	// Town-level agents: mayor/, deacon/
+	if isTownLevelAddress(address) {
+		return filepath.Join(r.townRoot, ".beads")
+	}
+
+	// Rig-level addresses: rig/polecat, rig/refinery
+	parts := strings.SplitN(address, "/", 2)
+	if len(parts) >= 1 && parts[0] != "" {
+		rig := parts[0]
+		rigBeadsDir := filepath.Join(r.townRoot, rig, ".beads")
+		// Check if rig beads exists
+		if _, err := os.Stat(rigBeadsDir); err == nil {
+			return rigBeadsDir
+		}
+	}
+
+	// Fall back to town-level beads
+	return filepath.Join(r.townRoot, ".beads")
+}
+
+// isTownLevelAddress returns true if the address is for a town-level agent.
+func isTownLevelAddress(address string) bool {
+	addr := strings.TrimSuffix(address, "/")
+	return addr == "mayor" || addr == "deacon"
+}
+
+// Send delivers a message via beads message.
+// Routes the message to the correct beads database based on recipient address.
+func (r *Router) Send(msg *Message) error {
+	// Convert addresses to beads identities
+	toIdentity := addressToIdentity(msg.To)
+	fromIdentity := addressToIdentity(msg.From)
+
+	// Build command: bd mail send <recipient> -s <subject> -m <body>
+	args := []string{"mail", "send", toIdentity,
+		"-s", msg.Subject,
+		"-m", msg.Body,
 	}
 
 	// Add priority flag
 	beadsPriority := PriorityToBeads(msg.Priority)
 	args = append(args, "--priority", fmt.Sprintf("%d", beadsPriority))
 
-	// Build labels for metadata (from, thread-id, reply-to, message-type)
-	var labels []string
-	labels = append(labels, "from:"+fromIdentity)
-
-	if msg.ThreadID != "" {
-		labels = append(labels, "thread:"+msg.ThreadID)
-	}
-	if msg.ReplyTo != "" {
-		labels = append(labels, "reply-to:"+msg.ReplyTo)
-	}
+	// Add message type if set
 	if msg.Type != "" && msg.Type != TypeNotification {
-		labels = append(labels, "msg-type:"+string(msg.Type))
+		args = append(args, "--type", string(msg.Type))
 	}
 
-	if len(labels) > 0 {
-		args = append(args, "--labels", strings.Join(labels, ","))
+	// Add thread ID if set
+	if msg.ThreadID != "" {
+		args = append(args, "--thread-id", msg.ThreadID)
 	}
+
+	// Add reply-to if set
+	if msg.ReplyTo != "" {
+		args = append(args, "--reply-to", msg.ReplyTo)
+	}
+
+	// Resolve the correct beads directory for the recipient
+	beadsDir := r.resolveBeadsDir(msg.To)
 
 	cmd := exec.Command("bd", args...)
-	cmd.Env = append(cmd.Environ(), "BEADS_AGENT_NAME="+fromIdentity)
-	cmd.Dir = r.workDir
+	cmd.Env = append(cmd.Environ(),
+		"BEADS_AGENT_NAME="+fromIdentity,
+		"BEADS_DIR="+beadsDir,
+	)
+	cmd.Dir = filepath.Dir(beadsDir) // Run in parent of .beads
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -89,8 +160,11 @@ func (r *Router) Send(msg *Message) error {
 }
 
 // GetMailbox returns a Mailbox for the given address.
+// Routes to the correct beads database based on the address.
 func (r *Router) GetMailbox(address string) (*Mailbox, error) {
-	return NewMailboxFromAddress(address, r.workDir), nil
+	beadsDir := r.resolveBeadsDir(address)
+	workDir := filepath.Dir(beadsDir) // Parent of .beads
+	return NewMailboxFromAddress(address, workDir), nil
 }
 
 // notifyRecipient sends a notification to a recipient's tmux session.

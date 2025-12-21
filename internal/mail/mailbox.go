@@ -22,6 +22,7 @@ var (
 type Mailbox struct {
 	identity string // beads identity (e.g., "gastown-Toast")
 	workDir  string // directory to run bd commands in
+	beadsDir string // explicit .beads directory path (set via BEADS_DIR)
 	path     string // for legacy JSONL mode (crew workers)
 	legacy   bool   // true = use JSONL files, false = use beads
 }
@@ -45,12 +46,22 @@ func NewMailboxBeads(identity, workDir string) *Mailbox {
 }
 
 // NewMailboxFromAddress creates a beads-backed mailbox from a GGT address.
-// The address is stored as-is (not converted to identity) to match how
-// messages are stored with their assignee field.
 func NewMailboxFromAddress(address, workDir string) *Mailbox {
+	beadsDir := filepath.Join(workDir, ".beads")
 	return &Mailbox{
-		identity: address, // Use address directly, not identity format
+		identity: addressToIdentity(address),
 		workDir:  workDir,
+		beadsDir: beadsDir,
+		legacy:   false,
+	}
+}
+
+// NewMailboxWithBeadsDir creates a mailbox with an explicit beads directory.
+func NewMailboxWithBeadsDir(address, workDir, beadsDir string) *Mailbox {
+	return &Mailbox{
+		identity: addressToIdentity(address),
+		workDir:  workDir,
+		beadsDir: beadsDir,
 		legacy:   false,
 	}
 }
@@ -74,13 +85,13 @@ func (m *Mailbox) List() ([]*Message, error) {
 }
 
 func (m *Mailbox) listBeads() ([]*Message, error) {
-	// bd list --type=message --assignee=<identity> --status=open --json
-	cmd := exec.Command("bd", "list",
-		"--type", "message",
-		"--assignee", m.identity,
-		"--status", "open",
-		"--json")
+	// bd mail inbox --json
+	cmd := exec.Command("bd", "mail", "inbox", "--json")
 	cmd.Dir = m.workDir
+	cmd.Env = append(cmd.Environ(),
+		"BD_IDENTITY="+m.identity,
+		"BEADS_DIR="+m.beadsDir,
+	)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -103,14 +114,6 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 		}
 		return nil, err
 	}
-
-	// Sort pinned messages first, then by timestamp (newest first)
-	sort.Slice(beadsMsgs, func(i, j int) bool {
-		if beadsMsgs[i].Pinned != beadsMsgs[j].Pinned {
-			return beadsMsgs[i].Pinned // pinned comes first
-		}
-		return beadsMsgs[i].CreatedAt.After(beadsMsgs[j].CreatedAt)
-	})
 
 	// Convert to GGT messages
 	var messages []*Message
@@ -186,9 +189,9 @@ func (m *Mailbox) Get(id string) (*Message, error) {
 }
 
 func (m *Mailbox) getBeads(id string) (*Message, error) {
-	// bd show <id> --json returns an array with one element
-	cmd := exec.Command("bd", "show", id, "--json")
+	cmd := exec.Command("bd", "mail", "read", id, "--json")
 	cmd.Dir = m.workDir
+	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+m.beadsDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -205,16 +208,12 @@ func (m *Mailbox) getBeads(id string) (*Message, error) {
 		return nil, err
 	}
 
-	// bd show returns an array with one element
-	var beadsMsgs []BeadsMessage
-	if err := json.Unmarshal(stdout.Bytes(), &beadsMsgs); err != nil {
+	var bm BeadsMessage
+	if err := json.Unmarshal(stdout.Bytes(), &bm); err != nil {
 		return nil, err
 	}
-	if len(beadsMsgs) == 0 {
-		return nil, ErrMessageNotFound
-	}
 
-	return beadsMsgs[0].ToMessage(), nil
+	return bm.ToMessage(), nil
 }
 
 func (m *Mailbox) getLegacy(id string) (*Message, error) {
@@ -239,9 +238,9 @@ func (m *Mailbox) MarkRead(id string) error {
 }
 
 func (m *Mailbox) markReadBeads(id string) error {
-	// bd close <id> marks the message as read
-	cmd := exec.Command("bd", "close", id, "--reason", "Message read")
+	cmd := exec.Command("bd", "mail", "ack", id)
 	cmd.Dir = m.workDir
+	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+m.beadsDir)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -408,12 +407,13 @@ func (m *Mailbox) ListByThread(threadID string) ([]*Message, error) {
 }
 
 func (m *Mailbox) listByThreadBeads(threadID string) ([]*Message, error) {
-	// bd list --type=message --label=thread:<thread-id> --json
-	cmd := exec.Command("bd", "list",
-		"--type", "message",
-		"--label", "thread:"+threadID,
-		"--json")
+	// bd message thread <thread-id> --json
+	cmd := exec.Command("bd", "message", "thread", threadID, "--json")
 	cmd.Dir = m.workDir
+	cmd.Env = append(cmd.Environ(),
+		"BD_IDENTITY="+m.identity,
+		"BEADS_DIR="+m.beadsDir,
+	)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
