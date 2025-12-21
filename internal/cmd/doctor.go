@@ -53,6 +53,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d := doctor.NewDoctor()
 
 	// Register built-in checks
+	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewDaemonCheck())
 	d.Register(doctor.NewBeadsDatabaseCheck())
 	d.Register(doctor.NewOrphanSessionCheck())
