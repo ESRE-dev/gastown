@@ -154,6 +154,7 @@ type BeadsMessage struct {
 	Status      string    `json:"status"`      // open=unread, closed=read
 	CreatedAt   time.Time `json:"created_at"`
 	Labels      []string  `json:"labels"` // Metadata labels (from:X, thread:X, reply-to:X, msg-type:X)
+	Pinned      bool      `json:"pinned,omitempty"`
 
 	// Cached parsed values (populated by ParseLabels)
 	sender   string

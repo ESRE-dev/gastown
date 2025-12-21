@@ -104,6 +104,14 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 		return nil, err
 	}
 
+	// Sort pinned messages first, then by timestamp (newest first)
+	sort.Slice(beadsMsgs, func(i, j int) bool {
+		if beadsMsgs[i].Pinned != beadsMsgs[j].Pinned {
+			return beadsMsgs[i].Pinned // pinned comes first
+		}
+		return beadsMsgs[i].CreatedAt.After(beadsMsgs[j].CreatedAt)
+	})
+
 	// Convert to GGT messages
 	var messages []*Message
 	for _, bm := range beadsMsgs {
