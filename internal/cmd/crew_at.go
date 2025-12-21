@@ -133,8 +133,9 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	// Check if we're already in the target session
 	if isInTmuxSession(sessionID) {
 		// We're in the session at a shell prompt - just start Claude directly
+		// Pass "gt prime" as initial prompt so Claude loads context immediately
 		fmt.Printf("Starting Claude in current session...\n")
-		return execClaude()
+		return execClaude("gt prime")
 	}
 
 	// Attach to session using exec to properly forward TTY

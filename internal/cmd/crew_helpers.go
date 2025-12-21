@@ -147,7 +147,8 @@ func isShellCommand(cmd string) bool {
 
 // execClaude execs claude, replacing the current process.
 // Used when we're already in the target session and just need to start Claude.
-func execClaude() error {
+// If prompt is provided, it's passed as the initial prompt to Claude.
+func execClaude(prompt string) error {
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
 		return fmt.Errorf("claude not found: %w", err)
@@ -155,6 +156,9 @@ func execClaude() error {
 
 	// exec replaces current process with claude
 	args := []string{"claude", "--dangerously-skip-permissions"}
+	if prompt != "" {
+		args = append(args, prompt)
+	}
 	return syscall.Exec(claudePath, args, os.Environ())
 }
 
