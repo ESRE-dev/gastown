@@ -376,8 +376,8 @@ Polecat: %s
 Please verify state and execute lifecycle action.
 `, role, action, time.Now().Format(time.RFC3339), polecatName)
 
-	// Send via bd mail (syntax: bd mail send <recipient> -s <subject> -m <body>)
-	cmd := exec.Command("bd", "mail", "send", manager,
+	// Send via gt mail (syntax: gt mail send <recipient> -s <subject> -m <body>)
+	cmd := exec.Command("gt", "mail", "send", manager,
 		"-s", subject,
 		"-m", body,
 	)
