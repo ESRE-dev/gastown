@@ -482,6 +482,9 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting crew worker: %w", err)
 	}
 
+	// Ensure crew workspace is on main branch (persistent roles should not use feature branches)
+	ensureMainBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", r.Name, name))
+
 	// If --no-tmux, just print the path
 	if crewNoTmux {
 		fmt.Println(worker.ClonePath)
@@ -1136,4 +1139,46 @@ func runCrewPristine(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// ensureMainBranch checks if a git directory is on main branch.
+// If not, warns the user and offers to switch.
+// Returns true if on main (or switched to main), false if user declined.
+func ensureMainBranch(dir, roleName string) bool {
+	g := git.NewGit(dir)
+
+	branch, err := g.CurrentBranch()
+	if err != nil {
+		// Not a git repo or other error, skip check
+		return true
+	}
+
+	if branch == "main" || branch == "master" {
+		return true
+	}
+
+	// Warn about wrong branch
+	fmt.Printf("\n%s %s is on branch '%s', not main\n",
+		style.Warning.Render("⚠"),
+		roleName,
+		branch)
+	fmt.Println("  Persistent roles should work on main to avoid orphaned work.")
+	fmt.Println()
+
+	// Auto-switch to main
+	fmt.Printf("  Switching to main...\n")
+	if err := g.Checkout("main"); err != nil {
+		fmt.Printf("  %s Could not switch to main: %v\n", style.Error.Render("✗"), err)
+		fmt.Println("  Please manually run: git checkout main && git pull")
+		return false
+	}
+
+	// Pull latest
+	if err := g.Pull("origin", "main"); err != nil {
+		fmt.Printf("  %s Pull failed (continuing anyway): %v\n", style.Warning.Render("⚠"), err)
+	} else {
+		fmt.Printf("  %s Switched to main and pulled latest\n", style.Success.Render("✓"))
+	}
+
+	return true
 }
