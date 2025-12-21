@@ -160,65 +160,78 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check/create polecat
-	pc, err := polecatMgr.Get(polecatName)
-	if err != nil {
-		if err == polecat.ErrPolecatNotFound {
-			if !spawnCreate {
-				return fmt.Errorf("polecat '%s' not found (use --create to create)", polecatName)
+	// Check if polecat exists
+	existingPolecat, err := polecatMgr.Get(polecatName)
+	polecatExists := err == nil
+
+	if polecatExists {
+		// Polecat exists - we'll recreate it fresh after safety checks
+
+		// Check if polecat is currently working (cannot interrupt active work)
+		if existingPolecat.State == polecat.StateWorking {
+			return fmt.Errorf("polecat '%s' is already working on %s", polecatName, existingPolecat.Issue)
+		}
+
+		// Check for uncommitted work (safety check before recreating)
+		pGit := git.NewGit(existingPolecat.ClonePath)
+		workStatus, checkErr := pGit.CheckUncommittedWork()
+		if checkErr == nil && !workStatus.Clean() {
+			fmt.Printf("\n%s Polecat has uncommitted work:\n", style.Warning.Render("⚠"))
+			if workStatus.HasUncommittedChanges {
+				fmt.Printf("  • %d uncommitted change(s)\n", len(workStatus.ModifiedFiles)+len(workStatus.UntrackedFiles))
 			}
-			fmt.Printf("Creating polecat %s...\n", polecatName)
-			pc, err = polecatMgr.Add(polecatName)
-			if err != nil {
-				return fmt.Errorf("creating polecat: %w", err)
+			if workStatus.StashCount > 0 {
+				fmt.Printf("  • %d stash(es)\n", workStatus.StashCount)
 			}
-		} else {
-			return fmt.Errorf("getting polecat: %w", err)
+			if workStatus.UnpushedCommits > 0 {
+				fmt.Printf("  • %d unpushed commit(s)\n", workStatus.UnpushedCommits)
+			}
+			fmt.Println()
+			if !spawnForce {
+				return fmt.Errorf("polecat '%s' has uncommitted work (%s)\nCommit or stash changes before spawning, or use --force to proceed anyway",
+					polecatName, workStatus.String())
+			}
+			fmt.Printf("%s Proceeding with --force (uncommitted work will be lost)\n",
+				style.Dim.Render("Warning:"))
 		}
+
+		// Check for unread mail (indicates existing unstarted work)
+		polecatAddress := fmt.Sprintf("%s/%s", rigName, polecatName)
+		router := mail.NewRouter(r.Path)
+		mailbox, mailErr := router.GetMailbox(polecatAddress)
+		if mailErr == nil {
+			_, unread, _ := mailbox.Count()
+			if unread > 0 && !spawnForce {
+				return fmt.Errorf("polecat '%s' has %d unread message(s) in inbox (possible existing work assignment)\nUse --force to override, or let the polecat process its inbox first",
+					polecatName, unread)
+			} else if unread > 0 {
+				fmt.Printf("%s Polecat has %d unread message(s), proceeding with --force\n",
+					style.Dim.Render("Warning:"), unread)
+			}
+		}
+
+		// Recreate the polecat with a fresh worktree (latest code from main)
+		fmt.Printf("Recreating polecat %s with fresh worktree...\n", polecatName)
+		if _, err = polecatMgr.Recreate(polecatName, spawnForce); err != nil {
+			return fmt.Errorf("recreating polecat: %w", err)
+		}
+		fmt.Printf("%s Fresh worktree created\n", style.Bold.Render("✓"))
+	} else if err == polecat.ErrPolecatNotFound {
+		// Polecat doesn't exist - create new one
+		if !spawnCreate {
+			return fmt.Errorf("polecat '%s' not found (use --create to create)", polecatName)
+		}
+		fmt.Printf("Creating polecat %s...\n", polecatName)
+		if _, err = polecatMgr.Add(polecatName); err != nil {
+			return fmt.Errorf("creating polecat: %w", err)
+		}
+	} else {
+		return fmt.Errorf("getting polecat: %w", err)
 	}
 
-	// Check polecat state
-	if pc.State == polecat.StateWorking {
-		return fmt.Errorf("polecat '%s' is already working on %s", polecatName, pc.Issue)
-	}
-
-	// Check for uncommitted work in existing polecat (safety check)
-	pGit := git.NewGit(pc.ClonePath)
-	workStatus, err := pGit.CheckUncommittedWork()
-	if err == nil && !workStatus.Clean() {
-		fmt.Printf("\n%s Polecat has uncommitted work:\n", style.Warning.Render("⚠"))
-		if workStatus.HasUncommittedChanges {
-			fmt.Printf("  • %d uncommitted change(s)\n", len(workStatus.ModifiedFiles)+len(workStatus.UntrackedFiles))
-		}
-		if workStatus.StashCount > 0 {
-			fmt.Printf("  • %d stash(es)\n", workStatus.StashCount)
-		}
-		if workStatus.UnpushedCommits > 0 {
-			fmt.Printf("  • %d unpushed commit(s)\n", workStatus.UnpushedCommits)
-		}
-		fmt.Println()
-		if !spawnForce {
-			return fmt.Errorf("polecat '%s' has uncommitted work (%s)\nCommit or stash changes before spawning, or use --force to proceed anyway",
-				polecatName, workStatus.String())
-		}
-		fmt.Printf("%s Proceeding with --force (uncommitted work may be lost if polecat is cleaned up)\n",
-			style.Dim.Render("Warning:"))
-	}
-
-	// Check for unread mail in polecat's inbox (indicates existing unstarted work)
+	// Define polecatAddress and router for later use (mail sending)
 	polecatAddress := fmt.Sprintf("%s/%s", rigName, polecatName)
 	router := mail.NewRouter(r.Path)
-	mailbox, err := router.GetMailbox(polecatAddress)
-	if err == nil {
-		_, unread, _ := mailbox.Count()
-		if unread > 0 && !spawnForce {
-			return fmt.Errorf("polecat '%s' has %d unread message(s) in inbox (possible existing work assignment)\nUse --force to override, or let the polecat process its inbox first",
-				polecatName, unread)
-		} else if unread > 0 {
-			fmt.Printf("%s Polecat has %d unread message(s), proceeding with --force\n",
-				style.Dim.Render("Warning:"), unread)
-		}
-	}
 
 	// Beads operations use rig-level beads (at rig root, not mayor/rig)
 	beadsPath := r.Path
@@ -327,7 +340,6 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send work assignment mail to polecat inbox (before starting session)
-	// polecatAddress and router already defined above when checking for unread mail
 	workMsg := buildWorkAssignmentMail(issue, spawnMessage, polecatAddress)
 
 	fmt.Printf("Sending work assignment to %s inbox...\n", polecatAddress)

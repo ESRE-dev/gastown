@@ -246,6 +246,66 @@ func (m *Manager) ReleaseName(name string) {
 	_ = m.namePool.Save()
 }
 
+// Recreate removes an existing polecat and creates a fresh worktree.
+// This ensures the polecat starts with the latest code from the base branch.
+// The name is preserved (not released to pool) since we're recreating immediately.
+// force controls whether to bypass uncommitted changes check.
+func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
+	if !m.exists(name) {
+		return nil, ErrPolecatNotFound
+	}
+
+	polecatPath := m.polecatDir(name)
+	branchName := fmt.Sprintf("polecat/%s", name)
+	mayorPath := filepath.Join(m.rig.Path, "mayor", "rig")
+	mayorGit := git.NewGit(mayorPath)
+	polecatGit := git.NewGit(polecatPath)
+
+	// Check for uncommitted work unless forced
+	if !force {
+		status, err := polecatGit.CheckUncommittedWork()
+		if err == nil && !status.Clean() {
+			return nil, &UncommittedWorkError{PolecatName: name, Status: status}
+		}
+	}
+
+	// Remove the worktree (use force for git worktree removal)
+	if err := mayorGit.WorktreeRemove(polecatPath, true); err != nil {
+		// Fall back to direct removal
+		if removeErr := os.RemoveAll(polecatPath); removeErr != nil {
+			return nil, fmt.Errorf("removing polecat dir: %w", removeErr)
+		}
+	}
+
+	// Prune stale worktree entries
+	_ = mayorGit.WorktreePrune()
+
+	// Delete the old branch so worktree starts fresh from current HEAD
+	_ = mayorGit.DeleteBranch(branchName, true) // force delete
+
+	// Create fresh worktree with new branch from current HEAD
+	if err := mayorGit.WorktreeAdd(polecatPath, branchName); err != nil {
+		return nil, fmt.Errorf("creating fresh worktree: %w", err)
+	}
+
+	// Set up shared beads
+	if err := m.setupSharedBeads(polecatPath); err != nil {
+		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Return fresh polecat
+	now := time.Now()
+	return &Polecat{
+		Name:      name,
+		Rig:       m.rig.Name,
+		State:     StateIdle,
+		ClonePath: polecatPath,
+		Branch:    branchName,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
+}
+
 // ReconcilePool syncs pool state with existing polecat directories.
 // This should be called to recover from crashes or stale state.
 func (m *Manager) ReconcilePool() {
