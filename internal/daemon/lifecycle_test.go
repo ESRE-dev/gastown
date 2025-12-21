@@ -30,8 +30,8 @@ func TestParseLifecycleRequest_Cycle(t *testing.T) {
 
 	for _, tc := range tests {
 		msg := &BeadsMessage{
-			Title:  tc.title,
-			Sender: "test-sender",
+			Subject: tc.title,
+			From:    "test-sender",
 		}
 		result := d.parseLifecycleRequest(msg)
 		if result == nil {
@@ -64,8 +64,8 @@ func TestParseLifecycleRequest_PrefixMatchesCycle(t *testing.T) {
 
 	for _, tc := range tests {
 		msg := &BeadsMessage{
-			Title:  tc.title,
-			Sender: "test-sender",
+			Subject: tc.title,
+			From:    "test-sender",
 		}
 		result := d.parseLifecycleRequest(msg)
 		if result == nil {
@@ -91,8 +91,8 @@ func TestParseLifecycleRequest_NotLifecycle(t *testing.T) {
 
 	for _, title := range tests {
 		msg := &BeadsMessage{
-			Title:  title,
-			Sender: "test-sender",
+			Subject: title,
+			From:    "test-sender",
 		}
 		result := d.parseLifecycleRequest(msg)
 		if result != nil {
@@ -116,8 +116,8 @@ func TestParseLifecycleRequest_ExtractsFrom(t *testing.T) {
 
 	for _, tc := range tests {
 		msg := &BeadsMessage{
-			Title:  tc.title,
-			Sender: tc.sender,
+			Subject: tc.title,
+			From:    tc.sender,
 		}
 		result := d.parseLifecycleRequest(msg)
 		if result == nil {
@@ -135,8 +135,8 @@ func TestParseLifecycleRequest_FallsBackToSender(t *testing.T) {
 
 	// When the title doesn't contain a parseable "from", use sender
 	msg := &BeadsMessage{
-		Title:  "LIFECYCLE: requesting cycle", // no role before "requesting"
-		Sender: "fallback-sender",
+		Subject: "LIFECYCLE: requesting cycle", // no role before "requesting"
+		From:    "fallback-sender",
 	}
 	result := d.parseLifecycleRequest(msg)
 	if result == nil {
@@ -200,23 +200,23 @@ func TestIdentityToSession_Unknown(t *testing.T) {
 
 func TestBeadsMessage_Serialization(t *testing.T) {
 	msg := BeadsMessage{
-		ID:          "msg-123",
-		Title:       "Test Message",
-		Description: "A test message body",
-		Sender:      "test-sender",
-		Assignee:    "test-assignee",
-		Priority:    1,
-		Status:      "open",
+		ID:       "msg-123",
+		Subject:  "Test Message",
+		Body:     "A test message body",
+		From:     "test-sender",
+		To:       "test-recipient",
+		Priority: "high",
+		Type:     "message",
 	}
 
 	// Verify all fields are accessible
 	if msg.ID != "msg-123" {
 		t.Errorf("ID mismatch")
 	}
-	if msg.Title != "Test Message" {
-		t.Errorf("Title mismatch")
+	if msg.Subject != "Test Message" {
+		t.Errorf("Subject mismatch")
 	}
-	if msg.Status != "open" {
-		t.Errorf("Status mismatch")
+	if msg.From != "test-sender" {
+		t.Errorf("From mismatch")
 	}
 }

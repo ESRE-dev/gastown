@@ -127,16 +127,6 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	// Send lifecycle request to manager
 	manager := getManager(role)
 
-	// Crew workers are human-managed - no automated manager to wait for
-	if role == RoleCrew {
-		fmt.Printf("\n%s Handoff complete\n", style.Bold.Render("✓"))
-		fmt.Println(style.Dim.Render("Crew workers are human-managed. To complete the cycle:"))
-		fmt.Println(style.Dim.Render("  1. Exit this session (Ctrl+D or 'exit')"))
-		fmt.Println(style.Dim.Render("  2. Run 'gt crew attach' to start fresh"))
-		fmt.Println(style.Dim.Render("  3. New session will see handoff message in inbox"))
-		return nil
-	}
-
 	if err := sendLifecycleRequest(manager, role, action, townRoot); err != nil {
 		return fmt.Errorf("sending lifecycle request: %w", err)
 	}
@@ -258,7 +248,7 @@ func determineAction(role Role) HandoffAction {
 	case RoleMayor, RoleWitness, RoleRefinery:
 		return HandoffCycle // Long-running, preserve context
 	case RoleCrew:
-		return HandoffCycle // Will only send mail, not actually retire
+		return HandoffCycle // Persistent workspace, preserve context
 	default:
 		return HandoffCycle
 	}
@@ -297,7 +287,7 @@ func getManager(role Role) string {
 		}
 		return rig + "/witness"
 	case RoleCrew:
-		return "human" // Crew is human-managed
+		return "deacon/" // Crew lifecycle managed by deacon
 	default:
 		return "deacon/"
 	}
@@ -367,29 +357,47 @@ func getPolecatName() string {
 	return ""
 }
 
+// getCrewIdentity extracts the crew identity from the tmux session.
+// Returns format: <rig>-crew-<name> (e.g., gastown-crew-max)
+func getCrewIdentity() string {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	if err != nil {
+		return ""
+	}
+	sessionName := strings.TrimSpace(string(out))
+
+	// Crew sessions: gt-<rig>-crew-<name>
+	if strings.HasPrefix(sessionName, "gt-") && strings.Contains(sessionName, "-crew-") {
+		// Remove "gt-" prefix to get <rig>-crew-<name>
+		return strings.TrimPrefix(sessionName, "gt-")
+	}
+	return ""
+}
+
 // sendLifecycleRequest sends the lifecycle request to our manager.
 func sendLifecycleRequest(manager string, role Role, action HandoffAction, townRoot string) error {
-	if manager == "human" {
-		// Crew is human-managed, just print a message
-		fmt.Println(style.Dim.Render("(Crew sessions are human-managed, no lifecycle request sent)"))
-		return nil
+	// Build identity for the LIFECYCLE message
+	// The daemon parses identity from "LIFECYCLE: <identity> requesting <action>"
+	identity := string(role)
+
+	switch role {
+	case RoleCrew:
+		// Crew identity: <rig>-crew-<name> (e.g., gastown-crew-max)
+		if crewID := getCrewIdentity(); crewID != "" {
+			identity = crewID
+		}
+	case RolePolecat:
+		// Polecat identity would need similar handling if routed to deacon
 	}
 
-	// For polecats, include the specific name
-	polecatName := ""
-	if role == RolePolecat {
-		polecatName = getPolecatName()
-	}
-
-	subject := fmt.Sprintf("LIFECYCLE: %s requesting %s", role, action)
+	subject := fmt.Sprintf("LIFECYCLE: %s requesting %s", identity, action)
 	body := fmt.Sprintf(`Lifecycle request from %s.
 
 Action: %s
 Time: %s
-Polecat: %s
 
 Please verify state and execute lifecycle action.
-`, role, action, time.Now().Format(time.RFC3339), polecatName)
+`, identity, action, time.Now().Format(time.RFC3339))
 
 	// Send via gt mail (syntax: gt mail send <recipient> -s <subject> -m <body>)
 	cmd := exec.Command("gt", "mail", "send", manager,
