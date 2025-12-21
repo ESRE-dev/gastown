@@ -462,16 +462,8 @@ func runMailDelete(cmd *cobra.Command, args []string) error {
 // findBeadsWorkDir finds a directory with a .beads database.
 // Walks up from CWD looking for .beads/ directory.
 func findBeadsWorkDir() (string, error) {
-	// First try workspace root
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err == nil {
-		// Check if town root has .beads
-		if _, err := os.Stat(filepath.Join(townRoot, ".beads")); err == nil {
-			return townRoot, nil
-		}
-	}
-
-	// Walk up from CWD looking for .beads
+	// Walk up from CWD looking for .beads - prefer closest one (rig-level)
+	// This finds the rig's .beads before the town's .beads
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -488,6 +480,14 @@ func findBeadsWorkDir() (string, error) {
 			break // Reached root
 		}
 		path = parent
+	}
+
+	// Fall back to town root if nothing found walking up
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err == nil {
+		if _, err := os.Stat(filepath.Join(townRoot, ".beads")); err == nil {
+			return townRoot, nil
+		}
 	}
 
 	return "", fmt.Errorf("no .beads directory found")
@@ -520,14 +520,14 @@ func detectSender() string {
 		}
 	}
 
-	// If in a rig's crew directory, extract address
+	// If in a rig's crew directory, extract address (format: rig/crew/name)
 	if strings.Contains(cwd, "/crew/") {
 		parts := strings.Split(cwd, "/crew/")
 		if len(parts) >= 2 {
 			rigPath := parts[0]
 			crewName := strings.Split(parts[1], "/")[0]
 			rigName := filepath.Base(rigPath)
-			return fmt.Sprintf("%s/%s", rigName, crewName)
+			return fmt.Sprintf("%s/crew/%s", rigName, crewName)
 		}
 	}
 

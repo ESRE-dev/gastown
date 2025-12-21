@@ -25,35 +25,46 @@ func NewRouter(workDir string) *Router {
 	}
 }
 
-// Send delivers a message via beads message.
+// Send delivers a message via beads issue creation.
+// Messages are stored as beads issues with type=message.
 func (r *Router) Send(msg *Message) error {
-	// Convert addresses to beads identities
-	toIdentity := addressToIdentity(msg.To)
+	// Use address directly for assignee (maintains compatibility with old messages)
+	// The from address is converted to identity format for the labels
 	fromIdentity := addressToIdentity(msg.From)
 
-	// Build command: bd mail send <recipient> -s <subject> -m <body>
-	args := []string{"mail", "send", toIdentity,
-		"-s", msg.Subject,
-		"-m", msg.Body,
+	// Build command: bd create --type=message --title="subject" --assignee=recipient
+	// Assignee uses the original address format to match how bd mail stored them
+	args := []string{"create",
+		"--type", "message",
+		"--title", msg.Subject,
+		"--assignee", msg.To,
+	}
+
+	// Add body if present
+	if msg.Body != "" {
+		args = append(args, "--description", msg.Body)
 	}
 
 	// Add priority flag
 	beadsPriority := PriorityToBeads(msg.Priority)
 	args = append(args, "--priority", fmt.Sprintf("%d", beadsPriority))
 
-	// Add message type if set
-	if msg.Type != "" && msg.Type != TypeNotification {
-		args = append(args, "--type", string(msg.Type))
-	}
+	// Build labels for metadata (from, thread-id, reply-to, message-type)
+	var labels []string
+	labels = append(labels, "from:"+fromIdentity)
 
-	// Add thread ID if set
 	if msg.ThreadID != "" {
-		args = append(args, "--thread-id", msg.ThreadID)
+		labels = append(labels, "thread:"+msg.ThreadID)
+	}
+	if msg.ReplyTo != "" {
+		labels = append(labels, "reply-to:"+msg.ReplyTo)
+	}
+	if msg.Type != "" && msg.Type != TypeNotification {
+		labels = append(labels, "msg-type:"+string(msg.Type))
 	}
 
-	// Add reply-to if set
-	if msg.ReplyTo != "" {
-		args = append(args, "--reply-to", msg.ReplyTo)
+	if len(labels) > 0 {
+		args = append(args, "--labels", strings.Join(labels, ","))
 	}
 
 	cmd := exec.Command("bd", args...)

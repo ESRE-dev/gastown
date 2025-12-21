@@ -45,9 +45,11 @@ func NewMailboxBeads(identity, workDir string) *Mailbox {
 }
 
 // NewMailboxFromAddress creates a beads-backed mailbox from a GGT address.
+// The address is stored as-is (not converted to identity) to match how
+// messages are stored with their assignee field.
 func NewMailboxFromAddress(address, workDir string) *Mailbox {
 	return &Mailbox{
-		identity: addressToIdentity(address),
+		identity: address, // Use address directly, not identity format
 		workDir:  workDir,
 		legacy:   false,
 	}
@@ -72,10 +74,13 @@ func (m *Mailbox) List() ([]*Message, error) {
 }
 
 func (m *Mailbox) listBeads() ([]*Message, error) {
-	// bd mail inbox --json
-	cmd := exec.Command("bd", "mail", "inbox", "--json")
+	// bd list --type=message --assignee=<identity> --status=open --json
+	cmd := exec.Command("bd", "list",
+		"--type", "message",
+		"--assignee", m.identity,
+		"--status", "open",
+		"--json")
 	cmd.Dir = m.workDir
-	cmd.Env = append(cmd.Environ(), "BD_IDENTITY="+m.identity)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -173,7 +178,8 @@ func (m *Mailbox) Get(id string) (*Message, error) {
 }
 
 func (m *Mailbox) getBeads(id string) (*Message, error) {
-	cmd := exec.Command("bd", "mail", "read", id, "--json")
+	// bd show <id> --json returns an array with one element
+	cmd := exec.Command("bd", "show", id, "--json")
 	cmd.Dir = m.workDir
 
 	var stdout, stderr bytes.Buffer
@@ -191,12 +197,16 @@ func (m *Mailbox) getBeads(id string) (*Message, error) {
 		return nil, err
 	}
 
-	var bm BeadsMessage
-	if err := json.Unmarshal(stdout.Bytes(), &bm); err != nil {
+	// bd show returns an array with one element
+	var beadsMsgs []BeadsMessage
+	if err := json.Unmarshal(stdout.Bytes(), &beadsMsgs); err != nil {
 		return nil, err
 	}
+	if len(beadsMsgs) == 0 {
+		return nil, ErrMessageNotFound
+	}
 
-	return bm.ToMessage(), nil
+	return beadsMsgs[0].ToMessage(), nil
 }
 
 func (m *Mailbox) getLegacy(id string) (*Message, error) {
@@ -221,7 +231,8 @@ func (m *Mailbox) MarkRead(id string) error {
 }
 
 func (m *Mailbox) markReadBeads(id string) error {
-	cmd := exec.Command("bd", "mail", "ack", id)
+	// bd close <id> marks the message as read
+	cmd := exec.Command("bd", "close", id, "--reason", "Message read")
 	cmd.Dir = m.workDir
 
 	var stderr bytes.Buffer
@@ -389,10 +400,12 @@ func (m *Mailbox) ListByThread(threadID string) ([]*Message, error) {
 }
 
 func (m *Mailbox) listByThreadBeads(threadID string) ([]*Message, error) {
-	// bd message thread <thread-id> --json
-	cmd := exec.Command("bd", "message", "thread", threadID, "--json")
+	// bd list --type=message --label=thread:<thread-id> --json
+	cmd := exec.Command("bd", "list",
+		"--type", "message",
+		"--label", "thread:"+threadID,
+		"--json")
 	cmd.Dir = m.workDir
-	cmd.Env = append(cmd.Environ(), "BD_IDENTITY="+m.identity)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
