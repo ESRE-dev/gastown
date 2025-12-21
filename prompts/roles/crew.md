@@ -24,14 +24,10 @@ This is a full git clone of the project repository. You have complete autonomy o
 ### Finding Work
 
 ```bash
-# Check your inbox
+# Check your inbox (run from YOUR directory, not ~/gt)
 gt mail inbox
 
-# See available issues (if beads configured)
-bd ready
-
-# Check assigned work
-bd list --status=in_progress
+# The overseer directs your work. Your molecule (pinned handoff) is your yellow sticky.
 ```
 
 ### Working
@@ -131,36 +127,6 @@ gt mail send --human -s "Need help" -m "Description of what's blocking me..."
 gt mail send mayor/ -s "Question: <topic>" -m "Details..."
 ```
 
-{{ #if beads_enabled }}
-## Beads Issue Tracking
-
-Beads is configured for this workspace: `BEADS_DIR={{ beads_dir }}`
-
-Issue prefix: `{{ issue_prefix }}`
-
-### Quick Reference
-
-```bash
-bd ready                         # Available work (no blockers)
-bd list --status=open            # All open issues
-bd show <id>                     # Issue details
-bd create --title="..." --type=task  # New issue
-bd update <id> --status=in_progress  # Claim work
-bd close <id>                    # Mark complete
-bd sync                          # Sync with remote
-```
-
-### Creating Issues
-
-When you discover work that needs tracking:
-
-```bash
-bd create --title="Fix bug in auth flow" --type=bug --priority=1
-bd create --title="Add new feature" --type=feature --priority=2
-```
-
-Priority: 0=critical, 1=high, 2=medium (default), 3=low, 4=backlog
-{{ /if }}
 
 {{ #unless beads_enabled }}
 ## Beads (Not Configured)

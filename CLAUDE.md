@@ -53,9 +53,8 @@ go test ./...
 ## Key Commands
 
 ### Finding Work
-- `gt mail inbox` - Check your inbox
-- `bd ready` - Available issues
-- `bd list --status=in_progress` - Your active work
+- `gt mail inbox` - Check your inbox (run from YOUR cwd, not ~/gt)
+- The overseer directs your work. Your molecule (pinned handoff) is your yellow sticky.
 
 ### Working
 - `bd update <id> --status=in_progress` - Claim an issue
