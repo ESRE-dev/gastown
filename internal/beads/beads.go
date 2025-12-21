@@ -547,6 +547,60 @@ func (b *Beads) ClearHandoffContent(role string) error {
 	return b.Update(issue.ID, UpdateOptions{Description: &empty})
 }
 
+// ClearMailResult contains statistics from a ClearMail operation.
+type ClearMailResult struct {
+	Closed  int // Number of messages closed
+	Cleared int // Number of pinned messages cleared (content removed)
+}
+
+// ClearMail closes or clears all open messages.
+// Non-pinned messages are closed with the given reason.
+// Pinned messages have their description cleared but remain open.
+func (b *Beads) ClearMail(reason string) (*ClearMailResult, error) {
+	// List all open messages
+	issues, err := b.List(ListOptions{
+		Status:   "open",
+		Type:     "message",
+		Priority: -1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing messages: %w", err)
+	}
+
+	result := &ClearMailResult{}
+
+	// Separate pinned from non-pinned
+	var toClose []string
+	var toClear []*Issue
+
+	for _, issue := range issues {
+		if issue.Status == StatusPinned {
+			toClear = append(toClear, issue)
+		} else {
+			toClose = append(toClose, issue.ID)
+		}
+	}
+
+	// Close non-pinned messages in batch
+	if len(toClose) > 0 {
+		if err := b.CloseWithReason(reason, toClose...); err != nil {
+			return nil, fmt.Errorf("closing messages: %w", err)
+		}
+		result.Closed = len(toClose)
+	}
+
+	// Clear pinned messages
+	empty := ""
+	for _, issue := range toClear {
+		if err := b.Update(issue.ID, UpdateOptions{Description: &empty}); err != nil {
+			return nil, fmt.Errorf("clearing pinned message %s: %w", issue.ID, err)
+		}
+		result.Cleared++
+	}
+
+	return result, nil
+}
+
 // MRFields holds the structured fields for a merge-request issue.
 // These fields are stored as key: value lines in the issue description.
 type MRFields struct {

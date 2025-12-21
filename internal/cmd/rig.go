@@ -71,14 +71,15 @@ var rigRemoveCmd = &cobra.Command{
 
 var rigResetCmd = &cobra.Command{
 	Use:   "reset",
-	Short: "Reset rig state (handoff content, etc.)",
+	Short: "Reset rig state (handoff content, mail, etc.)",
 	Long: `Reset various rig state.
 
 By default, resets all resettable state. Use flags to reset specific items.
 
 Examples:
   gt rig reset              # Reset all state
-  gt rig reset --handoff    # Clear handoff content only`,
+  gt rig reset --handoff    # Clear handoff content only
+  gt rig reset --mail       # Clear stale mail messages only`,
 	RunE: runRigReset,
 }
 
@@ -113,6 +114,7 @@ var (
 	rigAddPrefix       string
 	rigAddCrew         string
 	rigResetHandoff    bool
+	rigResetMail       bool
 	rigResetRole       string
 	rigShutdownForce   bool
 	rigShutdownNuclear bool
@@ -130,6 +132,7 @@ func init() {
 	rigAddCmd.Flags().StringVar(&rigAddCrew, "crew", "main", "Default crew workspace name")
 
 	rigResetCmd.Flags().BoolVar(&rigResetHandoff, "handoff", false, "Clear handoff content")
+	rigResetCmd.Flags().BoolVar(&rigResetMail, "mail", false, "Clear stale mail messages")
 	rigResetCmd.Flags().StringVar(&rigResetRole, "role", "", "Role to reset (default: auto-detect from cwd)")
 
 	rigShutdownCmd.Flags().BoolVarP(&rigShutdownForce, "force", "f", false, "Force immediate shutdown")
@@ -319,7 +322,7 @@ func runRigReset(cmd *cobra.Command, args []string) error {
 	}
 
 	// If no specific flags, reset all; otherwise only reset what's specified
-	resetAll := !rigResetHandoff
+	resetAll := !rigResetHandoff && !rigResetMail
 
 	bd := beads.New(townRoot)
 
@@ -329,6 +332,20 @@ func runRigReset(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("clearing handoff content: %w", err)
 		}
 		fmt.Printf("%s Cleared handoff content for %s\n", style.Success.Render("✓"), roleKey)
+	}
+
+	// Clear stale mail messages
+	if resetAll || rigResetMail {
+		result, err := bd.ClearMail("Cleared during reset")
+		if err != nil {
+			return fmt.Errorf("clearing mail: %w", err)
+		}
+		if result.Closed > 0 || result.Cleared > 0 {
+			fmt.Printf("%s Cleared mail: %d closed, %d pinned cleared\n",
+				style.Success.Render("✓"), result.Closed, result.Cleared)
+		} else {
+			fmt.Printf("%s No mail to clear\n", style.Success.Render("✓"))
+		}
 	}
 
 	return nil
