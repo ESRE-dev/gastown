@@ -13,10 +13,11 @@ func TestAddressToIdentity(t *testing.T) {
 		{"deacon", "deacon/"},
 		{"deacon/", "deacon/"},
 
-		// Rig-level agents use dash separator
-		{"gastown/Toast", "gastown-Toast"},
-		{"gastown/refinery", "gastown-refinery"},
-		{"gastown/witness", "gastown-witness"},
+		// Rig-level agents: slash format matches directory structure
+		{"gastown/polecats/Toast", "gastown/polecats/Toast"},
+		{"gastown/crew/max", "gastown/crew/max"},
+		{"gastown/refinery", "gastown/refinery"},
+		{"gastown/witness", "gastown/witness"},
 
 		// Rig broadcast (trailing slash removed)
 		{"gastown/", "gastown"},
@@ -43,13 +44,14 @@ func TestIdentityToAddress(t *testing.T) {
 		{"deacon", "deacon/"},
 		{"deacon/", "deacon/"},
 
-		// Rig-level agents
-		{"gastown-Toast", "gastown/Toast"},
-		{"gastown-refinery", "gastown/refinery"},
-		{"gastown-witness", "gastown/witness"},
+		// Rig-level agents: identity == address (slash format)
+		{"gastown/polecats/Toast", "gastown/polecats/Toast"},
+		{"gastown/crew/max", "gastown/crew/max"},
+		{"gastown/refinery", "gastown/refinery"},
+		{"gastown/witness", "gastown/witness"},
 
-		// Rig name only (adds trailing slash)
-		{"gastown", "gastown/"},
+		// Rig name only (no transformation)
+		{"gastown", "gastown"},
 	}
 
 	for _, tt := range tests {

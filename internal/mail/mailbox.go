@@ -20,7 +20,7 @@ var (
 
 // Mailbox manages messages for an identity via beads.
 type Mailbox struct {
-	identity string // beads identity (e.g., "gastown-Toast")
+	identity string // beads identity (e.g., "gastown/polecats/Toast")
 	workDir  string // directory to run bd commands in
 	beadsDir string // explicit .beads directory path (set via BEADS_DIR)
 	path     string // for legacy JSONL mode (crew workers)

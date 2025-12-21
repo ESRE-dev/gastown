@@ -276,16 +276,15 @@ func ParseMessageType(s string) MessageType {
 
 // addressToIdentity converts a GGT address to a beads identity.
 //
-// Examples:
+// Addresses use slash format matching directory structure:
 //   - "mayor/" → "mayor/"
 //   - "mayor" → "mayor/"
 //   - "deacon/" → "deacon/"
 //   - "deacon" → "deacon/"
-//   - "gastown/Toast" → "gastown-Toast"
-//   - "gastown/refinery" → "gastown-refinery"
+//   - "gastown/polecats/Toast" → "gastown/polecats/Toast"
+//   - "gastown/crew/max" → "gastown/crew/max"
+//   - "gastown/refinery" → "gastown/refinery"
 //   - "gastown/" → "gastown" (rig broadcast)
-//   - "beads/crew/dave" → "beads-dave" (crew/ stripped)
-//   - "beads/polecats/nux" → "beads-nux" (polecats/ stripped)
 func addressToIdentity(address string) string {
 	// Town-level agents: mayor and deacon keep trailing slash
 	if address == "mayor" || address == "mayor/" {
@@ -300,36 +299,20 @@ func addressToIdentity(address string) string {
 		address = address[:len(address)-1]
 	}
 
-	// Normalize worker paths: strip crew/ and polecats/ from path
-	// beads/crew/dave → beads/dave (both resolve to beads-dave)
-	// beads/polecats/nux → beads/nux (both resolve to beads-nux)
-	address = strings.Replace(address, "/crew/", "/", 1)
-	address = strings.Replace(address, "/polecats/", "/", 1)
-
-	// Replace / with - for beads identity
-	// gastown/Toast → gastown-Toast
-	result := ""
-	for _, c := range address {
-		if c == '/' {
-			result += "-"
-		} else {
-			result = result + string(c)
-		}
-	}
-	return result
+	// Keep slashes - addresses map to directory structure
+	return address
 }
 
 // identityToAddress converts a beads identity back to a GGT address.
 //
-// Examples:
-//   - "mayor" → "mayor/"
+// Identity format matches address format (slash-based):
 //   - "mayor/" → "mayor/"
-//   - "deacon" → "deacon/"
 //   - "deacon/" → "deacon/"
-//   - "gastown-Toast" → "gastown/Toast"
-//   - "gastown-refinery" → "gastown/refinery"
+//   - "gastown/polecats/Toast" → "gastown/polecats/Toast"
+//   - "gastown/crew/max" → "gastown/crew/max"
+//   - "gastown/refinery" → "gastown/refinery"
 func identityToAddress(identity string) string {
-	// Town-level agents
+	// Town-level agents ensure trailing slash
 	if identity == "mayor" || identity == "mayor/" {
 		return "mayor/"
 	}
@@ -337,14 +320,6 @@ func identityToAddress(identity string) string {
 		return "deacon/"
 	}
 
-	// Find first dash and replace with /
-	// gastown-Toast → gastown/Toast
-	for i, c := range identity {
-		if c == '-' {
-			return identity[:i] + "/" + identity[i+1:]
-		}
-	}
-
-	// No dash found, return as-is with trailing slash
-	return identity + "/"
+	// Identity already in slash format, return as-is
+	return identity
 }

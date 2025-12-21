@@ -554,14 +554,14 @@ func detectSender() string {
 		return "mayor/"
 	}
 
-	// If in a rig's polecats directory, extract address
+	// If in a rig's polecats directory, extract address (format: rig/polecats/name)
 	if strings.Contains(cwd, "/polecats/") {
 		parts := strings.Split(cwd, "/polecats/")
 		if len(parts) >= 2 {
 			rigPath := parts[0]
 			polecatPath := strings.Split(parts[1], "/")[0]
 			rigName := filepath.Base(rigPath)
-			return fmt.Sprintf("%s/%s", rigName, polecatPath)
+			return fmt.Sprintf("%s/polecats/%s", rigName, polecatPath)
 		}
 	}
 
