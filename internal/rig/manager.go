@@ -278,6 +278,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("initializing beads: %w", err)
 	}
 
+	// Initialize ephemeral beads for wisp/molecule tracking
+	if err := m.initEphemeralBeads(rigPath); err != nil {
+		return nil, fmt.Errorf("initializing ephemeral beads: %w", err)
+	}
+
 	// Register in town config
 	m.config.Rigs[opts.Name] = config.RigEntry{
 		GitURL:  opts.GitURL,
@@ -349,6 +354,67 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		}
 	}
 	return nil
+}
+
+// initEphemeralBeads initializes the ephemeral beads database at rig level.
+// Ephemeral beads are local-only (no sync-branch) and used for runtime tracking
+// of wisps and molecules.
+func (m *Manager) initEphemeralBeads(rigPath string) error {
+	beadsDir := filepath.Join(rigPath, ".beads-ephemeral")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		return err
+	}
+
+	// Initialize as a git repo (for local versioning, not for sync)
+	cmd := exec.Command("git", "init")
+	cmd.Dir = beadsDir
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git init: %w", err)
+	}
+
+	// Create ephemeral config (no sync-branch needed)
+	configPath := filepath.Join(beadsDir, "config.yaml")
+	configContent := "ephemeral: true\n# No sync-branch - ephemeral is local only\n"
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		return err
+	}
+
+	// Add .beads-ephemeral/ to .gitignore if not already present
+	gitignorePath := filepath.Join(rigPath, ".gitignore")
+	return m.ensureGitignoreEntry(gitignorePath, ".beads-ephemeral/")
+}
+
+// ensureGitignoreEntry adds an entry to .gitignore if it doesn't already exist.
+func (m *Manager) ensureGitignoreEntry(gitignorePath, entry string) error {
+	// Read existing content
+	content, err := os.ReadFile(gitignorePath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	// Check if entry already exists
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == entry {
+			return nil // Already present
+		}
+	}
+
+	// Append entry
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// Add newline before if file doesn't end with one
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		if _, err := f.WriteString("\n"); err != nil {
+			return err
+		}
+	}
+	_, err = f.WriteString(entry + "\n")
+	return err
 }
 
 // deriveBeadsPrefix generates a beads prefix from a rig name.

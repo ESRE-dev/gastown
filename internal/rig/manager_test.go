@@ -192,3 +192,108 @@ func TestRigSummary(t *testing.T) {
 		t.Error("expected HasRefinery = false")
 	}
 }
+
+func TestInitEphemeralBeads(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	rigPath := filepath.Join(root, "test-rig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	if err := manager.initEphemeralBeads(rigPath); err != nil {
+		t.Fatalf("initEphemeralBeads: %v", err)
+	}
+
+	// Verify directory was created
+	ephemeralPath := filepath.Join(rigPath, ".beads-ephemeral")
+	if _, err := os.Stat(ephemeralPath); os.IsNotExist(err) {
+		t.Error(".beads-ephemeral/ was not created")
+	}
+
+	// Verify it's a git repo
+	gitPath := filepath.Join(ephemeralPath, ".git")
+	if _, err := os.Stat(gitPath); os.IsNotExist(err) {
+		t.Error(".beads-ephemeral/ was not initialized as git repo")
+	}
+
+	// Verify config.yaml was created with ephemeral: true
+	configPath := filepath.Join(ephemeralPath, "config.yaml")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("reading config.yaml: %v", err)
+	}
+	if string(content) != "ephemeral: true\n# No sync-branch - ephemeral is local only\n" {
+		t.Errorf("config.yaml content = %q, want ephemeral: true with comment", string(content))
+	}
+
+	// Verify .gitignore was updated
+	gitignorePath := filepath.Join(rigPath, ".gitignore")
+	ignoreContent, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatalf("reading .gitignore: %v", err)
+	}
+	if string(ignoreContent) != ".beads-ephemeral/\n" {
+		t.Errorf(".gitignore content = %q, want .beads-ephemeral/", string(ignoreContent))
+	}
+}
+
+func TestEnsureGitignoreEntry_AddsEntry(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	gitignorePath := filepath.Join(root, ".gitignore")
+
+	if err := manager.ensureGitignoreEntry(gitignorePath, ".test-entry/"); err != nil {
+		t.Fatalf("ensureGitignoreEntry: %v", err)
+	}
+
+	content, _ := os.ReadFile(gitignorePath)
+	if string(content) != ".test-entry/\n" {
+		t.Errorf("content = %q, want .test-entry/", string(content))
+	}
+}
+
+func TestEnsureGitignoreEntry_DoesNotDuplicate(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	gitignorePath := filepath.Join(root, ".gitignore")
+
+	// Pre-populate with the entry
+	if err := os.WriteFile(gitignorePath, []byte(".test-entry/\n"), 0644); err != nil {
+		t.Fatalf("writing .gitignore: %v", err)
+	}
+
+	if err := manager.ensureGitignoreEntry(gitignorePath, ".test-entry/"); err != nil {
+		t.Fatalf("ensureGitignoreEntry: %v", err)
+	}
+
+	content, _ := os.ReadFile(gitignorePath)
+	if string(content) != ".test-entry/\n" {
+		t.Errorf("content = %q, want single .test-entry/", string(content))
+	}
+}
+
+func TestEnsureGitignoreEntry_AppendsToExisting(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	gitignorePath := filepath.Join(root, ".gitignore")
+
+	// Pre-populate with existing entries
+	if err := os.WriteFile(gitignorePath, []byte("node_modules/\n*.log\n"), 0644); err != nil {
+		t.Fatalf("writing .gitignore: %v", err)
+	}
+
+	if err := manager.ensureGitignoreEntry(gitignorePath, ".test-entry/"); err != nil {
+		t.Fatalf("ensureGitignoreEntry: %v", err)
+	}
+
+	content, _ := os.ReadFile(gitignorePath)
+	expected := "node_modules/\n*.log\n.test-entry/\n"
+	if string(content) != expected {
+		t.Errorf("content = %q, want %q", string(content), expected)
+	}
+}
