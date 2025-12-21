@@ -18,6 +18,7 @@ func BuiltinMolecules() []BuiltinMolecule {
 		BootstrapGasTownMolecule(),
 		PolecatWorkMolecule(),
 		VersionBumpMolecule(),
+		DeaconPatrolMolecule(),
 	}
 }
 
@@ -508,6 +509,149 @@ gt daemon start
 ` + "```" + `
 
 Needs: verify-release`,
+	}
+}
+
+// DeaconPatrolMolecule returns the deacon-patrol molecule definition.
+// This is the Mayor's daemon loop for handling callbacks, health checks, and cleanup.
+func DeaconPatrolMolecule() BuiltinMolecule {
+	return BuiltinMolecule{
+		ID:    "mol-deacon-patrol",
+		Title: "Deacon Patrol",
+		Description: `Mayor's daemon patrol loop.
+
+The Deacon is the Mayor's background process that runs continuously,
+handling callbacks, monitoring rig health, and performing cleanup.
+Each patrol cycle runs these steps in sequence, then loops or exits.
+
+## Step: inbox-check
+Handle callbacks from agents.
+
+Check the Mayor's inbox for messages from:
+- Witnesses reporting polecat status
+- Refineries reporting merge results
+- Polecats requesting help or escalation
+- External triggers (webhooks, timers)
+
+Process each message:
+` + "```" + `bash
+gt mail inbox
+# For each message:
+gt mail read <id>
+# Handle based on message type
+` + "```" + `
+
+Callbacks may spawn new polecats, update issue state, or trigger other actions.
+
+## Step: health-scan
+Ping Witnesses and Refineries.
+
+For each rig, verify:
+- Witness is responsive
+- Refinery is processing queue
+- No stalled operations
+
+` + "```" + `bash
+gt status --health
+# Check each rig
+for rig in $(gt rigs); do
+    gt rig status $rig
+done
+` + "```" + `
+
+Report any issues found. Restart unresponsive components if needed.
+Needs: inbox-check
+
+## Step: plugin-run
+Execute registered plugins.
+
+Run any plugins registered with the Deacon:
+- Custom health checks
+- Integration hooks (Slack, GitHub, etc.)
+- Metrics collection
+- External system sync
+
+Plugins are defined in the Mayor's config and run on each patrol cycle.
+Skip this step if no plugins are registered.
+Needs: health-scan
+
+## Step: orphan-check
+Find abandoned work.
+
+Scan for orphaned state:
+- Issues marked in_progress with no active polecat
+- Polecats that stopped responding mid-work
+- Merge queue entries with no polecat owner
+- Wisp sessions that outlived their spawner
+
+` + "```" + `bash
+bd list --status=in_progress
+gt polecats --all --orphan
+` + "```" + `
+
+For each orphan:
+- Check if polecat session still exists
+- If not, mark issue for reassignment or retry
+- File incident beads if data loss occurred
+Needs: health-scan
+
+## Step: session-gc
+Clean dead sessions.
+
+Garbage collect terminated sessions:
+- Remove stale polecat directories
+- Clean up wisp session artifacts
+- Prune old logs and temp files
+- Archive completed molecule state
+
+` + "```" + `bash
+gt gc --sessions
+gt gc --wisps --age=1h
+` + "```" + `
+
+Preserve audit trail. Only clean sessions confirmed dead.
+Needs: orphan-check
+
+## Step: context-check
+Check own context limit.
+
+The Deacon runs in a Claude session with finite context.
+Check if approaching the limit:
+
+` + "```" + `bash
+gt context --usage
+` + "```" + `
+
+If context is high (>80%), prepare for handoff:
+- Summarize current state
+- Note any pending work
+- Write handoff to molecule state
+
+This enables the Deacon to burn and respawn cleanly.
+Needs: session-gc
+
+## Step: loop-or-exit
+Burn and let daemon respawn, or exit if context high.
+
+Decision point at end of patrol cycle:
+
+If context is LOW:
+- Sleep briefly (avoid tight loop)
+- Return to inbox-check step
+
+If context is HIGH:
+- Write state to persistent storage
+- Exit cleanly
+- Let the daemon orchestrator respawn a fresh Deacon
+
+The daemon ensures Deacon is always running:
+` + "```" + `bash
+# Daemon respawns on exit
+gt daemon status
+` + "```" + `
+
+This enables infinite patrol duration via context-aware respawning.
+Needs: context-check`,
 	}
 }
 

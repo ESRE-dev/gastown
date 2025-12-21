@@ -5,8 +5,8 @@ import "testing"
 func TestBuiltinMolecules(t *testing.T) {
 	molecules := BuiltinMolecules()
 
-	if len(molecules) != 7 {
-		t.Errorf("expected 7 built-in molecules, got %d", len(molecules))
+	if len(molecules) != 8 {
+		t.Errorf("expected 8 built-in molecules, got %d", len(molecules))
 	}
 
 	// Verify each molecule can be parsed and validated
@@ -228,5 +228,58 @@ func TestPolecatWorkMolecule(t *testing.T) {
 	// request-shutdown needs update-handoff
 	if len(steps[7].Needs) != 1 || steps[7].Needs[0] != "update-handoff" {
 		t.Errorf("request-shutdown should need update-handoff, got %v", steps[7].Needs)
+	}
+}
+
+func TestDeaconPatrolMolecule(t *testing.T) {
+	mol := DeaconPatrolMolecule()
+
+	if mol.ID != "mol-deacon-patrol" {
+		t.Errorf("expected ID 'mol-deacon-patrol', got %q", mol.ID)
+	}
+
+	if mol.Title != "Deacon Patrol" {
+		t.Errorf("expected Title 'Deacon Patrol', got %q", mol.Title)
+	}
+
+	steps, err := ParseMoleculeSteps(mol.Description)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	// Should have 7 steps: inbox-check, health-scan, plugin-run, orphan-check,
+	// session-gc, context-check, loop-or-exit
+	if len(steps) != 7 {
+		t.Errorf("expected 7 steps, got %d", len(steps))
+	}
+
+	expectedRefs := []string{
+		"inbox-check", "health-scan", "plugin-run", "orphan-check",
+		"session-gc", "context-check", "loop-or-exit",
+	}
+	for i, expected := range expectedRefs {
+		if i >= len(steps) {
+			t.Errorf("missing step %d: expected %q", i, expected)
+			continue
+		}
+		if steps[i].Ref != expected {
+			t.Errorf("step %d: expected ref %q, got %q", i, expected, steps[i].Ref)
+		}
+	}
+
+	// Verify key dependencies
+	// inbox-check has no deps (first step)
+	if len(steps[0].Needs) != 0 {
+		t.Errorf("inbox-check should have no deps, got %v", steps[0].Needs)
+	}
+
+	// health-scan needs inbox-check
+	if len(steps[1].Needs) != 1 || steps[1].Needs[0] != "inbox-check" {
+		t.Errorf("health-scan should need inbox-check, got %v", steps[1].Needs)
+	}
+
+	// loop-or-exit needs context-check
+	if len(steps[6].Needs) != 1 || steps[6].Needs[0] != "context-check" {
+		t.Errorf("loop-or-exit should need context-check, got %v", steps[6].Needs)
 	}
 }
