@@ -120,6 +120,16 @@ This closes the message in beads.`,
 	RunE: runMailDelete,
 }
 
+var mailArchiveCmd = &cobra.Command{
+	Use:   "archive <message-id>",
+	Short: "Archive a message",
+	Long: `Archive a message (alias for delete).
+
+Removes the message from your inbox by closing it in beads.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runMailArchive,
+}
+
 var mailCheckCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Check for new mail (for hooks)",
@@ -212,6 +222,7 @@ func init() {
 	mailCmd.AddCommand(mailInboxCmd)
 	mailCmd.AddCommand(mailReadCmd)
 	mailCmd.AddCommand(mailDeleteCmd)
+	mailCmd.AddCommand(mailArchiveCmd)
 	mailCmd.AddCommand(mailCheckCmd)
 	mailCmd.AddCommand(mailThreadCmd)
 	mailCmd.AddCommand(mailReplyCmd)
@@ -461,6 +472,33 @@ func runMailDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Message deleted\n", style.Bold.Render("✓"))
+	return nil
+}
+
+func runMailArchive(cmd *cobra.Command, args []string) error {
+	msgID := args[0]
+
+	// Determine which inbox
+	address := detectSender()
+
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Get mailbox
+	router := mail.NewRouter(workDir)
+	mailbox, err := router.GetMailbox(address)
+	if err != nil {
+		return fmt.Errorf("getting mailbox: %w", err)
+	}
+
+	if err := mailbox.Delete(msgID); err != nil {
+		return fmt.Errorf("archiving message: %w", err)
+	}
+
+	fmt.Printf("%s Message archived\n", style.Bold.Render("✓"))
 	return nil
 }
 
