@@ -52,6 +52,16 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 		return runMayorStatusLine(t)
 	}
 
+	// Witness status line
+	if role == "witness" || strings.HasSuffix(statusLineSession, "-witness") {
+		return runWitnessStatusLine(t, rigName)
+	}
+
+	// Refinery status line
+	if role == "refinery" || strings.HasSuffix(statusLineSession, "-refinery") {
+		return runRefineryStatusLine(rigName)
+	}
+
 	// Build mail identity
 	var identity string
 	if rigName != "" {
@@ -121,6 +131,115 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%d polecats", polecatCount))
 	parts = append(parts, fmt.Sprintf("%d rigs", rigCount))
+	if unread > 0 {
+		parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+	}
+
+	fmt.Print(strings.Join(parts, " | ") + " |")
+	return nil
+}
+
+// runWitnessStatusLine outputs status for a witness session.
+// Shows: polecat count under management, mail count
+func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
+	if rigName == "" {
+		// Try to extract from session name: gt-<rig>-witness
+		if strings.HasPrefix(statusLineSession, "gt-") && strings.HasSuffix(statusLineSession, "-witness") {
+			rigName = strings.TrimPrefix(statusLineSession, "gt-")
+			rigName = strings.TrimSuffix(rigName, "-witness")
+		}
+	}
+
+	// Count polecats in this rig
+	sessions, err := t.ListSessions()
+	if err != nil {
+		return nil // Silent fail
+	}
+
+	polecatCount := 0
+	for _, s := range sessions {
+		agent := categorizeSession(s)
+		if agent == nil {
+			continue
+		}
+		// Count polecats in this specific rig
+		if agent.Type == AgentPolecat && agent.Rig == rigName {
+			polecatCount++
+		}
+	}
+
+	// Get witness mail
+	identity := fmt.Sprintf("%s/witness", rigName)
+	unread := getUnreadMailCount(identity)
+
+	// Build status
+	var parts []string
+	parts = append(parts, fmt.Sprintf("👁 %d polecats", polecatCount))
+	if unread > 0 {
+		parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+	}
+
+	fmt.Print(strings.Join(parts, " | ") + " |")
+	return nil
+}
+
+// runRefineryStatusLine outputs status for a refinery session.
+// Shows: MQ length, current processing status, mail count
+func runRefineryStatusLine(rigName string) error {
+	if rigName == "" {
+		// Try to extract from session name: gt-<rig>-refinery
+		if strings.HasPrefix(statusLineSession, "gt-") && strings.HasSuffix(statusLineSession, "-refinery") {
+			rigName = strings.TrimPrefix(statusLineSession, "gt-")
+			rigName = strings.TrimSuffix(rigName, "-refinery")
+		}
+	}
+
+	if rigName == "" {
+		fmt.Print("🏭 ? |")
+		return nil
+	}
+
+	// Get refinery manager using shared helper
+	mgr, _, err := getRefineryManager(rigName)
+	if err != nil {
+		// Fallback to simple status if we can't access refinery
+		fmt.Print("🏭 MQ: ? |")
+		return nil
+	}
+
+	// Get queue
+	queue, err := mgr.Queue()
+	if err != nil {
+		// Fallback to simple status if we can't read queue
+		fmt.Print("🏭 MQ: ? |")
+		return nil
+	}
+
+	// Count pending items (position > 0 means pending, 0 means currently processing)
+	pending := 0
+	processing := false
+	for _, item := range queue {
+		if item.Position == 0 {
+			processing = true
+		} else {
+			pending++
+		}
+	}
+
+	// Get refinery mail
+	identity := fmt.Sprintf("%s/refinery", rigName)
+	unread := getUnreadMailCount(identity)
+
+	// Build status
+	var parts []string
+	if processing {
+		parts = append(parts, fmt.Sprintf("🏭 MQ: %d (+1)", pending))
+	} else if pending > 0 {
+		parts = append(parts, fmt.Sprintf("🏭 MQ: %d", pending))
+	} else {
+		parts = append(parts, "🏭 idle")
+	}
+
 	if unread > 0 {
 		parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
 	}
