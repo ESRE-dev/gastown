@@ -597,7 +597,7 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 			messages, _ := mailbox.ListUnread()
 			var subjects []string
 			for _, msg := range messages {
-				subjects = append(subjects, fmt.Sprintf("- From %s: %s", msg.From, msg.Subject))
+				subjects = append(subjects, fmt.Sprintf("- %s from %s: %s", msg.ID, msg.From, msg.Subject))
 			}
 
 			fmt.Println("<system-reminder>")
