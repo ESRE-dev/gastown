@@ -278,9 +278,9 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("initializing beads: %w", err)
 	}
 
-	// Initialize ephemeral beads for wisp/molecule tracking
-	if err := m.initEphemeralBeads(rigPath); err != nil {
-		return nil, fmt.Errorf("initializing ephemeral beads: %w", err)
+	// Initialize wisp beads for wisp/molecule tracking
+	if err := m.initWispBeads(rigPath); err != nil {
+		return nil, fmt.Errorf("initializing wisp beads: %w", err)
 	}
 
 	// Register in town config
@@ -356,11 +356,11 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	return nil
 }
 
-// initEphemeralBeads initializes the ephemeral beads database at rig level.
-// Ephemeral beads are local-only (no sync-branch) and used for runtime tracking
+// initWispBeads initializes the wisp beads database at rig level.
+// Wisp beads are local-only (no sync-branch) and used for runtime tracking
 // of wisps and molecules.
-func (m *Manager) initEphemeralBeads(rigPath string) error {
-	beadsDir := filepath.Join(rigPath, ".beads-ephemeral")
+func (m *Manager) initWispBeads(rigPath string) error {
+	beadsDir := filepath.Join(rigPath, ".beads-wisp")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		return err
 	}
@@ -372,16 +372,16 @@ func (m *Manager) initEphemeralBeads(rigPath string) error {
 		return fmt.Errorf("git init: %w", err)
 	}
 
-	// Create ephemeral config (no sync-branch needed)
+	// Create wisp config (no sync-branch needed)
 	configPath := filepath.Join(beadsDir, "config.yaml")
-	configContent := "ephemeral: true\n# No sync-branch - ephemeral is local only\n"
+	configContent := "wisp: true\n# No sync-branch - wisp is local only\n"
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		return err
 	}
 
-	// Add .beads-ephemeral/ to .gitignore if not already present
+	// Add .beads-wisp/ to .gitignore if not already present
 	gitignorePath := filepath.Join(rigPath, ".gitignore")
-	return m.ensureGitignoreEntry(gitignorePath, ".beads-ephemeral/")
+	return m.ensureGitignoreEntry(gitignorePath, ".beads-wisp/")
 }
 
 // ensureGitignoreEntry adds an entry to .gitignore if it doesn't already exist.

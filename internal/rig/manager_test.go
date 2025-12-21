@@ -193,7 +193,7 @@ func TestRigSummary(t *testing.T) {
 	}
 }
 
-func TestInitEphemeralBeads(t *testing.T) {
+func TestInitWispBeads(t *testing.T) {
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -202,30 +202,30 @@ func TestInitEphemeralBeads(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	if err := manager.initEphemeralBeads(rigPath); err != nil {
-		t.Fatalf("initEphemeralBeads: %v", err)
+	if err := manager.initWispBeads(rigPath); err != nil {
+		t.Fatalf("initWispBeads: %v", err)
 	}
 
 	// Verify directory was created
-	ephemeralPath := filepath.Join(rigPath, ".beads-ephemeral")
-	if _, err := os.Stat(ephemeralPath); os.IsNotExist(err) {
-		t.Error(".beads-ephemeral/ was not created")
+	wispPath := filepath.Join(rigPath, ".beads-wisp")
+	if _, err := os.Stat(wispPath); os.IsNotExist(err) {
+		t.Error(".beads-wisp/ was not created")
 	}
 
 	// Verify it's a git repo
-	gitPath := filepath.Join(ephemeralPath, ".git")
+	gitPath := filepath.Join(wispPath, ".git")
 	if _, err := os.Stat(gitPath); os.IsNotExist(err) {
-		t.Error(".beads-ephemeral/ was not initialized as git repo")
+		t.Error(".beads-wisp/ was not initialized as git repo")
 	}
 
-	// Verify config.yaml was created with ephemeral: true
-	configPath := filepath.Join(ephemeralPath, "config.yaml")
+	// Verify config.yaml was created with wisp: true
+	configPath := filepath.Join(wispPath, "config.yaml")
 	content, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("reading config.yaml: %v", err)
 	}
-	if string(content) != "ephemeral: true\n# No sync-branch - ephemeral is local only\n" {
-		t.Errorf("config.yaml content = %q, want ephemeral: true with comment", string(content))
+	if string(content) != "wisp: true\n# No sync-branch - wisp is local only\n" {
+		t.Errorf("config.yaml content = %q, want wisp: true with comment", string(content))
 	}
 
 	// Verify .gitignore was updated
@@ -234,8 +234,8 @@ func TestInitEphemeralBeads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading .gitignore: %v", err)
 	}
-	if string(ignoreContent) != ".beads-ephemeral/\n" {
-		t.Errorf(".gitignore content = %q, want .beads-ephemeral/", string(ignoreContent))
+	if string(ignoreContent) != ".beads-wisp/\n" {
+		t.Errorf(".gitignore content = %q, want .beads-wisp/", string(ignoreContent))
 	}
 }
 
