@@ -220,8 +220,8 @@ func init() {
 func runMailSend(cmd *cobra.Command, args []string) error {
 	to := args[0]
 
-	// Find workspace - we need a directory with .beads
-	workDir, err := findBeadsWorkDir()
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
@@ -288,12 +288,6 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 }
 
 func runMailInbox(cmd *cobra.Command, args []string) error {
-	// Find workspace
-	workDir, err := findBeadsWorkDir()
-	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-
 	// Determine which inbox to check (priority: --identity flag, positional arg, auto-detect)
 	address := ""
 	if mailInboxIdentity != "" {
@@ -302,6 +296,12 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 		address = args[0]
 	} else {
 		address = detectSender()
+	}
+
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	// Get mailbox
@@ -367,14 +367,14 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 func runMailRead(cmd *cobra.Command, args []string) error {
 	msgID := args[0]
 
-	// Find workspace
-	workDir, err := findBeadsWorkDir()
+	// Determine which inbox
+	address := detectSender()
+
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
-
-	// Determine which inbox
-	address := detectSender()
 
 	// Get mailbox and message
 	router := mail.NewRouter(workDir)
@@ -435,14 +435,14 @@ func runMailRead(cmd *cobra.Command, args []string) error {
 func runMailDelete(cmd *cobra.Command, args []string) error {
 	msgID := args[0]
 
-	// Find workspace
-	workDir, err := findBeadsWorkDir()
+	// Determine which inbox
+	address := detectSender()
+
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
-
-	// Determine which inbox
-	address := detectSender()
 
 	// Get mailbox
 	router := mail.NewRouter(workDir)
@@ -459,11 +459,21 @@ func runMailDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// findBeadsWorkDir finds a directory with a .beads database.
-// Walks up from CWD looking for .beads/ directory.
-func findBeadsWorkDir() (string, error) {
-	// Walk up from CWD looking for .beads - prefer closest one (rig-level)
-	// This finds the rig's .beads before the town's .beads
+// findMailWorkDir returns the town root for all mail operations.
+//
+// Two-level beads architecture:
+// - Town beads (~/gt/.beads/): ALL mail and coordination
+// - Clone beads (<rig>/crew/*/.beads/): Project issues only
+//
+// Mail ALWAYS uses town beads, regardless of sender or recipient address.
+// This ensures messages are visible to all agents in the town.
+func findMailWorkDir() (string, error) {
+	return workspace.FindFromCwdOrError()
+}
+
+// findLocalBeadsDir finds the nearest .beads directory by walking up from CWD.
+// Used for project work (molecules, issue creation) that uses clone beads.
+func findLocalBeadsDir() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -480,14 +490,6 @@ func findBeadsWorkDir() (string, error) {
 			break // Reached root
 		}
 		path = parent
-	}
-
-	// Fall back to town root if nothing found walking up
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err == nil {
-		if _, err := os.Stat(filepath.Join(townRoot, ".beads")); err == nil {
-			return townRoot, nil
-		}
 	}
 
 	return "", fmt.Errorf("no .beads directory found")
@@ -536,22 +538,22 @@ func detectSender() string {
 }
 
 func runMailCheck(cmd *cobra.Command, args []string) error {
-	// Find workspace
-	workDir, err := findBeadsWorkDir()
-	if err != nil {
-		if mailCheckInject {
-			// Inject mode: always exit 0, silent on error
-			return nil
-		}
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-
 	// Determine which inbox (priority: --identity flag, auto-detect)
 	address := ""
 	if mailCheckIdentity != "" {
 		address = mailCheckIdentity
 	} else {
 		address = detectSender()
+	}
+
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
+	if err != nil {
+		if mailCheckInject {
+			// Inject mode: always exit 0, silent on error
+			return nil
+		}
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	// Get mailbox
@@ -621,8 +623,8 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 func runMailThread(cmd *cobra.Command, args []string) error {
 	threadID := args[0]
 
-	// Find workspace
-	workDir, err := findBeadsWorkDir()
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
@@ -689,8 +691,8 @@ func runMailThread(cmd *cobra.Command, args []string) error {
 func runMailReply(cmd *cobra.Command, args []string) error {
 	msgID := args[0]
 
-	// Find workspace
-	workDir, err := findBeadsWorkDir()
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
