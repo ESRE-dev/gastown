@@ -78,6 +78,9 @@ type Message struct {
 	// Read indicates if the message has been read (closed in beads).
 	Read bool `json:"read"`
 
+	// Pinned indicates if the message is pinned (persistent context marker).
+	Pinned bool `json:"pinned,omitempty"`
+
 	// Priority is the message priority.
 	Priority Priority `json:"priority"`
 
@@ -151,6 +154,7 @@ type BeadsMessage struct {
 	Assignee    string    `json:"assignee"`    // To identity
 	Priority    int       `json:"priority"`    // 0=urgent, 1=high, 2=normal, 3=low
 	Status      string    `json:"status"`      // open=unread, closed=read
+	Pinned      bool      `json:"pinned"`      // Persistent context marker
 	CreatedAt   time.Time `json:"created_at"`
 	Type        string    `json:"type,omitempty"`      // Message type
 	ThreadID    string    `json:"thread_id,omitempty"` // Thread identifier
@@ -187,6 +191,7 @@ func (bm *BeadsMessage) ToMessage() *Message {
 		Body:      bm.Description,
 		Timestamp: bm.CreatedAt,
 		Read:      bm.Status == "closed",
+		Pinned:    bm.Pinned,
 		Priority:  priority,
 		Type:      msgType,
 		ThreadID:  bm.ThreadID,

@@ -105,7 +105,39 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 		messages = append(messages, bm.ToMessage())
 	}
 
+	// Sort: pinned first, then by priority (urgent first), then by date (newest first)
+	sort.Slice(messages, func(i, j int) bool {
+		// Pinned messages always come first
+		if messages[i].Pinned != messages[j].Pinned {
+			return messages[i].Pinned
+		}
+		// Within same pinned status, sort by priority (urgent > high > normal > low)
+		pi := priorityOrder(messages[i].Priority)
+		pj := priorityOrder(messages[j].Priority)
+		if pi != pj {
+			return pi < pj
+		}
+		// Within same priority, sort by date (newest first)
+		return messages[i].Timestamp.After(messages[j].Timestamp)
+	})
+
 	return messages, nil
+}
+
+// priorityOrder returns sort order for priority (lower = more urgent).
+func priorityOrder(p Priority) int {
+	switch p {
+	case PriorityUrgent:
+		return 0
+	case PriorityHigh:
+		return 1
+	case PriorityNormal:
+		return 2
+	case PriorityLow:
+		return 3
+	default:
+		return 2
+	}
 }
 
 func (m *Mailbox) listLegacy() ([]*Message, error) {
