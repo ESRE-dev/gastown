@@ -25,8 +25,8 @@ type BeadsMessage struct {
 
 // ProcessLifecycleRequests checks for and processes lifecycle requests from the deacon inbox.
 func (d *Daemon) ProcessLifecycleRequests() {
-	// Get mail for deacon identity
-	cmd := exec.Command("bd", "mail", "inbox", "--identity", "deacon/", "--json")
+	// Get mail for deacon identity (using gt mail, not bd mail)
+	cmd := exec.Command("gt", "mail", "inbox", "--identity", "deacon/", "--json")
 	cmd.Dir = d.config.TownRoot
 
 	output, err := cmd.Output()
@@ -295,7 +295,8 @@ func (d *Daemon) syncWorkspace(workDir string) {
 
 // closeMessage marks a mail message as read by closing the beads issue.
 func (d *Daemon) closeMessage(id string) error {
-	cmd := exec.Command("bd", "close", id)
+	// Use gt mail commands for town-level beads
+	cmd := exec.Command("gt", "mail", "read", id)
 	cmd.Dir = d.config.TownRoot
 	return cmd.Run()
 }
