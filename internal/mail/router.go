@@ -66,31 +66,19 @@ func detectTownRoot(startDir string) string {
 }
 
 // resolveBeadsDir returns the correct .beads directory for the given address.
-// Town-level addresses (mayor/, deacon/) use {townRoot}/.beads.
-// Rig-level addresses (rig/polecat) use {townRoot}/{rig}/.beads.
+//
+// Two-level beads architecture:
+// - ALL mail uses town beads ({townRoot}/.beads) regardless of address
+// - Rig-level beads ({rig}/.beads) are for project issues only, not mail
+//
+// This ensures messages are visible to all agents in the town.
 func (r *Router) resolveBeadsDir(address string) string {
 	// If no town root, fall back to workDir's .beads
 	if r.townRoot == "" {
 		return filepath.Join(r.workDir, ".beads")
 	}
 
-	// Town-level agents: mayor/, deacon/
-	if isTownLevelAddress(address) {
-		return filepath.Join(r.townRoot, ".beads")
-	}
-
-	// Rig-level addresses: rig/polecat, rig/refinery
-	parts := strings.SplitN(address, "/", 2)
-	if len(parts) >= 1 && parts[0] != "" {
-		rig := parts[0]
-		rigBeadsDir := filepath.Join(r.townRoot, rig, ".beads")
-		// Check if rig beads exists
-		if _, err := os.Stat(rigBeadsDir); err == nil {
-			return rigBeadsDir
-		}
-	}
-
-	// Fall back to town-level beads
+	// All mail uses town-level beads
 	return filepath.Join(r.townRoot, ".beads")
 }
 
