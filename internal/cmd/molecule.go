@@ -145,7 +145,7 @@ func init() {
 }
 
 func runMoleculeList(cmd *cobra.Command, args []string) error {
-	workDir, err := findBeadsWorkDir()
+	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
@@ -288,7 +288,7 @@ func runMoleculeExport(cmd *cobra.Command, args []string) error {
 func runMoleculeShow(cmd *cobra.Command, args []string) error {
 	molID := args[0]
 
-	workDir, err := findBeadsWorkDir()
+	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
@@ -382,7 +382,7 @@ func runMoleculeShow(cmd *cobra.Command, args []string) error {
 func runMoleculeParse(cmd *cobra.Command, args []string) error {
 	molID := args[0]
 
-	workDir, err := findBeadsWorkDir()
+	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
@@ -462,7 +462,7 @@ func runMoleculeParse(cmd *cobra.Command, args []string) error {
 func runMoleculeInstantiate(cmd *cobra.Command, args []string) error {
 	molID := args[0]
 
-	workDir, err := findBeadsWorkDir()
+	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
@@ -532,7 +532,7 @@ func runMoleculeInstantiate(cmd *cobra.Command, args []string) error {
 func runMoleculeInstances(cmd *cobra.Command, args []string) error {
 	molID := args[0]
 
-	workDir, err := findBeadsWorkDir()
+	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}

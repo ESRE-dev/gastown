@@ -133,7 +133,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 // Fast path - returns 0 on any error.
 func getUnreadMailCount(identity string) int {
 	// Find workspace
-	workDir, err := findBeadsWorkDir()
+	workDir, err := findMailWorkDir()
 	if err != nil {
 		return 0
 	}
