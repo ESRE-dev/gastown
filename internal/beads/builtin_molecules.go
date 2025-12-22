@@ -19,6 +19,7 @@ func BuiltinMolecules() []BuiltinMolecule {
 		PolecatWorkMolecule(),
 		VersionBumpMolecule(),
 		DeaconPatrolMolecule(),
+		RefineryPatrolMolecule(),
 	}
 }
 
@@ -663,6 +664,152 @@ gt daemon status
 ` + "```" + `
 
 This enables infinite patrol duration via context-aware respawning.
+Needs: context-check`,
+	}
+}
+
+// RefineryPatrolMolecule returns the refinery-patrol molecule definition.
+// This is the merge queue processor's patrol loop with verification gates.
+func RefineryPatrolMolecule() BuiltinMolecule {
+	return BuiltinMolecule{
+		ID:    "mol-refinery-patrol",
+		Title: "Refinery Patrol",
+		Description: `Merge queue processor patrol loop.
+
+The Refinery is the Engineer in the engine room. You process polecat branches,
+merging them to main one at a time with sequential rebasing.
+
+**The Scotty Test**: Before proceeding past any failure, ask yourself:
+"Would Scotty walk past a warp core leak because it existed before his shift?"
+
+## Step: inbox-check
+Check mail for MR submissions, escalations, messages.
+
+` + "```" + `bash
+gt mail inbox
+# Process any urgent items
+` + "```" + `
+
+Handle shutdown requests, escalations, and status queries.
+
+## Step: queue-scan
+Fetch remote and identify polecat branches waiting.
+
+` + "```" + `bash
+git fetch origin
+git branch -r | grep polecat
+gt refinery queue <rig>
+` + "```" + `
+
+If queue empty, skip to context-check step.
+Track branch list for this cycle.
+Needs: inbox-check
+
+## Step: process-branch
+Pick next branch. Rebase on current main.
+
+` + "```" + `bash
+git checkout -b temp origin/<polecat-branch>
+git rebase origin/main
+` + "```" + `
+
+If rebase conflicts and unresolvable:
+- git rebase --abort
+- Notify polecat to fix and resubmit
+- Skip to loop-check for next branch
+
+Needs: queue-scan
+
+## Step: run-tests
+Run the test suite.
+
+` + "```" + `bash
+go test ./...
+` + "```" + `
+
+Track results: pass count, fail count, specific failures.
+Needs: process-branch
+
+## Step: handle-failures
+**VERIFICATION GATE**: This step enforces the Beads Promise.
+
+If tests PASSED: This step auto-completes. Proceed to merge.
+
+If tests FAILED:
+1. Diagnose: Is this a branch regression or pre-existing on main?
+2. If branch caused it:
+   - Abort merge
+   - Notify polecat: "Tests failing. Please fix and resubmit."
+   - Skip to loop-check
+3. If pre-existing on main:
+   - Option A: Fix it yourself (you're the Engineer!)
+   - Option B: File a bead: bd create --type=bug --priority=1 --title="..."
+
+**GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
+- Tests passing, OR
+- Fix committed, OR
+- Bead filed for the failure
+
+This is non-negotiable. Never disavow. Never "note and proceed."
+Needs: run-tests
+
+## Step: merge-push
+Merge to main and push immediately.
+
+` + "```" + `bash
+git checkout main
+git merge --ff-only temp
+git push origin main
+git branch -d temp
+git push origin --delete <polecat-branch>
+` + "```" + `
+
+Main has moved. Any remaining branches need rebasing on new baseline.
+Needs: handle-failures
+
+## Step: loop-check
+More branches to process?
+
+If yes: Return to process-branch with next branch.
+If no: Continue to generate-summary.
+
+Track: branches processed, branches skipped (with reasons).
+Needs: merge-push
+
+## Step: generate-summary
+Summarize this patrol cycle.
+
+Include:
+- Branches processed (count, names)
+- Test results (pass/fail)
+- Issues filed (if any)
+- Branches skipped (with reasons)
+- Any escalations sent
+
+This becomes the digest when the patrol is squashed.
+Needs: loop-check
+
+## Step: context-check
+Check own context usage.
+
+If context is HIGH (>80%):
+- Write handoff summary
+- Prepare for burn/respawn
+
+If context is LOW:
+- Can continue processing
+Needs: generate-summary
+
+## Step: burn-or-loop
+End of patrol cycle decision.
+
+If queue non-empty AND context LOW:
+- Burn this wisp, start fresh patrol
+- Return to inbox-check
+
+If queue empty OR context HIGH:
+- Burn wisp with summary digest
+- Exit (daemon will respawn if needed)
 Needs: context-check`,
 	}
 }
