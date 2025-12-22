@@ -584,6 +584,7 @@ type MoleculeContext struct {
 	RootIssueID string // The spawned molecule root issue
 	TotalSteps  int    // Total number of steps in the molecule
 	StepNumber  int    // Which step this is (1-indexed)
+	IsWisp      bool   // True if this is an ephemeral wisp molecule
 }
 
 // buildWorkAssignmentMail creates a work assignment mail message for a polecat.

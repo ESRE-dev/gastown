@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -560,7 +561,11 @@ func slingToRefinery(townRoot string, target *SlingTarget, thing *SlingThing) er
 
 // spawnMoleculeFromProto spawns a molecule from a proto template.
 func spawnMoleculeFromProto(beadsPath string, thing *SlingThing, assignee string) (string, *MoleculeContext, error) {
-	fmt.Printf("Spawning molecule from proto %s...\n", thing.ID)
+	moleculeType := "molecule"
+	if thing.IsWisp {
+		moleculeType = "wisp"
+	}
+	fmt.Printf("Spawning %s from proto %s...\n", moleculeType, thing.ID)
 
 	// Use bd mol run to spawn the molecule
 	args := []string{"--no-daemon", "mol", "run", thing.ID, "--json"}
@@ -568,8 +573,23 @@ func spawnMoleculeFromProto(beadsPath string, thing *SlingThing, assignee string
 		args = append(args, "--var", "assignee="+assignee)
 	}
 
+	// For wisps, use the ephemeral storage location
+	workDir := beadsPath
+	if thing.IsWisp {
+		wispPath := filepath.Join(beadsPath, ".beads-wisp")
+		// Check if wisp storage exists
+		if _, err := os.Stat(wispPath); err == nil {
+			// Use wisp storage - pass --db to point bd at the wisp directory
+			args = append([]string{"--db", filepath.Join(wispPath, "beads.db")}, args...)
+			fmt.Printf("  Using ephemeral storage: %s\n", style.Dim.Render(".beads-wisp/"))
+		} else {
+			fmt.Printf("  %s wisp storage not found, using regular storage\n",
+				style.Dim.Render("Note:"))
+		}
+	}
+
 	cmd := exec.Command("bd", args...)
-	cmd.Dir = beadsPath
+	cmd.Dir = workDir
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -595,14 +615,15 @@ func spawnMoleculeFromProto(beadsPath string, thing *SlingThing, assignee string
 		return "", nil, fmt.Errorf("parsing molecule result: %w", err)
 	}
 
-	fmt.Printf("%s Molecule spawned: %s (%d steps)\n",
-		style.Bold.Render("✓"), molResult.RootID, molResult.Created-1)
+	fmt.Printf("%s %s spawned: %s (%d steps)\n",
+		style.Bold.Render("✓"), moleculeType, molResult.RootID, molResult.Created-1)
 
 	moleculeCtx := &MoleculeContext{
 		MoleculeID:  thing.ID,
 		RootIssueID: molResult.RootID,
 		TotalSteps:  molResult.Created - 1,
 		StepNumber:  1,
+		IsWisp:      thing.IsWisp,
 	}
 
 	return molResult.RootID, moleculeCtx, nil
@@ -652,6 +673,7 @@ func spawnMoleculeOnIssue(beadsPath string, thing *SlingThing, assignee string) 
 		RootIssueID: molResult.RootID,
 		TotalSteps:  molResult.Created - 1,
 		StepNumber:  1,
+		IsWisp:      thing.IsWisp,
 	}
 
 	return molResult.RootID, moleculeCtx, nil

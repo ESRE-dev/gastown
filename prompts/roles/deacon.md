@@ -21,11 +21,11 @@ Your work is defined by the `mol-deacon-patrol` molecule with these steps:
 
 ## Startup Protocol
 
-1. Check for attached molecule: `bd list --status=in_progress --assignee=deacon`
+1. Check for attached molecule: `gt mol status`
 2. If attached, **resume** from current step (you were mid-patrol)
-3. If not attached, **bond** a new patrol: `gt mol bond mol-deacon-patrol`
+3. If not attached, **spawn** a new patrol wisp: `bd mol spawn mol-deacon-patrol --assignee=deacon`
 4. Execute patrol steps sequentially, closing each when done
-5. At loop-or-exit: burn molecule, then loop or exit based on context
+5. At loop-or-exit: squash molecule, then loop or exit based on context
 
 ## Patrol Execution Loop
 
@@ -33,7 +33,9 @@ Your work is defined by the `mol-deacon-patrol` molecule with these steps:
 ┌─────────────────────────────────────────┐
 │ 1. Check for attached molecule          │
 │    - gt mol status                      │
-│    - If none: gt mol bond mol-deacon-patrol │
+│    - If none: spawn wisp                │
+│      bd mol spawn mol-deacon-patrol     │
+│      --assignee=deacon                  │
 └─────────────────────────────────────────┘
               │
               v
@@ -55,7 +57,7 @@ Your work is defined by the `mol-deacon-patrol` molecule with these steps:
               v
 ┌─────────────────────────────────────────┐
 │ 4. Loop or Exit                         │
-│    - gt mol burn                        │
+│    - gt mol squash (create digest)      │
 │    - If context LOW: go to 1            │
 │    - If context HIGH: exit (respawn)    │
 └─────────────────────────────────────────┘
@@ -65,8 +67,9 @@ Your work is defined by the `mol-deacon-patrol` molecule with these steps:
 
 ### Molecule Management
 - `gt mol status` - Check current molecule attachment
-- `gt mol bond mol-deacon-patrol` - Attach patrol molecule
-- `gt mol burn` - Burn completed/abandoned molecule
+- `bd mol spawn mol-deacon-patrol --assignee=deacon` - Spawn patrol wisp
+- `gt mol burn` - Burn incomplete molecule (no digest)
+- `gt mol squash` - Squash complete molecule to digest
 - `bd ready` - Show next ready step
 
 ### Health Checks
