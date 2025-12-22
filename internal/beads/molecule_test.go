@@ -2,6 +2,7 @@ package beads
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -487,5 +488,110 @@ Has content.`
 	// Second step has content
 	if steps[1].Instructions != "Has content." {
 		t.Errorf("step[1].Instructions = %q", steps[1].Instructions)
+	}
+}
+
+func TestValidateMolecule_SimpleCycle(t *testing.T) {
+	// A -> B -> A (simple 2-node cycle)
+	mol := &Issue{
+		ID:   "mol-xyz",
+		Type: "molecule",
+		Description: `## Step: a
+First step.
+Needs: b
+
+## Step: b
+Second step.
+Needs: a`,
+	}
+
+	err := ValidateMolecule(mol)
+	if err == nil {
+		t.Error("ValidateMolecule() = nil, want error for cycle")
+	}
+	if err != nil && !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("error %q should mention 'cycle'", err.Error())
+	}
+}
+
+func TestValidateMolecule_LongerCycle(t *testing.T) {
+	// A -> B -> C -> A (3-node cycle)
+	mol := &Issue{
+		ID:   "mol-xyz",
+		Type: "molecule",
+		Description: `## Step: a
+First step.
+Needs: c
+
+## Step: b
+Second step.
+Needs: a
+
+## Step: c
+Third step.
+Needs: b`,
+	}
+
+	err := ValidateMolecule(mol)
+	if err == nil {
+		t.Error("ValidateMolecule() = nil, want error for cycle")
+	}
+	if err != nil && !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("error %q should mention 'cycle'", err.Error())
+	}
+}
+
+func TestValidateMolecule_DiamondNoCycle(t *testing.T) {
+	// Diamond pattern: A -> B, A -> C, B -> D, C -> D
+	// This has no cycle, should pass
+	mol := &Issue{
+		ID:   "mol-xyz",
+		Type: "molecule",
+		Description: `## Step: a
+Root step.
+
+## Step: b
+Branch 1.
+Needs: a
+
+## Step: c
+Branch 2.
+Needs: a
+
+## Step: d
+Merge point.
+Needs: b, c`,
+	}
+
+	err := ValidateMolecule(mol)
+	if err != nil {
+		t.Errorf("ValidateMolecule() = %v, want nil (diamond has no cycle)", err)
+	}
+}
+
+func TestValidateMolecule_CycleInSubgraph(t *testing.T) {
+	// Root -> A, A -> B -> C -> A (cycle not involving root)
+	mol := &Issue{
+		ID:   "mol-xyz",
+		Type: "molecule",
+		Description: `## Step: root
+Starting point.
+
+## Step: a
+First in cycle.
+Needs: root, c
+
+## Step: b
+Second in cycle.
+Needs: a
+
+## Step: c
+Third in cycle.
+Needs: b`,
+	}
+
+	err := ValidateMolecule(mol)
+	if err == nil {
+		t.Error("ValidateMolecule() = nil, want error for cycle in subgraph")
 	}
 }
