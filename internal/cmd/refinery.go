@@ -357,7 +357,7 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 	}
 
 	// Use getRefineryManager to validate rig (and infer from cwd if needed)
-	_, _, rigName, err := getRefineryManager(rigName)
+	mgr, _, rigName, err := getRefineryManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -372,7 +372,12 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("checking session: %w", err)
 	}
 	if !running {
-		return fmt.Errorf("refinery is not running for rig '%s'", rigName)
+		// Auto-start if not running
+		fmt.Printf("Refinery not running for %s, starting...\n", rigName)
+		if err := mgr.Start(false); err != nil {
+			return fmt.Errorf("starting refinery: %w", err)
+		}
+		fmt.Printf("%s Refinery started\n", style.Bold.Render("✓"))
 	}
 
 	// Attach to the session
