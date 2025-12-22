@@ -111,6 +111,14 @@ func runDone(cmd *cobra.Command, args []string) error {
 	// Build title
 	title := fmt.Sprintf("Merge: %s", issueID)
 
+	// CRITICAL: Push branch to origin BEFORE creating MR
+	// Without this, the worktree can be deleted and the branch lost forever
+	fmt.Printf("Pushing branch to origin...\n")
+	if err := g.Push("origin", branch, false); err != nil {
+		return fmt.Errorf("pushing branch to origin: %w", err)
+	}
+	fmt.Printf("%s Branch pushed to origin/%s\n", style.Bold.Render("✓"), branch)
+
 	// Build description with MR fields
 	mrFields := &beads.MRFields{
 		Branch:      branch,
