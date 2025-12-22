@@ -137,7 +137,7 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 		} else if strings.HasPrefix(session, "gt-witness-") {
 			// Witness sessions: gt-witness-<rig>
 			rig = strings.TrimPrefix(session, "gt-witness-")
-			theme = getThemeForRig(rig)
+			theme = getThemeForRole(rig, "witness")
 			worker = "witness"
 			role = "witness"
 		} else {
@@ -157,13 +157,16 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 			if strings.HasPrefix(workerPart, "crew-") {
 				worker = strings.TrimPrefix(workerPart, "crew-")
 				role = "crew"
+			} else if workerPart == "refinery" {
+				worker = "refinery"
+				role = "refinery"
 			} else {
 				worker = workerPart
 				role = "polecat"
 			}
 
-			// Use configured theme, fall back to hash-based assignment
-			theme = getThemeForRig(rig)
+			// Use role-based theme resolution
+			theme = getThemeForRole(rig, role)
 		}
 
 		// Apply theme and status format
@@ -247,6 +250,55 @@ func getThemeForRig(rigName string) tmux.Theme {
 	}
 	// Fall back to hash-based assignment
 	return tmux.AssignTheme(rigName)
+}
+
+// getThemeForRole returns the theme for a specific role in a rig.
+// Resolution order:
+// 1. Per-rig role override (rig/.gastown/config.json)
+// 2. Global role default (mayor/town.json)
+// 3. Built-in role defaults (witness=rust, refinery=plum)
+// 4. Rig theme (config or hash-based)
+func getThemeForRole(rigName, role string) tmux.Theme {
+	townRoot, _ := workspace.FindFromCwd()
+
+	// 1. Check per-rig role override
+	if townRoot != "" {
+		configPath := filepath.Join(townRoot, rigName, ".gastown", "config.json")
+		if cfg, err := config.LoadRigConfig(configPath); err == nil {
+			if cfg.Theme != nil && cfg.Theme.RoleThemes != nil {
+				if themeName, ok := cfg.Theme.RoleThemes[role]; ok {
+					if theme := tmux.GetThemeByName(themeName); theme != nil {
+						return *theme
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Check global role default (town config)
+	if townRoot != "" {
+		townConfigPath := filepath.Join(townRoot, "mayor", "town.json")
+		if townCfg, err := config.LoadTownConfig(townConfigPath); err == nil {
+			if townCfg.Theme != nil && townCfg.Theme.RoleDefaults != nil {
+				if themeName, ok := townCfg.Theme.RoleDefaults[role]; ok {
+					if theme := tmux.GetThemeByName(themeName); theme != nil {
+						return *theme
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Check built-in role defaults
+	builtins := config.BuiltinRoleThemes()
+	if themeName, ok := builtins[role]; ok {
+		if theme := tmux.GetThemeByName(themeName); theme != nil {
+			return *theme
+		}
+	}
+
+	// 4. Fall back to rig theme
+	return getThemeForRig(rigName)
 }
 
 // loadRigTheme loads the theme name from rig config.
