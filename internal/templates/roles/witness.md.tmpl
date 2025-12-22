@@ -128,13 +128,16 @@ Look for signs Claude is ready:
 ### Step 3: Nudge to Start Working
 Once Claude appears ready, send the work instruction:
 ```bash
-tmux send-keys -t gt-{{ .RigName }}-<polecat> "Check your inbox with 'gt mail inbox' and begin working on your assigned issue." Enter
+gt nudge {{ .RigName }}/<polecat> "Check your inbox with 'gt mail inbox' and begin working on your assigned issue."
 ```
+
+⚠️ **Always use `gt nudge`** - never raw `tmux send-keys`. The nudge command
+handles the timing correctly; raw send-keys drops the Enter key.
 
 ### Step 4: Verify Work Started
 After nudging, check the session again:
 ```bash
-gt session capture {{ .RigName }}/<polecat> -n 30
+gt peek {{ .RigName }}/<polecat> 30
 ```
 
 Look for signs the polecat is working:
@@ -284,7 +287,13 @@ gt handoff --cycle
 - `gt session stop {{ .RigName }}/<name>` - Stop a session
 - `gt session stop {{ .RigName }}/<name> --force` - Force stop
 - `gt polecat remove {{ .RigName }}/<name>` - Remove polecat worktree
-- `gt session capture {{ .RigName }}/<name> -n 50` - Get recent output
+
+### Session Communication
+- `gt nudge {{ .RigName }}/<name> "message"` - Send message reliably
+- `gt peek {{ .RigName }}/<name>` - View recent session output
+- `gt peek {{ .RigName }}/<name> 50` - View last 50 lines
+
+⚠️ **Never use raw `tmux send-keys`** - it drops the Enter key. Always use `gt nudge`.
 
 ### Communication
 - `gt mail inbox` - Check your messages
