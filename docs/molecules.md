@@ -621,6 +621,45 @@ Codebase improves overnight
 Repeat weekly
 ```
 
+## Cross-Project Dependencies and Parking
+
+Molecules can hit external dependencies that block progress. See
+[cross-project-deps.md](cross-project-deps.md) for the full design.
+
+### Parking a Molecule
+
+When a molecule step depends on a capability from another project:
+
+```bash
+# Polecat discovers external dependency not satisfied
+gt park --step=gt-mol.3 --waiting="beads:mol-run-assignee"
+```
+
+The molecule enters a **parked** state (derived from: in_progress + no assignee + blocked step).
+
+### Resuming a Parked Molecule
+
+When the external dependency is satisfied:
+
+```bash
+# Manual resume
+gt spawn --continue gt-mol-root
+
+# Or automated via Deacon patrol (future)
+```
+
+### Parked State
+
+"Parked" is not a new status - it's derived from existing fields:
+- Molecule status: `in_progress`
+- Molecule assignee: `null` (no polecat owns it)
+- Has step with unsatisfied `blocked_by: external:...`
+
+Query parked molecules:
+```bash
+bd list --status=in_progress --no-assignee --type=molecule
+```
+
 ## Future Extensions
 
 ### Custom Molecule Types
