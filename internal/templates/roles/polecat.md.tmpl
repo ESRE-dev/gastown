@@ -77,23 +77,41 @@ Agent-friendly UX is critical. Your guesses reveal what's intuitive.
 
 When your session starts, follow this protocol:
 
-1. **Run `gt prime`** - This loads your context and checks for mail automatically
-2. **Check your inbox** - If `gt prime` shows mail, read it with `gt mail read <id>`
-3. **Look for work assignment** - Messages with "📋 Work Assignment" contain your task
-4. **If no mail** - Check `bd list --status=in_progress` for existing assignments
+1. **Run `gt prime`** - This loads your context and checks for mail
+2. **Find your work molecule**:
+   ```bash
+   bd list --pinned --assignee={{ .RigName }}/{{ .Polecat }} --status=in_progress
+   ```
+3. **If you have a pinned molecule** - Resume from the next unclosed step
+4. **If no molecule** - Check inbox for work assignment (`gt mail inbox`)
 5. **Otherwise** - Wait for instructions from the Witness or Mayor
 
-Work assignments are delivered to your inbox rather than injected into your session,
-ensuring persistence across session restarts and providing an audit trail.
+Your work is tracked as a **pinned molecule** (created by `bd mol run` when you were spawned).
+This survives session restarts - just query for your pinned work to continue.
 
 ## Work Protocol
 
-1. **Start**: Read your work assignment from mail, or `bd show <assigned-issue>`
-2. **Work**: Implement the solution in your clone
-3. **Commit**: Regular commits with clear messages
-4. **Test**: Verify your changes work
-5. **Close**: `bd close <issue>` when done
-6. **Signal**: `gt done` to submit to merge queue
+Your work follows the **mol-polecat-work** molecule steps:
+
+1. **load-context** - Run `gt prime`, read your assignment
+2. **implement** - Write the solution, make commits
+3. **self-review** - Check for bugs, style issues
+4. **verify-tests** - Run tests, fix any failures
+5. **rebase-main** - Rebase on origin/main
+6. **submit-merge** - Run `gt done` to submit to merge queue
+7. **generate-summary** - Write a summary of what you did
+8. **request-shutdown** - Signal done, Witness cleans you up
+
+As you complete each step, close it:
+```bash
+bd close <step-id>
+bd ready --parent=<mol-id>  # See next step
+```
+
+When finished, squash the molecule:
+```bash
+bd mol squash <mol-id> --summary="Implemented X, tests pass, ready for merge"
+```
 
 ## Before Signaling Done
 

@@ -375,11 +375,11 @@ gt done  # Signal work ready for merge queue
 If there are CI failures, fix them before proceeding.
 Needs: rebase-main
 
-## Step: update-handoff
-Update handoff bead with final state.
+## Step: generate-summary
+Generate a summary for molecule squash.
 File any remaining work as issues.
 
-Document any important context for the next session
+Document any important context for the squash digest
 or for anyone reviewing the work.
 Needs: submit-merge
 
@@ -389,7 +389,7 @@ Wait for termination.
 
 The polecat is now ready to be cleaned up.
 Do not exit directly - wait for Witness to kill the session.
-Needs: update-handoff`,
+Needs: generate-summary`,
 	}
 }
 
