@@ -110,6 +110,16 @@ The message ID can be found from 'gt mail inbox'.`,
 	RunE: runMailRead,
 }
 
+var mailPeekCmd = &cobra.Command{
+	Use:   "peek",
+	Short: "Show preview of first unread message",
+	Long: `Display a compact preview of the first unread message.
+
+Useful for status bar popups - shows subject, sender, and body preview.
+Exits silently with code 1 if no unread messages.`,
+	RunE: runMailPeek,
+}
+
 var mailDeleteCmd = &cobra.Command{
 	Use:   "delete <message-id>",
 	Short: "Delete a message",
@@ -221,6 +231,7 @@ func init() {
 	mailCmd.AddCommand(mailSendCmd)
 	mailCmd.AddCommand(mailInboxCmd)
 	mailCmd.AddCommand(mailReadCmd)
+	mailCmd.AddCommand(mailPeekCmd)
 	mailCmd.AddCommand(mailDeleteCmd)
 	mailCmd.AddCommand(mailArchiveCmd)
 	mailCmd.AddCommand(mailCheckCmd)
@@ -443,6 +454,68 @@ func runMailRead(cmd *cobra.Command, args []string) error {
 
 	if msg.Body != "" {
 		fmt.Printf("\n%s\n", msg.Body)
+	}
+
+	return nil
+}
+
+func runMailPeek(cmd *cobra.Command, args []string) error {
+	// Determine which inbox
+	address := detectSender()
+
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
+	if err != nil {
+		os.Exit(1) // Silent exit - no workspace
+		return nil
+	}
+
+	// Get mailbox
+	router := mail.NewRouter(workDir)
+	mailbox, err := router.GetMailbox(address)
+	if err != nil {
+		os.Exit(1) // Silent exit - can't access mailbox
+		return nil
+	}
+
+	// Get unread messages
+	messages, err := mailbox.ListUnread()
+	if err != nil || len(messages) == 0 {
+		os.Exit(1) // Silent exit - no unread
+		return nil
+	}
+
+	// Show first unread message
+	msg := messages[0]
+
+	// Header with priority indicator
+	priorityStr := ""
+	if msg.Priority == mail.PriorityUrgent {
+		priorityStr = " [URGENT]"
+	} else if msg.Priority == mail.PriorityHigh {
+		priorityStr = " [!]"
+	}
+
+	fmt.Printf("📬 %s%s\n", msg.Subject, priorityStr)
+	fmt.Printf("From: %s\n", msg.From)
+	fmt.Printf("ID: %s\n\n", msg.ID)
+
+	// Body preview (truncate long bodies)
+	if msg.Body != "" {
+		body := msg.Body
+		// Truncate to ~500 chars for popup display
+		if len(body) > 500 {
+			body = body[:500] + "\n..."
+		}
+		fmt.Print(body)
+		if !strings.HasSuffix(body, "\n") {
+			fmt.Println()
+		}
+	}
+
+	// Show count if more messages
+	if len(messages) > 1 {
+		fmt.Printf("\n%s\n", style.Dim.Render(fmt.Sprintf("(+%d more unread)", len(messages)-1)))
 	}
 
 	return nil
