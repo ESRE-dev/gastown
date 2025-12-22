@@ -13,9 +13,11 @@ func TestAddressToIdentity(t *testing.T) {
 		{"deacon", "deacon/"},
 		{"deacon/", "deacon/"},
 
-		// Rig-level agents: slash format matches directory structure
-		{"gastown/polecats/Toast", "gastown/polecats/Toast"},
-		{"gastown/crew/max", "gastown/crew/max"},
+		// Rig-level agents: crew/ and polecats/ normalized to canonical form
+		{"gastown/polecats/Toast", "gastown/Toast"},
+		{"gastown/crew/max", "gastown/max"},
+		{"gastown/Toast", "gastown/Toast"},         // Already canonical
+		{"gastown/max", "gastown/max"},             // Already canonical
 		{"gastown/refinery", "gastown/refinery"},
 		{"gastown/witness", "gastown/witness"},
 
@@ -44,9 +46,10 @@ func TestIdentityToAddress(t *testing.T) {
 		{"deacon", "deacon/"},
 		{"deacon/", "deacon/"},
 
-		// Rig-level agents: identity == address (slash format)
-		{"gastown/polecats/Toast", "gastown/polecats/Toast"},
-		{"gastown/crew/max", "gastown/crew/max"},
+		// Rig-level agents: crew/ and polecats/ normalized
+		{"gastown/polecats/Toast", "gastown/Toast"},
+		{"gastown/crew/max", "gastown/max"},
+		{"gastown/Toast", "gastown/Toast"},  // Already canonical
 		{"gastown/refinery", "gastown/refinery"},
 		{"gastown/witness", "gastown/witness"},
 
