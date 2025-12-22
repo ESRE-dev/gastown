@@ -4,11 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
@@ -34,61 +31,70 @@ into integration branches and ultimately to main.`,
 }
 
 var refineryStartCmd = &cobra.Command{
-	Use:   "start <rig>",
+	Use:   "start [rig]",
 	Short: "Start the refinery",
 	Long: `Start the Refinery for a rig.
 
 Launches the merge queue processor which monitors for polecat work branches
 and merges them to the appropriate target branches.
 
+If rig is not specified, infers it from the current directory.
+
 Examples:
   gt refinery start gastown
-  gt refinery start gastown --foreground`,
-	Args: cobra.ExactArgs(1),
+  gt refinery start gastown --foreground
+  gt refinery start              # infer rig from cwd`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runRefineryStart,
 }
 
 var refineryStopCmd = &cobra.Command{
-	Use:   "stop <rig>",
+	Use:   "stop [rig]",
 	Short: "Stop the refinery",
 	Long: `Stop a running Refinery.
 
-Gracefully stops the refinery, completing any in-progress merge first.`,
-	Args: cobra.ExactArgs(1),
+Gracefully stops the refinery, completing any in-progress merge first.
+If rig is not specified, infers it from the current directory.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runRefineryStop,
 }
 
 var refineryStatusCmd = &cobra.Command{
-	Use:   "status <rig>",
+	Use:   "status [rig]",
 	Short: "Show refinery status",
 	Long: `Show the status of a rig's Refinery.
 
-Displays running state, current work, queue length, and statistics.`,
-	Args: cobra.ExactArgs(1),
+Displays running state, current work, queue length, and statistics.
+If rig is not specified, infers it from the current directory.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runRefineryStatus,
 }
 
 var refineryQueueCmd = &cobra.Command{
-	Use:   "queue <rig>",
+	Use:   "queue [rig]",
 	Short: "Show merge queue",
 	Long: `Show the merge queue for a rig.
 
-Lists all pending merge requests waiting to be processed.`,
-	Args: cobra.ExactArgs(1),
+Lists all pending merge requests waiting to be processed.
+If rig is not specified, infers it from the current directory.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runRefineryQueue,
 }
 
 var refineryAttachCmd = &cobra.Command{
-	Use:   "attach <rig>",
+	Use:   "attach [rig]",
 	Short: "Attach to refinery session",
 	Long: `Attach to a running Refinery's Claude session.
 
 Allows interactive access to the Refinery agent for debugging
 or manual intervention.
 
+If rig is not specified, infers it from the current directory.
+
 Examples:
-  gt refinery attach gastown`,
-	Args: cobra.ExactArgs(1),
+  gt refinery attach gastown
+  gt refinery attach          # infer rig from cwd`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runRefineryAttach,
 }
 
@@ -113,20 +119,36 @@ func init() {
 }
 
 // getRefineryManager creates a refinery manager for a rig.
-func getRefineryManager(rigName string) (*refinery.Manager, *rig.Rig, error) {
+// If rigName is empty, infers the rig from cwd.
+func getRefineryManager(rigName string) (*refinery.Manager, *rig.Rig, string, error) {
+	// Infer rig from cwd if not provided
+	if rigName == "" {
+		townRoot, err := workspace.FindFromCwdOrError()
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("not in a Gas Town workspace: %w", err)
+		}
+		rigName, err = inferRigFromCwd(townRoot)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("could not determine rig: %w\nUsage: gt refinery <command> <rig>", err)
+		}
+	}
+
 	_, r, err := getRig(rigName)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
 	mgr := refinery.NewManager(r)
-	return mgr, r, nil
+	return mgr, r, rigName, nil
 }
 
 func runRefineryStart(cmd *cobra.Command, args []string) error {
-	rigName := args[0]
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
 
-	mgr, _, err := getRefineryManager(rigName)
+	mgr, _, rigName, err := getRefineryManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -152,9 +174,12 @@ func runRefineryStart(cmd *cobra.Command, args []string) error {
 }
 
 func runRefineryStop(cmd *cobra.Command, args []string) error {
-	rigName := args[0]
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
 
-	mgr, _, err := getRefineryManager(rigName)
+	mgr, _, rigName, err := getRefineryManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -172,9 +197,12 @@ func runRefineryStop(cmd *cobra.Command, args []string) error {
 }
 
 func runRefineryStatus(cmd *cobra.Command, args []string) error {
-	rigName := args[0]
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
 
-	mgr, _, err := getRefineryManager(rigName)
+	mgr, _, rigName, err := getRefineryManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -242,9 +270,12 @@ func runRefineryStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runRefineryQueue(cmd *cobra.Command, args []string) error {
-	rigName := args[0]
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
 
-	mgr, _, err := getRefineryManager(rigName)
+	mgr, _, rigName, err := getRefineryManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -320,11 +351,15 @@ func runRefineryQueue(cmd *cobra.Command, args []string) error {
 }
 
 func runRefineryAttach(cmd *cobra.Command, args []string) error {
-	rigName := args[0]
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
 
-	townRoot, err := workspace.FindFromCwdOrError()
+	// Use getRefineryManager to validate rig (and infer from cwd if needed)
+	_, _, rigName, err := getRefineryManager(rigName)
 	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		return err
 	}
 
 	// Session name follows the same pattern as refinery manager
@@ -338,19 +373,6 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 	}
 	if !running {
 		return fmt.Errorf("refinery is not running for rig '%s'", rigName)
-	}
-
-	// Verify rig exists
-	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
-	if err != nil {
-		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
-	}
-
-	g := git.NewGit(townRoot)
-	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
-	if _, err := rigMgr.GetRig(rigName); err != nil {
-		return fmt.Errorf("rig '%s' not found", rigName)
 	}
 
 	// Attach to the session

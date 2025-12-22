@@ -15,7 +15,7 @@ import (
 func runMQList(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
-	_, r, err := getRefineryManager(rigName)
+	_, r, _, err := getRefineryManager(rigName)
 	if err != nil {
 		return err
 	}

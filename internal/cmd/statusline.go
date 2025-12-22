@@ -287,7 +287,7 @@ func runRefineryStatusLine(rigName string) error {
 	}
 
 	// Get refinery manager using shared helper
-	mgr, _, err := getRefineryManager(rigName)
+	mgr, _, _, err := getRefineryManager(rigName)
 	if err != nil {
 		// Fallback to simple status if we can't access refinery
 		fmt.Printf("%s MQ: ? |", AgentTypeIcons[AgentRefinery])

@@ -341,7 +341,7 @@ func runMQRetry(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 	mrID := args[1]
 
-	mgr, _, err := getRefineryManager(rigName)
+	mgr, _, _, err := getRefineryManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -385,7 +385,7 @@ func runMQReject(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 	mrIDOrBranch := args[1]
 
-	mgr, _, err := getRefineryManager(rigName)
+	mgr, _, _, err := getRefineryManager(rigName)
 	if err != nil {
 		return err
 	}
