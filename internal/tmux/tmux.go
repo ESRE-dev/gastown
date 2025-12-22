@@ -462,12 +462,15 @@ func (t *Tmux) SetStatusFormat(session, rig, worker, role string) error {
 
 	// Compact format - icon already identifies role
 	// Mayor: 🎩 Mayor
-	// Crew:  👷 gastown/max
+	// Crew:  👷 gastown/crew/max (full path)
 	// Polecat: 😺 gastown/Toast
 	var left string
 	if rig == "" {
 		// Town-level agent (Mayor, Deacon)
 		left = fmt.Sprintf("%s %s ", icon, worker)
+	} else if role == "crew" {
+		// Crew member - show full path: rig/crew/name
+		left = fmt.Sprintf("%s %s/crew/%s ", icon, rig, worker)
 	} else {
 		// Rig-level agent - show rig/worker
 		left = fmt.Sprintf("%s %s/%s ", icon, rig, worker)
