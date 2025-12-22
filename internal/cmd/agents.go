@@ -43,12 +43,12 @@ var AgentTypeColors = map[AgentType]string{
 
 // AgentTypeIcons maps agent types to display icons.
 var AgentTypeIcons = map[AgentType]string{
-	AgentMayor:    "👑",
-	AgentDeacon:   "⛪",
+	AgentMayor:    "🎩",
+	AgentDeacon:   "🗼",
 	AgentWitness:  "👁",
 	AgentRefinery: "🏭",
 	AgentCrew:     "👷",
-	AgentPolecat:  "🐾",
+	AgentPolecat:  "😺",
 }
 
 var agentsCmd = &cobra.Command{
