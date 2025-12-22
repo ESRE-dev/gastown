@@ -122,8 +122,10 @@ Run this checklist:
 [ ] Tests pass (if applicable)
 [ ] bd close <issue> (issue marked complete)
 [ ] bd sync (beads synced)
-[ ] git push (branch pushed to origin)
 ```
+
+**DO NOT push your branch to origin.** The `gt done` command handles submission
+to the merge queue. The Refinery will merge your work to main.
 
 The Witness will verify git state is clean before killing your session.
 
