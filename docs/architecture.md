@@ -339,6 +339,69 @@ Molecules are **crystallized, composable, nondeterministic-idempotent workflow t
 | Discard execution | **Burn** | Delete wisps without saving (routine work) |
 | Compress execution | **Squash** | Compress wisps into a digest (preserve outcome) |
 
+### Molecule Phase Lifecycle
+
+Molecules follow a **states of matter** metaphor through their lifecycle:
+
+```
+                    ┌─────────────┐
+                    │   Proto     │
+                    │  (crystal)  │
+                    └──────┬──────┘
+                           │
+                      bd mol bond
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+              ▼                         ▼
+      ┌───────────────┐        ┌───────────────┐
+      │     Mol       │        │    Wisp       │
+      │   (liquid)    │        │    (gas)      │
+      │   durable     │        │  ephemeral    │
+      │  main beads   │        │ .beads-eph/   │
+      └───────┬───────┘        └───────┬───────┘
+              │                        │
+         bd mol squash            bd mol squash
+              │                        │
+              ▼                        ▼
+      ┌───────────────┐        ┌───────────────┐
+      │    Digest     │        │   (nothing)   │
+      │ (distillate)  │        │  evaporates   │
+      │  in git hist  │        └───────────────┘
+      └───────────────┘
+```
+
+**Phase transitions:**
+- **Proto → Mol/Wisp** (`bd mol bond`): Instantiate a template into a running execution
+- **Mol → Digest** (`bd mol squash`): Compress completed work into permanent record
+- **Wisp → (evaporates)** (`bd mol squash` or `bd mol burn`): Ephemeral trace disappears
+
+### When to Use Mol vs Wisp
+
+The choice between **Mol** (durable) and **Wisp** (ephemeral) depends on the work's importance and audit requirements:
+
+| Aspect | Mol (Durable) | Wisp (Ephemeral) |
+|--------|---------------|------------------|
+| **Storage** | Main `.beads/` database | `.beads-ephemeral/` directory |
+| **Persistence** | Survives indefinitely | Evaporates on squash/burn |
+| **Git tracking** | Committed, synced | Never committed |
+| **Audit trail** | Full history preserved | Only digest (if squashed) |
+| **Use case** | Important work | Routine operations |
+
+**Use Mol for:**
+- Code review waves (need audit trail of findings)
+- Epic implementation (track progress across sessions)
+- Feature work (preserve design decisions)
+- Anything you might need to reference later
+
+**Use Wisp for:**
+- Orchestration tasks (witness patrols, health checks)
+- Polecat work sessions (ephemeral by nature)
+- Patrol loops (continuous monitoring)
+- Routine operations (no audit value)
+
+**Rule of thumb**: If you'd regret losing the execution trace, use Mol. If the work is routine and only the outcome matters, use Wisp.
+
 ### Molecule Format
 
 Molecules use a prose-based format with structured step definitions:
