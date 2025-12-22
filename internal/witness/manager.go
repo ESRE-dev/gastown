@@ -685,8 +685,14 @@ func (m *Manager) autoSpawnForReadyWork(w *Witness) error {
 
 		// Filter by epic if configured
 		if w.Config.EpicID != "" {
-			// TODO: Check if issue is a child of the configured epic
-			// For now, we skip this filter
+			isChild, err := m.isChildOfEpic(issue.ID, w.Config.EpicID)
+			if err != nil {
+				// Skip issues we can't verify - safer than including unknown work
+				continue
+			}
+			if !isChild {
+				continue
+			}
 		}
 
 		// Filter by prefix if configured
@@ -781,6 +787,50 @@ func (m *Manager) getReadyIssues() ([]ReadyIssue, error) {
 	}
 
 	return issues, nil
+}
+
+// issueDependency represents a dependency from bd show --json output.
+type issueDependency struct {
+	ID             string `json:"id"`
+	DependencyType string `json:"dependency_type"`
+}
+
+// issueWithDeps represents an issue with its dependencies from bd show --json.
+type issueWithDeps struct {
+	ID         string            `json:"id"`
+	Dependents []issueDependency `json:"dependents"`
+}
+
+// isChildOfEpic checks if an issue blocks (is a child of) the given epic.
+func (m *Manager) isChildOfEpic(issueID, epicID string) (bool, error) {
+	cmd := exec.Command("bd", "show", issueID, "--json")
+	cmd.Dir = m.workDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("%s", stderr.String())
+	}
+
+	var issues []issueWithDeps
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return false, fmt.Errorf("parsing issue: %w", err)
+	}
+
+	if len(issues) == 0 {
+		return false, nil
+	}
+
+	// Check if the epic is in the dependents with type "blocks"
+	for _, dep := range issues[0].Dependents {
+		if dep.ID == epicID && dep.DependencyType == "blocks" {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // isAlreadySpawned checks if an issue has already been spawned.
