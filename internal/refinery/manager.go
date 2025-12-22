@@ -226,8 +226,17 @@ func (m *Manager) Start(foreground bool) error {
 		return fmt.Errorf("starting Claude agent: %w", err)
 	}
 
-	// Prime the agent after Claude starts to load refinery context
-	if err := t.SendKeysDelayed(sessionID, "gt prime", 2000); err != nil {
+	// Wait for Claude to start (pane command changes from shell to node)
+	shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+	if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
+		fmt.Fprintf(m.output, "Warning: Timeout waiting for Claude to start: %v\n", err)
+	}
+
+	// Give Claude time to initialize after process starts
+	time.Sleep(500 * time.Millisecond)
+
+	// Prime the agent using NudgeSession for reliable delivery
+	if err := t.NudgeSession(sessionID, "run gt prime"); err != nil {
 		// Warning only - don't fail startup
 		fmt.Fprintf(m.output, "Warning: could not send prime command: %v\n", err)
 	}
