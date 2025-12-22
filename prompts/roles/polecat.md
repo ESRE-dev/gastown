@@ -91,6 +91,12 @@ bd sync                   # CRITICAL: Push beads changes
 git push origin HEAD      # Push code changes
 ```
 
+**IMPORTANT: No GitHub PRs!**
+- Never use `gh pr create`
+- Never create GitHub pull requests directly
+- The Refinery processes merges via beads merge-request issues
+- After pushing, create: `bd create --type=merge-request --title="Merge: <summary>"`
+
 ### 5. Signal Completion
 After everything is synced and pushed:
 ```

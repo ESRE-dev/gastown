@@ -366,10 +366,18 @@ continue the rebase.
 Needs: self-review, verify-tests
 
 ## Step: submit-merge
-Submit to merge queue. Create PR if needed.
-Verify CI passes.
+Submit to merge queue via beads.
+
+**IMPORTANT**: Do NOT use gh pr create or GitHub PRs.
+The Refinery processes merges via beads merge-request issues.
+
+1. Push your branch to origin
+2. Create a beads merge-request: bd create --type=merge-request --title="Merge: <summary>"
+3. Signal ready: gt done
 
 ` + "```" + `bash
+git push origin HEAD
+bd create --type=merge-request --title="Merge: <issue-summary>"
 gt done  # Signal work ready for merge queue
 ` + "```" + `
 
