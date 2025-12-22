@@ -44,10 +44,10 @@ var AgentTypeColors = map[AgentType]string{
 // AgentTypeIcons maps agent types to display icons.
 var AgentTypeIcons = map[AgentType]string{
 	AgentMayor:    "🎩",
-	AgentDeacon:   "🗼",
+	AgentDeacon:   "🦉",
 	AgentWitness:  "👁",
 	AgentRefinery: "🏭",
-	AgentCrew:     "👷",
+	AgentCrew:     "🧑‍💻",
 	AgentPolecat:  "😺",
 }
 

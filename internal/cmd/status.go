@@ -170,13 +170,13 @@ func outputStatusText(status TownStatus) error {
 		// Rig name with indicators
 		indicators := ""
 		if r.HasWitness {
-			indicators += " 👁"
+			indicators += " " + AgentTypeIcons[AgentWitness]
 		}
 		if r.HasRefinery {
-			indicators += " 🏭"
+			indicators += " " + AgentTypeIcons[AgentRefinery]
 		}
 		if r.CrewCount > 0 {
-			indicators += " 👤"
+			indicators += " " + AgentTypeIcons[AgentCrew]
 		}
 
 		fmt.Printf("   %s%s\n", style.Bold.Render(r.Name), indicators)

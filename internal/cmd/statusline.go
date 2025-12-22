@@ -62,21 +62,33 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 		return runRefineryStatusLine(rigName)
 	}
 
-	// Build mail identity
-	var identity string
-	if rigName != "" {
-		if polecat != "" {
-			identity = fmt.Sprintf("%s/%s", rigName, polecat)
-		} else if crew != "" {
-			identity = fmt.Sprintf("%s/%s", rigName, crew)
-		}
+	// Crew/Polecat status line
+	return runWorkerStatusLine(rigName, polecat, crew, issue)
+}
+
+// runWorkerStatusLine outputs status for crew or polecat sessions.
+func runWorkerStatusLine(rigName, polecat, crew, issue string) error {
+	// Determine agent type and identity
+	var icon, identity string
+	if polecat != "" {
+		icon = AgentTypeIcons[AgentPolecat]
+		identity = fmt.Sprintf("%s/%s", rigName, polecat)
+	} else if crew != "" {
+		icon = AgentTypeIcons[AgentCrew]
+		identity = fmt.Sprintf("%s/crew/%s", rigName, crew)
 	}
 
 	// Build status parts
 	var parts []string
 
-	// Current issue
-	if issue != "" {
+	// Add icon prefix
+	if icon != "" {
+		if issue != "" {
+			parts = append(parts, fmt.Sprintf("%s %s", icon, issue))
+		} else {
+			parts = append(parts, icon)
+		}
+	} else if issue != "" {
 		parts = append(parts, issue)
 	}
 
@@ -84,7 +96,7 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 	if identity != "" {
 		unread := getUnreadMailCount(identity)
 		if unread > 0 {
-			parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread)) // mail emoji
+			parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
 		}
 	}
 
@@ -173,7 +185,7 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 
 	// Build status
 	var parts []string
-	parts = append(parts, fmt.Sprintf("👁 %d polecats", polecatCount))
+	parts = append(parts, fmt.Sprintf("%s %d polecats", AgentTypeIcons[AgentWitness], polecatCount))
 	if unread > 0 {
 		parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
 	}
@@ -194,7 +206,7 @@ func runRefineryStatusLine(rigName string) error {
 	}
 
 	if rigName == "" {
-		fmt.Print("🏭 ? |")
+		fmt.Printf("%s ? |", AgentTypeIcons[AgentRefinery])
 		return nil
 	}
 
@@ -202,7 +214,7 @@ func runRefineryStatusLine(rigName string) error {
 	mgr, _, err := getRefineryManager(rigName)
 	if err != nil {
 		// Fallback to simple status if we can't access refinery
-		fmt.Print("🏭 MQ: ? |")
+		fmt.Printf("%s MQ: ? |", AgentTypeIcons[AgentRefinery])
 		return nil
 	}
 
@@ -210,7 +222,7 @@ func runRefineryStatusLine(rigName string) error {
 	queue, err := mgr.Queue()
 	if err != nil {
 		// Fallback to simple status if we can't read queue
-		fmt.Print("🏭 MQ: ? |")
+		fmt.Printf("%s MQ: ? |", AgentTypeIcons[AgentRefinery])
 		return nil
 	}
 
@@ -231,12 +243,13 @@ func runRefineryStatusLine(rigName string) error {
 
 	// Build status
 	var parts []string
+	icon := AgentTypeIcons[AgentRefinery]
 	if processing {
-		parts = append(parts, fmt.Sprintf("🏭 MQ: %d (+1)", pending))
+		parts = append(parts, fmt.Sprintf("%s MQ: %d (+1)", icon, pending))
 	} else if pending > 0 {
-		parts = append(parts, fmt.Sprintf("🏭 MQ: %d", pending))
+		parts = append(parts, fmt.Sprintf("%s MQ: %d", icon, pending))
 	} else {
-		parts = append(parts, "🏭 idle")
+		parts = append(parts, fmt.Sprintf("%s idle", icon))
 	}
 
 	if unread > 0 {

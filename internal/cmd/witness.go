@@ -232,7 +232,7 @@ func runWitnessStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Printf("%s Witness: %s\n\n", style.Bold.Render("👁"), rigName)
+	fmt.Printf("%s Witness: %s\n\n", style.Bold.Render(AgentTypeIcons[AgentWitness]), rigName)
 
 	stateStr := string(w.State)
 	switch w.State {
