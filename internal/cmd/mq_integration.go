@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -397,33 +398,17 @@ func filterMRsByTarget(mrs []*beads.Issue, targetBranch string) []*beads.Issue {
 	return result
 }
 
-// getTestCommand returns the test command from rig config.
+// getTestCommand returns the test command from rig settings.
 func getTestCommand(rigPath string) string {
-	configPath := filepath.Join(rigPath, "config.json")
-	data, err := os.ReadFile(configPath)
+	settingsPath := filepath.Join(rigPath, "settings", "config.json")
+	settings, err := config.LoadRigSettings(settingsPath)
 	if err != nil {
-		// Try .gastown/config.json as fallback
-		configPath = filepath.Join(rigPath, ".gastown", "config.json")
-		data, err = os.ReadFile(configPath)
-		if err != nil {
-			return ""
-		}
-	}
-
-	var rawConfig struct {
-		MergeQueue struct {
-			TestCommand string `json:"test_command"`
-		} `json:"merge_queue"`
-		TestCommand string `json:"test_command"` // Legacy fallback
-	}
-	if err := json.Unmarshal(data, &rawConfig); err != nil {
 		return ""
 	}
-
-	if rawConfig.MergeQueue.TestCommand != "" {
-		return rawConfig.MergeQueue.TestCommand
+	if settings.MergeQueue != nil && settings.MergeQueue.TestCommand != "" {
+		return settings.MergeQueue.TestCommand
 	}
-	return rawConfig.TestCommand
+	return ""
 }
 
 // runTestCommand executes a test command in the given directory.

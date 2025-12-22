@@ -715,7 +715,7 @@ func acquireIdentityLock(ctx RoleContext) error {
 			fmt.Printf("To resolve:\n")
 			fmt.Printf("  1. Find the other session and close it, OR\n")
 			fmt.Printf("  2. Run: gt doctor --fix (cleans stale locks)\n")
-			fmt.Printf("  3. If lock is stale: rm %s/.gastown/agent.lock\n", ctx.WorkDir)
+			fmt.Printf("  3. If lock is stale: rm %s/.runtime/agent.lock\n", ctx.WorkDir)
 			fmt.Println()
 
 			return fmt.Errorf("cannot claim identity %s/%s: %w", ctx.Rig, ctx.Polecat, err)

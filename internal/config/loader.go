@@ -232,7 +232,7 @@ func SaveRigConfig(path string, config *RigConfig) error {
 	return nil
 }
 
-// validateRigConfig validates a RigConfig.
+// validateRigConfig validates a RigConfig (identity only).
 func validateRigConfig(c *RigConfig) error {
 	if c.Type != "rig" && c.Type != "" {
 		return fmt.Errorf("%w: expected type 'rig', got '%s'", ErrInvalidType, c.Type)
@@ -240,14 +240,25 @@ func validateRigConfig(c *RigConfig) error {
 	if c.Version > CurrentRigConfigVersion {
 		return fmt.Errorf("%w: got %d, max supported %d", ErrInvalidVersion, c.Version, CurrentRigConfigVersion)
 	}
+	if c.Name == "" {
+		return fmt.Errorf("%w: name", ErrMissingField)
+	}
+	return nil
+}
 
-	// Validate merge queue config if present
+// validateRigSettings validates a RigSettings.
+func validateRigSettings(c *RigSettings) error {
+	if c.Type != "rig-settings" && c.Type != "" {
+		return fmt.Errorf("%w: expected type 'rig-settings', got '%s'", ErrInvalidType, c.Type)
+	}
+	if c.Version > CurrentRigSettingsVersion {
+		return fmt.Errorf("%w: got %d, max supported %d", ErrInvalidVersion, c.Version, CurrentRigSettingsVersion)
+	}
 	if c.MergeQueue != nil {
 		if err := validateMergeQueueConfig(c.MergeQueue); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -280,11 +291,129 @@ func validateMergeQueueConfig(c *MergeQueueConfig) error {
 	return nil
 }
 
-// NewRigConfig creates a new RigConfig with defaults.
-func NewRigConfig() *RigConfig {
+// NewRigConfig creates a new RigConfig (identity only).
+func NewRigConfig(name, gitURL string) *RigConfig {
 	return &RigConfig{
-		Type:       "rig",
-		Version:    CurrentRigConfigVersion,
+		Type:    "rig",
+		Version: CurrentRigConfigVersion,
+		Name:    name,
+		GitURL:  gitURL,
+	}
+}
+
+// NewRigSettings creates a new RigSettings with defaults.
+func NewRigSettings() *RigSettings {
+	return &RigSettings{
+		Type:       "rig-settings",
+		Version:    CurrentRigSettingsVersion,
 		MergeQueue: DefaultMergeQueueConfig(),
+		Namepool:   DefaultNamepoolConfig(),
+	}
+}
+
+// LoadRigSettings loads and validates a rig settings file.
+func LoadRigSettings(path string) (*RigSettings, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+		}
+		return nil, fmt.Errorf("reading settings: %w", err)
+	}
+
+	var settings RigSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("parsing settings: %w", err)
+	}
+
+	if err := validateRigSettings(&settings); err != nil {
+		return nil, err
+	}
+
+	return &settings, nil
+}
+
+// SaveRigSettings saves rig settings to a file.
+func SaveRigSettings(path string, settings *RigSettings) error {
+	if err := validateRigSettings(settings); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding settings: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing settings: %w", err)
+	}
+
+	return nil
+}
+
+// LoadMayorConfig loads and validates a mayor config file.
+func LoadMayorConfig(path string) (*MayorConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+		}
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+
+	var config MayorConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	if err := validateMayorConfig(&config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+// SaveMayorConfig saves a mayor config to a file.
+func SaveMayorConfig(path string, config *MayorConfig) error {
+	if err := validateMayorConfig(config); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+
+	return nil
+}
+
+// validateMayorConfig validates a MayorConfig.
+func validateMayorConfig(c *MayorConfig) error {
+	if c.Type != "mayor-config" && c.Type != "" {
+		return fmt.Errorf("%w: expected type 'mayor-config', got '%s'", ErrInvalidType, c.Type)
+	}
+	if c.Version > CurrentMayorConfigVersion {
+		return fmt.Errorf("%w: got %d, max supported %d", ErrInvalidVersion, c.Version, CurrentMayorConfigVersion)
+	}
+	return nil
+}
+
+// NewMayorConfig creates a new MayorConfig with defaults.
+func NewMayorConfig() *MayorConfig {
+	return &MayorConfig{
+		Type:    "mayor-config",
+		Version: CurrentMayorConfigVersion,
 	}
 }

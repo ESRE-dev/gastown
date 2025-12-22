@@ -3,14 +3,37 @@ package config
 
 import "time"
 
-// TownConfig represents the main town configuration (mayor/town.json).
+// TownConfig represents the main town identity (mayor/town.json).
 type TownConfig struct {
-	Type      string           `json:"type"`            // "town"
-	Version   int              `json:"version"`         // schema version
-	Name      string           `json:"name"`            // town identifier
-	CreatedAt time.Time        `json:"created_at"`
-	Theme     *TownThemeConfig `json:"theme,omitempty"` // global theme settings
+	Type      string    `json:"type"`    // "town"
+	Version   int       `json:"version"` // schema version
+	Name      string    `json:"name"`    // town identifier
+	CreatedAt time.Time `json:"created_at"`
 }
+
+// MayorConfig represents town-level behavioral configuration (mayor/config.json).
+// This is separate from TownConfig (identity) to keep configuration concerns distinct.
+type MayorConfig struct {
+	Type    string           `json:"type"`              // "mayor-config"
+	Version int              `json:"version"`           // schema version
+	Theme   *TownThemeConfig `json:"theme,omitempty"`   // global theme settings
+	Daemon  *DaemonConfig    `json:"daemon,omitempty"`  // daemon settings
+	Deacon  *DeaconConfig    `json:"deacon,omitempty"`  // deacon settings
+}
+
+// DaemonConfig represents daemon process settings.
+type DaemonConfig struct {
+	HeartbeatInterval string `json:"heartbeat_interval,omitempty"` // e.g., "30s"
+	PollInterval      string `json:"poll_interval,omitempty"`      // e.g., "10s"
+}
+
+// DeaconConfig represents deacon process settings.
+type DeaconConfig struct {
+	PatrolInterval string `json:"patrol_interval,omitempty"` // e.g., "5m"
+}
+
+// CurrentMayorConfigVersion is the current schema version for MayorConfig.
+const CurrentMayorConfigVersion = 1
 
 // RigsConfig represents the rigs registry (mayor/rigs.json).
 type RigsConfig struct {
@@ -48,9 +71,23 @@ const CurrentRigsVersion = 1
 // CurrentRigConfigVersion is the current schema version for RigConfig.
 const CurrentRigConfigVersion = 1
 
-// RigConfig represents the per-rig configuration (rig/config.json).
+// CurrentRigSettingsVersion is the current schema version for RigSettings.
+const CurrentRigSettingsVersion = 1
+
+// RigConfig represents per-rig identity (rig/config.json).
+// This contains only identity - behavioral config is in settings/config.json.
 type RigConfig struct {
-	Type       string            `json:"type"`                  // "rig"
+	Type      string       `json:"type"`       // "rig"
+	Version   int          `json:"version"`    // schema version
+	Name      string       `json:"name"`       // rig name
+	GitURL    string       `json:"git_url"`    // git repository URL
+	CreatedAt time.Time    `json:"created_at"` // when the rig was created
+	Beads     *BeadsConfig `json:"beads,omitempty"`
+}
+
+// RigSettings represents per-rig behavioral configuration (settings/config.json).
+type RigSettings struct {
+	Type       string            `json:"type"`                  // "rig-settings"
 	Version    int               `json:"version"`               // schema version
 	MergeQueue *MergeQueueConfig `json:"merge_queue,omitempty"` // merge queue settings
 	Theme      *ThemeConfig      `json:"theme,omitempty"`       // tmux theme settings

@@ -79,9 +79,9 @@ const HQGitignore = `# Gas Town HQ .gitignore
 **/crew/
 
 # =============================================================================
-# Rig runtime state directories
+# Runtime state directories (gitignored ephemeral data)
 # =============================================================================
-**/.gastown/
+**/.runtime/
 
 # =============================================================================
 # Rig .beads symlinks (point to ignored mayor/rig/.beads, recreated on setup)

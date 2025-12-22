@@ -308,7 +308,7 @@ func TestNamePool_StateFilePath(t *testing.T) {
 	}
 
 	// Verify file was created in expected location
-	expectedPath := filepath.Join(tmpDir, ".gastown", "namepool.json")
+	expectedPath := filepath.Join(tmpDir, ".runtime", "namepool-state.json")
 	if _, err := os.Stat(expectedPath); err != nil {
 		t.Errorf("state file not found at expected path: %v", err)
 	}

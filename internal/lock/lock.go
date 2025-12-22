@@ -1,7 +1,7 @@
 // Package lock provides agent identity locking to prevent multiple agents
 // from claiming the same worker identity.
 //
-// Lock files are stored at <worker>/.gastown/agent.lock and contain:
+// Lock files are stored at <worker>/.runtime/agent.lock and contain:
 // - PID of the owning process
 // - Timestamp when lock was acquired
 // - Session ID (tmux session name)
@@ -50,7 +50,7 @@ type Lock struct {
 func New(workerDir string) *Lock {
 	return &Lock{
 		workerDir: workerDir,
-		lockPath:  filepath.Join(workerDir, ".gastown", "agent.lock"),
+		lockPath:  filepath.Join(workerDir, ".runtime", "agent.lock"),
 	}
 }
 
@@ -167,7 +167,7 @@ func (l *Lock) ForceRelease() error {
 
 // write creates or updates the lock file.
 func (l *Lock) write(sessionID string) error {
-	// Ensure .gastown directory exists
+	// Ensure .runtime directory exists
 	dir := filepath.Dir(l.lockPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating lock directory: %w", err)
@@ -224,7 +224,7 @@ func FindAllLocks(root string) (map[string]*LockInfo, error) {
 			return nil
 		}
 
-		if filepath.Base(path) == "agent.lock" && filepath.Base(filepath.Dir(path)) == ".gastown" {
+		if filepath.Base(path) == "agent.lock" && filepath.Base(filepath.Dir(path)) == ".runtime" {
 			workerDir := filepath.Dir(filepath.Dir(path))
 			lock := New(workerDir)
 			lockInfo, err := lock.Read()

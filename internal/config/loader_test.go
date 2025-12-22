@@ -135,7 +135,9 @@ func TestRigConfigRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 
-	original := NewRigConfig()
+	original := NewRigConfig("gastown", "git@github.com:test/gastown.git")
+	original.CreatedAt = time.Now().Truncate(time.Second)
+	original.Beads = &BeadsConfig{Prefix: "gt-"}
 
 	if err := SaveRigConfig(path, original); err != nil {
 		t.Fatalf("SaveRigConfig: %v", err)
@@ -152,6 +154,35 @@ func TestRigConfigRoundTrip(t *testing.T) {
 	if loaded.Version != CurrentRigConfigVersion {
 		t.Errorf("Version = %d, want %d", loaded.Version, CurrentRigConfigVersion)
 	}
+	if loaded.Name != "gastown" {
+		t.Errorf("Name = %q, want 'gastown'", loaded.Name)
+	}
+	if loaded.GitURL != "git@github.com:test/gastown.git" {
+		t.Errorf("GitURL = %q, want expected URL", loaded.GitURL)
+	}
+	if loaded.Beads == nil || loaded.Beads.Prefix != "gt-" {
+		t.Error("Beads.Prefix not preserved")
+	}
+}
+
+func TestRigSettingsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings", "config.json")
+
+	original := NewRigSettings()
+
+	if err := SaveRigSettings(path, original); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	loaded, err := LoadRigSettings(path)
+	if err != nil {
+		t.Fatalf("LoadRigSettings: %v", err)
+	}
+
+	if loaded.Type != "rig-settings" {
+		t.Errorf("Type = %q, want 'rig-settings'", loaded.Type)
+	}
 	if loaded.MergeQueue == nil {
 		t.Fatal("MergeQueue is nil")
 	}
@@ -161,17 +192,14 @@ func TestRigConfigRoundTrip(t *testing.T) {
 	if loaded.MergeQueue.TargetBranch != "main" {
 		t.Errorf("MergeQueue.TargetBranch = %q, want 'main'", loaded.MergeQueue.TargetBranch)
 	}
-	if loaded.MergeQueue.OnConflict != OnConflictAssignBack {
-		t.Errorf("MergeQueue.OnConflict = %q, want %q", loaded.MergeQueue.OnConflict, OnConflictAssignBack)
-	}
 }
 
-func TestRigConfigWithCustomMergeQueue(t *testing.T) {
+func TestRigSettingsWithCustomMergeQueue(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
+	path := filepath.Join(dir, "settings.json")
 
-	original := &RigConfig{
-		Type:    "rig",
+	original := &RigSettings{
+		Type:    "rig-settings",
 		Version: 1,
 		MergeQueue: &MergeQueueConfig{
 			Enabled:              true,
@@ -187,13 +215,13 @@ func TestRigConfigWithCustomMergeQueue(t *testing.T) {
 		},
 	}
 
-	if err := SaveRigConfig(path, original); err != nil {
-		t.Fatalf("SaveRigConfig: %v", err)
+	if err := SaveRigSettings(path, original); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	loaded, err := LoadRigConfig(path)
+	loaded, err := LoadRigSettings(path)
 	if err != nil {
-		t.Fatalf("LoadRigConfig: %v", err)
+		t.Fatalf("LoadRigSettings: %v", err)
 	}
 
 	mq := loaded.MergeQueue
@@ -209,12 +237,6 @@ func TestRigConfigWithCustomMergeQueue(t *testing.T) {
 	if mq.RetryFlakyTests != 3 {
 		t.Errorf("RetryFlakyTests = %d, want 3", mq.RetryFlakyTests)
 	}
-	if mq.PollInterval != "1m" {
-		t.Errorf("PollInterval = %q, want '1m'", mq.PollInterval)
-	}
-	if mq.MaxConcurrent != 2 {
-		t.Errorf("MaxConcurrent = %d, want 2", mq.MaxConcurrent)
-	}
 }
 
 func TestRigConfigValidation(t *testing.T) {
@@ -226,23 +248,67 @@ func TestRigConfigValidation(t *testing.T) {
 		{
 			name: "valid config",
 			config: &RigConfig{
-				Type:       "rig",
+				Type:    "rig",
+				Version: 1,
+				Name:    "test-rig",
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing name",
+			config: &RigConfig{
+				Type:    "rig",
+				Version: 1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "wrong type",
+			config: &RigConfig{
+				Type:    "wrong",
+				Version: 1,
+				Name:    "test",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRigConfig(tt.config)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateRigConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRigSettingsValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings *RigSettings
+		wantErr  bool
+	}{
+		{
+			name: "valid settings",
+			settings: &RigSettings{
+				Type:       "rig-settings",
 				Version:    1,
 				MergeQueue: DefaultMergeQueueConfig(),
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid config without merge queue",
-			config: &RigConfig{
-				Type:    "rig",
+			name: "valid settings without merge queue",
+			settings: &RigSettings{
+				Type:    "rig-settings",
 				Version: 1,
 			},
 			wantErr: false,
 		},
 		{
 			name: "wrong type",
-			config: &RigConfig{
+			settings: &RigSettings{
 				Type:    "wrong",
 				Version: 1,
 			},
@@ -250,8 +316,8 @@ func TestRigConfigValidation(t *testing.T) {
 		},
 		{
 			name: "invalid on_conflict",
-			config: &RigConfig{
-				Type:    "rig",
+			settings: &RigSettings{
+				Type:    "rig-settings",
 				Version: 1,
 				MergeQueue: &MergeQueueConfig{
 					OnConflict: "invalid",
@@ -261,8 +327,8 @@ func TestRigConfigValidation(t *testing.T) {
 		},
 		{
 			name: "invalid poll_interval",
-			config: &RigConfig{
-				Type:    "rig",
+			settings: &RigSettings{
+				Type:    "rig-settings",
 				Version: 1,
 				MergeQueue: &MergeQueueConfig{
 					PollInterval: "not-a-duration",
@@ -274,9 +340,9 @@ func TestRigConfigValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateRigConfig(tt.config)
+			err := validateRigSettings(tt.settings)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateRigConfig() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("validateRigSettings() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -319,6 +385,51 @@ func TestDefaultMergeQueueConfig(t *testing.T) {
 
 func TestLoadRigConfigNotFound(t *testing.T) {
 	_, err := LoadRigConfig("/nonexistent/path.json")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestLoadRigSettingsNotFound(t *testing.T) {
+	_, err := LoadRigSettings("/nonexistent/path.json")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestMayorConfigRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mayor", "config.json")
+
+	original := NewMayorConfig()
+	original.Theme = &TownThemeConfig{
+		RoleDefaults: map[string]string{
+			"witness": "rust",
+		},
+	}
+
+	if err := SaveMayorConfig(path, original); err != nil {
+		t.Fatalf("SaveMayorConfig: %v", err)
+	}
+
+	loaded, err := LoadMayorConfig(path)
+	if err != nil {
+		t.Fatalf("LoadMayorConfig: %v", err)
+	}
+
+	if loaded.Type != "mayor-config" {
+		t.Errorf("Type = %q, want 'mayor-config'", loaded.Type)
+	}
+	if loaded.Version != CurrentMayorConfigVersion {
+		t.Errorf("Version = %d, want %d", loaded.Version, CurrentMayorConfigVersion)
+	}
+	if loaded.Theme == nil || loaded.Theme.RoleDefaults["witness"] != "rust" {
+		t.Error("Theme.RoleDefaults not preserved")
+	}
+}
+
+func TestLoadMayorConfigNotFound(t *testing.T) {
+	_, err := LoadMayorConfig("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}

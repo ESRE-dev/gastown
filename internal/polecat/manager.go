@@ -48,19 +48,19 @@ func NewManager(r *rig.Rig, g *git.Git) *Manager {
 	// Use the rig root for beads operations (rig-level beads at .beads/)
 	rigPath := r.Path
 
-	// Try to load rig config for namepool settings
-	rigConfigPath := filepath.Join(r.Path, ".gastown", "config.json")
+	// Try to load rig settings for namepool config
+	settingsPath := filepath.Join(r.Path, "settings", "config.json")
 	var pool *NamePool
 
-	rigConfig, err := config.LoadRigConfig(rigConfigPath)
-	if err == nil && rigConfig.Namepool != nil {
+	settings, err := config.LoadRigSettings(settingsPath)
+	if err == nil && settings.Namepool != nil {
 		// Use configured namepool settings
 		pool = NewNamePoolWithConfig(
 			r.Path,
 			r.Name,
-			rigConfig.Namepool.Style,
-			rigConfig.Namepool.Names,
-			rigConfig.Namepool.MaxBeforeNumbering,
+			settings.Namepool.Style,
+			settings.Namepool.Names,
+			settings.Namepool.MaxBeforeNumbering,
 		)
 	} else {
 		// Use defaults

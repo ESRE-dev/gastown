@@ -104,9 +104,9 @@ func runNamepool(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if configured
-	configPath := filepath.Join(rigPath, ".gastown", "config.json")
-	if cfg, err := config.LoadRigConfig(configPath); err == nil && cfg.Namepool != nil {
-		fmt.Printf("(configured in .gastown/config.json)\n")
+	settingsPath := filepath.Join(rigPath, "settings", "config.json")
+	if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.Namepool != nil {
+		fmt.Printf("(configured in settings/config.json)\n")
 	}
 
 	return nil
@@ -271,39 +271,31 @@ func detectCurrentRigWithPath() (string, string) {
 	return "", ""
 }
 
-// saveRigNamepoolConfig saves the namepool config to rig config.
+// saveRigNamepoolConfig saves the namepool config to rig settings.
 func saveRigNamepoolConfig(rigPath, theme string, customNames []string) error {
-	configPath := filepath.Join(rigPath, ".gastown", "config.json")
+	settingsPath := filepath.Join(rigPath, "settings", "config.json")
 
-	// Load existing config or create new
-	var cfg *config.RigConfig
-	cfg, err := config.LoadRigConfig(configPath)
+	// Load existing settings or create new
+	var settings *config.RigSettings
+	settings, err := config.LoadRigSettings(settingsPath)
 	if err != nil {
-		// Create new config if not found
+		// Create new settings if not found
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "not found") {
-			cfg = &config.RigConfig{
-				Type:    "rig",
-				Version: config.CurrentRigConfigVersion,
-			}
+			settings = config.NewRigSettings()
 		} else {
-			return fmt.Errorf("loading config: %w", err)
+			return fmt.Errorf("loading settings: %w", err)
 		}
 	}
 
 	// Set namepool
-	cfg.Namepool = &config.NamepoolConfig{
+	settings.Namepool = &config.NamepoolConfig{
 		Style: theme,
 		Names: customNames,
 	}
 
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
-		return err
-	}
-
-	// Save
-	if err := config.SaveRigConfig(configPath, cfg); err != nil {
-		return fmt.Errorf("saving config: %w", err)
+	// Save (creates directory if needed)
+	if err := config.SaveRigSettings(settingsPath, settings); err != nil {
+		return fmt.Errorf("saving settings: %w", err)
 	}
 
 	return nil

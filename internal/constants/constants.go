@@ -25,8 +25,11 @@ const (
 	// DirBeads is the beads database directory.
 	DirBeads = ".beads"
 
-	// DirGastown is the per-rig runtime state directory.
-	DirGastown = ".gastown"
+	// DirRuntime is the runtime state directory (gitignored).
+	DirRuntime = ".runtime"
+
+	// DirSettings is the rig settings directory (git-tracked).
+	DirSettings = "settings"
 )
 
 // File names for configuration and state.
@@ -132,7 +135,22 @@ func RigCrewPath(rigPath string) string {
 	return rigPath + "/" + DirCrew
 }
 
-// GastownPath returns the path to .gastown/ within a rig.
-func GastownPath(rigPath string) string {
-	return rigPath + "/" + DirGastown
+// MayorConfigPath returns the path to mayor/config.json within a town root.
+func MayorConfigPath(townRoot string) string {
+	return townRoot + "/" + DirMayor + "/" + FileConfigJSON
+}
+
+// TownRuntimePath returns the path to .runtime/ at the town root.
+func TownRuntimePath(townRoot string) string {
+	return townRoot + "/" + DirRuntime
+}
+
+// RigRuntimePath returns the path to .runtime/ within a rig.
+func RigRuntimePath(rigPath string) string {
+	return rigPath + "/" + DirRuntime
+}
+
+// RigSettingsPath returns the path to settings/ within a rig.
+func RigSettingsPath(rigPath string) string {
+	return rigPath + "/" + DirSettings
 }

@@ -16,8 +16,8 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	// Create temp directory structure
 	tmpDir := t.TempDir()
 	rigPath := filepath.Join(tmpDir, "testrig")
-	if err := os.MkdirAll(filepath.Join(rigPath, ".gastown"), 0755); err != nil {
-		t.Fatalf("mkdir .gastown: %v", err)
+	if err := os.MkdirAll(filepath.Join(rigPath, ".runtime"), 0755); err != nil {
+		t.Fatalf("mkdir .runtime: %v", err)
 	}
 
 	r := &rig.Rig{
@@ -146,7 +146,7 @@ func TestManager_RegisterMR(t *testing.T) {
 	}
 
 	// Verify it was saved to disk
-	stateFile := filepath.Join(rigPath, ".gastown", "refinery.json")
+	stateFile := filepath.Join(rigPath, ".runtime", "refinery.json")
 	data, err := os.ReadFile(stateFile)
 	if err != nil {
 		t.Fatalf("reading state file: %v", err)
