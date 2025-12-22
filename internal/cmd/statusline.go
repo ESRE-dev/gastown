@@ -3,9 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -68,11 +70,11 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 	}
 
 	// Crew/Polecat status line
-	return runWorkerStatusLine(rigName, polecat, crew, issue)
+	return runWorkerStatusLine(t, statusLineSession, rigName, polecat, crew, issue)
 }
 
 // runWorkerStatusLine outputs status for crew or polecat sessions.
-func runWorkerStatusLine(rigName, polecat, crew, issue string) error {
+func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue string) error {
 	// Determine agent type and identity
 	var icon, identity string
 	if polecat != "" {
@@ -86,15 +88,21 @@ func runWorkerStatusLine(rigName, polecat, crew, issue string) error {
 	// Build status parts
 	var parts []string
 
-	// Add icon prefix
+	// Try to get current work from beads if no issue env var
+	currentWork := issue
+	if currentWork == "" && session != "" {
+		currentWork = getCurrentWork(t, session, 40)
+	}
+
+	// Add icon and current work
 	if icon != "" {
-		if issue != "" {
-			parts = append(parts, fmt.Sprintf("%s %s", icon, issue))
+		if currentWork != "" {
+			parts = append(parts, fmt.Sprintf("%s %s", icon, currentWork))
 		} else {
 			parts = append(parts, icon)
 		}
-	} else if issue != "" {
-		parts = append(parts, issue)
+	} else if currentWork != "" {
+		parts = append(parts, currentWork)
 	}
 
 	// Mail preview
@@ -352,4 +360,38 @@ func getMailPreview(identity string, maxLen int) (int, string) {
 	}
 
 	return len(messages), subject
+}
+
+// getCurrentWork returns a truncated title of the first in_progress issue.
+// Uses the pane's working directory to find the beads.
+func getCurrentWork(t *tmux.Tmux, session string, maxLen int) string {
+	// Get the pane's working directory
+	workDir, err := t.GetPaneWorkDir(session)
+	if err != nil || workDir == "" {
+		return ""
+	}
+
+	// Check if there's a .beads directory
+	beadsDir := filepath.Join(workDir, ".beads")
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+		return ""
+	}
+
+	// Query beads for in_progress issues
+	b := beads.New(workDir)
+	issues, err := b.List(beads.ListOptions{
+		Status:   "in_progress",
+		Priority: -1,
+	})
+	if err != nil || len(issues) == 0 {
+		return ""
+	}
+
+	// Return first issue's ID and title, truncated
+	issue := issues[0]
+	display := fmt.Sprintf("%s: %s", issue.ID, issue.Title)
+	if len(display) > maxLen {
+		display = display[:maxLen-1] + "…"
+	}
+	return display
 }
