@@ -207,6 +207,15 @@ func (t *Tmux) GetPaneCommand(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// GetPaneWorkDir returns the current working directory of a pane.
+func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
+	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_current_path}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // CapturePane captures the visible content of a pane.
 func (t *Tmux) CapturePane(session string, lines int) (string, error) {
 	return t.run("capture-pane", "-p", "-t", session, "-S", fmt.Sprintf("-%d", lines))
