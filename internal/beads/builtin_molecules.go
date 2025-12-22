@@ -312,9 +312,13 @@ func PolecatWorkMolecule() BuiltinMolecule {
 		Title: "Polecat Work",
 		Description: `Full polecat lifecycle from assignment to decommission.
 
-This molecule enables nondeterministic idempotence for polecat work.
-A polecat that crashes after any step can restart, read its molecule state,
+This molecule is your contract. Follow it to one of its defined exits.
+The Witness doesn't care which exit you take, only that you exit properly.
+
+**State Machine**: A polecat that crashes can restart, read its molecule state,
 and continue from the last completed step. No work is lost.
+
+**Non-Linear Exits**: If blocked at any step, skip to exit-decision directly.
 
 ## Step: load-context
 Run gt prime and bd prime. Verify issue assignment.
@@ -323,12 +327,22 @@ Check inbox for any relevant messages.
 Read the assigned issue and understand the requirements.
 Identify any blockers or missing information.
 
+**If blocked here**: Missing requirements? Unclear scope? Jump to exit-decision
+with exit_type=escalate.
+
 ## Step: implement
 Implement the solution. Follow codebase conventions.
 File discovered work as new issues with bd create.
 
 Make regular commits with clear messages.
 Keep changes focused on the assigned issue.
+
+**Dynamic modifications allowed**:
+- Add extra review or test steps if needed
+- File discovered blockers as issues
+- Request session refresh if context is filling up
+
+**If blocked here**: Dependency missing? Work too large? Jump to exit-decision.
 Needs: load-context
 
 ## Step: self-review
@@ -362,7 +376,8 @@ git rebase origin/main
 ` + "```" + `
 
 If there are conflicts, resolve them carefully and
-continue the rebase.
+continue the rebase. If conflicts are unresolvable, jump to exit-decision
+with exit_type=escalate.
 Needs: self-review, verify-tests
 
 ## Step: submit-merge
@@ -384,21 +399,84 @@ gt done  # Signal work ready for merge queue
 If there are CI failures, fix them before proceeding.
 Needs: rebase-main
 
-## Step: generate-summary
-Generate a summary for molecule squash.
-File any remaining work as issues.
+## Step: exit-decision
+**CONVERGENCE POINT**: All exits pass through here.
 
-Document any important context for the squash digest
-or for anyone reviewing the work.
-Needs: submit-merge
+Determine your exit type and take appropriate action:
+
+### Exit Type: COMPLETED (normal)
+Work finished successfully. Submit-merge done.
+` + "```" + `bash
+# Document completion
+bd update <step-id> --status=closed
+` + "```" + `
+
+### Exit Type: BLOCKED
+External dependency prevents progress.
+` + "```" + `bash
+# 1. File the blocker
+bd create --type=task --title="Blocker: <description>" --priority=1
+
+# 2. Link dependency
+bd dep add <your-issue> <blocker-id>
+
+# 3. Defer your issue
+bd update <your-issue> --status=deferred
+
+# 4. Notify witness
+gt mail send <rig>/witness -s "Blocked: <issue-id>" -m "Blocked by <blocker-id>. Deferring."
+` + "```" + `
+
+### Exit Type: REFACTOR
+Work is too large for one polecat session.
+` + "```" + `bash
+# Option A: Self-refactor
+# 1. Break into sub-issues
+bd create --type=task --title="Sub: part 1" --parent=<your-issue>
+bd create --type=task --title="Sub: part 2" --parent=<your-issue>
+
+# 2. Close what you completed, defer the rest
+bd close <completed-sub-issues>
+bd update <your-issue> --status=deferred
+
+# Option B: Request refactor
+gt mail send mayor/ -s "Refactor needed: <issue-id>" -m "
+Issue too large. Completed X, remaining Y needs breakdown.
+Recommend splitting into: ...
+"
+bd update <your-issue> --status=deferred
+` + "```" + `
+
+### Exit Type: ESCALATE
+Need human judgment or authority.
+` + "```" + `bash
+# 1. Document what you know
+bd comment <your-issue> "Escalating because: <reason>. Context: <details>"
+
+# 2. Mail human
+gt mail send --human -s "Escalation: <issue-id>" -m "
+Need human decision on: <specific question>
+Context: <what you've tried>
+Options I see: <A, B, C>
+"
+
+# 3. Defer the issue
+bd update <your-issue> --status=deferred
+` + "```" + `
+
+**Record your exit**: Update this step with your exit type and actions taken.
+Needs: load-context
 
 ## Step: request-shutdown
-Send shutdown request to Witness.
 Wait for termination.
+
+All exit paths converge here. Your work is either:
+- Merged (COMPLETED)
+- Deferred with proper handoff (BLOCKED/REFACTOR/ESCALATE)
 
 The polecat is now ready to be cleaned up.
 Do not exit directly - wait for Witness to kill the session.
-Needs: generate-summary`,
+Needs: exit-decision`,
 	}
 }
 
