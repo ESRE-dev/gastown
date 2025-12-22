@@ -23,29 +23,28 @@ with Beads as the tracks. Wisps are steam vapors that dissipate after the work i
 ### Directory Structure
 
 ```
-~/gt/gastown/
+~/gt/gastown/                     # Rig root (not a git repo)
+├── .beads-wisp/                  # Shared wisp storage (rig-level, gitignored)
+│   └── issues.jsonl              # In-progress wisps (Deacon, Witness, Refinery)
+│
 ├── mayor/rig/                    # Mayor's canonical clone
-│   ├── .beads/                   # CANONICAL rig beads (versioned)
-│   │   ├── issues.jsonl          # Permanent issues + digests
-│   │   ├── config.yaml
-│   │   └── .gitignore            # Excludes .beads-wisp
-│   │
-│   └── .beads-wisp/              # GITIGNORED - shared wisp storage
-│       └── issues.jsonl          # In-progress wisps (Deacon, Witness, Refinery)
+│   └── .beads/                   # CANONICAL rig beads (versioned)
+│       ├── issues.jsonl          # Permanent issues + digests
+│       └── config.yaml
 │
 ├── refinery/rig/                 # Refinery's clone
-│   └── .beads/                   # Inherits from mayor/rig (no local wisps)
+│   └── .beads/                   # Inherits from mayor/rig
 │
-├── witness/                      # Witness (no clone needed, no local wisps)
+├── witness/                      # Witness (no clone needed)
 │
 └── polecats/<name>/              # Polecat worktrees
-    └── .beads/                   # Inherits from mayor/rig (polecats don't use wisps)
+    └── .beads/                   # Inherits from mayor/rig
 ```
 
 ### Key Points
 
-1. **`.beads-wisp/` is gitignored** - Never synced, never versioned
-2. **All rig patrols share `mayor/rig/.beads-wisp/`** - Deacon, Witness, Refinery
+1. **`.beads-wisp/` is at rig root** - Outside any git clone, naturally isolated
+2. **All rig agents share `<rig>/.beads-wisp/`** - Deacon, Witness, Refinery
 3. **Digests go to canonical `.beads/`** - Permanent record after squash
 4. **Wisps are deleted after squash/burn** - No accumulation
 5. **Polecats don't use wisps** - Each assignment is a deliverable with audit value
@@ -93,9 +92,9 @@ These roles have repetitive/cyclic work that would accumulate without wisps:
 
 | Role | Molecule | Storage Location | Squash Frequency |
 |------|----------|------------------|------------------|
-| **Deacon** | mol-deacon-patrol | mayor/rig/.beads-wisp/ | Per cycle |
-| **Witness** | mol-witness-patrol | mayor/rig/.beads-wisp/ | Per cycle |
-| **Refinery** | mol-refinery-cycle | mayor/rig/.beads-wisp/ | Per cycle |
+| **Deacon** | mol-deacon-patrol | `<rig>/.beads-wisp/` | Per cycle |
+| **Witness** | mol-witness-patrol | `<rig>/.beads-wisp/` | Per cycle |
+| **Refinery** | mol-refinery-cycle | `<rig>/.beads-wisp/` | Per cycle |
 
 ### Roles That Use Regular Molecules
 
