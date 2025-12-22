@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -19,7 +19,7 @@ func getRig(rigName string) (string, *rig.Rig, error) {
 		return "", nil, fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfigPath := constants.MayorRigsPath(townRoot)
 	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
 	if err != nil {
 		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}

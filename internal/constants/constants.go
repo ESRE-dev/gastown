@@ -1,0 +1,138 @@
+// Package constants defines shared constant values used throughout Gas Town.
+// Centralizing these magic strings improves maintainability and consistency.
+package constants
+
+// Directory names within a Gas Town workspace.
+const (
+	// DirMayor is the directory containing mayor configuration and state.
+	DirMayor = "mayor"
+
+	// DirPolecats is the directory containing polecat worktrees.
+	DirPolecats = "polecats"
+
+	// DirCrew is the directory containing crew workspaces.
+	DirCrew = "crew"
+
+	// DirRefinery is the directory containing the refinery clone.
+	DirRefinery = "refinery"
+
+	// DirWitness is the directory containing witness state.
+	DirWitness = "witness"
+
+	// DirRig is the subdirectory containing the actual git clone.
+	DirRig = "rig"
+
+	// DirBeads is the beads database directory.
+	DirBeads = ".beads"
+
+	// DirGastown is the per-rig runtime state directory.
+	DirGastown = ".gastown"
+)
+
+// File names for configuration and state.
+const (
+	// FileRigsJSON is the rig registry file in mayor/.
+	FileRigsJSON = "rigs.json"
+
+	// FileTownJSON is the town configuration file in mayor/.
+	FileTownJSON = "town.json"
+
+	// FileStateJSON is the agent state file.
+	FileStateJSON = "state.json"
+
+	// FileConfigJSON is the general config file.
+	FileConfigJSON = "config.json"
+
+	// FileConfigYAML is the beads config file.
+	FileConfigYAML = "config.yaml"
+)
+
+// Git branch names.
+const (
+	// BranchMain is the default main branch name.
+	BranchMain = "main"
+
+	// BranchBeadsSync is the branch used for beads synchronization.
+	BranchBeadsSync = "beads-sync"
+
+	// BranchPolecatPrefix is the prefix for polecat work branches.
+	BranchPolecatPrefix = "polecat/"
+
+	// BranchIntegrationPrefix is the prefix for integration branches.
+	BranchIntegrationPrefix = "integration/"
+)
+
+// Tmux session names.
+const (
+	// SessionMayor is the tmux session name for the mayor.
+	SessionMayor = "gt-mayor"
+
+	// SessionDeacon is the tmux session name for the deacon.
+	SessionDeacon = "gt-deacon"
+
+	// SessionPrefix is the prefix for all Gas Town tmux sessions.
+	SessionPrefix = "gt-"
+)
+
+// Agent role names.
+const (
+	// RoleMayor is the mayor agent role.
+	RoleMayor = "mayor"
+
+	// RoleWitness is the witness agent role.
+	RoleWitness = "witness"
+
+	// RoleRefinery is the refinery agent role.
+	RoleRefinery = "refinery"
+
+	// RolePolecat is the polecat agent role.
+	RolePolecat = "polecat"
+
+	// RoleCrew is the crew agent role.
+	RoleCrew = "crew"
+
+	// RoleDeacon is the deacon agent role.
+	RoleDeacon = "deacon"
+)
+
+// Path helpers construct common paths.
+
+// MayorRigsPath returns the path to rigs.json within a town root.
+func MayorRigsPath(townRoot string) string {
+	return townRoot + "/" + DirMayor + "/" + FileRigsJSON
+}
+
+// MayorTownPath returns the path to town.json within a town root.
+func MayorTownPath(townRoot string) string {
+	return townRoot + "/" + DirMayor + "/" + FileTownJSON
+}
+
+// MayorStatePath returns the path to mayor state.json within a town root.
+func MayorStatePath(townRoot string) string {
+	return townRoot + "/" + DirMayor + "/" + FileStateJSON
+}
+
+// RigMayorPath returns the path to mayor/rig within a rig.
+func RigMayorPath(rigPath string) string {
+	return rigPath + "/" + DirMayor + "/" + DirRig
+}
+
+// RigBeadsPath returns the path to mayor/rig/.beads within a rig.
+func RigBeadsPath(rigPath string) string {
+	return rigPath + "/" + DirMayor + "/" + DirRig + "/" + DirBeads
+}
+
+// RigPolecatsPath returns the path to polecats/ within a rig.
+func RigPolecatsPath(rigPath string) string {
+	return rigPath + "/" + DirPolecats
+}
+
+// RigCrewPath returns the path to crew/ within a rig.
+func RigCrewPath(rigPath string) string {
+	return rigPath + "/" + DirCrew
+}
+
+// GastownPath returns the path to .gastown/ within a rig.
+func GastownPath(rigPath string) string {
+	return rigPath + "/" + DirGastown
+}

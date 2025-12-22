@@ -15,6 +15,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/keepalive"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -388,8 +389,8 @@ func (d *Daemon) pokeDeacon() {
 
 // pokeMayor sends a heartbeat to the Mayor session.
 func (d *Daemon) pokeMayor() {
-	const mayorSession = "gt-mayor"
-	const agentID = "mayor"
+	mayorSession := constants.SessionMayor
+	agentID := constants.RoleMayor
 
 	running, err := d.tmux.HasSession(mayorSession)
 	if err != nil {
@@ -484,7 +485,7 @@ func (d *Daemon) pokeWitnesses() {
 // Falls back to directory scanning if rigs.json is not available.
 func (d *Daemon) discoverRigs() []*rig.Rig {
 	// Load rigs config from mayor/rigs.json
-	rigsConfigPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
+	rigsConfigPath := constants.MayorRigsPath(d.config.TownRoot)
 	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
 	if err != nil {
 		// Try fallback: scan town directory for rig directories
