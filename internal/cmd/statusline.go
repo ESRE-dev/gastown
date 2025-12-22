@@ -158,7 +158,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 
 	// Build status
 	var parts []string
-	parts = append(parts, fmt.Sprintf("%s %d polecats", AgentTypeIcons[AgentMayor], polecatCount))
+	parts = append(parts, fmt.Sprintf("%s %d 😺", AgentTypeIcons[AgentMayor], polecatCount))
 	parts = append(parts, fmt.Sprintf("%d rigs", rigCount))
 	if unread > 0 {
 		if subject != "" {
@@ -203,7 +203,7 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 	// Build status
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%s %d rigs", AgentTypeIcons[AgentDeacon], rigCount))
-	parts = append(parts, fmt.Sprintf("%d polecats", polecatCount))
+	parts = append(parts, fmt.Sprintf("%d 😺", polecatCount))
 	if unread > 0 {
 		if subject != "" {
 			parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
@@ -254,7 +254,7 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 
 	// Build status
 	var parts []string
-	parts = append(parts, fmt.Sprintf("%s %d polecats", AgentTypeIcons[AgentWitness], polecatCount))
+	parts = append(parts, fmt.Sprintf("%s %d 😺", AgentTypeIcons[AgentWitness], polecatCount))
 	if crewCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d crew", crewCount))
 	}
