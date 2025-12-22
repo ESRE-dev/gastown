@@ -67,6 +67,172 @@ Steps are discovered from directories. Each directory is a plugin:
 gt molecule instantiate code-review --parent=issue-123 --scope=src/
 ```
 
+## Molecule CLI Reference
+
+The `bd mol` commands manage the molecule lifecycle: bonding (instantiation), squashing
+(completion with digest), and burning (abandonment).
+
+### bd mol bond
+
+Instantiate a proto molecule into a runnable molecule (Mol or Wisp).
+
+```bash
+bd mol bond <proto-id> [--wisp] [--assignee=<addr>]
+```
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<proto-id>` | Yes | ID of the proto molecule to instantiate |
+| `--wisp` | No | Create a Wisp (ephemeral) instead of Mol (durable) |
+| `--assignee` | No | Address of the agent who will execute this molecule |
+
+**Behavior:**
+
+- **Default (Mol)**: Creates a durable molecule tracked in the main `.beads/` database.
+  Steps become permanent issues that survive indefinitely.
+- **With --wisp**: Creates an ephemeral molecule in `.beads-ephemeral/`. Steps are
+  transient and will be cleaned up on squash or burn.
+
+**Examples:**
+
+```bash
+# Create a durable Mol from engineer-in-box proto
+bd mol bond mol-engineer-in-box
+
+# Create an ephemeral Wisp assigned to a polecat
+bd mol bond mol-quick-fix --wisp --assignee=gastown/polecats/toast
+
+# Bond a proto with a specific template variant
+bd mol bond mol-engineer-in-box --template=minimal
+```
+
+**Output:**
+
+Returns the ID of the newly created molecule instance (e.g., `gt-xyz.exec-001`).
+
+---
+
+### bd mol squash
+
+Complete a molecule and generate a digest (permanent summary record).
+
+```bash
+bd mol squash <mol-id> --summary='...'
+```
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<mol-id>` | Yes | ID of the molecule instance to squash |
+| `--summary` | Yes | Summary of what was accomplished (agent-generated) |
+
+**Behavior:**
+
+- **For Mol (durable)**: Creates a digest issue in the permanent beads database.
+  The digest contains the summary and links back to the original proto.
+- **For Wisp (ephemeral)**: Evaporates the wisp (deletes from `.beads-ephemeral/`)
+  and creates a digest in the permanent database. The execution trace is gone,
+  but the outcome is preserved.
+
+**The summary is critical**: Agents generate the summary describing what was
+accomplished. This becomes the permanent record. Beads is a tool - the intelligence
+for summarization comes from the agent.
+
+**Examples:**
+
+```bash
+# Squash a completed molecule with summary
+bd mol squash gt-xyz.exec-001 --summary='Implemented user auth with JWT tokens. Added login/logout endpoints and middleware for protected routes.'
+
+# Squash with multi-line summary (use quotes)
+bd mol squash gt-xyz.exec-001 --summary='Fixed authentication bug.
+
+Changes:
+- Corrected token expiry calculation
+- Added refresh token rotation
+- Updated tests'
+```
+
+**Output:**
+
+Returns the ID of the created digest (e.g., `gt-xyz.digest-001`).
+
+---
+
+### bd mol burn
+
+Abandon a molecule without completing it. No digest is created.
+
+```bash
+bd mol burn <mol-id> [--reason='...']
+```
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<mol-id>` | Yes | ID of the molecule instance to burn |
+| `--reason` | No | Explanation of why the molecule was abandoned |
+
+**Behavior:**
+
+- Discards all molecule state (steps, progress, artifacts)
+- No digest is created - the molecule leaves no permanent record
+- For Wisps: Simply deletes from `.beads-ephemeral/`
+- For Mols: Marks as abandoned/closed without digest
+
+**When to burn vs squash:**
+
+| Situation | Use |
+|-----------|-----|
+| Work completed successfully | `squash` - preserve the outcome |
+| Routine work, no audit needed | `burn` - no record necessary |
+| Work abandoned/cancelled | `burn` - nothing to record |
+| Experiment that failed | `burn` - don't clutter history |
+| Investigation with findings | `squash` - findings are valuable |
+
+**Examples:**
+
+```bash
+# Burn a molecule that's no longer needed
+bd mol burn gt-xyz.exec-001
+
+# Burn with explanation
+bd mol burn gt-xyz.exec-001 --reason='Superseded by different approach in gt-abc'
+
+# Burn a failed experiment
+bd mol burn gt-xyz.exec-001 --reason='Approach proved unworkable - see notes in PR #123'
+```
+
+---
+
+### Lifecycle Summary
+
+```
+Proto Molecule (template in catalog)
+         │
+         ▼ bd mol bond
+    ┌────────────────────┐
+    │ Mol (durable) or   │
+    │ Wisp (ephemeral)   │
+    └────────┬───────────┘
+             │
+    ┌────────┴────────┐
+    ▼                 ▼
+bd mol burn      bd mol squash
+(no record)      (creates digest)
+```
+
+**Key insight**: The molecule lifecycle maps to Gas Town's steam engine metaphor:
+- **Proto** = Fuel (frozen template)
+- **Mol/Wisp** = Steam (active execution)
+- **Digest** = Distillate (condensed permanent record)
+- **Burn** = Steam dissipates (no condensation)
+- **Squash** = Steam condenses (captured as digest)
+
 ## Plugin CLAUDE.md Format
 
 Each plugin directory contains a CLAUDE.md with optional frontmatter:
