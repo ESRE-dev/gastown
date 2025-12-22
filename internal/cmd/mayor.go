@@ -3,8 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -179,25 +177,8 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Use exec to replace current process with tmux attach
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		return fmt.Errorf("tmux not found: %w", err)
-	}
-
-	return execCommand(tmuxPath, "attach-session", "-t", MayorSessionName)
-}
-
-// execCommand replaces the current process with the given command.
-// This is used for attaching to tmux sessions.
-func execCommand(name string, args ...string) error {
-	// On Unix, we would use syscall.Exec to replace the process
-	// For portability, we use exec.Command and wait
-	cmd := exec.Command(name, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	// Use shared attach helper (smart: links if inside tmux, attaches if outside)
+	return attachToTmuxSession(MayorSessionName)
 }
 
 func runMayorStatus(cmd *cobra.Command, args []string) error {

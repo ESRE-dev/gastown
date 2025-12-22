@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -199,13 +198,8 @@ func runDeaconAttach(cmd *cobra.Command, args []string) error {
 	}
 	// Session uses a respawn loop, so Claude restarts automatically if it exits
 
-	// Use exec to replace current process with tmux attach
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		return fmt.Errorf("tmux not found: %w", err)
-	}
-
-	return execCommand(tmuxPath, "attach-session", "-t", DeaconSessionName)
+	// Use shared attach helper (smart: links if inside tmux, attaches if outside)
+	return attachToTmuxSession(DeaconSessionName)
 }
 
 func runDeaconStatus(cmd *cobra.Command, args []string) error {
