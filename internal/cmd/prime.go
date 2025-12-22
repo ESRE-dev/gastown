@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -73,6 +75,11 @@ func runPrime(cmd *cobra.Command, args []string) error {
 
 	// Detect role
 	ctx := detectRole(cwd, townRoot)
+
+	// Check and acquire identity lock for worker roles
+	if err := acquireIdentityLock(ctx); err != nil {
+		return err
+	}
 
 	// Ensure beads redirect exists for worktree-based roles
 	ensureBeadsRedirect(ctx)
@@ -666,6 +673,57 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 	fmt.Println("To start fresh patrol:")
 	fmt.Println("  bd close <in-progress-issues>")
 	fmt.Println("  gt mol bond mol-deacon-patrol")
+}
+
+// acquireIdentityLock checks and acquires the identity lock for worker roles.
+// This prevents multiple agents from claiming the same worker identity.
+// Returns an error if another agent already owns this identity.
+func acquireIdentityLock(ctx RoleContext) error {
+	// Only lock worker roles (polecat, crew)
+	// Infrastructure roles (mayor, witness, refinery, deacon) are singletons
+	// managed by tmux session names, so they don't need file-based locks
+	if ctx.Role != RolePolecat && ctx.Role != RoleCrew {
+		return nil
+	}
+
+	// Create lock for this worker directory
+	l := lock.New(ctx.WorkDir)
+
+	// Determine session ID from environment or context
+	sessionID := os.Getenv("TMUX_PANE")
+	if sessionID == "" {
+		// Fall back to a descriptive identifier
+		sessionID = fmt.Sprintf("%s/%s", ctx.Rig, ctx.Polecat)
+	}
+
+	// Try to acquire the lock
+	if err := l.Acquire(sessionID); err != nil {
+		if errors.Is(err, lock.ErrLocked) {
+			// Another agent owns this identity
+			fmt.Printf("\n%s\n\n", style.Bold.Render("⚠️  IDENTITY COLLISION DETECTED"))
+			fmt.Printf("Another agent already claims this worker identity.\n\n")
+
+			// Show lock details
+			if info, readErr := l.Read(); readErr == nil {
+				fmt.Printf("Lock holder:\n")
+				fmt.Printf("  PID: %d\n", info.PID)
+				fmt.Printf("  Session: %s\n", info.SessionID)
+				fmt.Printf("  Acquired: %s\n", info.AcquiredAt.Format("2006-01-02 15:04:05"))
+				fmt.Println()
+			}
+
+			fmt.Printf("To resolve:\n")
+			fmt.Printf("  1. Find the other session and close it, OR\n")
+			fmt.Printf("  2. Run: gt doctor --fix (cleans stale locks)\n")
+			fmt.Printf("  3. If lock is stale: rm %s/.gastown/agent.lock\n", ctx.WorkDir)
+			fmt.Println()
+
+			return fmt.Errorf("cannot claim identity %s/%s: %w", ctx.Rig, ctx.Polecat, err)
+		}
+		return fmt.Errorf("acquiring identity lock: %w", err)
+	}
+
+	return nil
 }
 
 // ensureBeadsRedirect ensures the .beads/redirect file exists for worktree-based roles.
