@@ -443,6 +443,17 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("2. Check mail: `gt mail inbox`")
 		fmt.Println("3. If there's a 🤝 HANDOFF message, read it and continue the work")
 		fmt.Println("4. If no mail, await user instruction")
+	case RoleDeacon:
+		fmt.Println()
+		fmt.Println("---")
+		fmt.Println()
+		fmt.Println("**STARTUP PROTOCOL**: You are the Deacon. Please:")
+		fmt.Println("1. Announce: \"Deacon, checking in.\"")
+		fmt.Println("2. Signal awake: `gt deacon heartbeat \"starting patrol\"`")
+		fmt.Println("3. Check for attached patrol: `bd list --status=in_progress --assignee=deacon`")
+		fmt.Println("4. If attached: resume from current step")
+		fmt.Println("5. If naked: `gt mol bond mol-deacon-patrol`")
+		fmt.Println("6. Execute patrol steps until loop-or-exit")
 	}
 }
 
@@ -470,8 +481,14 @@ func runMailCheckInject(workDir string) {
 
 // outputMoleculeContext checks if the agent is working on a molecule step and shows progress.
 func outputMoleculeContext(ctx RoleContext) {
-	// Only applies to polecats and crew workers
-	if ctx.Role != RolePolecat && ctx.Role != RoleCrew {
+	// Applies to polecats, crew workers, and deacon
+	if ctx.Role != RolePolecat && ctx.Role != RoleCrew && ctx.Role != RoleDeacon {
+		return
+	}
+
+	// For Deacon, use special patrol molecule handling
+	if ctx.Role == RoleDeacon {
+		outputDeaconPatrolContext(ctx)
 		return
 	}
 
@@ -579,4 +596,71 @@ func showMoleculeProgress(b *beads.Beads, rootID string) {
 	if len(readySteps) > 0 {
 		fmt.Printf("Ready steps: %s\n", strings.Join(readySteps, ", "))
 	}
+}
+
+// outputDeaconPatrolContext shows patrol molecule status for the Deacon.
+func outputDeaconPatrolContext(ctx RoleContext) {
+	b := beads.New(ctx.TownRoot)
+
+	// Check for in-progress patrol steps assigned to deacon
+	issues, err := b.List(beads.ListOptions{
+		Status:   "in_progress",
+		Assignee: "deacon",
+		Priority: -1,
+	})
+	if err != nil {
+		// Silently skip if beads lookup fails
+		return
+	}
+
+	fmt.Println()
+	fmt.Printf("%s\n\n", style.Bold.Render("## 🔄 Patrol Status"))
+
+	if len(issues) == 0 {
+		// No attached molecule - show "naked" status
+		fmt.Println("Status: **Naked** (no patrol molecule attached)")
+		fmt.Println()
+		fmt.Println("To start patrol:")
+		fmt.Println("  gt mol bond mol-deacon-patrol")
+		return
+	}
+
+	// Find the patrol molecule step we're working on
+	for _, issue := range issues {
+		// Check if this is a patrol molecule step
+		moleculeID := parseMoleculeMetadata(issue.Description)
+		if moleculeID == "" {
+			continue
+		}
+
+		// Get the parent (root) issue ID
+		rootID := issue.Parent
+		if rootID == "" {
+			continue
+		}
+
+		// This is a molecule step - show context
+		fmt.Println("Status: **Attached** (patrol molecule in progress)")
+		fmt.Printf("  Current step: %s\n", issue.ID)
+		fmt.Printf("  Molecule: %s\n", moleculeID)
+		fmt.Printf("  Root issue: %s\n\n", rootID)
+
+		// Show patrol progress
+		showMoleculeProgress(b, rootID)
+
+		fmt.Println()
+		fmt.Println("**Patrol Work Loop:**")
+		fmt.Println("1. Execute current step: " + issue.Title)
+		fmt.Println("2. Close step: `bd close " + issue.ID + "`")
+		fmt.Println("3. Check next: `bd ready --parent " + rootID + "`")
+		fmt.Println("4. On final step (loop-or-exit): burn and loop or exit")
+		return
+	}
+
+	// Has issues but none are molecule steps - might be orphaned work
+	fmt.Println("Status: **In-progress work** (not a patrol molecule)")
+	fmt.Println()
+	fmt.Println("To start fresh patrol:")
+	fmt.Println("  bd close <in-progress-issues>")
+	fmt.Println("  gt mol bond mol-deacon-patrol")
 }

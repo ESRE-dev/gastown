@@ -99,11 +99,14 @@ func TestRenderRole_Deacon(t *testing.T) {
 	if !strings.Contains(output, "/test/town") {
 		t.Error("output missing town root")
 	}
-	if !strings.Contains(output, "Health Orchestrator") {
+	if !strings.Contains(output, "Patrol Executor") {
 		t.Error("output missing role description")
 	}
-	if !strings.Contains(output, "Wake Cycle") {
-		t.Error("output missing wake cycle section")
+	if !strings.Contains(output, "Patrol Execution Protocol") {
+		t.Error("output missing patrol execution section")
+	}
+	if !strings.Contains(output, "mol-deacon-patrol") {
+		t.Error("output missing patrol molecule reference")
 	}
 }
 
