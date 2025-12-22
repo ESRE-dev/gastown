@@ -99,6 +99,13 @@ func categorizeSession(name string) *AgentSession {
 		return session
 	}
 
+	// Witness sessions use different format: gt-witness-<rig>
+	if strings.HasPrefix(suffix, "witness-") {
+		session.Type = AgentWitness
+		session.Rig = strings.TrimPrefix(suffix, "witness-")
+		return session
+	}
+
 	// Rig-level agents: gt-<rig>-<type> or gt-<rig>-crew-<name>
 	parts := strings.SplitN(suffix, "-", 2)
 	if len(parts) < 2 {
