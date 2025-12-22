@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -12,9 +14,9 @@ func init() {
 }
 
 var nudgeCmd = &cobra.Command{
-	Use:   "nudge <session> <message>",
-	Short: "Send a message to a Claude session reliably",
-	Long: `Sends a message to a tmux session running Claude Code.
+	Use:   "nudge <rig/polecat> <message>",
+	Short: "Send a message to a polecat session reliably",
+	Long: `Sends a message to a polecat's Claude Code session.
 
 Uses a reliable delivery pattern:
 1. Sends text in literal mode (-l flag)
@@ -22,31 +24,57 @@ Uses a reliable delivery pattern:
 3. Sends Enter as a separate command
 
 This is the ONLY way to send messages to Claude sessions.
-Do not use raw tmux send-keys elsewhere.`,
+Do not use raw tmux send-keys elsewhere.
+
+Examples:
+  gt nudge gastown/furiosa "Check your mail and start working"
+  gt nudge gastown/alpha "What's your status?"`,
 	Args: cobra.ExactArgs(2),
 	RunE: runNudge,
 }
 
 func runNudge(cmd *cobra.Command, args []string) error {
-	session := args[0]
+	target := args[0]
 	message := args[1]
 
 	t := tmux.NewTmux()
 
-	// Verify session exists
-	exists, err := t.HasSession(session)
-	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("session %q not found", session)
+	// Check if target is rig/polecat format or raw session name
+	if strings.Contains(target, "/") {
+		// Parse rig/polecat format
+		rigName, polecatName, err := parseAddress(target)
+		if err != nil {
+			return err
+		}
+
+		mgr, _, err := getSessionManager(rigName)
+		if err != nil {
+			return err
+		}
+
+		// Get session name and send nudge using the reliable NudgeSession
+		sessionName := mgr.SessionName(polecatName)
+		if err := t.NudgeSession(sessionName, message); err != nil {
+			return fmt.Errorf("nudging session: %w", err)
+		}
+
+		fmt.Printf("%s Nudged %s/%s\n", style.Bold.Render("✓"), rigName, polecatName)
+	} else {
+		// Raw session name (legacy)
+		exists, err := t.HasSession(target)
+		if err != nil {
+			return fmt.Errorf("checking session: %w", err)
+		}
+		if !exists {
+			return fmt.Errorf("session %q not found", target)
+		}
+
+		if err := t.NudgeSession(target, message); err != nil {
+			return fmt.Errorf("nudging session: %w", err)
+		}
+
+		fmt.Printf("✓ Nudged %s\n", target)
 	}
 
-	// Send message with reliable pattern
-	if err := t.NudgeSession(session, message); err != nil {
-		return fmt.Errorf("nudging session: %w", err)
-	}
-
-	fmt.Printf("✓ Nudged %s\n", session)
 	return nil
 }
