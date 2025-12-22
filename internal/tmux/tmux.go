@@ -498,5 +498,18 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.SetDynamicStatus(session); err != nil {
 		return fmt.Errorf("setting dynamic status: %w", err)
 	}
+	if err := t.SetMailClickBinding(session); err != nil {
+		return fmt.Errorf("setting mail click binding: %w", err)
+	}
 	return nil
+}
+
+// SetMailClickBinding configures left-click on status-right to show mail preview.
+// This creates a popup showing the first unread message when clicking the mail icon area.
+func (t *Tmux) SetMailClickBinding(session string) error {
+	// Bind left-click on status-right to show mail popup
+	// The popup runs gt mail peek and closes on any key
+	_, err := t.run("bind-key", "-T", "root", "MouseDown1StatusRight",
+		"display-popup", "-E", "-w", "60", "-h", "15", "gt mail peek || echo 'No unread mail'")
+	return err
 }
