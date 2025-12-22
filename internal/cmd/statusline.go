@@ -141,7 +141,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 
 	// Build status
 	var parts []string
-	parts = append(parts, fmt.Sprintf("%d polecats", polecatCount))
+	parts = append(parts, fmt.Sprintf("%s %d polecats", AgentTypeIcons[AgentMayor], polecatCount))
 	parts = append(parts, fmt.Sprintf("%d rigs", rigCount))
 	if unread > 0 {
 		parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
