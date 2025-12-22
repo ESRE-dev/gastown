@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	themeListFlag  bool
-	themeApplyFlag bool
+	themeListFlag    bool
+	themeApplyFlag   bool
+	themeApplyAllFlag bool
 )
 
 var themeCmd = &cobra.Command{
@@ -35,7 +36,11 @@ Examples:
 
 var themeApplyCmd = &cobra.Command{
 	Use:   "apply",
-	Short: "Apply theme to all running sessions in this rig",
+	Short: "Apply theme to running sessions",
+	Long: `Apply theme to running Gas Town sessions.
+
+By default, only applies to sessions in the current rig.
+Use --all to apply to sessions across all rigs.`,
 	RunE:  runThemeApply,
 }
 
@@ -43,6 +48,7 @@ func init() {
 	rootCmd.AddCommand(themeCmd)
 	themeCmd.AddCommand(themeApplyCmd)
 	themeCmd.Flags().BoolVarP(&themeListFlag, "list", "l", false, "List available themes")
+	themeApplyCmd.Flags().BoolVarP(&themeApplyAllFlag, "all", "a", false, "Apply to all rigs, not just current")
 }
 
 func runTheme(cmd *cobra.Command, args []string) error {
@@ -124,6 +130,16 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 			theme = tmux.MayorTheme()
 			worker = "Mayor"
 			role = "coordinator"
+		} else if session == "gt-deacon" {
+			theme = tmux.DeaconTheme()
+			worker = "Deacon"
+			role = "health-check"
+		} else if strings.HasPrefix(session, "gt-witness-") {
+			// Witness sessions: gt-witness-<rig>
+			rig = strings.TrimPrefix(session, "gt-witness-")
+			theme = getThemeForRig(rig)
+			worker = "witness"
+			role = "witness"
 		} else {
 			// Parse session name: gt-<rig>-<worker> or gt-<rig>-crew-<name>
 			parts := strings.SplitN(session, "-", 3)
@@ -132,8 +148,8 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 			}
 			rig = parts[1]
 
-			// Skip if not matching current rig (if we know it)
-			if rigName != "" && rig != rigName {
+			// Skip if not matching current rig (unless --all flag)
+			if !themeApplyAllFlag && rigName != "" && rig != rigName {
 				continue
 			}
 
