@@ -16,7 +16,10 @@ func TestCategorizeSessionRig(t *testing.T) {
 		{"gt-gastown-crew-max", "gastown"},
 		{"gt-myrig-crew-user", "myrig"},
 
-		// Witness sessions
+		// Witness sessions (actual format: gt-witness-<rig>)
+		{"gt-witness-gastown", "gastown"},
+		{"gt-witness-myrig", "myrig"},
+		// Legacy format still works as fallback
 		{"gt-gastown-witness", "gastown"},
 		{"gt-myrig-witness", "myrig"},
 
@@ -58,7 +61,8 @@ func TestCategorizeSessionType(t *testing.T) {
 		{"gt-a-b", AgentPolecat},
 
 		// Non-polecat sessions
-		{"gt-gastown-witness", AgentWitness},
+		{"gt-witness-gastown", AgentWitness}, // actual format
+		{"gt-gastown-witness", AgentWitness}, // legacy fallback
 		{"gt-gastown-refinery", AgentRefinery},
 		{"gt-gastown-crew-max", AgentCrew},
 		{"gt-myrig-crew-user", AgentCrew},
