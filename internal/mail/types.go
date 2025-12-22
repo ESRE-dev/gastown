@@ -276,13 +276,17 @@ func ParseMessageType(s string) MessageType {
 
 // addressToIdentity converts a GGT address to a beads identity.
 //
-// Addresses use slash format matching directory structure:
+// Liberal normalization: accepts multiple address formats and normalizes
+// to canonical form (Postel's Law - be liberal in what you accept).
+//
+// Addresses use slash format:
 //   - "mayor/" → "mayor/"
 //   - "mayor" → "mayor/"
 //   - "deacon/" → "deacon/"
 //   - "deacon" → "deacon/"
-//   - "gastown/polecats/Toast" → "gastown/polecats/Toast"
-//   - "gastown/crew/max" → "gastown/crew/max"
+//   - "gastown/polecats/Toast" → "gastown/Toast" (normalized)
+//   - "gastown/crew/max" → "gastown/max" (normalized)
+//   - "gastown/Toast" → "gastown/Toast" (already canonical)
 //   - "gastown/refinery" → "gastown/refinery"
 //   - "gastown/" → "gastown" (rig broadcast)
 func addressToIdentity(address string) string {
@@ -299,17 +303,25 @@ func addressToIdentity(address string) string {
 		address = address[:len(address)-1]
 	}
 
-	// Keep slashes - addresses map to directory structure
+	// Normalize crew/ and polecats/ to canonical form:
+	// "rig/crew/name" → "rig/name"
+	// "rig/polecats/name" → "rig/name"
+	parts := strings.Split(address, "/")
+	if len(parts) == 3 && (parts[1] == "crew" || parts[1] == "polecats") {
+		return parts[0] + "/" + parts[2]
+	}
+
 	return address
 }
 
 // identityToAddress converts a beads identity back to a GGT address.
 //
-// Identity format matches address format (slash-based):
+// Liberal normalization (Postel's Law):
 //   - "mayor/" → "mayor/"
 //   - "deacon/" → "deacon/"
-//   - "gastown/polecats/Toast" → "gastown/polecats/Toast"
-//   - "gastown/crew/max" → "gastown/crew/max"
+//   - "gastown/polecats/Toast" → "gastown/Toast" (normalized)
+//   - "gastown/crew/max" → "gastown/max" (normalized)
+//   - "gastown/Toast" → "gastown/Toast" (already canonical)
 //   - "gastown/refinery" → "gastown/refinery"
 func identityToAddress(identity string) string {
 	// Town-level agents ensure trailing slash
@@ -320,6 +332,11 @@ func identityToAddress(identity string) string {
 		return "deacon/"
 	}
 
-	// Identity already in slash format, return as-is
+	// Normalize crew/ and polecats/ to canonical form
+	parts := strings.Split(identity, "/")
+	if len(parts) == 3 && (parts[1] == "crew" || parts[1] == "polecats") {
+		return parts[0] + "/" + parts[2]
+	}
+
 	return identity
 }
