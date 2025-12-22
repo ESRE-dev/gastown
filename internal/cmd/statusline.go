@@ -99,7 +99,7 @@ func runWorkerStatusLine(rigName, polecat, crew, issue string) error {
 
 	// Mail preview
 	if identity != "" {
-		unread, subject := getMailPreview(identity, 25)
+		unread, subject := getMailPreview(identity, 45)
 		if unread > 0 {
 			if subject != "" {
 				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
@@ -146,7 +146,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	rigCount := len(rigs)
 
 	// Get mayor mail with preview
-	unread, subject := getMailPreview("mayor/", 20)
+	unread, subject := getMailPreview("mayor/", 45)
 
 	// Build status
 	var parts []string

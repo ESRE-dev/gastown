@@ -446,22 +446,25 @@ var roleIcons = map[string]string{
 }
 
 // SetStatusFormat configures the left side of the status bar.
-// Shows: icon [rig/worker] role
+// Shows compact identity: icon + minimal context
 func (t *Tmux) SetStatusFormat(session, rig, worker, role string) error {
 	// Get icon for role (empty string if not found)
 	icon := roleIcons[role]
 
-	// Format: 😺 [gastown/Rictus] polecat
+	// Compact format - icon already identifies role
+	// Mayor: 🎩 Mayor
+	// Crew:  👷 gastown/max
+	// Polecat: 😺 gastown/Toast
 	var left string
 	if rig == "" {
-		// Mayor or other top-level agent
-		left = fmt.Sprintf("%s [%s] %s ", icon, worker, role)
+		// Town-level agent (Mayor, Deacon)
+		left = fmt.Sprintf("%s %s ", icon, worker)
 	} else {
-		left = fmt.Sprintf("%s [%s/%s] %s ", icon, rig, worker, role)
+		// Rig-level agent - show rig/worker
+		left = fmt.Sprintf("%s %s/%s ", icon, rig, worker)
 	}
 
-	// Allow enough room for the identity (increased for icon)
-	if _, err := t.run("set-option", "-t", session, "status-left-length", "45"); err != nil {
+	if _, err := t.run("set-option", "-t", session, "status-left-length", "25"); err != nil {
 		return err
 	}
 	_, err := t.run("set-option", "-t", session, "status-left", left)
@@ -475,7 +478,7 @@ func (t *Tmux) SetDynamicStatus(session string) error {
 	// gt status-line reads env vars and mail to build the status
 	right := fmt.Sprintf(`#(gt status-line --session=%s 2>/dev/null) %%H:%%M`, session)
 
-	if _, err := t.run("set-option", "-t", session, "status-right-length", "50"); err != nil {
+	if _, err := t.run("set-option", "-t", session, "status-right-length", "80"); err != nil {
 		return err
 	}
 	// Set faster refresh for more responsive status
