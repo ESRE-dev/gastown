@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,7 @@ var (
 type Manager struct {
 	rig     *rig.Rig
 	workDir string
+	output  io.Writer // Output destination for user-facing messages
 }
 
 // NewManager creates a new refinery manager for a rig.
@@ -35,7 +37,14 @@ func NewManager(r *rig.Rig) *Manager {
 	return &Manager{
 		rig:     r,
 		workDir: r.Path,
+		output:  os.Stdout,
 	}
+}
+
+// SetOutput sets the output writer for user-facing messages.
+// This is useful for testing or redirecting output.
+func (m *Manager) SetOutput(w io.Writer) {
+	m.output = w
 }
 
 // stateFile returns the path to the refinery state file.
@@ -219,7 +228,7 @@ func (m *Manager) Start(foreground bool) error {
 	// Prime the agent after Claude starts to load refinery context
 	if err := t.SendKeysDelayed(sessionID, "gt prime", 2000); err != nil {
 		// Warning only - don't fail startup
-		fmt.Printf("Warning: could not send prime command: %v\n", err)
+		fmt.Fprintf(m.output, "Warning: could not send prime command: %v\n", err)
 	}
 
 	return nil
@@ -357,8 +366,8 @@ func (m *Manager) branchToMR(branch string) *MergeRequest {
 
 // run is the main processing loop (for foreground mode).
 func (m *Manager) run(ref *Refinery) error {
-	fmt.Println("Refinery running...")
-	fmt.Println("Press Ctrl+C to stop")
+	fmt.Fprintln(m.output, "Refinery running...")
+	fmt.Fprintln(m.output, "Press Ctrl+C to stop")
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -366,7 +375,7 @@ func (m *Manager) run(ref *Refinery) error {
 	for range ticker.C {
 		// Process queue
 		if err := m.ProcessQueue(); err != nil {
-			fmt.Printf("Queue processing error: %v\n", err)
+			fmt.Fprintf(m.output, "Queue processing error: %v\n", err)
 		}
 	}
 	return nil
@@ -384,13 +393,13 @@ func (m *Manager) ProcessQueue() error {
 			continue
 		}
 
-		fmt.Printf("Processing: %s (%s)\n", item.MR.Branch, item.MR.Worker)
+		fmt.Fprintf(m.output, "Processing: %s (%s)\n", item.MR.Branch, item.MR.Worker)
 
 		result := m.ProcessMR(item.MR)
 		if result.Success {
-			fmt.Printf("  ✓ Merged successfully\n")
+			fmt.Fprintln(m.output, "  ✓ Merged successfully")
 		} else {
-			fmt.Printf("  ✗ Failed: %s\n", result.Error)
+			fmt.Fprintf(m.output, "  ✗ Failed: %s\n", result.Error)
 		}
 	}
 
@@ -516,7 +525,7 @@ func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg s
 		// Close the MR (in_progress → closed)
 		if err := mr.Close(closeReason); err != nil {
 			// Log error but continue - this shouldn't happen
-			fmt.Printf("Warning: failed to close MR: %v\n", err)
+			fmt.Fprintf(m.output, "Warning: failed to close MR: %v\n", err)
 		}
 		switch closeReason {
 		case CloseReasonMerged:
@@ -534,7 +543,7 @@ func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg s
 		// Reopen the MR for rework (in_progress → open)
 		if err := mr.Reopen(); err != nil {
 			// Log error but continue
-			fmt.Printf("Warning: failed to reopen MR: %v\n", err)
+			fmt.Fprintf(m.output, "Warning: failed to reopen MR: %v\n", err)
 		}
 		ref.Stats.TotalFailed++
 		ref.Stats.TodayFailed++
@@ -669,7 +678,7 @@ func (m *Manager) pushWithRetry(targetBranch string, config MergeConfig) error {
 
 	for attempt := 0; attempt <= config.PushRetryCount; attempt++ {
 		if attempt > 0 {
-			fmt.Printf("Push retry %d/%d after %v\n", attempt, config.PushRetryCount, delay)
+			fmt.Fprintf(m.output, "Push retry %d/%d after %v\n", attempt, config.PushRetryCount, delay)
 			time.Sleep(delay)
 			delay *= 2 // Exponential backoff
 		}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -71,6 +72,7 @@ type Engineer struct {
 	git     *git.Git
 	config  *MergeQueueConfig
 	workDir string
+	output  io.Writer // Output destination for user-facing messages
 
 	// stopCh is used for graceful shutdown
 	stopCh chan struct{}
@@ -84,8 +86,15 @@ func NewEngineer(r *rig.Rig) *Engineer {
 		git:     git.NewGit(r.Path),
 		config:  DefaultMergeQueueConfig(),
 		workDir: r.Path,
+		output:  os.Stdout,
 		stopCh:  make(chan struct{}),
 	}
+}
+
+// SetOutput sets the output writer for user-facing messages.
+// This is useful for testing or redirecting output.
+func (e *Engineer) SetOutput(w io.Writer) {
+	e.output = w
 }
 
 // LoadConfig loads merge queue configuration from the rig's config.json.
@@ -187,7 +196,7 @@ func (e *Engineer) Run(ctx context.Context) error {
 		return fmt.Errorf("merge queue is disabled in configuration")
 	}
 
-	fmt.Printf("[Engineer] Starting for rig %s (poll_interval=%s)\n",
+	fmt.Fprintf(e.output, "[Engineer] Starting for rig %s (poll_interval=%s)\n",
 		e.rig.Name, e.config.PollInterval)
 
 	ticker := time.NewTicker(e.config.PollInterval)
@@ -195,20 +204,20 @@ func (e *Engineer) Run(ctx context.Context) error {
 
 	// Run one iteration immediately, then on ticker
 	if err := e.processOnce(ctx); err != nil {
-		fmt.Printf("[Engineer] Error: %v\n", err)
+		fmt.Fprintf(e.output, "[Engineer] Error: %v\n", err)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("[Engineer] Shutting down (context cancelled)")
+			fmt.Fprintln(e.output, "[Engineer] Shutting down (context cancelled)")
 			return nil
 		case <-e.stopCh:
-			fmt.Println("[Engineer] Shutting down (stop signal)")
+			fmt.Fprintln(e.output, "[Engineer] Shutting down (stop signal)")
 			return nil
 		case <-ticker.C:
 			if err := e.processOnce(ctx); err != nil {
-				fmt.Printf("[Engineer] Error: %v\n", err)
+				fmt.Fprintf(e.output, "[Engineer] Error: %v\n", err)
 			}
 		}
 	}
@@ -246,7 +255,7 @@ func (e *Engineer) processOnce(ctx context.Context) error {
 	// bd ready already returns sorted by priority then age, so first is best
 	mr := readyMRs[0]
 
-	fmt.Printf("[Engineer] Processing: %s (%s)\n", mr.ID, mr.Title)
+	fmt.Fprintf(e.output, "[Engineer] Processing: %s (%s)\n", mr.ID, mr.Title)
 
 	// 4. Claim: bd update <id> --status=in_progress
 	inProgress := "in_progress"
@@ -291,10 +300,10 @@ func (e *Engineer) ProcessMR(ctx context.Context, mr *beads.Issue) ProcessResult
 
 	// For now, just log what we would do
 	// Full implementation in gt-3x1.2: Fetch and conflict check
-	fmt.Printf("[Engineer] Would process:\n")
-	fmt.Printf("  Branch: %s\n", mrFields.Branch)
-	fmt.Printf("  Target: %s\n", mrFields.Target)
-	fmt.Printf("  Worker: %s\n", mrFields.Worker)
+	fmt.Fprintln(e.output, "[Engineer] Would process:")
+	fmt.Fprintf(e.output, "  Branch: %s\n", mrFields.Branch)
+	fmt.Fprintf(e.output, "  Target: %s\n", mrFields.Target)
+	fmt.Fprintf(e.output, "  Worker: %s\n", mrFields.Worker)
 
 	// Return failure for now - actual implementation in gt-3x1.2
 	return ProcessResult{
@@ -322,35 +331,35 @@ func (e *Engineer) handleSuccess(mr *beads.Issue, result ProcessResult) {
 	mrFields.CloseReason = "merged"
 	newDesc := beads.SetMRFields(mr, mrFields)
 	if err := e.beads.Update(mr.ID, beads.UpdateOptions{Description: &newDesc}); err != nil {
-		fmt.Printf("[Engineer] Warning: failed to update MR %s with merge commit: %v\n", mr.ID, err)
+		fmt.Fprintf(e.output, "[Engineer] Warning: failed to update MR %s with merge commit: %v\n", mr.ID, err)
 	}
 
 	// 2. Close MR with reason 'merged'
 	if err := e.beads.CloseWithReason("merged", mr.ID); err != nil {
-		fmt.Printf("[Engineer] Warning: failed to close MR %s: %v\n", mr.ID, err)
+		fmt.Fprintf(e.output, "[Engineer] Warning: failed to close MR %s: %v\n", mr.ID, err)
 	}
 
 	// 3. Close source issue with reference to MR
 	if mrFields.SourceIssue != "" {
 		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
 		if err := e.beads.CloseWithReason(closeReason, mrFields.SourceIssue); err != nil {
-			fmt.Printf("[Engineer] Warning: failed to close source issue %s: %v\n", mrFields.SourceIssue, err)
+			fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mrFields.SourceIssue, err)
 		} else {
-			fmt.Printf("[Engineer] Closed source issue: %s\n", mrFields.SourceIssue)
+			fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mrFields.SourceIssue)
 		}
 	}
 
 	// 4. Delete source branch if configured
 	if e.config.DeleteMergedBranches && mrFields.Branch != "" {
 		if err := e.git.DeleteRemoteBranch("origin", mrFields.Branch); err != nil {
-			fmt.Printf("[Engineer] Warning: failed to delete branch %s: %v\n", mrFields.Branch, err)
+			fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete branch %s: %v\n", mrFields.Branch, err)
 		} else {
-			fmt.Printf("[Engineer] Deleted branch: %s\n", mrFields.Branch)
+			fmt.Fprintf(e.output, "[Engineer] Deleted branch: %s\n", mrFields.Branch)
 		}
 	}
 
 	// 5. Log success
-	fmt.Printf("[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
+	fmt.Fprintf(e.output, "[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
 }
 
 // handleFailure handles a failed merge request.
@@ -359,11 +368,11 @@ func (e *Engineer) handleFailure(mr *beads.Issue, result ProcessResult) {
 	// Reopen the MR (back to open status for rework)
 	open := "open"
 	if err := e.beads.Update(mr.ID, beads.UpdateOptions{Status: &open}); err != nil {
-		fmt.Printf("[Engineer] Warning: failed to reopen MR %s: %v\n", mr.ID, err)
+		fmt.Fprintf(e.output, "[Engineer] Warning: failed to reopen MR %s: %v\n", mr.ID, err)
 	}
 
 	// Log the failure
-	fmt.Printf("[Engineer] ✗ Failed: %s - %s\n", mr.ID, result.Error)
+	fmt.Fprintf(e.output, "[Engineer] ✗ Failed: %s - %s\n", mr.ID, result.Error)
 
 	// Full failure handling (assign back to worker, labels) in gt-3x1.4
 }
