@@ -2,18 +2,14 @@ package cmd
 
 import (
 	"bytes"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -250,100 +246,54 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 
 	// Handle molecule instantiation if specified
 	if spawnMolecule != "" {
-		// Use main beads to get the molecule template and parent issue
-		mainBeads := beads.New(beadsPath)
+		// Use bd mol run to spawn the molecule - this handles everything:
+		// - Creates child issues from proto template
+		// - Assigns root to polecat
+		// - Sets root status to in_progress
+		// - Pins root for session recovery
+		fmt.Printf("Running molecule %s on %s...\n", spawnMolecule, spawnIssue)
 
-		// Get the molecule template from main beads
-		mol, err := mainBeads.Show(spawnMolecule)
-		if err != nil {
-			return fmt.Errorf("getting molecule %s: %w", spawnMolecule, err)
-		}
+		cmd := exec.Command("bd", "--no-daemon", "mol", "run", spawnMolecule,
+			"--var", "issue="+spawnIssue, "--json")
+		cmd.Dir = beadsPath
 
-		if mol.Type != "molecule" {
-			return fmt.Errorf("%s is not a molecule (type: %s)", spawnMolecule, mol.Type)
-		}
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
 
-		// Validate the molecule
-		if err := beads.ValidateMolecule(mol); err != nil {
-			return fmt.Errorf("invalid molecule: %w", err)
-		}
-
-		// Get the parent issue from main beads
-		parent, err := mainBeads.Show(spawnIssue)
-		if err != nil {
-			return fmt.Errorf("getting parent issue %s: %w", spawnIssue, err)
-		}
-
-		// Generate ephemeral instance ID
-		ephInstanceID, err := generateEphemeralInstanceID()
-		if err != nil {
-			return fmt.Errorf("generating ephemeral instance ID: %w", err)
-		}
-
-		// Ensure ephemeral beads directory exists
-		ephemeralPath, err := ensureEphemeralBeadsDir(r.Path)
-		if err != nil {
-			return fmt.Errorf("setting up ephemeral beads: %w", err)
-		}
-
-		// Create ephemeral beads instance for molecule instantiation
-		ephBeads := beads.New(ephemeralPath)
-
-		// Create an ephemeral parent issue to hold the molecule steps
-		// This links back to the source issue in main beads
-		ephParentDesc := fmt.Sprintf("Ephemeral molecule execution.\n\nsource_issue: %s\nmolecule: %s\ninstance: %s",
-			spawnIssue, spawnMolecule, ephInstanceID)
-		ephParent, err := ephBeads.Create(beads.CreateOptions{
-			Title:       fmt.Sprintf("[%s] %s", ephInstanceID, parent.Title),
-			Type:        "task",
-			Priority:    parent.Priority,
-			Description: ephParentDesc,
-		})
-		if err != nil {
-			return fmt.Errorf("creating ephemeral parent issue: %w", err)
-		}
-
-		// Instantiate the molecule in ephemeral beads
-		fmt.Printf("Bonding molecule %s on %s (ephemeral: %s)...\n", spawnMolecule, spawnIssue, ephInstanceID)
-		steps, err := ephBeads.InstantiateMolecule(mol, ephParent, beads.InstantiateOptions{})
-		if err != nil {
-			return fmt.Errorf("instantiating molecule in ephemeral: %w", err)
-		}
-
-		fmt.Printf("%s Bonded %d steps in ephemeral\n", style.Bold.Render("✓"), len(steps))
-		for _, step := range steps {
-			fmt.Printf("  %s: %s\n", style.Dim.Render(step.ID), step.Title)
-		}
-
-		// Find the first ready step (one with no dependencies)
-		var firstReadyStep *beads.Issue
-		var stepNumber int
-		for i, step := range steps {
-			if len(step.DependsOn) == 0 {
-				firstReadyStep = step
-				stepNumber = i + 1
-				break
+		if err := cmd.Run(); err != nil {
+			errMsg := strings.TrimSpace(stderr.String())
+			if errMsg != "" {
+				return fmt.Errorf("running molecule: %s", errMsg)
 			}
+			return fmt.Errorf("running molecule: %w", err)
 		}
 
-		if firstReadyStep == nil {
-			return fmt.Errorf("no ready step found in molecule (all steps have dependencies)")
+		// Parse mol run output
+		var molResult struct {
+			RootID    string            `json:"root_id"`
+			IDMapping map[string]string `json:"id_mapping"`
+			Created   int               `json:"created"`
+			Assignee  string            `json:"assignee"`
+			Pinned    bool              `json:"pinned"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &molResult); err != nil {
+			return fmt.Errorf("parsing molecule result: %w", err)
 		}
 
-		// Build molecule context for work assignment with ephemeral info
+		fmt.Printf("%s Molecule spawned: %s (%d steps)\n",
+			style.Bold.Render("✓"), molResult.RootID, molResult.Created-1) // -1 for root
+
+		// Build molecule context for work assignment
 		moleculeCtx = &MoleculeContext{
-			MoleculeID:          spawnMolecule,
-			RootIssueID:         spawnIssue, // Original source issue in main beads
-			TotalSteps:          len(steps),
-			StepNumber:          stepNumber,
-			EphemeralInstanceID: ephInstanceID,
+			MoleculeID:  spawnMolecule,
+			RootIssueID: molResult.RootID,
+			TotalSteps:  molResult.Created - 1, // -1 for root
+			StepNumber:  1,                     // Starting on first step
 		}
 
-		// Switch to spawning on the first ready step
-		// Note: The step is in ephemeral beads, but we still assign the source issue
-		// in main beads to the polecat for tracking
-		fmt.Printf("\nSpawning on first ready step: %s\n", firstReadyStep.ID)
-		// Keep spawnIssue as the source issue for assignment tracking
+		// Update spawnIssue to be the molecule root (for assignment tracking)
+		spawnIssue = molResult.RootID
 	}
 
 	// Get or create issue
@@ -630,11 +580,10 @@ func buildSpawnContext(issue *BeadsIssue, message string) string {
 
 // MoleculeContext contains information about a molecule workflow assignment.
 type MoleculeContext struct {
-	MoleculeID          string // The molecule template ID
-	RootIssueID         string // The parent issue (molecule root)
-	TotalSteps          int    // Total number of steps in the molecule
-	StepNumber          int    // Which step this is (1-indexed)
-	EphemeralInstanceID string // Ephemeral instance ID (e.g., "eph-abc123")
+	MoleculeID  string // The molecule template ID (proto)
+	RootIssueID string // The spawned molecule root issue
+	TotalSteps  int    // Total number of steps in the molecule
+	StepNumber  int    // Which step this is (1-indexed)
 }
 
 // buildWorkAssignmentMail creates a work assignment mail message for a polecat.
@@ -646,12 +595,7 @@ func buildWorkAssignmentMail(issue *BeadsIssue, message, polecatAddress string, 
 
 	if issue != nil {
 		if moleculeCtx != nil {
-			if moleculeCtx.EphemeralInstanceID != "" {
-				// Ephemeral molecule format per spec
-				subject = fmt.Sprintf("📋 Work Assignment: %s [MOLECULE]", issue.Title)
-			} else {
-				subject = fmt.Sprintf("🧬 Molecule Step %d/%d: %s", moleculeCtx.StepNumber, moleculeCtx.TotalSteps, issue.Title)
-			}
+			subject = fmt.Sprintf("🧬 Molecule: %s (step %d/%d)", issue.Title, moleculeCtx.StepNumber, moleculeCtx.TotalSteps)
 		} else {
 			subject = fmt.Sprintf("📋 Work Assignment: %s", issue.Title)
 		}
@@ -677,21 +621,9 @@ func buildWorkAssignmentMail(issue *BeadsIssue, message, polecatAddress string, 
 	if moleculeCtx != nil {
 		body.WriteString("\n## Molecule Workflow\n")
 		body.WriteString(fmt.Sprintf("You are working on step %d of %d in molecule %s.\n", moleculeCtx.StepNumber, moleculeCtx.TotalSteps, moleculeCtx.MoleculeID))
-		body.WriteString(fmt.Sprintf("Source issue: %s\n", moleculeCtx.RootIssueID))
-		if moleculeCtx.EphemeralInstanceID != "" {
-			body.WriteString(fmt.Sprintf("Molecule instance: %s (ephemeral)\n\n", moleculeCtx.EphemeralInstanceID))
-			body.WriteString("**IMPORTANT**: This is an ephemeral molecule workflow.\n")
-			body.WriteString("The molecule steps are tracked in `.beads-ephemeral/` (not main beads).\n")
-			body.WriteString("When complete, generate a summary and squash the molecule.\n\n")
-		} else {
-			body.WriteString("\n")
-		}
+		body.WriteString(fmt.Sprintf("Molecule root: %s\n\n", moleculeCtx.RootIssueID))
 		body.WriteString("After completing this step:\n")
-		if issue != nil {
-			body.WriteString("1. Run `bd close " + issue.ID + "`\n")
-		} else {
-			body.WriteString("1. Run `bd close <step-id>`\n")
-		}
+		body.WriteString("1. Run `bd close <step-id>`\n")
 		body.WriteString("2. Run `bd ready --parent " + moleculeCtx.RootIssueID + "` to find next ready steps\n")
 		body.WriteString("3. If more steps are ready, continue working on them\n")
 		body.WriteString("4. When all steps are done, run `gt done` to signal completion\n\n")
@@ -729,43 +661,3 @@ func buildWorkAssignmentMail(issue *BeadsIssue, message, polecatAddress string, 
 	}
 }
 
-// generateEphemeralInstanceID creates a unique ephemeral instance ID.
-// Format: "eph-" followed by 6 hex characters (e.g., "eph-abc123").
-func generateEphemeralInstanceID() (string, error) {
-	b := make([]byte, 3)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generating random bytes: %w", err)
-	}
-	return "eph-" + hex.EncodeToString(b), nil
-}
-
-// ensureEphemeralBeadsDir ensures the ephemeral beads directory exists and is initialized.
-// Returns the path to the ephemeral beads directory.
-func ensureEphemeralBeadsDir(rigPath string) (string, error) {
-	ephemeralPath := filepath.Join(rigPath, ".beads-ephemeral")
-
-	// Create directory if it doesn't exist
-	if err := os.MkdirAll(ephemeralPath, 0755); err != nil {
-		return "", fmt.Errorf("creating ephemeral beads dir: %w", err)
-	}
-
-	// Check if it's initialized as a git repo
-	gitDir := filepath.Join(ephemeralPath, ".git")
-	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		// Initialize git repo
-		cmd := exec.Command("git", "init")
-		cmd.Dir = ephemeralPath
-		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("initializing git in ephemeral dir: %w", err)
-		}
-
-		// Create ephemeral config
-		configPath := filepath.Join(ephemeralPath, "config.yaml")
-		configContent := "ephemeral: true\n# No sync-branch - ephemeral is local only\n"
-		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-			return "", fmt.Errorf("creating ephemeral config: %w", err)
-		}
-	}
-
-	return ephemeralPath, nil
-}
