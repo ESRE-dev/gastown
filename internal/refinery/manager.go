@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -49,7 +50,7 @@ func (m *Manager) SetOutput(w io.Writer) {
 
 // stateFile returns the path to the refinery state file.
 func (m *Manager) stateFile() string {
-	return filepath.Join(m.rig.Path, ".gastown", "refinery.json")
+	return filepath.Join(m.rig.Path, ".runtime", "refinery.json")
 }
 
 // sessionName returns the tmux session name for this refinery.
@@ -554,21 +555,16 @@ func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg s
 
 // getTestCommand returns the test command if configured.
 func (m *Manager) getTestCommand() string {
-	// Check for .gastown/config.json with test_command
-	configPath := filepath.Join(m.rig.Path, ".gastown", "config.json")
-	data, err := os.ReadFile(configPath)
+	// Check settings/config.json for test_command
+	settingsPath := filepath.Join(m.rig.Path, "settings", "config.json")
+	settings, err := config.LoadRigSettings(settingsPath)
 	if err != nil {
 		return ""
 	}
-
-	var config struct {
-		TestCommand string `json:"test_command"`
+	if settings.MergeQueue != nil && settings.MergeQueue.TestCommand != "" {
+		return settings.MergeQueue.TestCommand
 	}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return ""
-	}
-
-	return config.TestCommand
+	return ""
 }
 
 // runTests executes the test command.
@@ -633,42 +629,25 @@ func (m *Manager) gitOutput(args ...string) (string, error) {
 // getMergeConfig loads the merge configuration from disk.
 // Returns default config if not configured.
 func (m *Manager) getMergeConfig() MergeConfig {
-	config := DefaultMergeConfig()
+	mergeConfig := DefaultMergeConfig()
 
-	// Check for .gastown/config.json with merge_queue settings
-	configPath := filepath.Join(m.rig.Path, ".gastown", "config.json")
-	data, err := os.ReadFile(configPath)
+	// Check settings/config.json for merge_queue settings
+	settingsPath := filepath.Join(m.rig.Path, "settings", "config.json")
+	settings, err := config.LoadRigSettings(settingsPath)
 	if err != nil {
-		return config
-	}
-
-	var rawConfig struct {
-		MergeQueue *MergeConfig `json:"merge_queue"`
-		// Legacy field for backwards compatibility
-		TestCommand string `json:"test_command"`
-	}
-	if err := json.Unmarshal(data, &rawConfig); err != nil {
-		return config
+		return mergeConfig
 	}
 
 	// Apply merge_queue config if present
-	if rawConfig.MergeQueue != nil {
-		config = *rawConfig.MergeQueue
-		// Ensure defaults for zero values
-		if config.PushRetryCount == 0 {
-			config.PushRetryCount = 3
-		}
-		if config.PushRetryDelayMs == 0 {
-			config.PushRetryDelayMs = 1000
-		}
+	if settings.MergeQueue != nil {
+		mq := settings.MergeQueue
+		mergeConfig.TestCommand = mq.TestCommand
+		mergeConfig.RunTests = mq.RunTests
+		mergeConfig.DeleteMergedBranches = mq.DeleteMergedBranches
+		// Note: PushRetryCount and PushRetryDelayMs use defaults if not explicitly set
 	}
 
-	// Legacy: use test_command if merge_queue not set
-	if rawConfig.TestCommand != "" && config.TestCommand == "" {
-		config.TestCommand = rawConfig.TestCommand
-	}
-
-	return config
+	return mergeConfig
 }
 
 // pushWithRetry pushes to the target branch with exponential backoff retry.

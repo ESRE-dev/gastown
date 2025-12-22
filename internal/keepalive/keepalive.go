@@ -17,7 +17,7 @@ type State struct {
 	Timestamp   time.Time `json:"timestamp"`
 }
 
-// Touch updates the keepalive file in the workspace's .gastown directory.
+// Touch updates the keepalive file in the workspace's .runtime directory.
 // It silently ignores errors (best-effort signaling).
 func Touch(command string) {
 	TouchWithArgs(command, nil)
@@ -43,10 +43,10 @@ func TouchWithArgs(command string, args []string) {
 // TouchInWorkspace updates the keepalive file in a specific workspace.
 // It silently ignores errors (best-effort signaling).
 func TouchInWorkspace(workspaceRoot, command string) {
-	gastown := filepath.Join(workspaceRoot, ".gastown")
+	runtimeDir := filepath.Join(workspaceRoot, ".runtime")
 
-	// Ensure .gastown directory exists
-	if err := os.MkdirAll(gastown, 0755); err != nil {
+	// Ensure .runtime directory exists
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
 		return
 	}
 
@@ -60,14 +60,14 @@ func TouchInWorkspace(workspaceRoot, command string) {
 		return
 	}
 
-	keepalivePath := filepath.Join(gastown, "keepalive.json")
+	keepalivePath := filepath.Join(runtimeDir, "keepalive.json")
 	_ = os.WriteFile(keepalivePath, data, 0644)
 }
 
 // Read returns the current keepalive state for the workspace.
 // Returns nil if the file doesn't exist or can't be read.
 func Read(workspaceRoot string) *State {
-	keepalivePath := filepath.Join(workspaceRoot, ".gastown", "keepalive.json")
+	keepalivePath := filepath.Join(workspaceRoot, ".runtime", "keepalive.json")
 
 	data, err := os.ReadFile(keepalivePath)
 	if err != nil {

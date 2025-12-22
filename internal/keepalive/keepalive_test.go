@@ -86,12 +86,12 @@ func TestDirectoryCreation(t *testing.T) {
 	tmpDir := t.TempDir()
 	workDir := filepath.Join(tmpDir, "some", "nested", "workspace")
 
-	// Touch should create .gastown directory
+	// Touch should create .runtime directory
 	TouchInWorkspace(workDir, "gt test")
 
 	// Verify directory was created
-	gastown := filepath.Join(workDir, ".gastown")
-	if _, err := os.Stat(gastown); os.IsNotExist(err) {
-		t.Error("expected .gastown directory to be created")
+	runtimeDir := filepath.Join(workDir, ".runtime")
+	if _, err := os.Stat(runtimeDir); os.IsNotExist(err) {
+		t.Error("expected .runtime directory to be created")
 	}
 }

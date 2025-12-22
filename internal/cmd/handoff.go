@@ -480,7 +480,7 @@ func setRequestingState(role Role, action HandoffAction, townRoot string) error 
 		}
 	default:
 		// For other roles, use a generic location
-		stateFile = filepath.Join(townRoot, ".gastown", "agent-state.json")
+		stateFile = filepath.Join(townRoot, ".runtime", "agent-state.json")
 	}
 
 	// Ensure directory exists

@@ -147,7 +147,7 @@ type SwarmStore struct {
 
 // LoadSwarmStore loads swarm state from disk.
 func LoadSwarmStore(rigPath string) (*SwarmStore, error) {
-	storePath := filepath.Join(rigPath, ".gastown", "swarms.json")
+	storePath := filepath.Join(rigPath, ".runtime", "swarms.json")
 	store := &SwarmStore{
 		path:   storePath,
 		Swarms: make(map[string]*swarm.Swarm),

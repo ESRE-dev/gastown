@@ -78,7 +78,7 @@ func runTheme(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Theme: %s (%s)\n", theme.Name, theme.Style())
 		// Show if it's configured vs default
 		if configured := loadRigTheme(rigName); configured != "" {
-			fmt.Printf("(configured in .gastown/config.json)\n")
+			fmt.Printf("(configured in settings/config.json)\n")
 		} else {
 			fmt.Printf("(default, based on rig name hash)\n")
 		}
@@ -254,8 +254,8 @@ func getThemeForRig(rigName string) tmux.Theme {
 
 // getThemeForRole returns the theme for a specific role in a rig.
 // Resolution order:
-// 1. Per-rig role override (rig/.gastown/config.json)
-// 2. Global role default (mayor/town.json)
+// 1. Per-rig role override (rig/settings/config.json)
+// 2. Global role default (mayor/config.json)
 // 3. Built-in role defaults (witness=rust, refinery=plum)
 // 4. Rig theme (config or hash-based)
 func getThemeForRole(rigName, role string) tmux.Theme {
@@ -263,10 +263,10 @@ func getThemeForRole(rigName, role string) tmux.Theme {
 
 	// 1. Check per-rig role override
 	if townRoot != "" {
-		configPath := filepath.Join(townRoot, rigName, ".gastown", "config.json")
-		if cfg, err := config.LoadRigConfig(configPath); err == nil {
-			if cfg.Theme != nil && cfg.Theme.RoleThemes != nil {
-				if themeName, ok := cfg.Theme.RoleThemes[role]; ok {
+		settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
+		if settings, err := config.LoadRigSettings(settingsPath); err == nil {
+			if settings.Theme != nil && settings.Theme.RoleThemes != nil {
+				if themeName, ok := settings.Theme.RoleThemes[role]; ok {
 					if theme := tmux.GetThemeByName(themeName); theme != nil {
 						return *theme
 					}
@@ -275,12 +275,12 @@ func getThemeForRole(rigName, role string) tmux.Theme {
 		}
 	}
 
-	// 2. Check global role default (town config)
+	// 2. Check global role default (mayor config)
 	if townRoot != "" {
-		townConfigPath := filepath.Join(townRoot, "mayor", "town.json")
-		if townCfg, err := config.LoadTownConfig(townConfigPath); err == nil {
-			if townCfg.Theme != nil && townCfg.Theme.RoleDefaults != nil {
-				if themeName, ok := townCfg.Theme.RoleDefaults[role]; ok {
+		mayorConfigPath := filepath.Join(townRoot, "mayor", "config.json")
+		if mayorCfg, err := config.LoadMayorConfig(mayorConfigPath); err == nil {
+			if mayorCfg.Theme != nil && mayorCfg.Theme.RoleDefaults != nil {
+				if themeName, ok := mayorCfg.Theme.RoleDefaults[role]; ok {
 					if theme := tmux.GetThemeByName(themeName); theme != nil {
 						return *theme
 					}
@@ -301,26 +301,26 @@ func getThemeForRole(rigName, role string) tmux.Theme {
 	return getThemeForRig(rigName)
 }
 
-// loadRigTheme loads the theme name from rig config.
+// loadRigTheme loads the theme name from rig settings.
 func loadRigTheme(rigName string) string {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil || townRoot == "" {
 		return ""
 	}
 
-	configPath := filepath.Join(townRoot, rigName, ".gastown", "config.json")
-	cfg, err := config.LoadRigConfig(configPath)
+	settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
+	settings, err := config.LoadRigSettings(settingsPath)
 	if err != nil {
 		return ""
 	}
 
-	if cfg.Theme != nil && cfg.Theme.Name != "" {
-		return cfg.Theme.Name
+	if settings.Theme != nil && settings.Theme.Name != "" {
+		return settings.Theme.Name
 	}
 	return ""
 }
 
-// saveRigTheme saves the theme name to rig config.
+// saveRigTheme saves the theme name to rig settings.
 func saveRigTheme(rigName, themeName string) error {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
@@ -330,31 +330,28 @@ func saveRigTheme(rigName, themeName string) error {
 		return fmt.Errorf("not in a Gas Town workspace")
 	}
 
-	configPath := filepath.Join(townRoot, rigName, ".gastown", "config.json")
+	settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
 
-	// Load existing config or create new
-	var cfg *config.RigConfig
-	cfg, err = config.LoadRigConfig(configPath)
+	// Load existing settings or create new
+	var settings *config.RigSettings
+	settings, err = config.LoadRigSettings(settingsPath)
 	if err != nil {
-		// Create new config if not found
+		// Create new settings if not found
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "not found") {
-			cfg = &config.RigConfig{
-				Type:    "rig",
-				Version: config.CurrentRigConfigVersion,
-			}
+			settings = config.NewRigSettings()
 		} else {
-			return fmt.Errorf("loading config: %w", err)
+			return fmt.Errorf("loading settings: %w", err)
 		}
 	}
 
 	// Set theme
-	cfg.Theme = &config.ThemeConfig{
+	settings.Theme = &config.ThemeConfig{
 		Name: themeName,
 	}
 
 	// Save
-	if err := config.SaveRigConfig(configPath, cfg); err != nil {
-		return fmt.Errorf("saving config: %w", err)
+	if err := config.SaveRigSettings(settingsPath, settings); err != nil {
+		return fmt.Errorf("saving settings: %w", err)
 	}
 
 	return nil

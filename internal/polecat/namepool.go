@@ -95,7 +95,7 @@ func NewNamePool(rigPath, rigName string) *NamePool {
 		InUse:        make(map[string]bool),
 		OverflowNext: DefaultPoolSize + 1,
 		MaxSize:      DefaultPoolSize,
-		stateFile:    filepath.Join(rigPath, ".gastown", "namepool.json"),
+		stateFile:    filepath.Join(rigPath, ".runtime", "namepool-state.json"),
 	}
 }
 
@@ -115,7 +115,7 @@ func NewNamePoolWithConfig(rigPath, rigName, theme string, customNames []string,
 		InUse:        make(map[string]bool),
 		OverflowNext: maxSize + 1,
 		MaxSize:      maxSize,
-		stateFile:    filepath.Join(rigPath, ".gastown", "namepool.json"),
+		stateFile:    filepath.Join(rigPath, ".runtime", "namepool-state.json"),
 	}
 }
 

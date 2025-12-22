@@ -41,7 +41,7 @@ func NewManager(r *rig.Rig) *Manager {
 
 // stateFile returns the path to the witness state file.
 func (m *Manager) stateFile() string {
-	return filepath.Join(m.rig.Path, ".gastown", "witness.json")
+	return filepath.Join(m.rig.Path, ".runtime", "witness.json")
 }
 
 // loadState loads witness state from disk.
@@ -261,7 +261,7 @@ func (m *Manager) checkPolecatHealth(name, path string) PolecatHealthStatus {
 	}
 
 	// Check 2: State file activity
-	stateFile := filepath.Join(path, ".gastown", "state.json")
+	stateFile := filepath.Join(path, ".runtime", "state.json")
 	if info, err := os.Stat(stateFile); err == nil {
 		if time.Since(info.ModTime()) < threshold {
 			return PolecatHealthy
