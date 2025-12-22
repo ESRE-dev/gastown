@@ -47,17 +47,18 @@ You wake up when:
 
 When you wake, follow this protocol:
 
-### 1. Check for Attached Molecule
+### 1. Find Your Current Work
 ```bash
-gt mol status                # Shows current molecule attachment
-bd list --status=in_progress --assignee=deacon
+bd list --pinned --assignee=deacon --status=in_progress
 ```
 
-If you have an attached molecule, **resume from the current step**.
-If no molecule attached, **bond a new patrol molecule**:
+If you have a pinned molecule, **resume from the current step**.
+If no molecule (naked), **start a new patrol**:
 ```bash
-gt mol bond mol-deacon-patrol
+bd mol run mol-deacon-patrol
 ```
+
+This spawns the patrol molecule, assigns it to you, pins it, and sets status to in_progress.
 
 ### 2. Execute Current Step
 
@@ -104,15 +105,15 @@ bd ready                     # Check for next step
 ### 4. Loop or Exit
 
 At the end of each patrol cycle:
-- **Low context**: `gt mol burn` → `gt mol bond mol-deacon-patrol` → repeat
-- **High context**: `gt mol burn` → exit cleanly (daemon respawns you)
+- **Low context**: `bd mol squash` → `bd mol run mol-deacon-patrol` → repeat
+- **High context**: `bd mol squash` → exit cleanly (daemon respawns you)
 
 ```bash
-# Burn the wisp (routine work, no audit needed)
-gt mol burn
+# Complete the patrol (squash generates summary, cleans up)
+bd mol squash <mol-id> --summary="Patrol complete: checked inbox, scanned health, no issues"
 
-# Option A: Loop
-gt mol bond mol-deacon-patrol
+# Option A: Loop (low context)
+bd mol run mol-deacon-patrol
 # Continue to inbox-check...
 
 # Option B: Exit (high context)
@@ -193,28 +194,28 @@ If you can't fix an issue after 3 attempts:
 
 ## Startup Protocol
 
-1. Check for attached molecule: `bd list --status=in_progress --assignee=deacon`
-2. If attached, **resume** from current step (you were mid-patrol)
-3. If not attached, **bond** a new patrol: `gt mol bond mol-deacon-patrol`
+1. Find your work: `bd list --pinned --assignee=deacon --status=in_progress`
+2. If you have a pinned molecule, **resume** from current step (you were mid-patrol)
+3. If naked (no pinned molecule), **start** a new patrol: `bd mol run mol-deacon-patrol`
 4. Execute patrol steps until loop-or-exit
-5. At loop-or-exit: burn molecule, then loop or exit based on context
+5. At loop-or-exit: squash molecule, then loop or exit based on context
 
 ## Handoff (Molecule-Based)
 
 The Deacon uses **nondeterministic idempotence** for handoff:
 
 1. Molecule state is in beads (survives session restarts)
-2. On respawn, check `bd list --status=in_progress` to find current step
-3. Resume from that step - no explicit handoff message needed
+2. On respawn, query `bd list --pinned --assignee=deacon` to find current work
+3. Resume from the next unclosed step - no explicit handoff message needed
 
 If you need to exit mid-patrol (high context):
 ```bash
-gt mol burn                  # Clean up wisp state
+bd mol squash <mol-id> --summary="Exiting mid-patrol due to context limit"
 # Just exit - daemon respawns with fresh context
-# New session will bond a fresh patrol molecule
+# New session will run a fresh patrol molecule
 ```
 
-The patrol molecule ensures continuity without handoff messages.
+The pinned molecule ensures continuity. Handoff mail is only for optional context notes.
 
 ---
 

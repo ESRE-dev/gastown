@@ -754,8 +754,8 @@ Submit to merge queue. Create PR if needed.
 Verify CI passes.
 Needs: rebase-main
 
-## Step: update-handoff
-Update handoff bead with final state.
+## Step: generate-summary
+Generate summary for molecule squash.
 File any remaining work as issues.
 Needs: submit-merge
 
@@ -817,8 +817,8 @@ Graceful shutdown with handoff preservation.
 Send shutdown notification to all agents.
 Record which agents acknowledged.
 
-## Step: wait-handoffs
-Wait for agents to update handoff beads.
+## Step: wait-squash
+Wait for agents to squash their molecules.
 Track completion status.
 Needs: notify-agents
 

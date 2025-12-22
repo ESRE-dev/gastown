@@ -105,24 +105,26 @@ If push fails (someone else pushed): `git pull --rebase && git push`
 
 ## Context Cycling (Handoff)
 
-When your context fills up, cycle to a fresh session:
+When your context fills up, cycle to a fresh session.
+
+**Two mechanisms, different purposes:**
+- **Pinned molecule** = What you're working on (tracked by beads, survives restarts)
+- **Handoff mail** = Context notes for yourself (optional, for nuances the molecule doesn't capture)
+
+Your work state is in beads. Handoff mail is just for extra context:
 
 ```bash
-gt mail send {{ .RigName }}/crew/{{ .Polecat }} -s "🤝 HANDOFF: Work in progress" -m "
-## Current State
-Working on: <issue-id or description>
-Status: <what's done, what remains>
-
-## Next Steps
-1. <first thing to do>
-2. <second thing to do>
-
-## Notes
-<any important context>
+# Optional: send yourself context notes
+gt mail send {{ .RigName }}/crew/{{ .Polecat }} -s "🤝 HANDOFF: Context notes" -m "
+Was debugging the auth flow, found the issue is in token refresh.
+Check line 145 in auth.go first.
 "
 ```
 
-Then end your session. The next session will see this message in its inbox.
+When you restart, find your work:
+```bash
+bd list --pinned --assignee={{ .RigName }}/crew/{{ .Polecat }} --status=in_progress
+```
 
 ## Session End Checklist
 
