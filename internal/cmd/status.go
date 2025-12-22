@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -68,7 +69,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load town config
-	townConfigPath := filepath.Join(townRoot, "mayor", "town.json")
+	townConfigPath := constants.MayorTownPath(townRoot)
 	townConfig, err := config.LoadTownConfig(townConfigPath)
 	if err != nil {
 		// Try to continue without config
@@ -76,7 +77,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load rigs config
-	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfigPath := constants.MayorRigsPath(townRoot)
 	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
 	if err != nil {
 		// Empty config if file doesn't exist
