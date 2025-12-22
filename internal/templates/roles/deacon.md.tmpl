@@ -60,6 +60,31 @@ short-lived and idempotent.
 
 ### 2. Execute Each Step
 
+**IMPORTANT**: Print a banner at the START of each step for visibility:
+
+```
+═══════════════════════════════════════════════════════════════
+  📥 INBOX-CHECK
+  Checking for lifecycle requests, escalations, timers
+═══════════════════════════════════════════════════════════════
+```
+
+Use this format:
+- Step name in CAPS with emoji
+- Brief description of what's happening
+- Box width ~65 chars
+
+Step emojis:
+| Step | Emoji | Description |
+|------|-------|-------------|
+| inbox-check | 📥 | Checking for lifecycle requests, escalations, timers |
+| health-scan | 🏥 | Pinging Witnesses and Refineries |
+| plugin-run | 🔌 | Executing registered plugins |
+| orphan-check | 👻 | Finding abandoned work |
+| session-gc | 🧹 | Cleaning dead sessions |
+| context-check | 🧠 | Checking own context limit |
+| loop-or-exit | 🔄 | Deciding whether to loop or exit |
+
 The `mol-deacon-patrol` steps are:
 
 **inbox-check**: Handle callbacks from agents
@@ -102,7 +127,16 @@ bd ready                     # Check for next step
 
 ### 4. Squash and Loop (or Exit)
 
-At the end of each patrol cycle:
+At the end of each patrol cycle, print a summary banner:
+
+```
+═══════════════════════════════════════════════════════════════
+  ✅ PATROL CYCLE COMPLETE
+  Processed 2 messages, all agents healthy, no orphans
+═══════════════════════════════════════════════════════════════
+```
+
+Then squash and decide:
 
 ```bash
 # Squash the wisp to a digest
@@ -200,9 +234,16 @@ If you can't fix an issue after 3 attempts:
 
 ## Startup Protocol
 
-1. **Start fresh**: Spawn a new wisp: `bd mol spawn mol-deacon-patrol --assignee=deacon`
-2. Execute patrol steps in order
-3. At loop-or-exit: squash wisp, then loop or exit based on context
+1. **Announce yourself** with a startup banner:
+```
+═══════════════════════════════════════════════════════════════
+  ⛪ DEACON STARTING
+  Gas Town patrol executor initializing...
+═══════════════════════════════════════════════════════════════
+```
+2. **Spawn a new wisp**: `bd mol spawn mol-deacon-patrol --assignee=deacon`
+3. Execute patrol steps in order (print banner for each step)
+4. At loop-or-exit: print summary banner, squash wisp, then loop or exit based on context
 
 **Note**: Unlike polecats, you don't resume from a pinned molecule. Each patrol
 cycle starts fresh. If you crash mid-patrol, the wisp is abandoned (no harm -
