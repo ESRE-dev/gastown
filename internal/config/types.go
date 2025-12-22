@@ -5,10 +5,11 @@ import "time"
 
 // TownConfig represents the main town configuration (mayor/town.json).
 type TownConfig struct {
-	Type      string    `json:"type"`       // "town"
-	Version   int       `json:"version"`    // schema version
-	Name      string    `json:"name"`       // town identifier
-	CreatedAt time.Time `json:"created_at"`
+	Type      string           `json:"type"`            // "town"
+	Version   int              `json:"version"`         // schema version
+	Name      string           `json:"name"`            // town identifier
+	CreatedAt time.Time        `json:"created_at"`
+	Theme     *TownThemeConfig `json:"theme,omitempty"` // global theme settings
 }
 
 // RigsConfig represents the rigs registry (mayor/rigs.json).
@@ -64,12 +65,33 @@ type ThemeConfig struct {
 
 	// Custom overrides the palette with specific colors.
 	Custom *CustomTheme `json:"custom,omitempty"`
+
+	// RoleThemes overrides themes for specific roles in this rig.
+	// Keys: "witness", "refinery", "crew", "polecat"
+	RoleThemes map[string]string `json:"role_themes,omitempty"`
 }
 
 // CustomTheme allows specifying exact colors for the status bar.
 type CustomTheme struct {
 	BG string `json:"bg"` // Background color (hex or tmux color name)
 	FG string `json:"fg"` // Foreground color (hex or tmux color name)
+}
+
+// TownThemeConfig represents global theme settings (mayor/config.json).
+type TownThemeConfig struct {
+	// RoleDefaults sets default themes for roles across all rigs.
+	// Keys: "witness", "refinery", "crew", "polecat"
+	RoleDefaults map[string]string `json:"role_defaults,omitempty"`
+}
+
+// BuiltinRoleThemes returns the default themes for each role.
+// These are used when no explicit configuration is provided.
+func BuiltinRoleThemes() map[string]string {
+	return map[string]string{
+		"witness":  "rust",  // Red/rust - watchful, alert
+		"refinery": "plum",  // Purple - processing, refining
+		// crew and polecat use rig theme by default (no override)
+	}
 }
 
 // MergeQueueConfig represents merge queue settings for a rig.
