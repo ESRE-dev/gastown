@@ -225,6 +225,31 @@ Examples:
 	RunE: runMoleculeStatus,
 }
 
+var moleculeCurrentCmd = &cobra.Command{
+	Use:   "current [identity]",
+	Short: "Show what agent should be working on",
+	Long: `Query what an agent is supposed to be working on via breadcrumb trail.
+
+Looks up the agent's handoff bead, checks for attached molecules, and
+identifies the current/next step in the workflow.
+
+If no identity is specified, uses the current agent based on working directory.
+
+Output includes:
+- Identity and handoff bead info
+- Attached molecule (if any)
+- Progress through steps
+- Current step that should be worked on next
+
+Examples:
+  gt molecule current              # Current agent's work
+  gt molecule current gastown/furiosa
+  gt molecule current deacon
+  gt mol current gastown/witness`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runMoleculeCurrent,
+}
+
 var moleculeCatalogCmd = &cobra.Command{
 	Use:   "catalog",
 	Short: "List available molecule protos",
@@ -303,6 +328,9 @@ func init() {
 	// Status flags
 	moleculeStatusCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 
+	// Current flags
+	moleculeCurrentCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
+
 	// Catalog flags
 	moleculeCatalogCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 
@@ -314,6 +342,7 @@ func init() {
 
 	// Add subcommands
 	moleculeCmd.AddCommand(moleculeStatusCmd)
+	moleculeCmd.AddCommand(moleculeCurrentCmd)
 	moleculeCmd.AddCommand(moleculeCatalogCmd)
 	moleculeCmd.AddCommand(moleculeBurnCmd)
 	moleculeCmd.AddCommand(moleculeSquashCmd)
@@ -1412,6 +1441,213 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 	// Next action hint
 	if status.NextAction != "" {
 		fmt.Printf("\n%s %s\n", style.Bold.Render("Next:"), status.NextAction)
+	}
+
+	return nil
+}
+
+// MoleculeCurrentInfo contains info about what an agent should be working on.
+type MoleculeCurrentInfo struct {
+	Identity      string `json:"identity"`
+	HandoffID     string `json:"handoff_id,omitempty"`
+	HandoffTitle  string `json:"handoff_title,omitempty"`
+	MoleculeID    string `json:"molecule_id,omitempty"`
+	MoleculeTitle string `json:"molecule_title,omitempty"`
+	StepsComplete int    `json:"steps_complete"`
+	StepsTotal    int    `json:"steps_total"`
+	CurrentStepID string `json:"current_step_id,omitempty"`
+	CurrentStep   string `json:"current_step,omitempty"`
+	Status        string `json:"status"` // "working", "naked", "complete", "blocked"
+}
+
+func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	// Find town root
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding workspace: %w", err)
+	}
+	if townRoot == "" {
+		return fmt.Errorf("not in a Gas Town workspace")
+	}
+
+	// Determine target agent identity
+	var target string
+	var roleCtx RoleContext
+
+	if len(args) > 0 {
+		// Explicit target provided
+		target = args[0]
+	} else {
+		// Auto-detect from current directory
+		roleCtx = detectRole(cwd, townRoot)
+		target = buildAgentIdentity(roleCtx)
+		if target == "" {
+			return fmt.Errorf("cannot determine agent identity from current directory (role: %s)", roleCtx.Role)
+		}
+	}
+
+	// Find beads directory
+	workDir, err := findLocalBeadsDir()
+	if err != nil {
+		return fmt.Errorf("not in a beads workspace: %w", err)
+	}
+
+	b := beads.New(workDir)
+
+	// Extract role from target for handoff bead lookup
+	parts := strings.Split(target, "/")
+	role := parts[len(parts)-1]
+
+	// Find handoff bead for this identity
+	handoff, err := b.FindHandoffBead(role)
+	if err != nil {
+		return fmt.Errorf("finding handoff bead: %w", err)
+	}
+
+	// Build current info
+	info := MoleculeCurrentInfo{
+		Identity: target,
+	}
+
+	if handoff == nil {
+		info.Status = "naked"
+		return outputMoleculeCurrent(info)
+	}
+
+	info.HandoffID = handoff.ID
+	info.HandoffTitle = handoff.Title
+
+	// Check for attached molecule
+	attachment := beads.ParseAttachmentFields(handoff)
+	if attachment == nil || attachment.AttachedMolecule == "" {
+		info.Status = "naked"
+		return outputMoleculeCurrent(info)
+	}
+
+	info.MoleculeID = attachment.AttachedMolecule
+
+	// Get the molecule root to find its title and children
+	molRoot, err := b.Show(attachment.AttachedMolecule)
+	if err != nil {
+		// Molecule not found - might be a template ID, still report what we have
+		info.Status = "working"
+		return outputMoleculeCurrent(info)
+	}
+
+	info.MoleculeTitle = molRoot.Title
+
+	// Find all children (steps) of the molecule root
+	children, err := b.List(beads.ListOptions{
+		Parent:   attachment.AttachedMolecule,
+		Status:   "all",
+		Priority: -1,
+	})
+	if err != nil {
+		// No steps - just an issue, not a molecule instance
+		info.Status = "working"
+		return outputMoleculeCurrent(info)
+	}
+
+	info.StepsTotal = len(children)
+
+	// Build set of closed issue IDs for dependency checking
+	closedIDs := make(map[string]bool)
+	var inProgressSteps []*beads.Issue
+	var readySteps []*beads.Issue
+
+	for _, child := range children {
+		switch child.Status {
+		case "closed":
+			info.StepsComplete++
+			closedIDs[child.ID] = true
+		case "in_progress":
+			inProgressSteps = append(inProgressSteps, child)
+		}
+	}
+
+	// Find ready steps (open with all deps closed)
+	for _, child := range children {
+		if child.Status == "open" {
+			allDepsClosed := true
+			for _, depID := range child.DependsOn {
+				if !closedIDs[depID] {
+					allDepsClosed = false
+					break
+				}
+			}
+			if len(child.DependsOn) == 0 || allDepsClosed {
+				readySteps = append(readySteps, child)
+			}
+		}
+	}
+
+	// Determine current step and status
+	if info.StepsComplete == info.StepsTotal && info.StepsTotal > 0 {
+		info.Status = "complete"
+	} else if len(inProgressSteps) > 0 {
+		// First in-progress step is the current one
+		info.Status = "working"
+		info.CurrentStepID = inProgressSteps[0].ID
+		info.CurrentStep = inProgressSteps[0].Title
+	} else if len(readySteps) > 0 {
+		// First ready step is the next to work on
+		info.Status = "working"
+		info.CurrentStepID = readySteps[0].ID
+		info.CurrentStep = readySteps[0].Title
+	} else if info.StepsTotal > 0 {
+		// Has steps but none ready or in-progress -> blocked
+		info.Status = "blocked"
+	} else {
+		info.Status = "working"
+	}
+
+	return outputMoleculeCurrent(info)
+}
+
+// outputMoleculeCurrent outputs the current info in the appropriate format.
+func outputMoleculeCurrent(info MoleculeCurrentInfo) error {
+	if moleculeJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(info)
+	}
+
+	// Human-readable output matching spec format
+	fmt.Printf("Identity: %s\n", info.Identity)
+
+	if info.HandoffID != "" {
+		fmt.Printf("Handoff:  %s (%s)\n", info.HandoffID, info.HandoffTitle)
+	} else {
+		fmt.Printf("Handoff:  %s\n", style.Dim.Render("(none)"))
+	}
+
+	if info.MoleculeID != "" {
+		if info.MoleculeTitle != "" {
+			fmt.Printf("Molecule: %s (%s)\n", info.MoleculeID, info.MoleculeTitle)
+		} else {
+			fmt.Printf("Molecule: %s\n", info.MoleculeID)
+		}
+	} else {
+		fmt.Printf("Molecule: %s\n", style.Dim.Render("(none attached)"))
+	}
+
+	if info.StepsTotal > 0 {
+		fmt.Printf("Progress: %d/%d steps complete\n", info.StepsComplete, info.StepsTotal)
+	}
+
+	if info.CurrentStepID != "" {
+		fmt.Printf("Current:  %s - %s\n", info.CurrentStepID, info.CurrentStep)
+	} else if info.Status == "naked" {
+		fmt.Printf("Status:   %s\n", style.Dim.Render("naked - awaiting work assignment"))
+	} else if info.Status == "complete" {
+		fmt.Printf("Status:   %s\n", style.Bold.Render("complete - molecule finished"))
+	} else if info.Status == "blocked" {
+		fmt.Printf("Status:   %s\n", style.Dim.Render("blocked - waiting on dependencies"))
 	}
 
 	return nil
