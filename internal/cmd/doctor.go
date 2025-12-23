@@ -85,6 +85,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewPatrolPluginsAccessibleCheck())
 	d.Register(doctor.NewPatrolRolesHavePromptsCheck())
 
+	// Attachment checks
+	d.Register(doctor.NewStaleAttachmentsCheck())
+
 	// Config architecture checks
 	d.Register(doctor.NewSettingsCheck())
 	d.Register(doctor.NewRuntimeGitignoreCheck())
