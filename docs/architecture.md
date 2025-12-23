@@ -438,66 +438,61 @@ The choice between **Mol** (durable) and **Wisp** (transient) depends on the wor
 
 ### Molecule Format
 
-Molecules use a prose-based format with structured step definitions:
+Molecules are stored as JSONL in `molecules.jsonl`:
 
-```markdown
-## Molecule: engineer-in-box
-Full workflow from design to merge.
-
-## Step: design
-Think carefully about architecture. Consider:
-- Existing patterns in the codebase
-- Trade-offs between approaches
-- Testability and maintainability
-
-Write a brief design summary before proceeding.
-
-## Step: implement
-Write the code. Follow codebase conventions.
-Needs: design
-
-## Step: review
-Self-review the changes. Look for bugs, style issues, missing error handling.
-Needs: implement
-
-## Step: test
-Write and run tests. Cover happy path and edge cases.
-Needs: implement
-
-## Step: submit
-Submit for merge via refinery.
-Needs: review, test
+```json
+{
+  "id": "mol-engineer-in-box",
+  "title": "Engineer in Box: {{feature}}",
+  "description": "Full workflow from design to merge.",
+  "labels": ["template"],
+  "issue_type": "epic"
+}
 ```
 
-**Key format elements:**
-- `## Step: <name>` - Step header with reference name
-- Prose instructions - What the step should accomplish
-- `Needs: <step1>, <step2>` - Dependencies (optional)
-- `Tier: haiku|sonnet|opus` - Model hint (optional)
+Steps are hierarchical children with dependencies encoded as beads edges:
+
+```
+mol-engineer-in-box
+├── .1 design      "Think about architecture"
+├── .2 implement   "Write the code"           ← depends on .1
+├── .3 review      "Self-review changes"      ← depends on .2
+├── .4 test        "Write and run tests"      ← depends on .2
+└── .5 submit      "Submit for merge"         ← depends on .3, .4
+```
+
+**Key points:**
+- Storage is JSONL (standard beads issue format)
+- `{{var}}` placeholders resolved at bond time
+- Steps are child issues, not embedded markdown
+- Dependencies are beads edges, not text directives
 
 ### Molecule Composition
 
-Molecules can include other molecules to create derived workflows:
+Molecules compose via bonding - attaching one molecule to another:
 
-```markdown
-## Molecule: gastown-polecat
-Full workflow for Gas Town polecats including binary installation.
+```
+mol-gastown-polecat (composed)
+├── [mol-engineer-in-box steps bonded here]
+│   ├── .1 design
+│   ├── .2 implement
+│   ├── .3 review
+│   ├── .4 test
+│   └── .5 submit
+└── .6 install-binary  ← depends on .5 (submit)
+```
 
-Includes: mol-engineer-in-box
-
-## Step: install-binary
-After merge is submitted, rebuild and install the local gt binary.
-Run from the rig directory:
-  go build -o gt ./cmd/gt
-  go install ./cmd/gt
-Needs: submit
+**Composition via bond:**
+```bash
+bd mol bond mol-engineer-in-box $PARENT_MOL
+bd create "Install binary" --parent=$PARENT_MOL --deps=.5
 ```
 
 **Semantics:**
-- `Includes:` brings in all steps from the referenced molecule
-- New steps can depend on included steps (e.g., `Needs: submit`)
-- Multiple includes are supported for complex polymers
-- Dependencies are resolved transitively at parse time
+- Bonding attaches one molecule's steps as children
+- New steps can depend on bonded steps
+- Multiple bonds create complex polymers
+- Dependencies are standard beads edges
 
 ### Nondeterministic Idempotence
 
@@ -823,127 +818,48 @@ Molecules aren't just for implementing features. Any multi-step process that req
 
 #### mol-polecat-work
 
-The full polecat lifecycle, not just "do the issue":
+The full polecat lifecycle:
 
-```markdown
-## Molecule: polecat-work
-Full polecat lifecycle from assignment to decommission.
-
-## Step: load-context
-Run gt prime and bd prime. Verify issue assignment.
-Check inbox for any relevant messages.
-
-## Step: implement
-Implement the solution. Follow codebase conventions.
-File discovered work as new issues.
-Needs: load-context
-
-## Step: self-review
-Review your own changes. Look for bugs, style issues,
-missing error handling, security concerns.
-Needs: implement
-
-## Step: verify-tests
-Run existing tests. Add new tests for new functionality.
-Ensure adequate coverage.
-Needs: implement
-
-## Step: rebase-main
-Rebase against main to incorporate any changes.
-Resolve conflicts if needed.
-Needs: self-review, verify-tests
-
-## Step: submit-merge
-Submit to merge queue. Create PR if needed.
-Verify CI passes.
-Needs: rebase-main
-
-## Step: generate-summary
-Generate summary for molecule squash.
-File any remaining work as issues.
-Needs: submit-merge
-
-## Step: request-shutdown
-Send shutdown request to Witness.
-Wait for termination.
-Needs: update-handoff
+```
+mol-polecat-work
+├── .1 load-context     "gt prime, bd prime, check inbox"
+├── .2 implement        "Write code, file discovered work"    ← .1
+├── .3 self-review      "Check for bugs, security issues"     ← .2
+├── .4 verify-tests     "Run tests, add coverage"             ← .2
+├── .5 rebase-main      "Rebase, resolve conflicts"           ← .3, .4
+├── .6 submit-merge     "Submit to queue, verify CI"          ← .5
+├── .7 generate-summary "Squash summary, file remaining work" ← .6
+└── .8 request-shutdown "Signal Witness, wait for kill"       ← .7
 ```
 
-**Why this matters**: A polecat that crashes after step 4 doesn't lose work. On restart, it reads molecule state, sees "verify-tests: completed, rebase-main: pending", and continues rebasing.
+**Why this matters**: A polecat that crashes after step 4 doesn't lose work. On restart, it reads molecule state, sees ".4: completed, .5: pending", and continues rebasing.
 
 #### mol-rig-activate
 
 Activating a rig for work:
 
-```markdown
-## Molecule: rig-activate
-Activate a rig and spawn workers.
-
-## Step: verify-rig
-Check rig exists and is properly configured.
-Verify git remote is accessible.
-
-## Step: start-witness
-Start Witness if not running.
-Verify Witness is healthy.
-Needs: verify-rig
-
-## Step: start-refinery
-Start Refinery if not running.
-Verify Refinery is healthy.
-Needs: verify-rig
-
-## Step: sync-beads
-Sync beads from remote.
-Resolve any conflicts.
-Needs: start-witness
-
-## Step: identify-ready
-Query bd ready for available work.
-Prioritize by issue priority.
-Needs: sync-beads
-
-## Step: spawn-workers
-Spawn polecats for ready issues.
-Respect max_workers limit.
-Needs: identify-ready, start-refinery
+```
+mol-rig-activate
+├── .1 verify-rig     "Check config, git remote"
+├── .2 start-witness  "Start if needed, verify health"  ← .1
+├── .3 start-refinery "Start if needed, verify health"  ← .1
+├── .4 sync-beads     "Sync from remote"                ← .2
+├── .5 identify-ready "Query bd ready, prioritize"      ← .4
+└── .6 spawn-workers  "Spawn polecats for work"         ← .5, .3
 ```
 
 #### mol-graceful-shutdown
 
 Shutting down Gas Town properly:
 
-```markdown
-## Molecule: graceful-shutdown
-Graceful shutdown with handoff preservation.
-
-## Step: notify-agents
-Send shutdown notification to all agents.
-Record which agents acknowledged.
-
-## Step: wait-squash
-Wait for agents to squash their molecules.
-Track completion status.
-Needs: notify-agents
-
-## Step: verify-clean
-Verify all git states are clean.
-Check for uncommitted work.
-Needs: wait-handoffs
-
-## Step: kill-workers
-Terminate polecat sessions.
-Remove worktrees.
-Needs: verify-clean
-
-## Step: kill-core
-Terminate Witness, Refinery, Mayor, Deacon.
-In correct order.
-Needs: kill-workers
-
-## Step: final-sync
-Final beads sync to preserve state.
-Needs: kill-core
+```
+mol-graceful-shutdown
+├── .1 notify-agents "Send shutdown to all agents"
+├── .2 wait-squash   "Wait for molecule completion"   ← .1
+├── .3 verify-clean  "Check git states clean"         ← .2
+├── .4 kill-workers  "Terminate polecats, worktrees"  ← .3
+├── .5 kill-core     "Terminate Witness, Refinery"    ← .4
+└── .6 final-sync    "Final beads sync"               ← .5
 ```
 
 **Key principle**: If a multi-step process requires cognition and can fail partway through, it should be a molecule. This applies to:
@@ -954,113 +870,77 @@ Needs: kill-core
 
 ### Pluggable Molecules
 
-Some workflows benefit from **pluggable steps** - dimensions that can be added or removed by creating/deleting directories. The canonical example is **code review**, where each review dimension (security, performance, test coverage) is a plugin.
+Some workflows benefit from **pluggable steps** - dimensions that can be added or removed dynamically. The canonical example is **code review**, where each review dimension (security, performance, test coverage) is a plugin molecule.
 
-#### Philosophy: Plugins Are Directories
+#### Philosophy: Plugins ARE Molecules
 
-In Gas Town, a plugin is just a directory that agents notice. If the directory exists, the plugin exists. No registration, no manifests, no YAML configs.
+In Gas Town, plugins are molecules with specific labels. No separate format, no YAML configs, no directory conventions. Just beads.
 
-```
-~/gt/molecules/code-review/
-├── discovery/
-│   ├── file-census/
-│   │   └── CLAUDE.md          # Instructions for this step
-│   ├── dep-graph/
-│   │   └── CLAUDE.md
-│   └── duplication-scan/
-│       └── CLAUDE.md
-├── structural/
-│   ├── architecture-review/
-│   │   └── CLAUDE.md
-│   └── missing-abstractions/
-│       └── CLAUDE.md
-└── tactical/
-    ├── security-scan/
-    │   └── CLAUDE.md
-    ├── performance-review/
-    │   └── CLAUDE.md
-    └── test-gaps/
-        └── CLAUDE.md
+```json
+{
+  "id": "mol-security-scan",
+  "title": "Security scan: {{scope}}",
+  "description": "Check for OWASP Top 10 vulnerabilities in {{scope}}",
+  "labels": ["template", "plugin", "code-review", "phase:tactical", "tier:sonnet"],
+  "issue_type": "task"
+}
 ```
 
-**Add a dimension**: Create a directory with CLAUDE.md
-**Remove a dimension**: Delete the directory
-**Customize a dimension**: Edit its CLAUDE.md
+**Add a dimension**: Install a plugin molecule (`bd mol install mol-security-scan`)
+**Remove a dimension**: Uninstall or don't bond it
+**Customize a dimension**: Fork and modify the molecule
 
-#### Plugin Metadata
+#### Plugin Labels
 
-Each plugin can include frontmatter in its CLAUDE.md:
+Labels encode metadata that would otherwise go in config files:
 
-```markdown
----
-phase: tactical
-needs: [structural-complete]
-tier: sonnet
----
+| Label | Purpose |
+|-------|---------|
+| `plugin` | Marks as bondable at hook points |
+| `code-review` | Which molecule can use this plugin |
+| `phase:tactical` | Grouping for ordering |
+| `tier:sonnet` | Model hint |
+| `witness` / `deacon` | Which patrol can use it |
 
-# Security Scan
+#### Dynamic Assembly
 
-Look for OWASP Top 10 vulnerabilities...
-```
-
-| Field | Description |
-|-------|-------------|
-| `phase` | Grouping for ordering (discovery, structural, tactical, synthesis) |
-| `needs` | Dependencies - other steps that must complete first |
-| `tier` | Model hint (haiku, sonnet, opus) |
-
-#### Dynamic Molecule Assembly
-
-When instantiating a pluggable molecule, the system:
-
-1. **Scans** plugin directories under the molecule root
-2. **Parses** metadata from each plugin's CLAUDE.md
-3. **Assembles** the DAG based on phase groupings and dependencies
-4. **Creates** beads for each discovered step
+At runtime, the parent molecule bonds plugins based on labels:
 
 ```bash
-gt molecule instantiate code-review --parent=gt-xyz --scope=src/auth
+# In mol-code-review, during plugin-run step:
+for plugin in $(bd mol list --label plugin,code-review --json | jq -r '.[].id'); do
+  bd mol bond $plugin $CURRENT_MOL --var scope="$SCOPE"
+done
 ```
 
-Creates beads like:
+Creates a structure like:
 ```
-gt-xyz.discovery-file-census
-gt-xyz.discovery-dep-graph
-gt-xyz.structural-architecture-review    # blocks tactical
-gt-xyz.tactical-src-auth-security
-gt-xyz.tactical-src-auth-performance
-gt-xyz.synthesis
+gt-xyz (mol-code-review instance)
+├── discovery plugins (parallel)
+│   ├── .file-census
+│   ├── .dep-graph
+│   └── .coverage-map
+├── structural plugins (sequential)  ← depends on discovery
+│   ├── .architecture-review
+│   └── .abstraction-analysis
+├── tactical plugins (parallel)       ← depends on structural
+│   ├── .security-scan
+│   └── .performance-review
+└── .synthesis                        ← depends on tactical
 ```
-
-The **directory structure IS the molecule**. No separate molecule definition needed.
-
-#### Phases and Ordering
-
-Pluggable molecules support phased execution:
-
-| Phase | Purpose | Parallelism |
-|-------|---------|-------------|
-| `discovery` | Inventory, analyze codebase | Fully parallel |
-| `structural` | Big picture issues (architecture, abstractions) | Sequential for coherence |
-| `tactical` | Per-component detailed review | Parallel per component |
-| `synthesis` | Aggregate, dedupe, prioritize | Single coordinator |
-
-Steps in earlier phases block steps in later phases. Within a phase, parallelism depends on explicit `needs` declarations.
 
 #### Code Review Molecule
 
-The **code-review** molecule is the reference implementation:
+The **mol-code-review** molecule is the reference implementation:
 
 **Discovery Phase** (parallel scouts):
-- `file-census` - Inventory: sizes, ages, churn rates
-- `dep-graph` - Dependencies, cycles, inversions
-- `coverage-map` - Test coverage, dead code
-- `duplication-scan` - Near-duplicate files, copy-paste debt
+- `mol-file-census` - Inventory: sizes, ages, churn rates
+- `mol-dep-graph` - Dependencies, cycles, inversions
+- `mol-coverage-map` - Test coverage, dead code
 
 **Structural Phase** (sequential):
-- `architecture-review` - Does structure match domain?
-- `abstraction-analysis` - Wrangling at wrong layers?
-- `consolidation-planner` - What should be unified?
+- `mol-architecture-review` - Does structure match domain?
+- `mol-abstraction-analysis` - Wrangling at wrong layers?
 
 **Tactical Phase** (parallel per hotspot):
 - `security-scan` - OWASP Top 10, injection, auth bypass
@@ -1104,13 +984,13 @@ Each instantiation is independent. The ledger shows all runs, enabling compariso
 
 | Aspect | Static Molecule | Pluggable Molecule |
 |--------|-----------------|-------------------|
-| Definition | Steps in issue description | Steps from directory scan |
-| Add step | Edit molecule bead | Create directory |
-| Remove step | Edit molecule bead | Delete directory |
-| Customization | Edit description | Edit plugin CLAUDE.md |
+| Definition | Steps defined at template time | Steps bonded at runtime |
+| Add step | Edit molecule template | Install plugin molecule |
+| Remove step | Edit molecule template | Don't bond it |
+| Customization | Edit description | Fork plugin molecule |
 | Use case | Fixed workflows | Extensible workflows |
 
-Both patterns are valid. Use static molecules for well-defined workflows (engineer-in-box, polecat-work). Use pluggable molecules when dimensions should be customizable (code-review, migration-analysis).
+Both patterns are valid. Use static molecules for well-defined workflows (mol-engineer-in-box, mol-polecat-work). Use pluggable molecules when dimensions should be customizable (mol-code-review, mol-witness-patrol).
 
 ## Directory Structure
 
@@ -1287,10 +1167,7 @@ For reference without mermaid rendering (see [hq.md](hq.md) for creation/setup):
 │   │   │   └── <project files>          # (inherits beads from rig)
 │   │   └── Toast/                       # Git worktree from Mayor's clone
 │   │
-│   └── plugins/                         # Optional plugins
-│       └── merge-oracle/
-│           ├── CLAUDE.md
-│           └── state.json
+│   └── molecules.jsonl                  # Optional local molecule catalog
 │
 └── wyvern/                              # Another rig (same structure)
     ├── config.json
@@ -1650,9 +1527,9 @@ sequenceDiagram
 - Zero new infrastructure needed (uses existing mail, beads, identities)
 - Composable - plugins can invoke other plugins via mail
 - Debuggable - just look at mail logs and bead history
-- Extensible - anyone can add a plugin by creating a directory
+- Extensible - anyone can add a plugin molecule to their catalog
 
-**Structure**: `<rig>/plugins/<name>/` with optional `rig/`, `CLAUDE.md`, `mail/`, `state.json`.
+**Structure**: Plugin molecules in `molecules.jsonl` with labels for discovery.
 
 ### 8. Rig-Level Beads via BEADS_DIR
 
@@ -2088,47 +1965,41 @@ Gas Town is intentionally rough and lightweight. A "credible plugin system" with
 
 ### Plugin Structure
 
-Plugins live in a rig's `plugins/` directory:
+Plugins are molecules with specific labels, stored in `molecules.jsonl`:
 
+```json
+{
+  "id": "mol-merge-oracle",
+  "title": "Analyze merge queue",
+  "description": "Analyze pending changesets for conflicts and ordering.",
+  "labels": ["template", "plugin", "refinery", "tier:sonnet"],
+  "issue_type": "task"
+}
 ```
-wyvern/                            # Rig
-├── plugins/
-│   └── merge-oracle/              # A plugin
-│       ├── rig/                   # Plugin's git clone (if needed)
-│       ├── CLAUDE.md              # Plugin's instructions/prompts
-│       ├── mail/inbox.jsonl       # Plugin's mailbox
-│       └── state.json             # Plugin state (optional)
-```
-
-That's it. No plugin.yaml, no special registration. If the directory exists, the plugin exists.
 
 ### Invoking Plugins
 
-Plugins are invoked like any other agent - via mail:
+Plugins are bonded during patrol execution:
 
 ```bash
-# Refinery asks merge-oracle to analyze pending changesets
-gt send wyvern/plugins/merge-oracle -s "Analyze merge queue" -m "..."
-
-# Mayor asks plan-oracle for a work breakdown
-gt send beads/plugins/plan-oracle -s "Plan for bd-xyz" -m "..."
+# In mol-refinery-patrol plugin-run step:
+bd mol bond mol-merge-oracle $PATROL_WISP \
+  --var queue_state="$QUEUE_JSON"
 ```
 
-Plugins do their work (potentially spawning Claude sessions) and respond via mail, creating any necessary artifacts (beads, files, branches).
+Plugins execute as molecule steps, creating any necessary artifacts (beads, files, branches).
 
 ### Hook Points
 
-Existing agents can be configured to notify plugins at specific points. This is just convention - agents check if a plugin exists and mail it:
+Patrol molecules bond plugins at specific points. Discovery uses labels:
 
-| Workflow Point | Agent | Example Plugin |
-|----------------|-------|----------------|
-| Before merge processing | Refinery | merge-oracle |
-| Before work dispatch | Mayor | plan-oracle |
-| On worker stuck | Witness | debug-oracle |
-| On PR ready | Refinery | review-oracle |
-| Periodic / on-demand | Mayor | beads-hygiene |
+| Workflow Point | Patrol | Label Filter |
+|----------------|--------|--------------|
+| Refinery patrol | mol-refinery-patrol | `plugin,refinery` |
+| Witness patrol | mol-witness-patrol | `plugin,witness` |
+| Deacon patrol | mol-deacon-patrol | `plugin,deacon` |
 
-Configuration is minimal - perhaps a line in the agent's CLAUDE.md or state.json noting which plugins to consult.
+Configuration is via labels - agents bond plugins that match their role.
 
 ### Example: Merge Oracle
 
@@ -2149,7 +2020,7 @@ The **merge-oracle** plugin analyzes changesets before the Refinery processes th
 - Mail to Refinery with recommendation (proceed / escalate to Mayor)
 - If escalation needed: mail to Mayor with explanation
 
-The merge-oracle's `CLAUDE.md` contains the prompts and classification criteria. Gas Town doesn't need to know the internals.
+The mol-merge-oracle's description contains the prompts and classification criteria. Gas Town doesn't need to know the internals.
 
 ### Example: Plan Oracle
 
@@ -2210,7 +2081,7 @@ Workers sometimes get confused about which database they're in, especially when:
 - Mayor can invoke periodically (nightly hygiene scan)
 - Any agent can invoke on-demand when confused
 
-**CLAUDE.md prompt core**:
+**mol-beads-hygiene description (prompt core)**:
 ```
 You are reviewing beads databases for cross-pollution between Gas Town's
 two-level architecture:
