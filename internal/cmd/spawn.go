@@ -553,12 +553,11 @@ func buildSpawnContext(issue *BeadsIssue, message string) string {
 
 	sb.WriteString("\n## Workflow\n")
 	sb.WriteString("1. Run `gt prime` to load polecat context\n")
-	sb.WriteString("2. Run `bd sync --from-main` to get fresh beads\n")
-	sb.WriteString("3. Work on your task, commit changes regularly\n")
-	sb.WriteString("4. Run `bd close <issue-id>` when done\n")
-	sb.WriteString("5. Run `bd sync` to push beads changes\n")
-	sb.WriteString("6. Push code: `git push origin HEAD`\n")
-	sb.WriteString("7. Run `gt done` to signal completion\n")
+	sb.WriteString("2. Work on your task, commit changes regularly\n")
+	sb.WriteString("3. Run `bd close <issue-id>` when done\n")
+	sb.WriteString("4. Run `bd sync` to push beads changes\n")
+	sb.WriteString("5. Push code: `git push origin HEAD`\n")
+	sb.WriteString("6. Run `gt done` to signal completion\n")
 
 	return sb.String()
 }
@@ -617,17 +616,16 @@ func buildWorkAssignmentMail(issue *BeadsIssue, message, polecatAddress string, 
 
 	body.WriteString("\n## Workflow\n")
 	body.WriteString("1. Run `gt prime` to load polecat context\n")
-	body.WriteString("2. Run `bd sync --from-main` to get fresh beads\n")
-	body.WriteString("3. Work on your task, commit changes regularly\n")
-	body.WriteString("4. Run `bd close <issue-id>` when done\n")
+	body.WriteString("2. Work on your task, commit changes regularly\n")
+	body.WriteString("3. Run `bd close <issue-id>` when done\n")
 	if moleculeCtx != nil {
-		body.WriteString("5. Check `bd ready --parent " + moleculeCtx.RootIssueID + "` for more steps\n")
-		body.WriteString("6. Repeat steps 3-5 for each ready step\n")
-		body.WriteString("7. When all steps done: run `bd sync`, push code, run `gt done`\n")
+		body.WriteString("4. Check `bd ready --parent " + moleculeCtx.RootIssueID + "` for more steps\n")
+		body.WriteString("5. Repeat steps 2-4 for each ready step\n")
+		body.WriteString("6. When all steps done: run `bd sync`, push code, run `gt done`\n")
 	} else {
-		body.WriteString("5. Run `bd sync` to push beads changes\n")
-		body.WriteString("6. Push code: `git push origin HEAD`\n")
-		body.WriteString("7. Run `gt done` to signal completion\n")
+		body.WriteString("4. Run `bd sync` to push beads changes\n")
+		body.WriteString("5. Push code: `git push origin HEAD`\n")
+		body.WriteString("6. Run `gt done` to signal completion\n")
 	}
 	body.WriteString("\n## Handoff Protocol\n")
 	body.WriteString("Before signaling done, ensure:\n")
