@@ -1,7 +1,10 @@
 // Package config provides configuration types and serialization for Gas Town.
 package config
 
-import "time"
+import (
+	"os"
+	"time"
+)
 
 // TownConfig represents the main town identity (mayor/town.json).
 type TownConfig struct {
@@ -207,4 +210,28 @@ func DefaultNamepoolConfig() *NamepoolConfig {
 		Style:              "mad-max",
 		MaxBeforeNumbering: 50,
 	}
+}
+
+// AccountsConfig represents Claude Code account configuration (mayor/accounts.json).
+// This enables Gas Town to manage multiple Claude Code accounts with easy switching.
+type AccountsConfig struct {
+	Version  int                `json:"version"`  // schema version
+	Accounts map[string]Account `json:"accounts"` // handle -> account details
+	Default  string             `json:"default"`  // default account handle
+}
+
+// Account represents a single Claude Code account.
+type Account struct {
+	Email       string `json:"email"`                 // account email
+	Description string `json:"description,omitempty"` // human description
+	ConfigDir   string `json:"config_dir"`            // path to CLAUDE_CONFIG_DIR
+}
+
+// CurrentAccountsVersion is the current schema version for AccountsConfig.
+const CurrentAccountsVersion = 1
+
+// DefaultAccountsConfigDir returns the default base directory for account configs.
+func DefaultAccountsConfigDir() string {
+	home, _ := os.UserHomeDir()
+	return home + "/.claude-accounts"
 }

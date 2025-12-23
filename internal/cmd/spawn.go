@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -32,6 +33,7 @@ var (
 	spawnRig      string
 	spawnMolecule string
 	spawnForce    bool
+	spawnAccount  string
 )
 
 var spawnCmd = &cobra.Command{
@@ -71,6 +73,7 @@ func init() {
 	spawnCmd.Flags().StringVar(&spawnRig, "rig", "", "Rig name (defaults to current directory's rig)")
 	spawnCmd.Flags().StringVar(&spawnMolecule, "molecule", "", "Molecule ID to instantiate on the issue")
 	spawnCmd.Flags().BoolVar(&spawnForce, "force", false, "Force spawn even if polecat has unread mail")
+	spawnCmd.Flags().StringVar(&spawnAccount, "account", "", "Claude Code account handle to use (overrides default)")
 
 	rootCmd.AddCommand(spawnCmd)
 }
@@ -348,6 +351,16 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("%s Work assignment sent\n", style.Bold.Render("✓"))
 
+	// Resolve account for Claude config
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, spawnAccount)
+	if err != nil {
+		return fmt.Errorf("resolving account: %w", err)
+	}
+	if accountHandle != "" {
+		fmt.Printf("Using account: %s\n", accountHandle)
+	}
+
 	// Start session
 	t := tmux.NewTmux()
 	sessMgr := session.NewManager(t, r)
@@ -359,7 +372,10 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	} else {
 		// Start new session
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
-		if err := sessMgr.Start(polecatName, session.StartOptions{}); err != nil {
+		startOpts := session.StartOptions{
+			ClaudeConfigDir: claudeConfigDir,
+		}
+		if err := sessMgr.Start(polecatName, startOpts); err != nil {
 			return fmt.Errorf("starting session: %w", err)
 		}
 	}

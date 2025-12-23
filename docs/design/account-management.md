@@ -34,24 +34,27 @@ Each registered account gets its own config directory:
 
 ### Town Configuration
 
-File: `~/gt/mayor/accounts.yaml`
+File: `~/gt/mayor/accounts.json`
 
 This follows the existing pattern where town-level config lives in `mayor/`.
 
-```yaml
-accounts:
-  yegge:
-    email: steve.yegge@gmail.com
-    description: "Personal/Gmail account"
-    config_dir: ~/.claude-accounts/yegge
-
-  ghosttrack:
-    email: steve@ghosttrack.com
-    description: "Ghost Track business account"
-    config_dir: ~/.claude-accounts/ghosttrack
-
-# Global default used when no override specified
-default: ghosttrack
+```json
+{
+  "version": 1,
+  "accounts": {
+    "yegge": {
+      "email": "steve.yegge@gmail.com",
+      "description": "Personal/Gmail account",
+      "config_dir": "~/.claude-accounts/yegge"
+    },
+    "ghosttrack": {
+      "email": "steve@ghosttrack.com",
+      "description": "Ghost Track business account",
+      "config_dir": "~/.claude-accounts/ghosttrack"
+    }
+  },
+  "default": "ghosttrack"
+}
 ```
 
 ### Environment Variable: GT_ACCOUNT
@@ -196,7 +199,7 @@ claude  # Login as ghosttrack
 
 ### Phase 1: Basic Support
 
-- Add `accounts.yaml` parsing
+- Add `accounts.json` parsing
 - Add `gt account` subcommands
 - Wire up `GT_ACCOUNT` env var in spawn
 

@@ -48,6 +48,9 @@ const (
 
 	// FileConfigYAML is the beads config file.
 	FileConfigYAML = "config.yaml"
+
+	// FileAccountsJSON is the accounts configuration file in mayor/.
+	FileAccountsJSON = "accounts.json"
 )
 
 // Git branch names.
@@ -153,4 +156,9 @@ func RigRuntimePath(rigPath string) string {
 // RigSettingsPath returns the path to settings/ within a rig.
 func RigSettingsPath(rigPath string) string {
 	return rigPath + "/" + DirSettings
+}
+
+// MayorAccountsPath returns the path to mayor/accounts.json within a town root.
+func MayorAccountsPath(townRoot string) string {
+	return townRoot + "/" + DirMayor + "/" + FileAccountsJSON
 }

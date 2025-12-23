@@ -46,6 +46,13 @@ type StartOptions struct {
 
 	// Command overrides the default "claude" command.
 	Command string
+
+	// Account specifies the account handle to use (overrides default).
+	Account string
+
+	// ClaudeConfigDir is resolved CLAUDE_CONFIG_DIR for the account.
+	// If set, this is injected as an environment variable.
+	ClaudeConfigDir string
 }
 
 // Info contains information about a running session.
@@ -132,6 +139,11 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	// Set environment
 	_ = m.tmux.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
 	_ = m.tmux.SetEnvironment(sessionID, "GT_POLECAT", polecat)
+
+	// Set CLAUDE_CONFIG_DIR for account selection
+	if opts.ClaudeConfigDir != "" {
+		_ = m.tmux.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", opts.ClaudeConfigDir)
+	}
 
 	// CRITICAL: Set beads environment for worktree polecats
 	// Polecats share the rig's beads directory (at rig root, not mayor/rig)

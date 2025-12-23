@@ -434,3 +434,118 @@ func TestLoadMayorConfigNotFound(t *testing.T) {
 		t.Fatal("expected error for nonexistent file")
 	}
 }
+
+func TestAccountsConfigRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mayor", "accounts.json")
+
+	original := NewAccountsConfig()
+	original.Accounts["yegge"] = Account{
+		Email:       "steve.yegge@gmail.com",
+		Description: "Personal account",
+		ConfigDir:   "~/.claude-accounts/yegge",
+	}
+	original.Accounts["ghosttrack"] = Account{
+		Email:       "steve@ghosttrack.com",
+		Description: "Business account",
+		ConfigDir:   "~/.claude-accounts/ghosttrack",
+	}
+	original.Default = "ghosttrack"
+
+	if err := SaveAccountsConfig(path, original); err != nil {
+		t.Fatalf("SaveAccountsConfig: %v", err)
+	}
+
+	loaded, err := LoadAccountsConfig(path)
+	if err != nil {
+		t.Fatalf("LoadAccountsConfig: %v", err)
+	}
+
+	if loaded.Version != CurrentAccountsVersion {
+		t.Errorf("Version = %d, want %d", loaded.Version, CurrentAccountsVersion)
+	}
+	if len(loaded.Accounts) != 2 {
+		t.Errorf("Accounts count = %d, want 2", len(loaded.Accounts))
+	}
+	if loaded.Default != "ghosttrack" {
+		t.Errorf("Default = %q, want 'ghosttrack'", loaded.Default)
+	}
+
+	yegge := loaded.GetAccount("yegge")
+	if yegge == nil {
+		t.Fatal("GetAccount('yegge') returned nil")
+	}
+	if yegge.Email != "steve.yegge@gmail.com" {
+		t.Errorf("yegge.Email = %q, want 'steve.yegge@gmail.com'", yegge.Email)
+	}
+
+	defAcct := loaded.GetDefaultAccount()
+	if defAcct == nil {
+		t.Fatal("GetDefaultAccount() returned nil")
+	}
+	if defAcct.Email != "steve@ghosttrack.com" {
+		t.Errorf("default.Email = %q, want 'steve@ghosttrack.com'", defAcct.Email)
+	}
+}
+
+func TestAccountsConfigValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *AccountsConfig
+		wantErr bool
+	}{
+		{
+			name:    "valid empty config",
+			config:  NewAccountsConfig(),
+			wantErr: false,
+		},
+		{
+			name: "valid config with accounts",
+			config: &AccountsConfig{
+				Version: 1,
+				Accounts: map[string]Account{
+					"test": {Email: "test@example.com", ConfigDir: "~/.claude-accounts/test"},
+				},
+				Default: "test",
+			},
+			wantErr: false,
+		},
+		{
+			name: "default refers to nonexistent account",
+			config: &AccountsConfig{
+				Version: 1,
+				Accounts: map[string]Account{
+					"test": {Email: "test@example.com", ConfigDir: "~/.claude-accounts/test"},
+				},
+				Default: "nonexistent",
+			},
+			wantErr: true,
+		},
+		{
+			name: "account missing config_dir",
+			config: &AccountsConfig{
+				Version: 1,
+				Accounts: map[string]Account{
+					"test": {Email: "test@example.com"},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAccountsConfig(tt.config)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateAccountsConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadAccountsConfigNotFound(t *testing.T) {
+	_, err := LoadAccountsConfig("/nonexistent/path.json")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}

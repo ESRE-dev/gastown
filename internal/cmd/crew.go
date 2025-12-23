@@ -12,6 +12,7 @@ var (
 	crewForce   bool
 	crewNoTmux  bool
 	crewMessage string
+	crewAccount string
 )
 
 var crewCmd = &cobra.Command{
@@ -197,6 +198,7 @@ func init() {
 
 	crewAtCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 	crewAtCmd.Flags().BoolVar(&crewNoTmux, "no-tmux", false, "Just print directory path")
+	crewAtCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use (overrides default)")
 
 	crewRemoveCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 	crewRemoveCmd.Flags().BoolVar(&crewForce, "force", false, "Force remove (skip safety checks)")

@@ -5,9 +5,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 func runCrewAt(cmd *cobra.Command, args []string) error {
@@ -52,6 +55,20 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Resolve account for Claude config
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, crewAccount)
+	if err != nil {
+		return fmt.Errorf("resolving account: %w", err)
+	}
+	if accountHandle != "" {
+		fmt.Printf("Using account: %s\n", accountHandle)
+	}
+
 	// Check if session exists
 	t := tmux.NewTmux()
 	sessionID := crewSessionName(r.Name, name)
@@ -69,6 +86,11 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// Set environment
 		_ = t.SetEnvironment(sessionID, "GT_RIG", r.Name)
 		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
+
+		// Set CLAUDE_CONFIG_DIR for account selection
+		if claudeConfigDir != "" {
+			_ = t.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", claudeConfigDir)
+		}
 
 		// Apply rig-based theming (uses config if set, falls back to hash)
 		theme := getThemeForRig(r.Name)
