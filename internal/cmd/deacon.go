@@ -153,11 +153,10 @@ func startDeaconSession(t *tmux.Tmux) error {
 	theme := tmux.DeaconTheme()
 	_ = t.ConfigureGasTownSession(DeaconSessionName, theme, "", "Deacon", "health-check")
 
-	// Launch Claude in a respawn loop - session survives restarts
+	// Launch Claude directly (no shell respawn loop)
+	// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat
 	// The startup hook handles context loading automatically
-	// Use SendKeysDelayed to allow shell initialization after NewSession
-	loopCmd := `while true; do echo "⛪ Starting Deacon session..."; claude --dangerously-skip-permissions; echo ""; echo "Deacon exited. Restarting in 2s... (Ctrl-C to stop)"; sleep 2; done`
-	if err := t.SendKeysDelayed(DeaconSessionName, loopCmd, 200); err != nil {
+	if err := t.SendKeys(DeaconSessionName, "claude --dangerously-skip-permissions"); err != nil {
 		return fmt.Errorf("sending command: %w", err)
 	}
 
@@ -257,16 +256,23 @@ func runDeaconRestart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("checking session: %w", err)
 	}
 
+	fmt.Println("Restarting Deacon...")
+
 	if running {
-		// Graceful restart: send Ctrl-C to exit Claude, loop will restart it
-		fmt.Println("Restarting Deacon (sending Ctrl-C to trigger respawn loop)...")
-		_ = t.SendKeysRaw(DeaconSessionName, "C-c")
-		fmt.Printf("%s Deacon will restart automatically. Session stays attached.\n", style.Bold.Render("✓"))
-		return nil
+		// Kill existing session
+		if err := t.KillSession(DeaconSessionName); err != nil {
+			fmt.Printf("%s Warning: failed to kill session: %v\n", style.Dim.Render("⚠"), err)
+		}
 	}
 
-	// Not running, start fresh
-	return runDeaconStart(cmd, args)
+	// Start fresh
+	if err := runDeaconStart(cmd, args); err != nil {
+		return err
+	}
+
+	fmt.Printf("%s Deacon restarted\n", style.Bold.Render("✓"))
+	fmt.Printf("  %s\n", style.Dim.Render("Use 'gt deacon attach' to connect"))
+	return nil
 }
 
 func runDeaconHeartbeat(cmd *cobra.Command, args []string) error {

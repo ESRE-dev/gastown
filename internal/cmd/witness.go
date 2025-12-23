@@ -312,10 +312,10 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 	theme := tmux.AssignTheme(rigName)
 	_ = t.ConfigureGasTownSession(sessionName, theme, rigName, "witness", "witness")
 
-	// Launch Claude in a respawn loop
+	// Launch Claude directly (no shell respawn loop)
+	// Restarts are handled by daemon via LIFECYCLE mail or deacon health-scan
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
-	loopCmd := `while true; do echo "👁️ Starting Witness for ` + rigName + `..."; claude --dangerously-skip-permissions; echo ""; echo "Witness exited. Restarting in 2s... (Ctrl-C to stop)"; sleep 2; done`
-	if err := t.SendKeysDelayed(sessionName, loopCmd, 200); err != nil {
+	if err := t.SendKeys(sessionName, "claude --dangerously-skip-permissions"); err != nil {
 		return false, fmt.Errorf("sending command: %w", err)
 	}
 

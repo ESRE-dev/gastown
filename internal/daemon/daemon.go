@@ -186,20 +186,39 @@ func (d *Daemon) nextMOTD() string {
 	return deaconMOTDMessages[nextIdx]
 }
 
-// ensureDeaconRunning checks if the Deacon session exists and starts it if not.
+// ensureDeaconRunning checks if the Deacon session exists and Claude is running.
+// If the session exists but Claude has exited, it restarts Claude.
+// If the session doesn't exist, it creates it and starts Claude.
 // The Deacon is the system's heartbeat - it must always be running.
 func (d *Daemon) ensureDeaconRunning() {
-	running, err := d.tmux.HasSession(DeaconSessionName)
+	sessionExists, err := d.tmux.HasSession(DeaconSessionName)
 	if err != nil {
 		d.logger.Printf("Error checking Deacon session: %v", err)
 		return
 	}
 
-	if running {
-		return // Deacon is running, nothing to do
+	if sessionExists {
+		// Session exists - check if Claude is actually running
+		cmd, err := d.tmux.GetPaneCommand(DeaconSessionName)
+		if err != nil {
+			d.logger.Printf("Error checking Deacon pane command: %v", err)
+			return
+		}
+
+		// If Claude is running (node process), we're good
+		if cmd == "node" {
+			return
+		}
+
+		// Claude has exited (shell is showing) - restart it
+		d.logger.Printf("Deacon session exists but Claude exited (cmd=%s), restarting...", cmd)
+		if err := d.tmux.SendKeys(DeaconSessionName, "claude --dangerously-skip-permissions"); err != nil {
+			d.logger.Printf("Error restarting Claude in Deacon session: %v", err)
+		}
+		return
 	}
 
-	// Deacon is not running - start it
+	// Session doesn't exist - create it and start Claude
 	d.logger.Println("Deacon session not running, starting...")
 
 	// Create session in town root
@@ -211,9 +230,9 @@ func (d *Daemon) ensureDeaconRunning() {
 	// Set environment
 	_ = d.tmux.SetEnvironment(DeaconSessionName, "GT_ROLE", "deacon")
 
-	// Launch Claude in a respawn loop - session survives restarts
-	loopCmd := `while true; do echo "⛪ Starting Deacon session..."; claude --dangerously-skip-permissions; echo ""; echo "Deacon exited. Restarting in 2s... (Ctrl-C to stop)"; sleep 2; done`
-	if err := d.tmux.SendKeysDelayed(DeaconSessionName, loopCmd, 200); err != nil {
+	// Launch Claude directly (no shell respawn loop)
+	// The daemon will detect if Claude exits and restart it on next heartbeat
+	if err := d.tmux.SendKeys(DeaconSessionName, "claude --dangerously-skip-permissions"); err != nil {
 		d.logger.Printf("Error launching Claude in Deacon session: %v", err)
 		return
 	}
