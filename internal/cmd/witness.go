@@ -78,6 +78,19 @@ If the witness is not running, this will start it first.`,
 	RunE: runWitnessAttach,
 }
 
+var witnessRestartCmd = &cobra.Command{
+	Use:   "restart <rig>",
+	Short: "Restart the witness",
+	Long: `Restart the Witness for a rig.
+
+Stops the current session (if running) and starts a fresh one.
+
+Examples:
+  gt witness restart gastown`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWitnessRestart,
+}
+
 func init() {
 	// Start flags
 	witnessStartCmd.Flags().BoolVar(&witnessForeground, "foreground", false, "Run in foreground (default: background)")
@@ -88,6 +101,7 @@ func init() {
 	// Add subcommands
 	witnessCmd.AddCommand(witnessStartCmd)
 	witnessCmd.AddCommand(witnessStopCmd)
+	witnessCmd.AddCommand(witnessRestartCmd)
 	witnessCmd.AddCommand(witnessStatusCmd)
 	witnessCmd.AddCommand(witnessAttachCmd)
 
@@ -340,4 +354,42 @@ func runWitnessAttach(cmd *cobra.Command, args []string) error {
 	attachCmd.Stdout = os.Stdout
 	attachCmd.Stderr = os.Stderr
 	return attachCmd.Run()
+}
+
+func runWitnessRestart(cmd *cobra.Command, args []string) error {
+	rigName := args[0]
+
+	mgr, r, err := getWitnessManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Restarting witness for %s...\n", rigName)
+
+	// Kill tmux session if it exists
+	t := tmux.NewTmux()
+	sessionName := witnessSessionName(rigName)
+	running, _ := t.HasSession(sessionName)
+	if running {
+		if err := t.KillSession(sessionName); err != nil {
+			fmt.Printf("%s Warning: failed to kill session: %v\n", style.Dim.Render("⚠"), err)
+		}
+	}
+
+	// Update state file to stopped
+	_ = mgr.Stop()
+
+	// Start fresh
+	created, err := ensureWitnessSession(rigName, r)
+	if err != nil {
+		return fmt.Errorf("starting witness: %w", err)
+	}
+
+	if created {
+		_ = mgr.Start(false) // Mark as running in state file
+	}
+
+	fmt.Printf("%s Witness restarted for %s\n", style.Bold.Render("✓"), rigName)
+	fmt.Printf("  %s\n", style.Dim.Render("Use 'gt witness attach' to connect"))
+	return nil
 }

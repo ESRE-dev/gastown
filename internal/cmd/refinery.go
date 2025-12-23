@@ -98,6 +98,21 @@ Examples:
 	RunE: runRefineryAttach,
 }
 
+var refineryRestartCmd = &cobra.Command{
+	Use:   "restart [rig]",
+	Short: "Restart the refinery",
+	Long: `Restart the Refinery for a rig.
+
+Stops the current session (if running) and starts a fresh one.
+If rig is not specified, infers it from the current directory.
+
+Examples:
+  gt refinery restart gastown
+  gt refinery restart          # infer rig from cwd`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runRefineryRestart,
+}
+
 func init() {
 	// Start flags
 	refineryStartCmd.Flags().BoolVar(&refineryForeground, "foreground", false, "Run in foreground (default: background)")
@@ -111,6 +126,7 @@ func init() {
 	// Add subcommands
 	refineryCmd.AddCommand(refineryStartCmd)
 	refineryCmd.AddCommand(refineryStopCmd)
+	refineryCmd.AddCommand(refineryRestartCmd)
 	refineryCmd.AddCommand(refineryStatusCmd)
 	refineryCmd.AddCommand(refineryQueueCmd)
 	refineryCmd.AddCommand(refineryAttachCmd)
@@ -382,4 +398,32 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 
 	// Attach to session using exec to properly forward TTY
 	return attachToTmuxSession(sessionID)
+}
+
+func runRefineryRestart(cmd *cobra.Command, args []string) error {
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
+
+	mgr, _, rigName, err := getRefineryManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Restarting refinery for %s...\n", rigName)
+
+	// Stop if running (ignore ErrNotRunning)
+	if err := mgr.Stop(); err != nil && err != refinery.ErrNotRunning {
+		return fmt.Errorf("stopping refinery: %w", err)
+	}
+
+	// Start fresh
+	if err := mgr.Start(false); err != nil {
+		return fmt.Errorf("starting refinery: %w", err)
+	}
+
+	fmt.Printf("%s Refinery restarted for %s\n", style.Bold.Render("✓"), rigName)
+	fmt.Printf("  %s\n", style.Dim.Render("Use 'gt refinery attach' to connect"))
+	return nil
 }
