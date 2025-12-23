@@ -112,18 +112,20 @@ How does the system know if an issue is mail or work?
 
 The `from:` label is the canonical discriminator. Regular issues don't have senders.
 
-## Two-Level Beads Architecture
+## Three-Tier Beads Architecture
 
-Gas Town uses beads at two levels:
+Gas Town uses beads at three tiers - two persistent, one ephemeral:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  TOWN LEVEL: ~/gt/.beads/                                   │
 │  ─────────────────────────────────────────────────────────  │
 │  Prefix: hq-*                                               │
+│  Git tracked: Yes                                           │
 │  Contains:                                                  │
 │    - All mail (cross-agent communication)                   │
 │    - Mayor coordination issues                              │
+│    - Deacon patrol wisps (town-level ephemeral work)        │
 │    - Cross-rig work items                                   │
 │  Sync: Direct commit to main (single location)              │
 └─────────────────────────────────────────────────────────────┘
@@ -131,21 +133,37 @@ Gas Town uses beads at two levels:
          │ gt mail commands auto-route here
          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  RIG LEVEL: ~/gt/gastown/crew/max/.beads/                   │
+│  RIG LEVEL: ~/gt/<rig>/crew/<name>/.beads/                  │
 │  ─────────────────────────────────────────────────────────  │
-│  Prefix: gt-*                                               │
+│  Prefix: gt-* (or rig-specific)                             │
+│  Git tracked: Yes (via beads-sync branch)                   │
 │  Contains:                                                  │
 │    - Project issues (bugs, features, tasks)                 │
 │    - Molecules (work patterns)                              │
-│    - Agent hook states                                      │
+│    - Agent hook states (pinned molecules)                   │
 │  Sync: Via beads-sync branch (multiple clones)              │
+└─────────────────────────────────────────────────────────────┘
+         │
+         │ Ephemeral patrol state (not synced)
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│  RIG WISPS: ~/gt/<rig>/.beads-wisp/                         │
+│  ─────────────────────────────────────────────────────────  │
+│  Git tracked: NO (gitignored)                               │
+│  Contains:                                                  │
+│    - Witness patrol cycles                                  │
+│    - Refinery patrol cycles                                 │
+│    - Any rig-level ephemeral molecule execution             │
+│  Lifecycle: Created → Executed → Squashed to digest → Deleted│
 └─────────────────────────────────────────────────────────────┘
 ```
 
 Key points:
-- **Mail always uses town beads** (`~/gt/.beads/`) - `gt mail` routes automatically
+- **Mail uses town beads** (`~/gt/.beads/`) - `gt mail` routes automatically
+- **Deacon uses town beads** - town-level role, no rig dependency
 - **Project work uses rig beads** (in your clone) - `bd` commands use local `.beads/`
-- **Different sync strategies**: Town is single-writer, rig uses branch-based sync
+- **Patrol wisps use rig wisp storage** - ephemeral, never synced, squashed after cycles
+- **Different sync strategies**: Town is single-writer, rig uses branch-based sync, wisps don't sync
 
 ## The Query Model
 
