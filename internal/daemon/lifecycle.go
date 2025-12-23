@@ -240,7 +240,7 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 		return fmt.Errorf("don't know how to restart %s", identity)
 	}
 
-	// Pre-sync workspace for agents with git clones (refinery)
+	// Pre-sync workspace for agents with git worktrees (refinery)
 	if needsPreSync {
 		d.logger.Printf("Pre-syncing workspace for %s at %s", identity, workDir)
 		d.syncWorkspace(workDir)

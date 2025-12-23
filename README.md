@@ -1,8 +1,21 @@
 # Gas Town
 
-Multi-agent workspace manager for AI coding agents.
+**The IDE of 2026** - not Integrated Development Environment, but **Integrated Delegation Engine**.
 
-Gas Town coordinates swarms of AI agents working on software projects. Workers (polecats) implement features and fix bugs. Refineries review and merge code. Witnesses manage worker lifecycles. Mayors coordinate across projects.
+Gas Town turns Claude Code (the Steam Engine) into a Steam Train, with Beads as the globally distributed railway network. Workers spawn, work molecules, submit to merge queues, and get cleaned up - all autonomously.
+
+## The Vision
+
+```
+Claude       = Fire (the energy source)
+Claude Code  = Steam Engine (harnesses the fire)
+Gas Town     = Steam Train (coordinates engines on tracks)
+Beads        = Railroad Tracks (the persistent ledger of work)
+```
+
+**Core principle: Gas Town is a Village.**
+
+Not a rigid hierarchy with centralized monitoring, but an anti-fragile village where every agent understands the whole system and can help any neighbor. If you see something stuck, you can help. The village heals itself through distributed awareness.
 
 ## Install
 
@@ -36,9 +49,11 @@ Town (~/gt/)
 
 ## Key Concepts
 
-- **Molecules**: Structured workflow templates with quality gates and dependencies
-- **Beads**: Unified data plane for issues, messages, and state ([github.com/steveyegge/beads](https://github.com/steveyegge/beads))
-- **Nondeterministic Idempotence**: Workflows survive crashes and agent restarts
+- **Molecular Chemistry of Work**: Protos (templates) → Mols (flowing work) → Wisps (ephemeral) → Digests (outcomes)
+- **Beads as Universal Data Plane**: Git-backed, human-readable, fractal ledger ([github.com/steveyegge/beads](https://github.com/steveyegge/beads))
+- **Antifragility**: Self-monitoring village, not centralized hierarchy
+- **Propulsion Principle**: Agents pull work from molecules, don't wait for commands
+- **Nondeterministic Idempotence**: Any worker can continue any molecule after crashes
 
 ## Commands
 
@@ -47,13 +62,16 @@ gt status             # Town status
 gt rig list           # List rigs
 gt spawn --issue <id> # Start worker
 gt mail inbox         # Check messages
+gt peek <worker>      # Check worker health
+gt nudge <worker>     # Wake stuck worker
 ```
 
 ## Documentation
 
-- [Architecture](docs/architecture.md)
-- [Molecules](docs/molecules.md)
-- [Federation](docs/federation-design.md)
+- [Vision](docs/vision.md) - Core innovations and philosophy
+- [Architecture](docs/architecture.md) - System design
+- [Molecular Chemistry](docs/molecular-chemistry.md) - Work composition
+- [Molecules](docs/molecules.md) - Workflow templates
 
 ## Development
 

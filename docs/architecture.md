@@ -109,6 +109,40 @@ Gas Town has four AI agent roles:
 | **Refinery** | Per-rig | Merge queue processing, PR review, integration |
 | **Polecat** | Per-rig | Implementation work on assigned issues |
 
+### Gas Town is a Village
+
+**Core Operating Principle**: Gas Town is anti-fragile by design.
+
+The anti-pattern we reject:
+```
+Centralized Monitor → watches all workers → single point of failure
+                   → fragile protocols → cascading failures
+```
+
+The pattern we embrace:
+```
+Every worker → understands the whole → can help any neighbor
+           → peek is encouraged → distributed awareness
+           → ant colony without murder → self-healing system
+```
+
+**Key properties:**
+
+- **Distributed awareness**: Every agent understands the system deeply
+- **Mutual monitoring**: Any agent can peek at any other agent's health
+- **Collective intervention**: If you see something stuck, you can help
+- **No single point of failure**: The village survives individual failures
+- **Organic healing**: Problems get fixed by whoever notices them first
+
+This is an ant colony, except the ants don't kill defective members - they help them recover. Workers who crash are respawned. Workers who get stuck are nudged. Workers who need help receive it.
+
+**Practical implications:**
+
+1. **Every patrol includes neighbor-checking** - Witness peeks at Refinery, Refinery peeks at Witness, everyone can peek at the Deacon
+2. **`gt peek` is universal vocabulary** - Any agent can check any other agent's health
+3. **Exit state enums are teaching tools** - COMPLETED, BLOCKED, REFACTOR, ESCALATE are shared vocabulary
+4. **Mail is the nervous system** - Asynchronous, persistent, auditable coordination
+
 ### Mail
 
 Agents communicate via **mail** - messages stored as beads issues with `type=message`. Mail enables:
@@ -247,7 +281,7 @@ Gas Town uses a **two-level beads architecture**. This is critical to understand
 
 **Common confusion:**
 - `~/gt/gastown/.beads/` at the rig container level is **gitignored** (local runtime state)
-- The real project beads live in the **gastown.git clones** (e.g., `crew/max/.beads/`)
+- The real project beads live in the **gastown.git worktrees** (e.g., `crew/max/.beads/`)
 - All clones share the same beads via git sync on the `beads-sync` branch
 
 #### Mail Routing

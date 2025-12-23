@@ -32,7 +32,7 @@ var polecatCmd = &cobra.Command{
 	Short:   "Manage polecats in rigs",
 	Long: `Manage polecat lifecycle in rigs.
 
-Polecats are worker agents that operate in their own git clones.
+Polecats are worker agents that operate in their own git worktrees.
 Use the subcommands to add, remove, list, wake, and sleep polecats.`,
 }
 

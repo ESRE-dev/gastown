@@ -28,7 +28,7 @@ This command:
   3. Optionally creates a GitHub repository
 
 The .gitignore excludes:
-  - Polecats and rig clones (recreated with 'gt spawn' or 'gt rig add')
+  - Polecat worktrees and rig clones (recreated with 'gt spawn' or 'gt rig add')
   - Runtime state files (state.json, *.lock)
   - OS and editor files
 
@@ -53,7 +53,7 @@ func init() {
 // HQGitignore is the standard .gitignore for Gas Town HQs
 const HQGitignore = `# Gas Town HQ .gitignore
 # Track: Role context, handoff docs, beads config/data, rig configs
-# Ignore: Git clones (polecats, mayor/refinery rigs), runtime state
+# Ignore: Git worktrees (polecats) and clones (mayor/refinery rigs), runtime state
 
 # =============================================================================
 # Runtime state files (transient)
@@ -63,10 +63,10 @@ const HQGitignore = `# Gas Town HQ .gitignore
 **/registry.json
 
 # =============================================================================
-# Rig git clones (recreate with 'gt spawn' or 'gt rig add')
+# Rig git worktrees (recreate with 'gt spawn' or 'gt rig add')
 # =============================================================================
 
-# Polecats - worker clones
+# Polecats - worker worktrees
 **/polecats/
 
 # Mayor rig clones

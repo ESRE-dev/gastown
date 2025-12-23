@@ -118,7 +118,7 @@ func (c *RuntimeGitignoreCheck) Run(ctx *CheckContext) *CheckResult {
 		issues = append(issues, "Town .gitignore missing .runtime/ pattern")
 	}
 
-	// Check each rig's .gitignore (in their git clones)
+	// Check each rig's .gitignore (in their git worktrees)
 	rigs := c.findRigs(ctx.TownRoot)
 	for _, rig := range rigs {
 		// Check crew members

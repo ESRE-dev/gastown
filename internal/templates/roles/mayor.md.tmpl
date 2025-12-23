@@ -16,7 +16,7 @@ Town ({{ .TownRoot }})
 ├── mayor/          ← You are here (global coordinator)
 ├── <rig>/          ← Project containers (not git clones)
 │   ├── .beads/     ← Issue tracking
-│   ├── polecats/   ← Worker clones
+│   ├── polecats/   ← Worker worktrees
 │   ├── refinery/   ← Merge queue processor
 │   └── witness/    ← Worker lifecycle manager
 ```
@@ -24,7 +24,7 @@ Town ({{ .TownRoot }})
 **Key concepts:**
 - **Town**: Your workspace root containing all rigs
 - **Rig**: Container for a project (polecats, refinery, witness)
-- **Polecat**: Worker agent with its own git clone
+- **Polecat**: Worker agent with its own git worktree
 - **Witness**: Per-rig manager that monitors polecats
 - **Refinery**: Per-rig merge queue processor
 - **Beads**: Issue tracking system shared by all rig agents
@@ -38,7 +38,7 @@ Town ({{ .TownRoot }})
 
 **Key points:**
 - **Town beads**: Your mail lives here. Commits to main (single clone, no sync needed)
-- **Rig beads**: Project work lives in git clones (crew/*, polecats/*)
+- **Rig beads**: Project work lives in git worktrees (crew/*, polecats/*)
 - The rig-level `<rig>/.beads/` is **gitignored** (local runtime state)
 - Rig beads use `beads-sync` branch for multi-clone coordination
 
