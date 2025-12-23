@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/daemon"
+	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -23,10 +24,11 @@ var upCmd = &cobra.Command{
 This is the idempotent "boot" command for Gas Town. It ensures all
 infrastructure agents are running:
 
-  • Daemon    - Go background process that pokes agents
-  • Deacon    - Health orchestrator (monitors Mayor/Witnesses)
-  • Mayor     - Global work coordinator
-  • Witnesses - Per-rig polecat managers
+  • Daemon     - Go background process that pokes agents
+  • Deacon     - Health orchestrator (monitors Mayor/Witnesses)
+  • Mayor      - Global work coordinator
+  • Witnesses  - Per-rig polecat managers
+  • Refineries - Per-rig merge queue processors
 
 Polecats are NOT started by this command - they are transient workers
 spawned on demand by the Mayor or Witnesses.
@@ -92,6 +94,30 @@ func runUp(cmd *cobra.Command, args []string) error {
 			allOK = false
 		} else {
 			printStatus(fmt.Sprintf("Witness (%s)", rigName), true, sessionName)
+		}
+	}
+
+	// 5. Refineries (one per rig)
+	for _, rigName := range rigs {
+		_, r, err := getRig(rigName)
+		if err != nil {
+			printStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
+			allOK = false
+			continue
+		}
+
+		mgr := refinery.NewManager(r)
+		if err := mgr.Start(false); err != nil {
+			if err == refinery.ErrAlreadyRunning {
+				sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+				printStatus(fmt.Sprintf("Refinery (%s)", rigName), true, sessionName)
+			} else {
+				printStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
+				allOK = false
+			}
+		} else {
+			sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+			printStatus(fmt.Sprintf("Refinery (%s)", rigName), true, sessionName)
 		}
 	}
 
