@@ -96,6 +96,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Lifecycle hygiene checks
 	d.Register(doctor.NewLifecycleHygieneCheck())
 
+	// Hook attachment checks
+	d.Register(doctor.NewHookAttachmentValidCheck())
+
 	// Run checks
 	var report *doctor.Report
 	if doctorFix {
