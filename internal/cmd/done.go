@@ -3,10 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -19,28 +21,49 @@ var doneCmd = &cobra.Command{
 This is a convenience command for polecats that:
 1. Submits the current branch to the merge queue
 2. Auto-detects issue ID from branch name
+3. Notifies the Witness with the exit outcome
 
-Equivalent to: gt mq submit
+Exit types:
+  COMPLETED  - Work done, MR submitted (default)
+  ESCALATED  - Hit blocker, needs human intervention
+  DEFERRED   - Work paused, issue still open
 
 Examples:
-  gt done                  # Submit current branch
-  gt done --issue gt-abc   # Explicit issue ID`,
+  gt done                       # Submit branch, notify COMPLETED
+  gt done --issue gt-abc        # Explicit issue ID
+  gt done --exit ESCALATED      # Signal blocker, skip MR
+  gt done --exit DEFERRED       # Pause work, skip MR`,
 	RunE: runDone,
 }
 
 var (
 	doneIssue    string
 	donePriority int
+	doneExit     string
+)
+
+// Valid exit types for gt done
+const (
+	ExitCompleted = "COMPLETED"
+	ExitEscalated = "ESCALATED"
+	ExitDeferred  = "DEFERRED"
 )
 
 func init() {
 	doneCmd.Flags().StringVar(&doneIssue, "issue", "", "Source issue ID (default: parse from branch name)")
 	doneCmd.Flags().IntVarP(&donePriority, "priority", "p", -1, "Override priority (0-4, default: inherit from issue)")
+	doneCmd.Flags().StringVar(&doneExit, "exit", ExitCompleted, "Exit type: COMPLETED, ESCALATED, or DEFERRED")
 
 	rootCmd.AddCommand(doneCmd)
 }
 
 func runDone(cmd *cobra.Command, args []string) error {
+	// Validate exit type
+	exitType := strings.ToUpper(doneExit)
+	if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
+		return fmt.Errorf("invalid exit type '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneExit)
+	}
+
 	// Find workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -66,10 +89,6 @@ func runDone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting current branch: %w", err)
 	}
 
-	if branch == "main" || branch == "master" {
-		return fmt.Errorf("cannot submit main/master branch to merge queue")
-	}
-
 	// Parse branch info
 	info := parseBranchName(branch)
 
@@ -80,80 +99,133 @@ func runDone(cmd *cobra.Command, args []string) error {
 	}
 	worker := info.Worker
 
-	if issueID == "" {
-		return fmt.Errorf("cannot determine source issue from branch '%s'; use --issue to specify", branch)
+	// Determine polecat name from sender detection
+	sender := detectSender()
+	polecatName := ""
+	if parts := strings.Split(sender, "/"); len(parts) >= 2 {
+		polecatName = parts[len(parts)-1]
 	}
 
-	// Initialize beads
-	bd := beads.New(cwd)
-
-	// Determine target branch (auto-detect integration branch if applicable)
-	target := "main"
-	autoTarget, err := detectIntegrationBranch(bd, g, issueID)
-	if err == nil && autoTarget != "" {
-		target = autoTarget
-	}
-
-	// Get source issue for priority inheritance
-	var priority int
-	if donePriority >= 0 {
-		priority = donePriority
-	} else {
-		// Try to inherit from source issue
-		sourceIssue, err := bd.Show(issueID)
-		if err != nil {
-			priority = 2 // Default
-		} else {
-			priority = sourceIssue.Priority
+	// For COMPLETED, we need an issue ID and branch must not be main
+	var mrID string
+	if exitType == ExitCompleted {
+		if branch == "main" || branch == "master" {
+			return fmt.Errorf("cannot submit main/master branch to merge queue")
 		}
+
+		if issueID == "" {
+			return fmt.Errorf("cannot determine source issue from branch '%s'; use --issue to specify", branch)
+		}
+
+		// Initialize beads
+		bd := beads.New(cwd)
+
+		// Determine target branch (auto-detect integration branch if applicable)
+		target := "main"
+		autoTarget, err := detectIntegrationBranch(bd, g, issueID)
+		if err == nil && autoTarget != "" {
+			target = autoTarget
+		}
+
+		// Get source issue for priority inheritance
+		var priority int
+		if donePriority >= 0 {
+			priority = donePriority
+		} else {
+			// Try to inherit from source issue
+			sourceIssue, err := bd.Show(issueID)
+			if err != nil {
+				priority = 2 // Default
+			} else {
+				priority = sourceIssue.Priority
+			}
+		}
+
+		// Build title
+		title := fmt.Sprintf("Merge: %s", issueID)
+
+		// CRITICAL: Push branch to origin BEFORE creating MR
+		// Without this, the worktree can be deleted and the branch lost forever
+		fmt.Printf("Pushing branch to origin...\n")
+		if err := g.Push("origin", branch, false); err != nil {
+			return fmt.Errorf("pushing branch to origin: %w", err)
+		}
+		fmt.Printf("%s Branch pushed to origin/%s\n", style.Bold.Render("✓"), branch)
+
+		// Build description with MR fields
+		mrFields := &beads.MRFields{
+			Branch:      branch,
+			Target:      target,
+			SourceIssue: issueID,
+			Worker:      worker,
+			Rig:         rigName,
+		}
+		description := beads.FormatMRFields(mrFields)
+
+		// Create the merge-request issue
+		createOpts := beads.CreateOptions{
+			Title:       title,
+			Type:        "merge-request",
+			Priority:    priority,
+			Description: description,
+		}
+
+		issue, err := bd.Create(createOpts)
+		if err != nil {
+			return fmt.Errorf("creating merge request: %w", err)
+		}
+		mrID = issue.ID
+
+		// Success output
+		fmt.Printf("%s Work submitted to merge queue\n", style.Bold.Render("✓"))
+		fmt.Printf("  MR ID: %s\n", style.Bold.Render(issue.ID))
+		fmt.Printf("  Source: %s\n", branch)
+		fmt.Printf("  Target: %s\n", target)
+		fmt.Printf("  Issue: %s\n", issueID)
+		if worker != "" {
+			fmt.Printf("  Worker: %s\n", worker)
+		}
+		fmt.Printf("  Priority: P%d\n", priority)
+		fmt.Println()
+		fmt.Printf("%s\n", style.Dim.Render("The Refinery will process your merge request."))
+	} else {
+		// For ESCALATED or DEFERRED, just print status
+		fmt.Printf("%s Signaling %s\n", style.Bold.Render("→"), exitType)
+		if issueID != "" {
+			fmt.Printf("  Issue: %s\n", issueID)
+		}
+		fmt.Printf("  Branch: %s\n", branch)
 	}
 
-	// Build title
-	title := fmt.Sprintf("Merge: %s", issueID)
+	// Notify Witness about completion
+	// Use town-level beads for cross-agent mail
+	townRouter := mail.NewRouter(townRoot)
+	witnessAddr := fmt.Sprintf("%s/witness", rigName)
 
-	// CRITICAL: Push branch to origin BEFORE creating MR
-	// Without this, the worktree can be deleted and the branch lost forever
-	fmt.Printf("Pushing branch to origin...\n")
-	if err := g.Push("origin", branch, false); err != nil {
-		return fmt.Errorf("pushing branch to origin: %w", err)
+	// Build notification body
+	var bodyLines []string
+	bodyLines = append(bodyLines, fmt.Sprintf("Exit: %s", exitType))
+	if issueID != "" {
+		bodyLines = append(bodyLines, fmt.Sprintf("Issue: %s", issueID))
 	}
-	fmt.Printf("%s Branch pushed to origin/%s\n", style.Bold.Render("✓"), branch)
-
-	// Build description with MR fields
-	mrFields := &beads.MRFields{
-		Branch:      branch,
-		Target:      target,
-		SourceIssue: issueID,
-		Worker:      worker,
-		Rig:         rigName,
+	if mrID != "" {
+		bodyLines = append(bodyLines, fmt.Sprintf("MR: %s", mrID))
 	}
-	description := beads.FormatMRFields(mrFields)
+	bodyLines = append(bodyLines, fmt.Sprintf("Branch: %s", branch))
 
-	// Create the merge-request issue
-	createOpts := beads.CreateOptions{
-		Title:       title,
-		Type:        "merge-request",
-		Priority:    priority,
-		Description: description,
+	doneNotification := &mail.Message{
+		To:      witnessAddr,
+		From:    sender,
+		Subject: fmt.Sprintf("POLECAT_DONE %s", polecatName),
+		Body:    strings.Join(bodyLines, "\n"),
 	}
 
-	issue, err := bd.Create(createOpts)
-	if err != nil {
-		return fmt.Errorf("creating merge request: %w", err)
+	fmt.Printf("\nNotifying Witness...\n")
+	if err := townRouter.Send(doneNotification); err != nil {
+		fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not notify witness: %v", err)))
+	} else {
+		fmt.Printf("%s Witness notified of %s\n", style.Bold.Render("✓"), exitType)
 	}
-
-	// Success output
-	fmt.Printf("%s Work submitted to merge queue\n", style.Bold.Render("✓"))
-	fmt.Printf("  MR ID: %s\n", style.Bold.Render(issue.ID))
-	fmt.Printf("  Source: %s\n", branch)
-	fmt.Printf("  Target: %s\n", target)
-	fmt.Printf("  Issue: %s\n", issueID)
-	if worker != "" {
-		fmt.Printf("  Worker: %s\n", worker)
-	}
-	fmt.Printf("  Priority: P%d\n", priority)
-	fmt.Println()
-	fmt.Printf("%s\n", style.Dim.Render("The Refinery will process your merge request."))
 
 	return nil
 }
