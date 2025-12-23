@@ -26,7 +26,7 @@ import (
 
 // Sling command flags
 var (
-	slingWisp     bool   // Create ephemeral molecule (wisp)
+	slingWisp     bool   // Create wisp instead of durable mol
 	slingMolecule string // Molecule proto when slinging an issue
 	slingPriority int    // Override priority (P0-P4)
 	slingForce    bool   // Re-sling even if hook has work
@@ -76,13 +76,13 @@ TARGET FORMATS:
 Examples:
   gt sling feature gastown/Toast           # Spawn feature, sling to Toast
   gt sling gt-abc gastown/Nux -m bugfix    # Issue with workflow
-  gt sling patrol deacon/ --wisp           # Ephemeral patrol wisp`,
+  gt sling patrol deacon/ --wisp           # Patrol wisp`,
 	Args: cobra.ExactArgs(2),
 	RunE: runSling,
 }
 
 func init() {
-	slingCmd.Flags().BoolVar(&slingWisp, "wisp", false, "Create ephemeral molecule (burned on complete)")
+	slingCmd.Flags().BoolVar(&slingWisp, "wisp", false, "Create wisp (burned on complete)")
 	slingCmd.Flags().StringVarP(&slingMolecule, "molecule", "m", "", "Molecule proto when slinging an issue")
 	slingCmd.Flags().IntVarP(&slingPriority, "priority", "p", -1, "Override priority (0-4)")
 	slingCmd.Flags().BoolVar(&slingForce, "force", false, "Re-sling even if hook has work")

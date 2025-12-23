@@ -61,7 +61,7 @@ bd pour mol-feature --var name=auth
 
 ### 2. `bd wisp` Command
 
-**Purpose:** Instantiate a proto as an ephemeral wisp (vapor phase).
+**Purpose:** Instantiate a proto as a wisp (vapor phase).
 
 **Syntax:**
 ```bash
@@ -270,7 +270,7 @@ bd mol run mol-deacon-patrol
 ```markdown
 ## Patrol Cycle (Wisp-Based)
 
-Each patrol cycle uses ephemeral wisps:
+Each patrol cycle uses wisps:
 
 ```bash
 # 1. Spawn wisp for this cycle

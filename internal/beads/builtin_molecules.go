@@ -1136,7 +1136,7 @@ git push origin HEAD
    - COMPLETED: ` + "`bd close <work-mol-root>`" + `
    - BLOCKED/REFACTOR/ESCALATE: ` + "`bd update <work-mol-root> --status=deferred`" + `
 
-3. Burn this session wisp (ephemeral, no audit needed):
+3. Burn this session wisp (no audit needed):
 ` + "```" + `bash
 bd mol burn
 ` + "```" + `

@@ -55,7 +55,7 @@ gt sling gt-epic-123 refinery/
 | Molecule proto | none | `gt sling feature polecat/alpha` | Spawns from proto |
 | Issue/Bead | `gt-*`, `bd-*` | `gt sling gt-xyz polecat/alpha` | Work item |
 | Epic | `gt-*` (type=epic) | `gt sling gt-epic refinery/` | Batch of issues |
-| Wisp | `--wisp` flag | `gt sling patrol deacon/ --wisp` | Ephemeral molecule |
+| Wisp | `--wisp` flag | `gt sling patrol deacon/ --wisp` | Wisp (no audit trail) |
 
 ### What Happens When You Sling?
 
@@ -125,7 +125,7 @@ Arguments:
   target    Agent address (polecat/name, deacon/, witness/, refinery/)
 
 Flags:
-  --wisp           Create ephemeral molecule (burned on complete, squashed to digest)
+  --wisp           Create wisp (burned on complete, squashed to digest)
   --molecule, -m   Specify molecule proto when slinging an issue
   --priority, -p   Override priority (P0-P4)
   --force          Re-sling even if hook already has work
@@ -133,7 +133,7 @@ Flags:
 Examples:
   gt sling feature polecat/alpha              # Spawn feature mol, sling to alpha
   gt sling gt-xyz polecat/beta -m bugfix      # Sling issue with bugfix workflow
-  gt sling patrol deacon/ --wisp              # Ephemeral patrol wisp
+  gt sling patrol deacon/ --wisp              # Patrol wisp
   gt sling gt-epic-batch refinery/            # Batch work to refinery
 ```
 

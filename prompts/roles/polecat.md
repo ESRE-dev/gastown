@@ -110,7 +110,7 @@ Understanding the difference helps contextualize your place in the system:
 | **Used by** | Polecats, epics | Deacon, Witness, Refinery |
 
 **You use molecules** - your work has audit value and persists.
-**Patrol roles use wisps** - their cycles are ephemeral.
+**Patrol roles use wisps** - no audit trail needed.
 
 ---
 

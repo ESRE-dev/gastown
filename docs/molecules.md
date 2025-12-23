@@ -101,7 +101,7 @@ bd mol bond <proto-id> [--wisp] [--assignee=<addr>]
 # Create a durable Mol from engineer-in-box proto
 bd mol bond mol-engineer-in-box
 
-# Create an ephemeral Wisp assigned to a polecat
+# Create a Wisp assigned to a polecat
 bd mol bond mol-quick-fix --wisp --assignee=gastown/polecats/toast
 
 # Bond a proto with a specific template variant
