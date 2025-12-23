@@ -76,6 +76,12 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewRuntimeGitignoreCheck())
 	d.Register(doctor.NewLegacyGastownCheck())
 
+	// Crew workspace checks
+	d.Register(doctor.NewCrewStateCheck())
+
+	// Lifecycle hygiene checks
+	d.Register(doctor.NewLifecycleHygieneCheck())
+
 	// Run checks
 	var report *doctor.Report
 	if doctorFix {
