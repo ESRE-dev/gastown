@@ -13,10 +13,12 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -409,21 +411,25 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 
 	// Auto-start infrastructure if not running (redundant system - Witness also self-checks)
 	// This ensures the merge queue and polecat monitor are alive to handle work
-	refineryRunning, _ := sessMgr.IsRunning("refinery")
-	if !refineryRunning {
+	refineryMgr := refinery.NewManager(r)
+	if refStatus, err := refineryMgr.Status(); err == nil && refStatus.State != refinery.StateRunning {
 		fmt.Printf("Starting refinery for %s...\n", rigName)
-		if err := sessMgr.Start("refinery", session.StartOptions{}); err != nil {
-			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not start refinery: %v", err)))
+		if err := refineryMgr.Start(false); err != nil {
+			if err != refinery.ErrAlreadyRunning {
+				fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not start refinery: %v", err)))
+			}
 		} else {
 			fmt.Printf("  %s\n", style.Dim.Render("Refinery started"))
 		}
 	}
 
-	witnessRunning, _ := sessMgr.IsRunning("witness")
-	if !witnessRunning {
+	witnessMgr := witness.NewManager(r)
+	if witStatus, err := witnessMgr.Status(); err == nil && witStatus.State != witness.StateRunning {
 		fmt.Printf("Starting witness for %s...\n", rigName)
-		if err := sessMgr.Start("witness", session.StartOptions{}); err != nil {
-			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not start witness: %v", err)))
+		if err := witnessMgr.Start(false); err != nil {
+			if err != witness.ErrAlreadyRunning {
+				fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not start witness: %v", err)))
+			}
 		} else {
 			fmt.Printf("  %s\n", style.Dim.Render("Witness started"))
 		}
