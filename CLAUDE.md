@@ -109,12 +109,16 @@ Issue prefix: `gt-`
 
 ```
 [ ] git status              (check for uncommitted changes)
-[ ] git push                (push any commits)
+[ ] git add && git commit   (commit any changes)
 [ ] bd sync                 (sync beads changes)
-[ ] Check inbox             (any messages needing response?)
-[ ] HANDOFF if incomplete:
-    gt mail send gastown/crew/joe -s "🤝 HANDOFF: ..." -m "..."
+[ ] git push                (push to remote - CRITICAL)
+[ ] gt handoff              (hand off to fresh session)
+    # Or with context: gt handoff -s "Brief" -m "Details"
 ```
+
+**Why `gt handoff`?** This is the canonical way to end your session. It handles
+everything: sends handoff mail, respawns with fresh context, and your work
+continues from where you left off via your pinned molecule.
 
 Crew member: joe
 Rig: gastown

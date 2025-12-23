@@ -17,19 +17,22 @@ var handoffCmd = &cobra.Command{
 	Short: "Hand off to a fresh session, work continues from hook",
 	Long: `End watch. Hand off to a fresh agent session.
 
-This command uses tmux respawn-pane to end the current session and restart it
-with a fresh Claude instance, running the full startup/priming sequence.
+This is the canonical way to end any agent session. It handles all roles:
+
+  - Mayor, Crew, Witness, Refinery, Deacon: Respawns with fresh Claude instance
+  - Polecats: Calls 'gt done --exit DEFERRED' (Witness handles lifecycle)
 
 When run without arguments, hands off the current session.
 When given a role name, hands off that role's session (and switches to it).
 
 Examples:
-  gt handoff           # Hand off current session
-  gt handoff crew      # Hand off crew session (auto-detect name)
-  gt handoff mayor     # Hand off mayor session
-  gt handoff witness   # Hand off witness session for current rig
+  gt handoff                          # Hand off current session
+  gt handoff -s "Context" -m "Notes"  # Hand off with custom message
+  gt handoff crew                     # Hand off crew session
+  gt handoff mayor                    # Hand off mayor session
 
-Any molecule on the hook will be auto-continued by the new session.`,
+Any molecule on the hook will be auto-continued by the new session.
+The SessionStart hook runs 'gt prime' to restore context.`,
 	RunE: runHandoff,
 }
 
@@ -49,6 +52,19 @@ func init() {
 }
 
 func runHandoff(cmd *cobra.Command, args []string) error {
+	// Check if we're a polecat - polecats use gt done instead
+	// GT_POLECAT is set by the session manager when starting polecat sessions
+	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
+		fmt.Printf("%s Polecat detected (%s) - using gt done for handoff\n",
+			style.Bold.Render("🐾"), polecatName)
+		// Polecats don't respawn themselves - Witness handles lifecycle
+		// Call gt done with DEFERRED exit type to preserve work state
+		doneCmd := exec.Command("gt", "done", "--exit", "DEFERRED")
+		doneCmd.Stdout = os.Stdout
+		doneCmd.Stderr = os.Stderr
+		return doneCmd.Run()
+	}
+
 	t := tmux.NewTmux()
 
 	// Verify we're in tmux
