@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -322,4 +323,173 @@ func (c *HookSingletonCheck) Fix(ctx *CheckContext) error {
 		return fmt.Errorf("%s", strings.Join(errors, "; "))
 	}
 	return nil
+}
+
+// OrphanedAttachmentsCheck detects handoff beads for agents that no longer exist.
+// This happens when a polecat worktree is deleted but its handoff bead remains,
+// leaving molecules attached to non-existent agents.
+type OrphanedAttachmentsCheck struct {
+	BaseCheck
+	orphans []orphanedHandoff
+}
+
+type orphanedHandoff struct {
+	beadID    string
+	beadTitle string
+	beadsDir  string
+	agent     string // Parsed agent identity
+}
+
+// NewOrphanedAttachmentsCheck creates a new orphaned attachments check.
+func NewOrphanedAttachmentsCheck() *OrphanedAttachmentsCheck {
+	return &OrphanedAttachmentsCheck{
+		BaseCheck: BaseCheck{
+			CheckName:        "orphaned-attachments",
+			CheckDescription: "Detect handoff beads for non-existent agents",
+		},
+	}
+}
+
+// Run checks all handoff beads for orphaned agents.
+func (c *OrphanedAttachmentsCheck) Run(ctx *CheckContext) *CheckResult {
+	c.orphans = nil
+
+	var details []string
+
+	// Check town-level beads
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	townOrphans := c.checkBeadsDir(townBeadsDir, ctx.TownRoot)
+	for _, orph := range townOrphans {
+		details = append(details, c.formatOrphan(orph))
+	}
+	c.orphans = append(c.orphans, townOrphans...)
+
+	// Check rig-level beads using the shared helper
+	attachCheck := &HookAttachmentValidCheck{}
+	rigDirs := attachCheck.findRigBeadsDirs(ctx.TownRoot)
+	for _, rigDir := range rigDirs {
+		rigOrphans := c.checkBeadsDir(rigDir, ctx.TownRoot)
+		for _, orph := range rigOrphans {
+			details = append(details, c.formatOrphan(orph))
+		}
+		c.orphans = append(c.orphans, rigOrphans...)
+	}
+
+	if len(c.orphans) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No orphaned handoff beads found",
+		}
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("Found %d orphaned handoff bead(s)", len(c.orphans)),
+		Details: details,
+		FixHint: "Re-sling molecule to active agent with 'gt sling', or close with 'bd close <id>'",
+	}
+}
+
+// checkBeadsDir checks for orphaned handoff beads in a directory.
+func (c *OrphanedAttachmentsCheck) checkBeadsDir(beadsDir, townRoot string) []orphanedHandoff {
+	var orphans []orphanedHandoff
+
+	b := beads.New(filepath.Dir(beadsDir))
+
+	// List all pinned beads
+	pinnedBeads, err := b.List(beads.ListOptions{
+		Status:   beads.StatusPinned,
+		Priority: -1,
+	})
+	if err != nil {
+		return nil
+	}
+
+	for _, bead := range pinnedBeads {
+		// Check if title matches handoff pattern (ends with " Handoff")
+		if !strings.HasSuffix(bead.Title, " Handoff") {
+			continue
+		}
+
+		// Extract agent identity from title
+		agent := strings.TrimSuffix(bead.Title, " Handoff")
+		if agent == "" {
+			continue
+		}
+
+		// Check if agent worktree exists
+		if !c.agentExists(agent, townRoot) {
+			orphans = append(orphans, orphanedHandoff{
+				beadID:    bead.ID,
+				beadTitle: bead.Title,
+				beadsDir:  beadsDir,
+				agent:     agent,
+			})
+		}
+	}
+
+	return orphans
+}
+
+// agentExists checks if an agent's worktree exists.
+// Agent identities follow patterns like:
+//   - "gastown/nux" → polecat at <townRoot>/gastown/polecats/nux
+//   - "gastown/crew/joe" → crew at <townRoot>/gastown/crew/joe
+//   - "mayor" → mayor at <townRoot>/mayor
+//   - "gastown-witness" → witness at <townRoot>/gastown/witness
+//   - "gastown-refinery" → refinery at <townRoot>/gastown/refinery
+func (c *OrphanedAttachmentsCheck) agentExists(agent, townRoot string) bool {
+	// Handle special roles with hyphen separator
+	if strings.HasSuffix(agent, "-witness") {
+		rig := strings.TrimSuffix(agent, "-witness")
+		path := filepath.Join(townRoot, rig, "witness")
+		return dirExists(path)
+	}
+	if strings.HasSuffix(agent, "-refinery") {
+		rig := strings.TrimSuffix(agent, "-refinery")
+		path := filepath.Join(townRoot, rig, "refinery")
+		return dirExists(path)
+	}
+
+	// Handle mayor
+	if agent == "mayor" {
+		return dirExists(filepath.Join(townRoot, "mayor"))
+	}
+
+	// Handle crew (rig/crew/name pattern)
+	if strings.Contains(agent, "/crew/") {
+		parts := strings.SplitN(agent, "/crew/", 2)
+		if len(parts) == 2 {
+			path := filepath.Join(townRoot, parts[0], "crew", parts[1])
+			return dirExists(path)
+		}
+	}
+
+	// Handle polecats (rig/name pattern) - most common case
+	if strings.Contains(agent, "/") {
+		parts := strings.SplitN(agent, "/", 2)
+		if len(parts) == 2 {
+			path := filepath.Join(townRoot, parts[0], "polecats", parts[1])
+			return dirExists(path)
+		}
+	}
+
+	// Unknown pattern - assume exists to avoid false positives
+	return true
+}
+
+// dirExists checks if a directory exists.
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
+// formatOrphan formats an orphaned handoff for display.
+func (c *OrphanedAttachmentsCheck) formatOrphan(orph orphanedHandoff) string {
+	return fmt.Sprintf("%s: agent %q no longer exists", orph.beadID, orph.agent)
 }

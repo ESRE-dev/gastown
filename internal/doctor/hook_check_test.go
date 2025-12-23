@@ -202,3 +202,117 @@ func TestHookSingletonCheck_FormatDuplicate(t *testing.T) {
 		}
 	}
 }
+
+// Tests for OrphanedAttachmentsCheck
+
+func TestNewOrphanedAttachmentsCheck(t *testing.T) {
+	check := NewOrphanedAttachmentsCheck()
+
+	if check.Name() != "orphaned-attachments" {
+		t.Errorf("expected name 'orphaned-attachments', got %q", check.Name())
+	}
+
+	if check.Description() != "Detect handoff beads for non-existent agents" {
+		t.Errorf("unexpected description: %q", check.Description())
+	}
+
+	// This check is not auto-fixable (uses BaseCheck, not FixableCheck)
+	if check.CanFix() {
+		t.Error("expected CanFix to return false")
+	}
+}
+
+func TestOrphanedAttachmentsCheck_NoBeadsDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	check := NewOrphanedAttachmentsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// No beads dir means nothing to check, should be OK
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when no beads dir, got %v", result.Status)
+	}
+}
+
+func TestOrphanedAttachmentsCheck_FormatOrphan(t *testing.T) {
+	check := NewOrphanedAttachmentsCheck()
+
+	tests := []struct {
+		orph     orphanedHandoff
+		expected string
+	}{
+		{
+			orph: orphanedHandoff{
+				beadID: "hq-123",
+				agent:  "gastown/nux",
+			},
+			expected: `hq-123: agent "gastown/nux" no longer exists`,
+		},
+		{
+			orph: orphanedHandoff{
+				beadID: "gt-456",
+				agent:  "gastown/crew/joe",
+			},
+			expected: `gt-456: agent "gastown/crew/joe" no longer exists`,
+		},
+	}
+
+	for _, tt := range tests {
+		result := check.formatOrphan(tt.orph)
+		if result != tt.expected {
+			t.Errorf("formatOrphan() = %q, want %q", result, tt.expected)
+		}
+	}
+}
+
+func TestOrphanedAttachmentsCheck_AgentExists(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create some agent directories
+	polecatDir := filepath.Join(tmpDir, "gastown", "polecats", "nux")
+	if err := os.MkdirAll(polecatDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	crewDir := filepath.Join(tmpDir, "gastown", "crew", "joe")
+	if err := os.MkdirAll(crewDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	witnessDir := filepath.Join(tmpDir, "gastown", "witness")
+	if err := os.MkdirAll(witnessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewOrphanedAttachmentsCheck()
+
+	tests := []struct {
+		agent    string
+		expected bool
+	}{
+		// Existing agents
+		{"gastown/nux", true},
+		{"gastown/crew/joe", true},
+		{"mayor", true},
+		{"gastown-witness", true},
+
+		// Non-existent agents
+		{"gastown/deleted", false},
+		{"gastown/crew/gone", false},
+		{"otherrig-witness", false},
+	}
+
+	for _, tt := range tests {
+		result := check.agentExists(tt.agent, tmpDir)
+		if result != tt.expected {
+			t.Errorf("agentExists(%q) = %v, want %v", tt.agent, result, tt.expected)
+		}
+	}
+}
