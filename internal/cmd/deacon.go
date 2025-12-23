@@ -3,6 +3,8 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -130,9 +132,17 @@ func startDeaconSession(t *tmux.Tmux) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Create session in workspace root
+	// Deacon runs from its own directory (for correct role detection by gt prime)
+	deaconDir := filepath.Join(townRoot, "deacon")
+
+	// Ensure deacon directory exists
+	if err := os.MkdirAll(deaconDir, 0755); err != nil {
+		return fmt.Errorf("creating deacon directory: %w", err)
+	}
+
+	// Create session in deacon directory
 	fmt.Println("Starting Deacon session...")
-	if err := t.NewSession(DeaconSessionName, townRoot); err != nil {
+	if err := t.NewSession(DeaconSessionName, deaconDir); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
