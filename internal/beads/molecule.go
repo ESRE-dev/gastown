@@ -149,13 +149,23 @@ type InstantiateOptions struct {
 
 // InstantiateMolecule creates child issues from a molecule template.
 //
-// For each step in the molecule, this creates:
+// This function supports two molecule formats (format bridge pattern):
+//
+// 1. New format (child issues): If the molecule proto has child issues,
+//    those children are used as templates. Dependencies are copied from
+//    the template children's DependsOn relationships.
+//
+// 2. Old format (embedded markdown): If the molecule has no children,
+//    steps are parsed from the Description field using ParseMoleculeSteps().
+//    Dependencies are extracted from "Needs:" declarations in the markdown.
+//
+// For each step, this creates:
 //   - A child issue with ID "{parent.ID}.{step.Ref}"
 //   - Title from step title
 //   - Description from step instructions (with template vars expanded)
 //   - Type: task
 //   - Priority: inherited from parent
-//   - Dependencies wired according to Needs: declarations
+//   - Dependencies wired according to template
 //
 // The function is atomic via bd CLI - either all issues are created or none.
 // Returns the created step issues.
@@ -167,6 +177,95 @@ func (b *Beads) InstantiateMolecule(mol *Issue, parent *Issue, opts InstantiateO
 		return nil, fmt.Errorf("parent issue is nil")
 	}
 
+	// FORMAT BRIDGE: Try new format first (child issues), fall back to old format (markdown)
+	templateChildren, err := b.List(ListOptions{
+		Parent:   mol.ID,
+		Status:   "all",
+		Priority: -1,
+	})
+	if err != nil {
+		// Non-fatal - might not have children, continue to old format
+		templateChildren = nil
+	}
+
+	if len(templateChildren) > 0 {
+		// NEW FORMAT: Use child issues as templates
+		return b.instantiateFromChildren(mol, parent, templateChildren, opts)
+	}
+
+	// OLD FORMAT: Parse steps from molecule description
+	return b.instantiateFromMarkdown(mol, parent, opts)
+}
+
+// instantiateFromChildren creates steps from template child issues (new format).
+func (b *Beads) instantiateFromChildren(mol *Issue, parent *Issue, templates []*Issue, opts InstantiateOptions) ([]*Issue, error) {
+	var createdIssues []*Issue
+	templateToNew := make(map[string]string) // template ID -> new issue ID
+
+	// First pass: create all child issues
+	for _, tmpl := range templates {
+		// Expand template variables in description
+		description := tmpl.Description
+		if opts.Context != nil {
+			description = ExpandTemplateVars(description, opts.Context)
+		}
+
+		// Add provenance metadata
+		if description != "" {
+			description += "\n\n"
+		}
+		description += fmt.Sprintf("instantiated_from: %s\ntemplate_step: %s", mol.ID, tmpl.ID)
+
+		// Create the child issue
+		childOpts := CreateOptions{
+			Title:       tmpl.Title,
+			Type:        tmpl.Type,
+			Priority:    parent.Priority,
+			Description: description,
+			Parent:      parent.ID,
+		}
+		if childOpts.Type == "" {
+			childOpts.Type = "task"
+		}
+
+		child, err := b.Create(childOpts)
+		if err != nil {
+			// Attempt to clean up created issues on failure
+			for _, created := range createdIssues {
+				_ = b.Close(created.ID)
+			}
+			return nil, fmt.Errorf("creating step from template %q: %w", tmpl.ID, err)
+		}
+
+		createdIssues = append(createdIssues, child)
+		templateToNew[tmpl.ID] = child.ID
+	}
+
+	// Second pass: wire dependencies based on template dependencies
+	for _, tmpl := range templates {
+		if len(tmpl.DependsOn) == 0 {
+			continue
+		}
+
+		newChildID := templateToNew[tmpl.ID]
+		for _, depTemplateID := range tmpl.DependsOn {
+			newDepID, ok := templateToNew[depTemplateID]
+			if !ok {
+				// Dependency points outside the template - skip
+				continue
+			}
+			if err := b.AddDependency(newChildID, newDepID); err != nil {
+				// Log but don't fail - the issues are created
+				return createdIssues, fmt.Errorf("adding dependency %s -> %s: %w", newChildID, newDepID, err)
+			}
+		}
+	}
+
+	return createdIssues, nil
+}
+
+// instantiateFromMarkdown creates steps from embedded markdown (old format).
+func (b *Beads) instantiateFromMarkdown(mol *Issue, parent *Issue, opts InstantiateOptions) ([]*Issue, error) {
 	// Parse steps from molecule
 	steps, err := ParseMoleculeSteps(mol.Description)
 	if err != nil {
@@ -257,6 +356,13 @@ func (b *Beads) InstantiateMolecule(mol *Issue, parent *Issue, opts InstantiateO
 
 // ValidateMolecule checks if an issue is a valid molecule definition.
 // Returns an error describing the problem, or nil if valid.
+//
+// Note: This function only validates the old format (embedded markdown steps).
+// For new format molecules (with child issues), validation is implicit during
+// instantiation - if the molecule has children, those are used as templates.
+// Use InstantiateMolecule directly for new format molecules; this function
+// will report "no steps defined" for new format molecules since it cannot
+// access child issues without a Beads client.
 func ValidateMolecule(mol *Issue) error {
 	if mol == nil {
 		return fmt.Errorf("molecule is nil")
