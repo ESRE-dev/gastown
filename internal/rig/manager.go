@@ -283,6 +283,18 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("initializing wisp beads: %w", err)
 	}
 
+	// Seed patrol molecules for this rig
+	if err := m.seedPatrolMolecules(rigPath); err != nil {
+		// Non-fatal: log warning but continue
+		fmt.Printf("  Warning: Could not seed patrol molecules: %v\n", err)
+	}
+
+	// Create plugin directories
+	if err := m.createPluginDirectories(rigPath); err != nil {
+		// Non-fatal: log warning but continue
+		fmt.Printf("  Warning: Could not create plugin directories: %v\n", err)
+	}
+
 	// Register in town config
 	m.config.Rigs[opts.Name] = config.RigEntry{
 		GitURL:  opts.GitURL,
@@ -490,4 +502,113 @@ func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName 
 
 	claudePath := filepath.Join(workspacePath, "CLAUDE.md")
 	return os.WriteFile(claudePath, []byte(content), 0644)
+}
+
+// seedPatrolMolecules creates patrol molecule prototypes in the rig's beads database.
+// These molecules define the work loops for Deacon, Witness, and Refinery roles.
+func (m *Manager) seedPatrolMolecules(rigPath string) error {
+	// Use bd command to seed molecules (more reliable than internal API)
+	// The bd mol seed command creates built-in molecules if they don't exist
+	cmd := exec.Command("bd", "mol", "seed", "--patrol")
+	cmd.Dir = rigPath
+	if err := cmd.Run(); err != nil {
+		// Fallback: bd mol seed might not support --patrol yet
+		// Try creating them individually via bd create
+		return m.seedPatrolMoleculesManually(rigPath)
+	}
+	return nil
+}
+
+// seedPatrolMoleculesManually creates patrol molecules using bd create commands.
+func (m *Manager) seedPatrolMoleculesManually(rigPath string) error {
+	// Patrol molecule definitions (subset of builtin_molecules.go for seeding)
+	patrolMols := []struct {
+		title string
+		desc  string
+	}{
+		{
+			title: "Deacon Patrol",
+			desc:  "Mayor's daemon patrol loop for handling callbacks, health checks, and cleanup.",
+		},
+		{
+			title: "Witness Patrol",
+			desc:  "Per-rig worker monitor patrol loop with progressive nudging.",
+		},
+		{
+			title: "Refinery Patrol",
+			desc:  "Merge queue processor patrol loop with verification gates.",
+		},
+	}
+
+	for _, mol := range patrolMols {
+		// Check if already exists by title
+		checkCmd := exec.Command("bd", "list", "--type=molecule", "--format=json")
+		checkCmd.Dir = rigPath
+		output, _ := checkCmd.Output()
+		if strings.Contains(string(output), mol.title) {
+			continue // Already exists
+		}
+
+		// Create the molecule
+		cmd := exec.Command("bd", "create",
+			"--type=molecule",
+			"--title="+mol.title,
+			"--description="+mol.desc,
+			"--priority=2",
+		)
+		cmd.Dir = rigPath
+		if err := cmd.Run(); err != nil {
+			// Non-fatal, continue with others
+			continue
+		}
+	}
+	return nil
+}
+
+// createPluginDirectories creates plugin directories at town and rig levels.
+// - ~/gt/plugins/ (town-level, shared across all rigs)
+// - <rig>/plugins/ (rig-level, rig-specific plugins)
+func (m *Manager) createPluginDirectories(rigPath string) error {
+	// Town-level plugins directory
+	townPluginsDir := filepath.Join(m.townRoot, "plugins")
+	if err := os.MkdirAll(townPluginsDir, 0755); err != nil {
+		return fmt.Errorf("creating town plugins directory: %w", err)
+	}
+
+	// Create a README in town plugins if it doesn't exist
+	townReadme := filepath.Join(townPluginsDir, "README.md")
+	if _, err := os.Stat(townReadme); os.IsNotExist(err) {
+		content := `# Gas Town Plugins
+
+This directory contains town-level plugins that run during Deacon patrol cycles.
+
+## Plugin Structure
+
+Each plugin is a directory containing:
+- plugin.md - Plugin definition with YAML frontmatter
+
+## Gate Types
+
+- cooldown: Time since last run (e.g., 24h)
+- cron: Schedule-based (e.g., "0 9 * * *")
+- condition: Metric threshold
+- event: Trigger-based (startup, heartbeat)
+
+See docs/deacon-plugins.md for full documentation.
+`
+		if writeErr := os.WriteFile(townReadme, []byte(content), 0644); writeErr != nil {
+			// Non-fatal
+			return nil
+		}
+	}
+
+	// Rig-level plugins directory
+	rigPluginsDir := filepath.Join(rigPath, "plugins")
+	if err := os.MkdirAll(rigPluginsDir, 0755); err != nil {
+		return fmt.Errorf("creating rig plugins directory: %w", err)
+	}
+
+	// Add plugins/ to rig .gitignore
+	gitignorePath := filepath.Join(rigPath, ".gitignore")
+	return m.ensureGitignoreEntry(gitignorePath, "plugins/")
 }
