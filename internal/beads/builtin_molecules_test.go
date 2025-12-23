@@ -5,8 +5,8 @@ import "testing"
 func TestBuiltinMolecules(t *testing.T) {
 	molecules := BuiltinMolecules()
 
-	if len(molecules) != 12 {
-		t.Errorf("expected 12 built-in molecules, got %d", len(molecules))
+	if len(molecules) != 13 {
+		t.Errorf("expected 13 built-in molecules, got %d", len(molecules))
 	}
 
 	// Verify each molecule can be parsed and validated
