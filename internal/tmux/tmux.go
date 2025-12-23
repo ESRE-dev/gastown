@@ -80,6 +80,15 @@ func (t *Tmux) KillSession(name string) error {
 	return err
 }
 
+// KillServer terminates the entire tmux server and all sessions.
+func (t *Tmux) KillServer() error {
+	_, err := t.run("kill-server")
+	if errors.Is(err, ErrNoServer) {
+		return nil // Already dead
+	}
+	return err
+}
+
 // HasSession checks if a session exists.
 func (t *Tmux) HasSession(name string) (bool, error) {
 	_, err := t.run("has-session", "-t", name)

@@ -36,11 +36,13 @@ This is useful for:
 var (
 	downQuiet bool
 	downForce bool
+	downAll   bool
 )
 
 func init() {
 	downCmd.Flags().BoolVarP(&downQuiet, "quiet", "q", false, "Only show errors")
 	downCmd.Flags().BoolVarP(&downForce, "force", "f", false, "Force kill without graceful shutdown")
+	downCmd.Flags().BoolVarP(&downAll, "all", "a", false, "Also kill the tmux server")
 	rootCmd.AddCommand(downCmd)
 }
 
@@ -94,6 +96,16 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		printDownStatus("Daemon", true, "not running")
+	}
+
+	// 5. Kill tmux server if --all
+	if downAll {
+		if err := t.KillServer(); err != nil {
+			printDownStatus("Tmux server", false, err.Error())
+			allOK = false
+		} else {
+			printDownStatus("Tmux server", true, "killed")
+		}
 	}
 
 	fmt.Println()
