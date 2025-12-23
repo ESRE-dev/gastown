@@ -544,3 +544,11 @@ func (t *Tmux) SetMailClickBinding(session string) error {
 		"display-popup", "-E", "-w", "60", "-h", "15", "gt mail peek || echo 'No unread mail'")
 	return err
 }
+
+// RespawnPane kills all processes in a pane and starts a new command.
+// This is used for "hot reload" of agent sessions - instantly restart in place.
+// The pane parameter should be a pane ID (e.g., "%0") or session:window.pane format.
+func (t *Tmux) RespawnPane(pane, command string) error {
+	_, err := t.run("respawn-pane", "-k", "-t", pane, command)
+	return err
+}
