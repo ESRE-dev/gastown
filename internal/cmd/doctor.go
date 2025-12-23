@@ -101,6 +101,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Hook attachment checks
 	d.Register(doctor.NewHookAttachmentValidCheck())
+	d.Register(doctor.NewHookSingletonCheck())
 
 	// Run checks
 	var report *doctor.Report

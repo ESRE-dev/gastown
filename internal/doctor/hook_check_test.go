@@ -121,3 +121,84 @@ func TestHookAttachmentValidCheck_FindRigBeadsDirs(t *testing.T) {
 		t.Logf("Found dirs: %v", dirs)
 	}
 }
+
+// Tests for HookSingletonCheck
+
+func TestNewHookSingletonCheck(t *testing.T) {
+	check := NewHookSingletonCheck()
+
+	if check.Name() != "hook-singleton" {
+		t.Errorf("expected name 'hook-singleton', got %q", check.Name())
+	}
+
+	if check.Description() != "Ensure each agent has at most one handoff bead" {
+		t.Errorf("unexpected description: %q", check.Description())
+	}
+
+	if !check.CanFix() {
+		t.Error("expected CanFix to return true")
+	}
+}
+
+func TestHookSingletonCheck_NoBeadsDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	check := NewHookSingletonCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// No beads dir means nothing to check, should be OK
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when no beads dir, got %v", result.Status)
+	}
+}
+
+func TestHookSingletonCheck_EmptyBeadsDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewHookSingletonCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// Empty beads dir means no pinned beads, should be OK
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when empty beads dir, got %v", result.Status)
+	}
+}
+
+func TestHookSingletonCheck_FormatDuplicate(t *testing.T) {
+	check := NewHookSingletonCheck()
+
+	tests := []struct {
+		dup      duplicateHandoff
+		expected string
+	}{
+		{
+			dup: duplicateHandoff{
+				title:   "Mayor Handoff",
+				beadIDs: []string{"hq-123", "hq-456"},
+			},
+			expected: `"Mayor Handoff" has 2 beads: hq-123, hq-456`,
+		},
+		{
+			dup: duplicateHandoff{
+				title:   "Witness Handoff",
+				beadIDs: []string{"gt-1", "gt-2", "gt-3"},
+			},
+			expected: `"Witness Handoff" has 3 beads: gt-1, gt-2, gt-3`,
+		},
+	}
+
+	for _, tt := range tests {
+		result := check.formatDuplicate(tt.dup)
+		if result != tt.expected {
+			t.Errorf("formatDuplicate() = %q, want %q", result, tt.expected)
+		}
+	}
+}
