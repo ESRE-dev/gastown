@@ -152,27 +152,28 @@ func resolveRoleToSession(role string) (string, error) {
 	}
 }
 
-// buildRestartCommand creates the gt command to restart a session.
+// buildRestartCommand creates the command to run when respawning a session's pane.
+// This needs to be the actual command to execute (e.g., claude), not a session attach command.
 func buildRestartCommand(sessionName string) (string, error) {
+	// For respawn-pane, we run claude directly. The SessionStart hook will run gt prime.
+	// Use exec to ensure clean process replacement.
+	claudeCmd := "exec claude --dangerously-skip-permissions"
+
 	switch {
 	case sessionName == "gt-mayor":
-		return "gt may at", nil
+		return claudeCmd, nil
 
 	case sessionName == "gt-deacon":
-		return "gt dea at", nil
+		return claudeCmd, nil
 
 	case strings.Contains(sessionName, "-crew-"):
-		// gt-<rig>-crew-<name>
-		// The attach command can auto-detect from cwd, so just use `gt crew at`
-		return "gt crew at", nil
+		return claudeCmd, nil
 
 	case strings.HasSuffix(sessionName, "-witness"):
-		// gt-<rig>-witness
-		return "gt wit at", nil
+		return claudeCmd, nil
 
 	case strings.HasSuffix(sessionName, "-refinery"):
-		// gt-<rig>-refinery
-		return "gt ref at", nil
+		return claudeCmd, nil
 
 	default:
 		return "", fmt.Errorf("unknown session type: %s (try specifying role explicitly)", sessionName)

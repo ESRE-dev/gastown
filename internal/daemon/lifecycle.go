@@ -300,10 +300,12 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	}
 }
 
-// closeMessage marks a mail message as read by closing the beads issue.
+// closeMessage removes a lifecycle mail message after processing.
+// We use delete instead of read because gt mail read intentionally
+// doesn't mark messages as read (to preserve handoff messages).
 func (d *Daemon) closeMessage(id string) error {
-	// Use gt mail commands for town-level beads
-	cmd := exec.Command("gt", "mail", "read", id)
+	// Use gt mail delete to actually remove the message
+	cmd := exec.Command("gt", "mail", "delete", id)
 	cmd.Dir = d.config.TownRoot
 	return cmd.Run()
 }
