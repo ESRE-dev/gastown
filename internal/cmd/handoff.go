@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -168,30 +169,91 @@ func resolveRoleToSession(role string) (string, error) {
 
 // buildRestartCommand creates the command to run when respawning a session's pane.
 // This needs to be the actual command to execute (e.g., claude), not a session attach command.
+// The command includes a cd to the correct working directory for the role.
 func buildRestartCommand(sessionName string) (string, error) {
-	// For respawn-pane, we run claude directly. The SessionStart hook will run gt prime.
-	// Use exec to ensure clean process replacement.
-	claudeCmd := "exec claude --dangerously-skip-permissions"
+	// Detect town root from current directory
+	townRoot := detectTownRootFromCwd()
+	if townRoot == "" {
+		return "", fmt.Errorf("cannot detect town root - run from within a Gas Town workspace")
+	}
 
+	// Determine the working directory for this session type
+	workDir, err := sessionWorkDir(sessionName, townRoot)
+	if err != nil {
+		return "", err
+	}
+
+	// For respawn-pane, we cd to the right directory then run claude.
+	// The SessionStart hook will run gt prime.
+	// Use exec to ensure clean process replacement.
+	return fmt.Sprintf("cd %s && exec claude --dangerously-skip-permissions", workDir), nil
+}
+
+// sessionWorkDir returns the correct working directory for a session.
+func sessionWorkDir(sessionName, townRoot string) (string, error) {
 	switch {
 	case sessionName == "gt-mayor":
-		return claudeCmd, nil
+		return townRoot, nil
 
 	case sessionName == "gt-deacon":
-		return claudeCmd, nil
+		return townRoot + "/deacon", nil
 
 	case strings.Contains(sessionName, "-crew-"):
-		return claudeCmd, nil
+		// gt-<rig>-crew-<name> -> <townRoot>/<rig>/crew/<name>
+		parts := strings.Split(sessionName, "-")
+		if len(parts) < 4 {
+			return "", fmt.Errorf("invalid crew session name: %s", sessionName)
+		}
+		// Find the index of "crew" to split rig name (may contain dashes)
+		for i, p := range parts {
+			if p == "crew" && i > 1 && i < len(parts)-1 {
+				rig := strings.Join(parts[1:i], "-")
+				name := strings.Join(parts[i+1:], "-")
+				return fmt.Sprintf("%s/%s/crew/%s", townRoot, rig, name), nil
+			}
+		}
+		return "", fmt.Errorf("cannot parse crew session name: %s", sessionName)
 
 	case strings.HasSuffix(sessionName, "-witness"):
-		return claudeCmd, nil
+		// gt-<rig>-witness -> <townRoot>/<rig>/witness
+		rig := strings.TrimPrefix(sessionName, "gt-")
+		rig = strings.TrimSuffix(rig, "-witness")
+		return fmt.Sprintf("%s/%s/witness", townRoot, rig), nil
 
 	case strings.HasSuffix(sessionName, "-refinery"):
-		return claudeCmd, nil
+		// gt-<rig>-refinery -> <townRoot>/<rig>/refinery
+		rig := strings.TrimPrefix(sessionName, "gt-")
+		rig = strings.TrimSuffix(rig, "-refinery")
+		return fmt.Sprintf("%s/%s/refinery", townRoot, rig), nil
 
 	default:
 		return "", fmt.Errorf("unknown session type: %s (try specifying role explicitly)", sessionName)
 	}
+}
+
+// detectTownRootFromCwd walks up from the current directory to find the town root.
+func detectTownRootFromCwd() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	dir := cwd
+	for {
+		// Check for primary marker (mayor/town.json)
+		markerPath := filepath.Join(dir, "mayor", "town.json")
+		if _, err := os.Stat(markerPath); err == nil {
+			return dir
+		}
+
+		// Move up
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 // handoffRemoteSession respawns a different session and optionally switches to it.
