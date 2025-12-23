@@ -23,6 +23,13 @@ var doctorCmd = &cobra.Command{
 Doctor checks for common configuration issues, missing files,
 and other problems that could affect workspace operation.
 
+Patrol checks:
+  - patrol-molecules-exist   Verify patrol molecules exist
+  - patrol-hooks-wired       Verify daemon triggers patrols
+  - patrol-not-stuck         Detect stale wisps (>1h)
+  - patrol-plugins-accessible Verify plugin directories
+  - patrol-roles-have-prompts Verify role prompts exist
+
 Use --fix to attempt automatic fixes for issues that support it.
 Use --rig to check a specific rig instead of the entire workspace.`,
 	RunE: runDoctor,
@@ -70,6 +77,13 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewWispOrphansCheck())
 	d.Register(doctor.NewWispSizeCheck())
 	d.Register(doctor.NewWispStaleCheck())
+
+	// Patrol system checks
+	d.Register(doctor.NewPatrolMoleculesExistCheck())
+	d.Register(doctor.NewPatrolHooksWiredCheck())
+	d.Register(doctor.NewPatrolNotStuckCheck())
+	d.Register(doctor.NewPatrolPluginsAccessibleCheck())
+	d.Register(doctor.NewPatrolRolesHavePromptsCheck())
 
 	// Config architecture checks
 	d.Register(doctor.NewSettingsCheck())
