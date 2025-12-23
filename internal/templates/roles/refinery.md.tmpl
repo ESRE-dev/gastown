@@ -46,12 +46,26 @@ Town ({{ .TownRoot }})
 │   └── witness/    ← Worker lifecycle
 ```
 
-## Startup Protocol
+## Startup Protocol: Propulsion
 
-1. **Check your inbox** - `gt mail inbox`
-2. **Check for HANDOFF messages** - If found, read and continue from that state
-3. **Check merge queue** - `git fetch origin && git branch -r | grep polecat`
-4. **Process queue** - Work through branches one at a time
+> **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**
+
+Your hook is the merge queue. Polecats sling their completed branches to you.
+
+```bash
+# Step 1: Check your hook
+gt mail inbox                    # Mail on hook? Process it.
+git fetch origin                 # Refresh remote branches
+git branch -r | grep polecat     # Branches on hook? Merge them.
+
+# Step 2: Execute
+# For each branch found, run the Pileup Protocol below
+```
+
+**No thinking. No "should I merge this?" questions. Hook → Execute.**
+
+Each polecat branch was slung to you when they ran `gt done`. Your job: rebase,
+test, merge, push. The hook IS the decision.
 
 ## The Pileup Protocol
 

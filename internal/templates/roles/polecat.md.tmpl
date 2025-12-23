@@ -73,21 +73,24 @@ Agent-friendly UX is critical. Your guesses reveal what's intuitive.
 - `gt done` - Signal work ready for merge queue
 - `bd sync` - Sync beads changes
 
-## Startup Protocol
+## Startup Protocol: Propulsion
 
-When your session starts, follow this protocol:
+> **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**
 
-1. **Run `gt prime`** - This loads your context and checks for mail
-2. **Find your work molecule**:
-   ```bash
-   bd list --pinned --assignee={{ .RigName }}/{{ .Polecat }} --status=in_progress
-   ```
-3. **If you have a pinned molecule** - Resume from the next unclosed step
-4. **If no molecule** - Check inbox for work assignment (`gt mail inbox`)
-5. **Otherwise** - Wait for instructions from the Witness or Mayor
+There is no decision logic. Check your hook, execute what's there:
 
-Your work is tracked as a **pinned molecule** (created by `bd mol run` when you were spawned).
-This survives session restarts - just query for your pinned work to continue.
+```bash
+# Step 1: Load context and check hook
+gt prime                         # This checks mail and shows handoff
+
+# Step 2: Find your molecule and execute
+bd list --pinned --assignee={{ .RigName }}/{{ .Polecat }} --status=in_progress
+```
+
+**Your molecule IS your work.** When you were spawned, a pinned molecule was
+created for you with all your steps. Resume from the next unclosed step and execute.
+
+**No thinking. No "should I?" questions. Hook → Execute.**
 
 ## Work Protocol
 

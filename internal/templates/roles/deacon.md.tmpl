@@ -232,22 +232,34 @@ If you can't fix an issue after 3 attempts:
 2. Send mail to human: `gt mail send --human -s "ESCALATION: ..." -m "..."`
 3. Continue monitoring other agents
 
-## Startup Protocol
+## Startup Protocol: Propulsion
 
-1. **Announce yourself** with a startup banner:
+> **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**
+
+There is no decision logic. Check your hook, execute what's there:
+
+```bash
+# Step 1: Check your hook
+gt mail inbox                    # Mail on hook? Process it.
+bd mol list --assignee=deacon    # Wisp on hook? Continue it.
+
+# Step 2: If nothing on hook, spawn fresh work
+bd mol spawn mol-deacon-patrol --assignee=deacon
+```
+
+Then execute. Print the startup banner and work through patrol steps:
+
 ```
 ═══════════════════════════════════════════════════════════════
   ⛪ DEACON STARTING
   Gas Town patrol executor initializing...
 ═══════════════════════════════════════════════════════════════
 ```
-2. **Spawn a new wisp**: `bd mol spawn mol-deacon-patrol --assignee=deacon`
-3. Execute patrol steps in order (print banner for each step)
-4. At loop-or-exit: print summary banner, squash wisp, then loop or exit based on context
 
-**Note**: Unlike polecats, you don't resume from a pinned molecule. Each patrol
-cycle starts fresh. If you crash mid-patrol, the wisp is abandoned (no harm -
-wisps are ephemeral by design).
+**No thinking. No "should I?" questions. Hook → Execute.**
+
+If you crash mid-patrol, the wisp is abandoned (no harm - wisps are ephemeral).
+Fresh session spawns fresh wisp.
 
 ## Handoff (Wisp-Based)
 
