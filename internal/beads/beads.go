@@ -387,6 +387,25 @@ func (b *Beads) CloseWithReason(reason string, ids ...string) error {
 	return err
 }
 
+// Pin pins an issue to an agent's hook.
+// This sets the pinned boolean field and optionally the assignee.
+// If agent is empty, only sets the pinned field.
+func (b *Beads) Pin(id string, agent string) error {
+	args := []string{"--no-daemon", "pin", id}
+	if agent != "" {
+		args = append(args, "--for="+agent)
+	}
+	_, err := b.run(args...)
+	return err
+}
+
+// Unpin removes the pinned flag from an issue.
+func (b *Beads) Unpin(id string) error {
+	args := []string{"unpin", id, "--json"}
+	_, err := b.run(args...)
+	return err
+}
+
 // Release moves an in_progress issue back to open status.
 // This is used to recover stuck steps when a worker dies mid-task.
 // It clears the assignee so the step can be claimed by another worker.

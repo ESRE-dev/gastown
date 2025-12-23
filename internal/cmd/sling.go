@@ -1057,10 +1057,20 @@ func pinToHook(beadsPath, agentAddress, issueID string, moleculeCtx *MoleculeCon
 		attachedMolecule = moleculeCtx.RootIssueID
 	}
 
-	// Attach molecule to handoff bead
+	// Attach molecule to handoff bead (stores in description)
 	_, err = b.AttachMolecule(handoff.ID, attachedMolecule)
 	if err != nil {
 		return fmt.Errorf("attaching molecule: %w", err)
+	}
+
+	// Also pin the work issue itself to the agent
+	// This sets the pinned boolean field AND assignee so bd hook can find it
+	// NOTE: There's a known issue (gt-o3is) where bd pin via subprocess doesn't
+	// actually set the pinned field, even though it reports success.
+	if err := b.Pin(attachedMolecule, role); err != nil {
+		// Non-fatal - the handoff bead attachment is the primary mechanism
+		// This just enables bd hook visibility
+		fmt.Printf("  %s pin work issue: %v\n", style.Dim.Render("Note: could not"), err)
 	}
 
 	return nil
