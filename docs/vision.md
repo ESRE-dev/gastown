@@ -22,12 +22,12 @@ The engine does work and generates steam. Gas Town coordinates many engines on
 a shared network, routing work to the right engines, tracking outcomes, and
 ensuring nothing is lost.
 
-| Component | Role | Metaphor |
-|-----------|------|----------|
-| **Proto molecules** | Workflow templates | Fuel |
-| **Mols** | Flowing work instances | Liquid fuel |
-| **Wisps** | Transient execution traces | Steam |
-| **Digests** | Compressed work records | Distillate |
+| Component | Phase | Role |
+|-----------|-------|------|
+| **Proto** | Solid (crystal) | Frozen workflow templates |
+| **Mol** | Liquid | Flowing durable work instances |
+| **Wisp** | Vapor (gas) | Transient ephemeral traces |
+| **Digest** | Distillate | Compressed permanent records |
 
 ---
 
