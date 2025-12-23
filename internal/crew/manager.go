@@ -291,6 +291,17 @@ func (m *Manager) loadState(name string) (*CrewWorker, error) {
 		return nil, fmt.Errorf("parsing state: %w", err)
 	}
 
+	// Backfill essential fields if missing (handles empty or incomplete state.json)
+	if crew.Name == "" {
+		crew.Name = name
+	}
+	if crew.Rig == "" {
+		crew.Rig = m.rig.Name
+	}
+	if crew.ClonePath == "" {
+		crew.ClonePath = m.crewDir(name)
+	}
+
 	return &crew, nil
 }
 
