@@ -456,7 +456,7 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("2. Check mail: `gt mail inbox`")
 		fmt.Println("3. If there's a 🤝 HANDOFF message, read it and continue the work")
 		fmt.Println("4. Check for attached work: `gt mol status`")
-		fmt.Println("   - If attachment found → **AUTO-CONTINUE** (no human input needed)")
+		fmt.Println("   - If attachment found → **RUN IT** (no human input needed)")
 		fmt.Println("   - If no attachment → await user instruction")
 	case RoleDeacon:
 		fmt.Println()
