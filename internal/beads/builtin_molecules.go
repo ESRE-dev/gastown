@@ -20,6 +20,7 @@ func BuiltinMolecules() []BuiltinMolecule {
 		VersionBumpMolecule(),
 		DeaconPatrolMolecule(),
 		RefineryPatrolMolecule(),
+		WitnessPatrolMolecule(),
 		CrewSessionMolecule(),
 		PolecatSessionMolecule(),
 	}
@@ -777,6 +778,221 @@ gt daemon status
 ` + "```" + `
 
 This enables infinite patrol duration via context-aware respawning.
+Needs: context-check`,
+	}
+}
+
+// WitnessPatrolMolecule returns the witness-patrol molecule definition.
+// This is the per-rig worker monitor's patrol loop with progressive nudging.
+func WitnessPatrolMolecule() BuiltinMolecule {
+	return BuiltinMolecule{
+		ID:    "mol-witness-patrol",
+		Title: "Witness Patrol",
+		Description: `Per-rig worker monitor patrol loop.
+
+The Witness is the Pit Boss for your rig. You watch polecats, nudge them toward
+completion, verify clean git state before kills, and escalate stuck workers.
+
+**You do NOT do implementation work.** Your job is oversight, not coding.
+
+This molecule uses wisp storage (.beads-wisp/) for ephemeral patrol state.
+Persistent state (nudge counts, handoffs) is stored in a witness handoff bead.
+
+## Step: inbox-check
+Process witness mail: lifecycle requests, help requests.
+
+` + "```" + `bash
+gt mail inbox
+` + "```" + `
+
+Handle by message type:
+- **LIFECYCLE/Shutdown**: Queue for pre-kill verification
+- **Blocked/Help**: Assess if resolvable or escalate
+- **HANDOFF**: Load predecessor state
+- **Work complete**: Verify issue closed, proceed to pre-kill
+
+Record any pending actions for later steps.
+Mark messages as processed when complete.
+
+## Step: load-state
+Read handoff bead and get nudge counts.
+
+Load persistent state from the witness handoff bead:
+- Active workers and their status from last cycle
+- Nudge counts per worker per issue
+- Last nudge timestamps
+- Pending escalations
+
+` + "```" + `bash
+bd show <handoff-bead-id>
+` + "```" + `
+
+If no handoff exists (fresh start), initialize empty state.
+This state persists across wisp burns and session cycles.
+Needs: inbox-check
+
+## Step: survey-workers
+List polecats and categorize by status.
+
+` + "```" + `bash
+gt polecat list <rig>
+` + "```" + `
+
+Categorize each polecat:
+- **working**: Actively processing (needs inspection)
+- **idle**: At prompt, not active (may need nudge)
+- **pending_shutdown**: Requested termination (needs pre-kill)
+- **error**: Showing errors (needs assessment)
+
+Build action queue for next steps.
+Needs: load-state
+
+## Step: inspect-workers
+Capture output for each 'working' polecat.
+
+For each polecat showing "working" status:
+` + "```" + `bash
+tmux capture-pane -t gt-<rig>-<name> -p | tail -40
+` + "```" + `
+
+Look for:
+- Recent tool calls (good - actively working)
+- Prompt waiting for input (may be stuck)
+- Error messages or stack traces
+- "Done" or completion indicators
+- Time since last activity
+
+Update worker status based on inspection.
+Needs: survey-workers
+
+## Step: decide-actions
+Apply nudge matrix and queue actions.
+
+For each worker, apply decision rules:
+
+**Progressing normally**: No action needed
+**Idle <10 min**: Continue monitoring
+**Idle 10-15 min**: Queue first nudge (gentle)
+**Idle 15-20 min with no progress since nudge 1**: Queue second nudge (direct)
+**Idle 20+ min with no progress since nudge 2**: Queue third nudge (final warning)
+**No response after 3 nudges**: Queue escalation to Mayor
+**Requesting shutdown**: Queue pre-kill verification
+**Showing errors**: Assess severity, queue nudge or escalation
+
+Progressive nudge text:
+1. "How's progress on <issue>? Need any help?"
+2. "Please wrap up <issue> soon. What's blocking you?"
+3. "Final check on <issue>. Will escalate in 5 min if no response."
+
+Track nudge counts in state - never exceed 3 per issue.
+Needs: inspect-workers
+
+## Step: execute-actions
+Nudge, kill, or escalate as decided.
+
+Process action queue in order:
+
+**Nudges:**
+` + "```" + `bash
+tmux send-keys -t gt-<rig>-<name> "<nudge text>" Enter
+` + "```" + `
+Update nudge count and timestamp in state.
+
+**Pre-kill verification:**
+` + "```" + `bash
+cd polecats/<name> && git status    # Must be clean
+git log origin/main..HEAD           # Check for unpushed commits
+bd show <issue-id>                  # Verify issue closed
+` + "```" + `
+
+If clean:
+` + "```" + `bash
+tmux kill-session -t gt-<rig>-<name>
+git worktree remove polecats/<name>  # If transient
+git branch -d polecat/<name>         # If transient
+` + "```" + `
+
+If dirty: nudge worker to clean up, wait for retry.
+If dirty after 3 attempts: escalate to Mayor.
+
+**Escalations:**
+` + "```" + `bash
+gt mail send mayor/ -s "Escalation: <polecat> stuck on <issue>" -m "
+Worker: <polecat>
+Issue: <issue-id>
+Problem: <description>
+
+Timeline:
+- Nudge 1: <time> - <response>
+- Nudge 2: <time> - <response>
+- Nudge 3: <time> - <response>
+
+Git state: <clean/dirty>
+My assessment: <what's happening>
+Recommendation: <what should happen>
+"
+` + "```" + `
+Needs: decide-actions
+
+## Step: save-state
+Update handoff bead with new states.
+
+Persist state to the witness handoff bead:
+- Updated worker statuses
+- Current nudge counts per worker
+- Nudge timestamps
+- Actions taken this cycle
+- Pending items for next cycle
+
+` + "```" + `bash
+bd update <handoff-bead-id> --description="<serialized state>"
+` + "```" + `
+
+This state survives wisp burns and session cycles.
+Needs: execute-actions
+
+## Step: generate-summary
+Summarize this patrol cycle for digest.
+
+Include:
+- Workers inspected (count, names)
+- Nudges sent (count, to whom)
+- Sessions killed (count, names)
+- Escalations (count, issues)
+- Issues found (brief descriptions)
+- Actions pending for next cycle
+
+This becomes the digest when the patrol wisp is squashed.
+Needs: save-state
+
+## Step: context-check
+Check own context usage.
+
+If context is HIGH (>80%):
+- Ensure state is saved to handoff bead
+- Prepare for burn/respawn
+
+If context is LOW:
+- Can continue patrolling
+Needs: generate-summary
+
+## Step: burn-or-loop
+End of patrol cycle decision.
+
+If context is LOW:
+- Burn this wisp (no audit trail needed for patrol cycles)
+- Sleep briefly to avoid tight loop (30-60 seconds)
+- Return to inbox-check step
+
+If context is HIGH:
+- Burn wisp with summary digest
+- Exit cleanly (daemon will respawn fresh Witness)
+
+` + "```" + `bash
+bd mol burn   # Destroy ephemeral wisp
+` + "```" + `
+
+The daemon ensures Witness is always running.
 Needs: context-check`,
 	}
 }
