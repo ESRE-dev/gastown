@@ -814,6 +814,30 @@ Handle by message type:
 Record any pending actions for later steps.
 Mark messages as processed when complete.
 
+## Step: check-refinery
+Ensure the refinery is alive and processing merge requests.
+
+**Redundant system**: This check runs in both gt spawn and Witness patrol
+to ensure the merge queue processor stays operational.
+
+` + "```" + `bash
+# Check if refinery session is running
+gt session status <rig>/refinery
+
+# Check for merge requests in queue
+bd list --type=merge-request --status=open
+` + "```" + `
+
+If merge requests are waiting AND refinery is not running:
+` + "```" + `bash
+gt session start <rig>/refinery
+gt mail send <rig>/refinery -s "PATROL: Wake up" -m "Merge requests in queue. Please process."
+` + "```" + `
+
+If refinery is running but queue is non-empty for >30 min, send nudge.
+This ensures polecats don't wait forever for their branches to merge.
+Needs: inbox-check
+
 ## Step: load-state
 Read handoff bead and get nudge counts.
 
@@ -829,7 +853,7 @@ bd show <handoff-bead-id>
 
 If no handoff exists (fresh start), initialize empty state.
 This state persists across wisp burns and session cycles.
-Needs: inbox-check
+Needs: check-refinery
 
 ## Step: survey-workers
 List polecats and categorize by status.

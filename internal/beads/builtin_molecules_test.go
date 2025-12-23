@@ -300,16 +300,17 @@ func TestWitnessPatrolMolecule(t *testing.T) {
 		t.Fatalf("failed to parse: %v", err)
 	}
 
-	// Should have 10 steps: inbox-check, load-state, survey-workers, inspect-workers,
-	// decide-actions, execute-actions, save-state, generate-summary, context-check, burn-or-loop
-	if len(steps) != 10 {
-		t.Errorf("expected 10 steps, got %d", len(steps))
+	// Should have 11 steps: inbox-check, check-refinery, load-state, survey-workers,
+	// inspect-workers, decide-actions, execute-actions, save-state, generate-summary,
+	// context-check, burn-or-loop
+	if len(steps) != 11 {
+		t.Errorf("expected 11 steps, got %d", len(steps))
 	}
 
 	expectedRefs := []string{
-		"inbox-check", "load-state", "survey-workers", "inspect-workers",
-		"decide-actions", "execute-actions", "save-state", "generate-summary",
-		"context-check", "burn-or-loop",
+		"inbox-check", "check-refinery", "load-state", "survey-workers",
+		"inspect-workers", "decide-actions", "execute-actions", "save-state",
+		"generate-summary", "context-check", "burn-or-loop",
 	}
 	for i, expected := range expectedRefs {
 		if i >= len(steps) {
@@ -327,13 +328,18 @@ func TestWitnessPatrolMolecule(t *testing.T) {
 		t.Errorf("inbox-check should have no deps, got %v", steps[0].Needs)
 	}
 
-	// load-state needs inbox-check
+	// check-refinery needs inbox-check
 	if len(steps[1].Needs) != 1 || steps[1].Needs[0] != "inbox-check" {
-		t.Errorf("load-state should need inbox-check, got %v", steps[1].Needs)
+		t.Errorf("check-refinery should need inbox-check, got %v", steps[1].Needs)
+	}
+
+	// load-state needs check-refinery
+	if len(steps[2].Needs) != 1 || steps[2].Needs[0] != "check-refinery" {
+		t.Errorf("load-state should need check-refinery, got %v", steps[2].Needs)
 	}
 
 	// burn-or-loop needs context-check
-	if len(steps[9].Needs) != 1 || steps[9].Needs[0] != "context-check" {
-		t.Errorf("burn-or-loop should need context-check, got %v", steps[9].Needs)
+	if len(steps[10].Needs) != 1 || steps[10].Needs[0] != "context-check" {
+		t.Errorf("burn-or-loop should need context-check, got %v", steps[10].Needs)
 	}
 }

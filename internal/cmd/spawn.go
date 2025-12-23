@@ -407,6 +407,28 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s\n", style.Dim.Render("Deacon notified of polecat start"))
 	}
 
+	// Auto-start infrastructure if not running (redundant system - Witness also self-checks)
+	// This ensures the merge queue and polecat monitor are alive to handle work
+	refineryRunning, _ := sessMgr.IsRunning("refinery")
+	if !refineryRunning {
+		fmt.Printf("Starting refinery for %s...\n", rigName)
+		if err := sessMgr.Start("refinery", session.StartOptions{}); err != nil {
+			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not start refinery: %v", err)))
+		} else {
+			fmt.Printf("  %s\n", style.Dim.Render("Refinery started"))
+		}
+	}
+
+	witnessRunning, _ := sessMgr.IsRunning("witness")
+	if !witnessRunning {
+		fmt.Printf("Starting witness for %s...\n", rigName)
+		if err := sessMgr.Start("witness", session.StartOptions{}); err != nil {
+			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not start witness: %v", err)))
+		} else {
+			fmt.Printf("  %s\n", style.Dim.Render("Witness started"))
+		}
+	}
+
 	return nil
 }
 
