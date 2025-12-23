@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -280,6 +280,11 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 		return false, nil
 	}
 
+	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
+	if err := claude.EnsureSettingsForRole(r.Path, "witness"); err != nil {
+		return false, fmt.Errorf("ensuring Claude settings: %w", err)
+	}
+
 	// Create new tmux session
 	if err := t.NewSession(sessionName, r.Path); err != nil {
 		return false, fmt.Errorf("creating session: %w", err)
@@ -294,17 +299,10 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 	_ = t.ConfigureGasTownSession(sessionName, theme, rigName, "witness", "witness")
 
 	// Launch Claude in a respawn loop
+	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	loopCmd := `while true; do echo "👁️ Starting Witness for ` + rigName + `..."; claude --dangerously-skip-permissions; echo ""; echo "Witness exited. Restarting in 2s... (Ctrl-C to stop)"; sleep 2; done`
 	if err := t.SendKeysDelayed(sessionName, loopCmd, 200); err != nil {
 		return false, fmt.Errorf("sending command: %w", err)
-	}
-
-	// Wait briefly then send gt prime to initialize context
-	// This runs after Claude starts up in the respawn loop
-	time.Sleep(3 * time.Second)
-	if err := t.SendKeys(sessionName, "gt prime"); err != nil {
-		// Non-fatal - Claude will still work, just without auto-priming
-		fmt.Printf("Warning: failed to send gt prime: %v\n", err)
 	}
 
 	return true, nil

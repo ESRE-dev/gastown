@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -118,6 +119,11 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 		workDir = m.polecatDir(polecat)
 	}
 
+	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
+	if err := claude.EnsureSettingsForRole(workDir, "polecat"); err != nil {
+		return fmt.Errorf("ensuring Claude settings: %w", err)
+	}
+
 	// Create session
 	if err := m.tmux.NewSession(sessionID, workDir); err != nil {
 		return fmt.Errorf("creating session: %w", err)
@@ -149,12 +155,9 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 		return fmt.Errorf("sending command: %w", err)
 	}
 
-	// If issue specified, wait a bit then inject it
-	if opts.Issue != "" {
-		time.Sleep(500 * time.Millisecond)
-		prompt := fmt.Sprintf("Work on issue: %s", opts.Issue)
-		_ = m.Inject(polecat, prompt) // Non-fatal error
-	}
+	// NOTE: No issue injection needed here. Work assignments are sent via mail
+	// before session start, and the SessionStart hook runs gt prime + mail check
+	// which shows the polecat its assignment.
 
 	return nil
 }

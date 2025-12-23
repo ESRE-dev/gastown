@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -189,6 +190,11 @@ func (m *Manager) Start(foreground bool) error {
 		refineryRigDir = m.workDir
 	}
 
+	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
+	if err := claude.EnsureSettingsForRole(refineryRigDir, "refinery"); err != nil {
+		return fmt.Errorf("ensuring Claude settings: %w", err)
+	}
+
 	if err := t.NewSession(sessionID, refineryRigDir); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
@@ -227,18 +233,10 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	// Wait for Claude to start (pane command changes from shell to node)
+	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
 	if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
 		fmt.Fprintf(m.output, "Warning: Timeout waiting for Claude to start: %v\n", err)
-	}
-
-	// Give Claude time to initialize after process starts
-	time.Sleep(500 * time.Millisecond)
-
-	// Prime the agent using NudgeSession for reliable delivery
-	if err := t.NudgeSession(sessionID, "run gt prime"); err != nil {
-		// Warning only - don't fail startup
-		fmt.Fprintf(m.output, "Warning: could not send prime command: %v\n", err)
 	}
 
 	return nil
