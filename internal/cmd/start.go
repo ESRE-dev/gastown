@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -19,6 +20,7 @@ import (
 )
 
 var (
+	startAll             bool
 	shutdownGraceful     bool
 	shutdownWait         int
 	shutdownAll          bool
@@ -35,7 +37,8 @@ var startCmd = &cobra.Command{
 The Deacon is the health-check orchestrator that monitors Mayor and Witnesses.
 The Mayor is the global coordinator that dispatches work.
 
-Other agents (Witnesses, Refineries, Polecats) are started lazily as needed.
+By default, other agents (Witnesses, Refineries) are started lazily as needed.
+Use --all to start Witnesses and Refineries for all registered rigs immediately.
 
 To stop Gas Town, use 'gt shutdown'.`,
 	RunE: runStart,
@@ -66,6 +69,9 @@ Use --nuclear to force cleanup even if polecats have uncommitted work (DANGER).`
 }
 
 func init() {
+	startCmd.Flags().BoolVarP(&startAll, "all", "a", false,
+		"Also start Witnesses and Refineries for all rigs")
+
 	shutdownCmd.Flags().BoolVarP(&shutdownGraceful, "graceful", "g", false,
 		"Send ESC to agents and wait for them to handoff before killing")
 	shutdownCmd.Flags().IntVarP(&shutdownWait, "wait", "w", 30,
@@ -118,6 +124,47 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s Deacon started\n", style.Bold.Render("✓"))
 	}
 
+	// If --all, start witnesses and refineries for all rigs
+	if startAll {
+		fmt.Println()
+		fmt.Println("Starting rig agents...")
+
+		rigs, err := discoverAllRigs(townRoot)
+		if err != nil {
+			fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), err)
+		} else {
+			for _, r := range rigs {
+				// Start Witness
+				witnessSession := fmt.Sprintf("gt-%s-witness", r.Name)
+				witnessRunning, _ := t.HasSession(witnessSession)
+				if witnessRunning {
+					fmt.Printf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
+				} else {
+					created, err := ensureWitnessSession(r.Name, r)
+					if err != nil {
+						fmt.Printf("  %s %s witness failed: %v\n", style.Dim.Render("○"), r.Name, err)
+					} else if created {
+						fmt.Printf("  %s %s witness started\n", style.Bold.Render("✓"), r.Name)
+					}
+				}
+
+				// Start Refinery
+				refinerySession := fmt.Sprintf("gt-%s-refinery", r.Name)
+				refineryRunning, _ := t.HasSession(refinerySession)
+				if refineryRunning {
+					fmt.Printf("  %s %s refinery already running\n", style.Dim.Render("○"), r.Name)
+				} else {
+					created, err := ensureRefinerySession(r.Name, r)
+					if err != nil {
+						fmt.Printf("  %s %s refinery failed: %v\n", style.Dim.Render("○"), r.Name, err)
+					} else if created {
+						fmt.Printf("  %s %s refinery started\n", style.Bold.Render("✓"), r.Name)
+					}
+				}
+			}
+		}
+	}
+
 	fmt.Println()
 	fmt.Printf("%s Gas Town is running\n", style.Bold.Render("✓"))
 	fmt.Println()
@@ -126,6 +173,76 @@ func runStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Check status:     %s\n", style.Dim.Render("gt status"))
 
 	return nil
+}
+
+// discoverAllRigs finds all rigs in the workspace.
+func discoverAllRigs(townRoot string) ([]*rig.Rig, error) {
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading rigs config: %w", err)
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+
+	return rigMgr.DiscoverRigs()
+}
+
+// ensureRefinerySession creates a refinery tmux session if it doesn't exist.
+// Returns true if a new session was created, false if it already existed.
+func ensureRefinerySession(rigName string, r *rig.Rig) (bool, error) {
+	t := tmux.NewTmux()
+	sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+
+	// Check if session already exists
+	running, err := t.HasSession(sessionName)
+	if err != nil {
+		return false, fmt.Errorf("checking session: %w", err)
+	}
+
+	if running {
+		return false, nil
+	}
+
+	// Working directory is the refinery's rig clone
+	refineryRigDir := filepath.Join(r.Path, "refinery", "rig")
+	if _, err := os.Stat(refineryRigDir); os.IsNotExist(err) {
+		// Fall back to rig path if refinery/rig doesn't exist
+		refineryRigDir = r.Path
+	}
+
+	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
+	if err := claude.EnsureSettingsForRole(refineryRigDir, "refinery"); err != nil {
+		return false, fmt.Errorf("ensuring Claude settings: %w", err)
+	}
+
+	// Create new tmux session
+	if err := t.NewSession(sessionName, refineryRigDir); err != nil {
+		return false, fmt.Errorf("creating session: %w", err)
+	}
+
+	// Set environment
+	t.SetEnvironment(sessionName, "GT_ROLE", "refinery")
+	t.SetEnvironment(sessionName, "GT_RIG", rigName)
+
+	// Set beads environment
+	beadsDir := filepath.Join(r.Path, "mayor", "rig", ".beads")
+	t.SetEnvironment(sessionName, "BEADS_DIR", beadsDir)
+	t.SetEnvironment(sessionName, "BEADS_NO_DAEMON", "1")
+	t.SetEnvironment(sessionName, "BEADS_AGENT_NAME", fmt.Sprintf("%s/refinery", rigName))
+
+	// Apply Gas Town theming
+	theme := tmux.AssignTheme(rigName)
+	_ = t.ConfigureGasTownSession(sessionName, theme, rigName, "refinery", "refinery")
+
+	// Launch Claude in a respawn loop
+	loopCmd := `while true; do echo "🛢️ Starting Refinery for ` + rigName + `..."; claude --dangerously-skip-permissions; echo ""; echo "Refinery exited. Restarting in 2s... (Ctrl-C to stop)"; sleep 2; done`
+	if err := t.SendKeysDelayed(sessionName, loopCmd, 200); err != nil {
+		return false, fmt.Errorf("sending command: %w", err)
+	}
+
+	return true, nil
 }
 
 func runShutdown(cmd *cobra.Command, args []string) error {
