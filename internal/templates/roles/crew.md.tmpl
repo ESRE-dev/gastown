@@ -129,26 +129,33 @@ If push fails (someone else pushed): `git pull --rebase && git push`
 
 ## Context Cycling (Handoff)
 
-When your context fills up, cycle to a fresh session.
+When your context fills up, cycle to a fresh session using `gt handoff`.
 
 **Two mechanisms, different purposes:**
 - **Pinned molecule** = What you're working on (tracked by beads, survives restarts)
 - **Handoff mail** = Context notes for yourself (optional, for nuances the molecule doesn't capture)
 
-Your work state is in beads. Handoff mail is just for extra context:
+Your work state is in beads. The handoff command handles the mechanics:
 
 ```bash
-# Optional: send yourself context notes
-gt mail send {{ .RigName }}/crew/{{ .Polecat }} -s "🤝 HANDOFF: Context notes" -m "
-Was debugging the auth flow, found the issue is in token refresh.
+# Simple handoff (molecule persists, fresh context)
+gt handoff
+
+# Handoff with context notes
+gt handoff -s "Working on auth bug" -m "
+Found the issue is in token refresh.
 Check line 145 in auth.go first.
 "
 ```
 
-When you restart, find your work:
-```bash
-bd list --pinned --assignee={{ .RigName }}/crew/{{ .Polecat }} --status=in_progress
-```
+**Crew cycling is relaxed**: Unlike patrol workers (Deacon, Witness, Refinery) who have
+fixed heuristics (N rounds → cycle), you cycle when it feels right:
+- Context getting full
+- Finished a logical chunk of work
+- Need a fresh perspective
+- Human asks you to
+
+When you restart, your hook still has your molecule. The handoff mail provides context.
 
 ## Session End Checklist
 
@@ -159,8 +166,8 @@ Before ending your session:
 [ ] git push                (push any commits)
 [ ] bd sync                 (sync beads if configured)
 [ ] Check inbox             (any messages needing response?)
-[ ] HANDOFF if incomplete:
-    gt mail send {{ .RigName }}/crew/{{ .Polecat }} -s "🤝 HANDOFF: ..." -m "..."
+[ ] gt handoff              (cycle to fresh session)
+    # Or with context: gt handoff -s "Brief" -m "Details"
 ```
 
 ## Tips
