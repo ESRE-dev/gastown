@@ -561,3 +561,10 @@ func (t *Tmux) RespawnPane(pane, command string) error {
 	_, err := t.run("respawn-pane", "-k", "-t", pane, command)
 	return err
 }
+
+// SwitchClient switches the current tmux client to a different session.
+// Used after remote recycle to move the user's view to the recycled session.
+func (t *Tmux) SwitchClient(targetSession string) error {
+	_, err := t.run("switch-client", "-t", targetSession)
+	return err
+}
