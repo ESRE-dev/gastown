@@ -38,7 +38,10 @@ var sessionCmd = &cobra.Command{
 	Long: `Manage tmux sessions for polecats.
 
 Sessions are tmux sessions running Claude for each polecat.
-Use the subcommands to start, stop, attach, and monitor sessions.`,
+Use the subcommands to start, stop, attach, and monitor sessions.
+
+TIP: To send messages to a running session, use 'gt nudge' (not 'session inject').
+The nudge command uses reliable delivery that works correctly with Claude Code.`,
 }
 
 var sessionStartCmd = &cobra.Command{
@@ -104,14 +107,19 @@ Examples:
 
 var sessionInjectCmd = &cobra.Command{
 	Use:   "inject <rig>/<polecat>",
-	Short: "Send message to session",
+	Short: "Send message to session (prefer 'gt nudge')",
 	Long: `Send a message to a polecat session.
 
-Injects text into the session via tmux send-keys. Useful for nudges or notifications.
+NOTE: For sending messages to Claude sessions, use 'gt nudge' instead.
+It uses reliable delivery (literal mode + timing) that works correctly
+with Claude Code's input handling.
+
+This command is a low-level primitive for file-based injection or
+cases where you need raw tmux send-keys behavior.
 
 Examples:
-  gt session inject wyvern/Toast -m "Check your mail"
-  gt session inject wyvern/Toast -f prompt.txt`,
+  gt nudge gastown/furiosa "Check your mail"     # Preferred
+  gt session inject wyvern/Toast -f prompt.txt   # For file injection`,
 	Args: cobra.ExactArgs(1),
 	RunE: runSessionInject,
 }

@@ -1,533 +1,240 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/workspace"
-)
-
-// HandoffAction for handoff command.
-type HandoffAction string
-
-const (
-	HandoffCycle    HandoffAction = "cycle"    // Restart with handoff mail
-	HandoffRestart  HandoffAction = "restart"  // Fresh restart, no handoff
-	HandoffShutdown HandoffAction = "shutdown" // Terminate, no restart
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 var handoffCmd = &cobra.Command{
-	Use:   "handoff",
-	Short: "Request lifecycle action (retirement/restart)",
-	Long: `Request a lifecycle action from your manager.
+	Use:   "handoff [role]",
+	Short: "Hand off to a fresh session, work continues from hook",
+	Long: `End watch. Hand off to a fresh agent session.
 
-This command initiates graceful retirement:
-1. Verifies git state is clean
-2. For polecats (shutdown): auto-submits MR to merge queue
-3. Sends handoff mail to yourself (for cycle)
-4. Sends lifecycle request to your manager
-5. Sets requesting state and waits for retirement
+This command uses tmux respawn-pane to end the current session and restart it
+with a fresh Claude instance, running the full startup/priming sequence.
 
-Your manager (daemon for Mayor/Witness, witness for polecats) will
-verify the request and terminate your session. For cycle/restart,
-a new session starts and reads your handoff mail to continue work.
-
-Polecat auto-MR:
-When a polecat runs 'gt handoff' (default: shutdown), the current branch
-is automatically submitted to the merge queue if it follows the
-polecat/<name>/<issue> naming convention. The Refinery will process
-the merge request.
-
-Flags:
-  --cycle     Restart with handoff mail (default for Mayor/Witness)
-  --restart   Fresh restart, no handoff context
-  --shutdown  Terminate without restart (default for polecats)
+When run without arguments, hands off the current session.
+When given a role name, hands off that role's session (and switches to it).
 
 Examples:
-  gt handoff           # Use role-appropriate default
-  gt handoff --cycle   # Restart with context handoff
-  gt handoff --restart # Fresh restart
-`,
+  gt handoff           # Hand off current session
+  gt handoff crew      # Hand off crew session (auto-detect name)
+  gt handoff mayor     # Hand off mayor session
+  gt handoff witness   # Hand off witness session for current rig
+
+Any molecule on the hook will be auto-continued by the new session.`,
 	RunE: runHandoff,
 }
 
 var (
-	handoffCycle    bool
-	handoffRestart  bool
-	handoffShutdown bool
-	handoffForce    bool
-	handoffMessage  string
+	handoffWatch  bool
+	handoffDryRun bool
 )
 
 func init() {
-	handoffCmd.Flags().BoolVar(&handoffCycle, "cycle", false, "Restart with handoff mail")
-	handoffCmd.Flags().BoolVar(&handoffRestart, "restart", false, "Fresh restart, no handoff")
-	handoffCmd.Flags().BoolVar(&handoffShutdown, "shutdown", false, "Terminate without restart")
-	handoffCmd.Flags().BoolVarP(&handoffForce, "force", "f", false, "Skip pre-flight checks")
-	handoffCmd.Flags().StringVarP(&handoffMessage, "message", "m", "", "Handoff message for successor")
-
+	handoffCmd.Flags().BoolVarP(&handoffWatch, "watch", "w", true, "Switch to new session (for remote handoff)")
+	handoffCmd.Flags().BoolVarP(&handoffDryRun, "dry-run", "n", false, "Show what would be done without executing")
 	rootCmd.AddCommand(handoffCmd)
 }
 
 func runHandoff(cmd *cobra.Command, args []string) error {
-	// Detect our role
-	role := detectHandoffRole()
-	if role == RoleUnknown {
-		return fmt.Errorf("cannot detect agent role (set GT_ROLE or run from known context)")
+	t := tmux.NewTmux()
+
+	// Verify we're in tmux
+	if !tmux.IsInsideTmux() {
+		return fmt.Errorf("not running in tmux - cannot hand off")
 	}
 
-	// Determine action
-	action := determineAction(role)
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		return fmt.Errorf("TMUX_PANE not set - cannot hand off")
+	}
 
-	fmt.Printf("Agent role: %s\n", style.Bold.Render(string(role)))
-	fmt.Printf("Action: %s\n", style.Bold.Render(string(action)))
-
-	// Find workspace
-	townRoot, err := workspace.FindFromCwdOrError()
+	// Get current session name
+	currentSession, err := getCurrentTmuxSession()
 	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		return fmt.Errorf("getting session name: %w", err)
 	}
 
-	// Pre-flight checks (unless forced)
-	if !handoffForce {
-		if err := preFlightChecks(); err != nil {
-			return fmt.Errorf("pre-flight check failed: %w\n\nUse --force to skip checks", err)
-		}
-	}
-
-	// For polecats shutting down with work complete, auto-submit MR to merge queue
-	if role == RolePolecat && action == HandoffShutdown {
-		if err := submitMRForPolecat(); err != nil {
-			// Non-fatal: warn but continue with handoff
-			fmt.Printf("%s Could not auto-submit MR: %v\n", style.Warning.Render("Warning:"), err)
-			fmt.Println(style.Dim.Render("  You may need to run 'gt mq submit' manually"))
-		} else {
-			fmt.Printf("%s Auto-submitted work to merge queue\n", style.Bold.Render("✓"))
+	// Determine target session
+	targetSession := currentSession
+	if len(args) > 0 {
+		// User specified a role to hand off
+		targetSession, err = resolveRoleToSession(args[0])
+		if err != nil {
+			return fmt.Errorf("resolving role: %w", err)
 		}
 	}
 
-	// For cycle, update handoff bead for successor
-	if action == HandoffCycle {
-		if err := sendHandoffMail(role, townRoot); err != nil {
-			return fmt.Errorf("updating handoff bead: %w", err)
-		}
-		fmt.Printf("%s Updated handoff bead for successor\n", style.Bold.Render("✓"))
-	}
-
-	// Send lifecycle request to manager
-	manager := getManager(role)
-
-	if err := sendLifecycleRequest(manager, role, action, townRoot); err != nil {
-		return fmt.Errorf("sending lifecycle request: %w", err)
-	}
-	fmt.Printf("%s Sent %s request to %s\n", style.Bold.Render("✓"), action, manager)
-
-	// Signal daemon for immediate processing (if manager is deacon)
-	if manager == "deacon/" {
-		if err := signalDaemon(townRoot); err != nil {
-			// Non-fatal: daemon will eventually poll
-			fmt.Printf("%s Could not signal daemon (will poll): %v\n", style.Dim.Render("○"), err)
-		} else {
-			fmt.Printf("%s Signaled daemon for immediate processing\n", style.Bold.Render("✓"))
-		}
-	}
-
-	// Set requesting state
-	if err := setRequestingState(role, action, townRoot); err != nil {
-		fmt.Printf("Warning: failed to set state: %v\n", err)
-	}
-
-	// Wait for retirement with timeout warning
-	fmt.Println()
-	fmt.Printf("%s Waiting for retirement...\n", style.Dim.Render("◌"))
-	fmt.Println(style.Dim.Render("(Manager will terminate this session)"))
-
-	// Wait with periodic warnings - manager should kill us
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	waitStart := time.Now()
-	for {
-		select {
-		case <-ticker.C:
-			elapsed := time.Since(waitStart).Round(time.Second)
-			fmt.Printf("%s Still waiting (%v elapsed)...\n", style.Dim.Render("◌"), elapsed)
-			if elapsed >= 2*time.Minute {
-				fmt.Println(style.Dim.Render("  Hint: If manager isn't responding, you may need to:"))
-				fmt.Println(style.Dim.Render("  - Check if daemon/witness is running"))
-				fmt.Println(style.Dim.Render("  - Use Ctrl+C to abort and manually exit"))
-			}
-		}
-	}
-}
-
-// detectHandoffRole figures out what kind of agent we are.
-// Uses GT_ROLE env var, tmux session name, or directory context.
-func detectHandoffRole() Role {
-	// Check GT_ROLE environment variable first
-	if role := os.Getenv("GT_ROLE"); role != "" {
-		switch strings.ToLower(role) {
-		case "mayor":
-			return RoleMayor
-		case "witness":
-			return RoleWitness
-		case "refinery":
-			return RoleRefinery
-		case "polecat":
-			return RolePolecat
-		case "crew":
-			return RoleCrew
-		}
-	}
-
-	// Check tmux session name
-	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
-	if err == nil {
-		sessionName := strings.TrimSpace(string(out))
-		if sessionName == "gt-mayor" {
-			return RoleMayor
-		}
-		if strings.HasSuffix(sessionName, "-witness") {
-			return RoleWitness
-		}
-		if strings.HasSuffix(sessionName, "-refinery") {
-			return RoleRefinery
-		}
-		// Crew sessions: gt-<rig>-crew-<name>
-		if strings.Contains(sessionName, "-crew-") {
-			return RoleCrew
-		}
-		// Polecat sessions: gt-<rig>-<name>
-		if strings.HasPrefix(sessionName, "gt-") && strings.Count(sessionName, "-") >= 2 {
-			return RolePolecat
-		}
-	}
-
-	// Fall back to directory-based detection
-	cwd, err := os.Getwd()
+	// Build the restart command
+	restartCmd, err := buildRestartCommand(targetSession)
 	if err != nil {
-		return RoleUnknown
+		return err
 	}
 
-	townRoot, err := workspace.FindFromCwd()
-	if err != nil || townRoot == "" {
-		return RoleUnknown
+	// If handing off a different session, we need to find its pane and respawn there
+	if targetSession != currentSession {
+		return handoffRemoteSession(t, targetSession, restartCmd)
 	}
 
-	ctx := detectRole(cwd, townRoot)
-	return ctx.Role
-}
+	// Handing off ourselves - print feedback then respawn
+	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), currentSession)
 
-// determineAction picks the action based on flags or role default.
-func determineAction(role Role) HandoffAction {
-	// Explicit flags take precedence
-	if handoffCycle {
-		return HandoffCycle
-	}
-	if handoffRestart {
-		return HandoffRestart
-	}
-	if handoffShutdown {
-		return HandoffShutdown
-	}
-
-	// Role-based defaults
-	switch role {
-	case RolePolecat:
-		return HandoffShutdown // Ephemeral, work is done
-	case RoleMayor, RoleWitness, RoleRefinery:
-		return HandoffCycle // Long-running, preserve context
-	case RoleCrew:
-		return HandoffCycle // Persistent workspace, preserve context
-	default:
-		return HandoffCycle
-	}
-}
-
-// preFlightChecks verifies it's safe to retire.
-func preFlightChecks() error {
-	// Check git status
-	cmd := exec.Command("git", "status", "--porcelain")
-	out, err := cmd.Output()
-	if err != nil {
-		// Not a git repo, that's fine
+	// Dry run mode - show what would happen
+	if handoffDryRun {
+		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", pane, restartCmd)
 		return nil
 	}
 
-	if len(strings.TrimSpace(string(out))) > 0 {
-		return fmt.Errorf("uncommitted changes in git working tree")
-	}
-
-	return nil
+	// Use exec to respawn the pane - this kills us and restarts
+	return t.RespawnPane(pane, restartCmd)
 }
 
-// getManager returns the address of our lifecycle manager.
-// For polecats and refineries, it detects the rig from context.
-func getManager(role Role) string {
-	switch role {
-	case RoleMayor, RoleWitness:
-		return "deacon/"
-	case RolePolecat, RoleRefinery:
-		// Detect rig from current directory context
-		rig := detectRigFromContext()
+// getCurrentTmuxSession returns the current tmux session name.
+func getCurrentTmuxSession() (string, error) {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// resolveRoleToSession converts a role name to a tmux session name.
+// For roles that need context (crew, witness, refinery), it auto-detects from environment.
+func resolveRoleToSession(role string) (string, error) {
+	switch strings.ToLower(role) {
+	case "mayor", "may":
+		return "gt-mayor", nil
+
+	case "deacon", "dea":
+		return "gt-deacon", nil
+
+	case "crew":
+		// Try to get rig and crew name from environment or cwd
+		rig := os.Getenv("GT_RIG")
+		crewName := os.Getenv("GT_CREW")
+		if rig == "" || crewName == "" {
+			// Try to detect from cwd
+			detected, err := detectCrewFromCwd()
+			if err == nil {
+				rig = detected.rigName
+				crewName = detected.crewName
+			}
+		}
+		if rig == "" || crewName == "" {
+			return "", fmt.Errorf("cannot determine crew identity - run from crew directory or specify GT_RIG/GT_CREW")
+		}
+		return fmt.Sprintf("gt-%s-crew-%s", rig, crewName), nil
+
+	case "witness", "wit":
+		rig := os.Getenv("GT_RIG")
 		if rig == "" {
-			// Fallback if rig detection fails - this shouldn't happen
-			// in normal operation but is better than a literal placeholder
-			return "deacon/"
+			return "", fmt.Errorf("cannot determine rig - set GT_RIG or run from rig context")
 		}
-		return rig + "/witness"
-	case RoleCrew:
-		return "deacon/" // Crew lifecycle managed by deacon
+		return fmt.Sprintf("gt-%s-witness", rig), nil
+
+	case "refinery", "ref":
+		rig := os.Getenv("GT_RIG")
+		if rig == "" {
+			return "", fmt.Errorf("cannot determine rig - set GT_RIG or run from rig context")
+		}
+		return fmt.Sprintf("gt-%s-refinery", rig), nil
+
 	default:
-		return "deacon/"
+		// Assume it's a direct session name
+		return role, nil
 	}
 }
 
-// detectRigFromContext determines the rig name from the current directory.
-func detectRigFromContext() string {
-	cwd, err := os.Getwd()
+// buildRestartCommand creates the gt command to restart a session.
+func buildRestartCommand(sessionName string) (string, error) {
+	switch {
+	case sessionName == "gt-mayor":
+		return "gt may at", nil
+
+	case sessionName == "gt-deacon":
+		return "gt dea at", nil
+
+	case strings.Contains(sessionName, "-crew-"):
+		// gt-<rig>-crew-<name>
+		// The attach command can auto-detect from cwd, so just use `gt crew at`
+		return "gt crew at", nil
+
+	case strings.HasSuffix(sessionName, "-witness"):
+		// gt-<rig>-witness
+		return "gt wit at", nil
+
+	case strings.HasSuffix(sessionName, "-refinery"):
+		// gt-<rig>-refinery
+		return "gt ref at", nil
+
+	default:
+		return "", fmt.Errorf("unknown session type: %s (try specifying role explicitly)", sessionName)
+	}
+}
+
+// handoffRemoteSession respawns a different session and optionally switches to it.
+func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error {
+	// Check if target session exists
+	exists, err := t.HasSession(targetSession)
 	if err != nil {
-		return ""
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("session '%s' not found - is the agent running?", targetSession)
 	}
 
-	townRoot, err := workspace.FindFromCwd()
-	if err != nil || townRoot == "" {
-		return ""
-	}
-
-	ctx := detectRole(cwd, townRoot)
-	return ctx.Rig
-}
-
-// sendHandoffMail updates the pinned handoff bead for the successor to read.
-func sendHandoffMail(role Role, townRoot string) error {
-	// Build handoff content
-	content := handoffMessage
-	if content == "" {
-		content = fmt.Sprintf(`🤝 HANDOFF: Session cycling
-
-Time: %s
-Role: %s
-Action: cycle
-
-Check bd ready for pending work.
-Check gt mail inbox for messages received during transition.
-`, time.Now().Format(time.RFC3339), role)
-	}
-
-	// Determine the handoff role key
-	// For role-specific handoffs, use the role name
-	roleKey := string(role)
-
-	// Update the pinned handoff bead
-	bd := beads.New(townRoot)
-	if err := bd.UpdateHandoffContent(roleKey, content); err != nil {
-		return fmt.Errorf("updating handoff bead: %w", err)
-	}
-
-	return nil
-}
-
-// getPolecatName extracts the polecat name from the tmux session.
-// Returns empty string if not a polecat session.
-func getPolecatName() string {
-	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	// Get the pane ID for the target session
+	targetPane, err := getSessionPane(targetSession)
 	if err != nil {
-		return ""
+		return fmt.Errorf("getting target pane: %w", err)
 	}
-	sessionName := strings.TrimSpace(string(out))
 
-	// Polecat sessions: gt-<rig>-<name>
-	if strings.HasPrefix(sessionName, "gt-") {
-		parts := strings.SplitN(sessionName, "-", 3)
-		if len(parts) >= 3 {
-			return parts[2] // The polecat name
+	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), targetSession)
+
+	// Dry run mode
+	if handoffDryRun {
+		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", targetPane, restartCmd)
+		if handoffWatch {
+			fmt.Printf("Would execute: tmux switch-client -t %s\n", targetSession)
 		}
-	}
-	return ""
-}
-
-// getCrewIdentity extracts the crew identity from the tmux session.
-// Returns format: <rig>-crew-<name> (e.g., gastown-crew-max)
-func getCrewIdentity() string {
-	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
-	if err != nil {
-		return ""
-	}
-	sessionName := strings.TrimSpace(string(out))
-
-	// Crew sessions: gt-<rig>-crew-<name>
-	if strings.HasPrefix(sessionName, "gt-") && strings.Contains(sessionName, "-crew-") {
-		// Remove "gt-" prefix to get <rig>-crew-<name>
-		return strings.TrimPrefix(sessionName, "gt-")
-	}
-	return ""
-}
-
-// sendLifecycleRequest sends the lifecycle request to our manager.
-func sendLifecycleRequest(manager string, role Role, action HandoffAction, townRoot string) error {
-	// Build identity for the LIFECYCLE message
-	// The daemon parses identity from "LIFECYCLE: <identity> requesting <action>"
-	identity := string(role)
-
-	switch role {
-	case RoleCrew:
-		// Crew identity: <rig>-crew-<name> (e.g., gastown-crew-max)
-		if crewID := getCrewIdentity(); crewID != "" {
-			identity = crewID
-		}
-	case RolePolecat:
-		// Polecat identity would need similar handling if routed to deacon
-	}
-
-	subject := fmt.Sprintf("LIFECYCLE: %s requesting %s", identity, action)
-	body := fmt.Sprintf(`Lifecycle request from %s.
-
-Action: %s
-Time: %s
-
-Please verify state and execute lifecycle action.
-`, identity, action, time.Now().Format(time.RFC3339))
-
-	// Send via gt mail (syntax: gt mail send <recipient> -s <subject> -m <body>)
-	cmd := exec.Command("gt", "mail", "send", manager,
-		"-s", subject,
-		"-m", body,
-	)
-	cmd.Dir = townRoot
-
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%w: %s", err, string(out))
-	}
-
-	return nil
-}
-
-// submitMRForPolecat submits the current branch to the merge queue.
-// This is called automatically when a polecat shuts down with completed work.
-func submitMRForPolecat() error {
-	// Check if we're on a polecat branch with work to submit
-	cmd := exec.Command("git", "branch", "--show-current")
-	out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("getting current branch: %w", err)
-	}
-	branch := strings.TrimSpace(string(out))
-
-	// Skip if on main/master (no work to submit)
-	if branch == "main" || branch == "master" || branch == "" {
-		return nil // Nothing to submit, that's OK
-	}
-
-	// Check if branch follows polecat/<name>/<issue> pattern
-	parts := strings.Split(branch, "/")
-	if len(parts) < 3 || parts[0] != "polecat" {
-		// Not a polecat work branch, skip
 		return nil
 	}
 
-	// Run gt mq submit --no-cleanup (handoff manages lifecycle itself)
-	submitCmd := exec.Command("gt", "mq", "submit", "--no-cleanup")
-	submitOutput, err := submitCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s", strings.TrimSpace(string(submitOutput)))
+	// Respawn the remote session's pane
+	if err := t.RespawnPane(targetPane, restartCmd); err != nil {
+		return fmt.Errorf("respawning pane: %w", err)
 	}
 
-	// Print the submit output (trimmed)
-	output := strings.TrimSpace(string(submitOutput))
-	if output != "" {
-		for _, line := range strings.Split(output, "\n") {
-			fmt.Printf("  %s\n", line)
+	// If --watch, switch to that session
+	if handoffWatch {
+		fmt.Printf("Switching to %s...\n", targetSession)
+		// Use tmux switch-client to move our view to the target session
+		if err := exec.Command("tmux", "switch-client", "-t", targetSession).Run(); err != nil {
+			// Non-fatal - they can manually switch
+			fmt.Printf("Note: Could not auto-switch (use: tmux switch-client -t %s)\n", targetSession)
 		}
 	}
 
 	return nil
 }
 
-// setRequestingState updates state.json to indicate we're requesting lifecycle action.
-func setRequestingState(role Role, action HandoffAction, townRoot string) error {
-	// Determine state file location based on role
-	var stateFile string
-	switch role {
-	case RoleMayor:
-		stateFile = filepath.Join(townRoot, "mayor", "state.json")
-	case RoleWitness:
-		// Would need rig context
-		stateFile = filepath.Join(townRoot, "witness", "state.json")
-	case RoleCrew:
-		// Crew state: <townRoot>/<rig>/crew/<name>/state.json
-		if crewID := getCrewIdentity(); crewID != "" {
-			// crewID format: <rig>-crew-<name>
-			parts := strings.SplitN(crewID, "-crew-", 2)
-			if len(parts) == 2 {
-				stateFile = filepath.Join(townRoot, parts[0], "crew", parts[1], "state.json")
-			}
-		}
-		if stateFile == "" {
-			// Fallback to cwd
-			cwd, _ := os.Getwd()
-			stateFile = filepath.Join(cwd, "state.json")
-		}
-	default:
-		// For other roles, use a generic location
-		stateFile = filepath.Join(townRoot, ".runtime", "agent-state.json")
-	}
-
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(stateFile), 0755); err != nil {
-		return err
-	}
-
-	// Read existing state or create new
-	state := make(map[string]interface{})
-	if data, err := os.ReadFile(stateFile); err == nil {
-		_ = json.Unmarshal(data, &state)
-	}
-
-	// Set requesting state
-	state["requesting_"+string(action)] = true
-	state["requesting_time"] = time.Now().Format(time.RFC3339)
-
-	// Write back
-	data, err := json.MarshalIndent(state, "", "  ")
+// getSessionPane returns the pane identifier for a session's main pane.
+func getSessionPane(sessionName string) (string, error) {
+	// Get the pane ID for the first pane in the session
+	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}").Output()
 	if err != nil {
-		return err
+		return "", err
 	}
-
-	return os.WriteFile(stateFile, data, 0644)
-}
-
-// signalDaemon sends SIGUSR1 to the daemon to trigger immediate lifecycle processing.
-func signalDaemon(townRoot string) error {
-	pidFile := filepath.Join(townRoot, "daemon", "daemon.pid")
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		return fmt.Errorf("reading daemon PID: %w", err)
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return "", fmt.Errorf("no panes found in session")
 	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return fmt.Errorf("parsing daemon PID: %w", err)
-	}
-
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("finding daemon process: %w", err)
-	}
-
-	if err := process.Signal(syscall.SIGUSR1); err != nil {
-		return fmt.Errorf("signaling daemon: %w", err)
-	}
-
-	return nil
+	return lines[0], nil
 }
