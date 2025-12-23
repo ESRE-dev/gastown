@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
@@ -43,13 +44,23 @@ type TownStatus struct {
 
 // RigStatus represents status of a single rig.
 type RigStatus struct {
-	Name         string   `json:"name"`
-	Polecats     []string `json:"polecats"`
-	PolecatCount int      `json:"polecat_count"`
-	Crews        []string `json:"crews"`
-	CrewCount    int      `json:"crew_count"`
-	HasWitness   bool     `json:"has_witness"`
-	HasRefinery  bool     `json:"has_refinery"`
+	Name         string     `json:"name"`
+	Polecats     []string   `json:"polecats"`
+	PolecatCount int        `json:"polecat_count"`
+	Crews        []string   `json:"crews"`
+	CrewCount    int        `json:"crew_count"`
+	HasWitness   bool       `json:"has_witness"`
+	HasRefinery  bool       `json:"has_refinery"`
+	Hooks        []AgentHookInfo `json:"hooks,omitempty"`
+}
+
+// AgentHookInfo represents an agent's hook (pinned work) status.
+type AgentHookInfo struct {
+	Agent    string `json:"agent"`              // Agent address (e.g., "gastown/toast", "gastown/witness")
+	Role     string `json:"role"`               // Role type (polecat, crew, witness, refinery)
+	HasWork  bool   `json:"has_work"`           // Whether agent has pinned work
+	Molecule string `json:"molecule,omitempty"` // Attached molecule ID
+	Title    string `json:"title,omitempty"`    // Pinned bead title
 }
 
 // StatusSum provides summary counts.
@@ -59,6 +70,7 @@ type StatusSum struct {
 	CrewCount     int `json:"crew_count"`
 	WitnessCount  int `json:"witness_count"`
 	RefineryCount int `json:"refinery_count"`
+	ActiveHooks   int `json:"active_hooks"`
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
@@ -120,6 +132,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			rs.CrewCount = len(workers)
 		}
 
+		// Discover hooks for all agents in this rig
+		rs.Hooks = discoverRigHooks(r, rs.Crews)
+		for _, hook := range rs.Hooks {
+			if hook.HasWork {
+				status.Summary.ActiveHooks++
+			}
+		}
+
 		status.Rigs = append(status.Rigs, rs)
 
 		// Update summary
@@ -159,6 +179,7 @@ func outputStatusText(status TownStatus) error {
 	fmt.Printf("   Crews:     %d\n", status.Summary.CrewCount)
 	fmt.Printf("   Witnesses: %d\n", status.Summary.WitnessCount)
 	fmt.Printf("   Refineries: %d\n", status.Summary.RefineryCount)
+	fmt.Printf("   Active Hooks: %d\n", status.Summary.ActiveHooks)
 
 	if len(status.Rigs) == 0 {
 		fmt.Printf("\n%s\n", style.Dim.Render("No rigs registered. Use 'gt rig add' to add one."))
@@ -191,7 +212,90 @@ func outputStatusText(status TownStatus) error {
 		if len(r.Crews) > 0 {
 			fmt.Printf("      Crews: %v\n", r.Crews)
 		}
+
+		// Show active hooks
+		activeHooks := []AgentHookInfo{}
+		for _, h := range r.Hooks {
+			if h.HasWork {
+				activeHooks = append(activeHooks, h)
+			}
+		}
+		if len(activeHooks) > 0 {
+			fmt.Printf("      %s\n", style.Bold.Render("Hooks:"))
+			for _, h := range activeHooks {
+				if h.Molecule != "" {
+					fmt.Printf("         %s %s → %s\n", AgentTypeIcons[AgentPolecat], h.Agent, h.Molecule)
+				} else if h.Title != "" {
+					fmt.Printf("         %s %s → %s\n", AgentTypeIcons[AgentPolecat], h.Agent, h.Title)
+				} else {
+					fmt.Printf("         %s %s → (work attached)\n", AgentTypeIcons[AgentPolecat], h.Agent)
+				}
+			}
+		}
 	}
 
 	return nil
+}
+
+// discoverRigHooks finds all hook attachments for agents in a rig.
+// It scans polecats, crew workers, witness, and refinery for handoff beads.
+func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
+	var hooks []AgentHookInfo
+
+	// Create beads instance for the rig
+	b := beads.New(r.Path)
+
+	// Check polecats
+	for _, name := range r.Polecats {
+		hook := getAgentHook(b, name, r.Name+"/"+name, "polecat")
+		hooks = append(hooks, hook)
+	}
+
+	// Check crew workers
+	for _, name := range crews {
+		hook := getAgentHook(b, name, r.Name+"/crew/"+name, "crew")
+		hooks = append(hooks, hook)
+	}
+
+	// Check witness
+	if r.HasWitness {
+		hook := getAgentHook(b, "witness", r.Name+"/witness", "witness")
+		hooks = append(hooks, hook)
+	}
+
+	// Check refinery
+	if r.HasRefinery {
+		hook := getAgentHook(b, "refinery", r.Name+"/refinery", "refinery")
+		hooks = append(hooks, hook)
+	}
+
+	return hooks
+}
+
+// getAgentHook retrieves hook status for a specific agent.
+func getAgentHook(b *beads.Beads, role, agentAddress, roleType string) AgentHookInfo {
+	hook := AgentHookInfo{
+		Agent: agentAddress,
+		Role:  roleType,
+	}
+
+	// Find handoff bead for this role
+	handoff, err := b.FindHandoffBead(role)
+	if err != nil || handoff == nil {
+		return hook
+	}
+
+	// Check for attachment
+	attachment := beads.ParseAttachmentFields(handoff)
+	if attachment != nil && attachment.AttachedMolecule != "" {
+		hook.HasWork = true
+		hook.Molecule = attachment.AttachedMolecule
+		hook.Title = handoff.Title
+	} else if handoff.Description != "" {
+		// Has content but no molecule - still has work
+		hook.HasWork = true
+		hook.Title = handoff.Title
+	}
+
+	return hook
 }
