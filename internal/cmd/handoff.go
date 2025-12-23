@@ -136,9 +136,19 @@ func getCurrentTmuxSession() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// resolveRoleToSession converts a role name to a tmux session name.
-// For roles that need context (crew, witness, refinery), it auto-detects from environment.
+// resolveRoleToSession converts a role name or path to a tmux session name.
+// Accepts:
+//   - Role shortcuts: "crew", "witness", "refinery", "mayor", "deacon"
+//   - Full paths: "<rig>/crew/<name>", "<rig>/witness", "<rig>/refinery"
+//   - Direct session names (passed through)
+//
+// For role shortcuts that need context (crew, witness, refinery), it auto-detects from environment.
 func resolveRoleToSession(role string) (string, error) {
+	// First, check if it's a path format (contains /)
+	if strings.Contains(role, "/") {
+		return resolvePathToSession(role)
+	}
+
 	switch strings.ToLower(role) {
 	case "mayor", "may":
 		return "gt-mayor", nil
@@ -178,9 +188,42 @@ func resolveRoleToSession(role string) (string, error) {
 		return fmt.Sprintf("gt-%s-refinery", rig), nil
 
 	default:
-		// Assume it's a direct session name
+		// Assume it's a direct session name (e.g., gt-gastown-crew-max)
 		return role, nil
 	}
+}
+
+// resolvePathToSession converts a path like "<rig>/crew/<name>" to a session name.
+// Supported formats:
+//   - <rig>/crew/<name> -> gt-<rig>-crew-<name>
+//   - <rig>/witness -> gt-<rig>-witness
+//   - <rig>/refinery -> gt-<rig>-refinery
+func resolvePathToSession(path string) (string, error) {
+	parts := strings.Split(path, "/")
+
+	// Handle <rig>/crew/<name> format
+	if len(parts) == 3 && parts[1] == "crew" {
+		rig := parts[0]
+		name := parts[2]
+		return fmt.Sprintf("gt-%s-crew-%s", rig, name), nil
+	}
+
+	// Handle <rig>/<role> format (witness, refinery)
+	if len(parts) == 2 {
+		rig := parts[0]
+		role := strings.ToLower(parts[1])
+		switch role {
+		case "witness":
+			return fmt.Sprintf("gt-%s-witness", rig), nil
+		case "refinery":
+			return fmt.Sprintf("gt-%s-refinery", rig), nil
+		case "crew":
+			// Just "<rig>/crew" without a name - need more info
+			return "", fmt.Errorf("crew path requires name: %s/crew/<name>", rig)
+		}
+	}
+
+	return "", fmt.Errorf("cannot parse path '%s' - expected <rig>/crew/<name>, <rig>/witness, or <rig>/refinery", path)
 }
 
 // buildRestartCommand creates the command to run when respawning a session's pane.
