@@ -269,15 +269,11 @@ Before killing ANY polecat session, verify:
 
 When your context fills up (slow responses, losing track of state):
 
-1. Capture current state:
-   - Active workers and their status
-   - Pending nudges (worker, nudge count, last nudge time)
-   - Recent escalations
-   - Any other relevant context
+1. Capture current state mentally (active workers, pending nudges, escalations)
 
-2. Send handoff to yourself:
+2. Use `gt handoff` to cycle to a fresh session:
    ```bash
-   gt mail send {{ rig }}/witness -s "HANDOFF: Witness session cycle" -m "
+   gt handoff -s "Witness cycle" -m "
    Active workers: <list with status>
    Pending nudges:
      - <polecat>: <nudge_count> nudges, last at <time>
@@ -286,7 +282,9 @@ When your context fills up (slow responses, losing track of state):
    "
    ```
 
-3. Exit cleanly (don't self-terminate, wait for daemon)
+**Why `gt handoff`?** This is the canonical way to end any agent session. It
+sends handoff mail, then respawns with fresh Claude instance. The SessionStart
+hook runs `gt prime` to restore your context.
 
 ---
 

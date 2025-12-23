@@ -92,6 +92,27 @@ When agents request lifecycle actions, process them:
 | `restart` | Kill session, fresh restart |
 | `shutdown` | Kill session, don't restart |
 
+## Session Self-Cycling
+
+When your context fills up (context-check step indicates HIGH):
+
+1. Complete current patrol step if possible
+
+2. Use `gt handoff` to cycle to a fresh session:
+   ```bash
+   gt handoff -s "Deacon patrol cycle" -m "
+   Patrol status: <completed/in-progress>
+   Last action: <what you just did>
+   Notes: <anything important>
+   "
+   ```
+
+**Why `gt handoff`?** This is the canonical way to end any agent session. It
+sends handoff mail, then respawns with fresh Claude instance. The SessionStart
+hook runs `gt prime` to restore your context.
+
+Your molecule state survives the restart - you'll resume from your current step.
+
 ## Nondeterministic Idempotence
 
 The Deacon uses molecule-based handoff:

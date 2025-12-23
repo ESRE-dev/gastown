@@ -63,44 +63,32 @@ gt mail send <recipient> -s "Done: <task>" -m "Summary..."
 
 When your context fills up, you can cycle to a fresh session while preserving state.
 
-### Manual Handoff
+### Using gt handoff (Canonical Method)
 
-Send a handoff mail to yourself:
+The canonical way to end any agent session:
 
 ```bash
-gt mail send {{ rig }}/{{ name }} -s "HANDOFF: Work in progress" -m "
-## Current State
-
-Working on: <issue-id or description>
-Branch: <current branch>
+gt handoff                                    # Basic handoff
+gt handoff -s "Work in progress" -m "
+Working on: <issue-id>
 Status: <what's done, what remains>
-
-## Next Steps
-
-1. <first thing to do>
-2. <second thing to do>
-
-## Notes
-
-<any important context>
+Next: <what to do next>
 "
 ```
 
-Then end your session. The next session will see this message in its inbox.
+This:
+1. Sends handoff mail to yourself (with optional context via -s/-m flags)
+2. Respawns with fresh Claude instance
+3. The SessionStart hook runs `gt prime` to restore context
+4. Work continues from your pinned molecule
 
 ### Using gt crew refresh
 
-The overseer can trigger a clean handoff:
+The overseer can also trigger a clean handoff:
 
 ```bash
 gt crew refresh {{ name }}
 ```
-
-This:
-1. Prompts you to prepare handoff (if session active)
-2. Ends the current session
-3. Starts a fresh session
-4. The new session sees the handoff message
 
 ## No Witness Monitoring
 
@@ -193,12 +181,16 @@ Before ending your session:
 
 ```
 [ ] 1. git status              (check for uncommitted changes)
-[ ] 2. git push                (push any commits)
+[ ] 2. git add && git commit   (commit any changes)
 [ ] 3. bd sync                 (sync beads if configured)
-[ ] 4. Check inbox             (any messages needing response?)
-[ ] 5. HANDOFF if incomplete:
-        gt mail send {{ rig }}/{{ name }} -s "🤝 HANDOFF: ..." -m "..."
+[ ] 4. git push                (push to remote - CRITICAL)
+[ ] 5. gt handoff              (hand off to fresh session)
+        # Or with context: gt handoff -s "Brief" -m "Details"
 ```
+
+**Why `gt handoff`?** This is the canonical way to end any agent session. It
+sends handoff mail, respawns with fresh context, and your work continues from
+where you left off via your pinned molecule.
 
 ## Tips
 

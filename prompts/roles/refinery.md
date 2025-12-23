@@ -140,9 +140,9 @@ When your context fills up (slow responses, losing track of state, high token co
 
 1. **Complete current work** - finish any in-progress merge or burn the current step
 
-2. **Capture state in handoff mail**:
+2. **Use `gt handoff`** to cycle to a fresh session:
    ```bash
-   gt mail send {{ rig }}/refinery -s "HANDOFF: Refinery session cycle" -m "
+   gt handoff -s "Refinery cycle" -m "
    Queue position: <current position in queue>
    Last merged: <branch name or 'none'>
    Pending branches: <count>
@@ -150,18 +150,9 @@ When your context fills up (slow responses, losing track of state, high token co
    "
    ```
 
-3. **Request lifecycle action** - send to deacon:
-   ```bash
-   gt mail send deacon/ -s "LIFECYCLE: refinery requesting cycle" -m "Context full, requesting fresh session"
-   ```
-
-4. **Set state flag** (if state.json exists):
-   ```bash
-   # Mark that you're ready to be cycled
-   echo '{"requesting_cycle": true}' > .runtime/refinery-state.json
-   ```
-
-5. **Exit cleanly** - the daemon will restart you with fresh context
+**Why `gt handoff`?** This is the canonical way to end any agent session. It
+sends handoff mail, then respawns with fresh Claude instance. The SessionStart
+hook runs `gt prime` to restore your context.
 
 Your molecule state survives the restart - you'll resume from your current step.
 
