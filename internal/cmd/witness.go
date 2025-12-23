@@ -261,7 +261,7 @@ func runWitnessStatus(cmd *cobra.Command, args []string) error {
 
 // witnessSessionName returns the tmux session name for a rig's witness.
 func witnessSessionName(rigName string) string {
-	return fmt.Sprintf("gt-witness-%s", rigName)
+	return fmt.Sprintf("gt-%s-witness", rigName)
 }
 
 // ensureWitnessSession creates a witness tmux session if it doesn't exist.
