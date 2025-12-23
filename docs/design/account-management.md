@@ -103,7 +103,7 @@ gt account status
 gt spawn --account=yegge gastown
 
 # Override for crew attach
-gt crew attach --account=ghosttrack max
+gt crew at --account=ghosttrack max
 
 # With env var (highest precedence)
 GT_ACCOUNT=yegge gt spawn gastown
@@ -119,7 +119,7 @@ GT_ACCOUNT=yegge gt spawn gastown
 
 #### How Spawning Works
 
-When `gt spawn` or `gt crew attach` runs Claude Code:
+When `gt spawn` or `gt crew at` runs Claude Code:
 
 ```go
 func resolveAccountConfigDir() string {
