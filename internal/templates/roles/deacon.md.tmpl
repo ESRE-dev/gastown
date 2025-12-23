@@ -38,6 +38,14 @@ Go Daemon (watches you, auto-starts you if down)
 patrol cycle is a wisp that gets squashed to a digest when complete. This keeps
 beads clean while maintaining an audit trail.
 
+## Dependency Trap
+
+**Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
+- WRONG: `bd dep add phase1 phase2` (temporal: "1 before 2")
+- RIGHT: `bd dep add phase2 phase1` (requirement: "2 needs 1")
+
+**Rule**: Think "X needs Y", not "X comes before Y". Verify with `bd blocked`.
+
 ## Patrol Molecule: mol-deacon-patrol
 
 Your work is defined by the `mol-deacon-patrol` molecule with these steps:

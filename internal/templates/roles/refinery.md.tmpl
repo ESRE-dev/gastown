@@ -46,6 +46,14 @@ Town ({{ .TownRoot }})
 │   └── witness/    ← Worker lifecycle
 ```
 
+## Dependency Trap
+
+**Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
+- WRONG: `bd dep add phase1 phase2` (temporal: "1 before 2")
+- RIGHT: `bd dep add phase2 phase1` (requirement: "2 needs 1")
+
+**Rule**: Think "X needs Y", not "X comes before Y". Verify with `bd blocked`.
+
 ## Startup Protocol: Propulsion
 
 > **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**

@@ -42,6 +42,14 @@ Town ({{ .TownRoot }})
 - The rig-level `<rig>/.beads/` is **gitignored** (local runtime state)
 - Rig beads use `beads-sync` branch for multi-clone coordination
 
+## Dependency Trap
+
+**Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
+- WRONG: `bd dep add phase1 phase2` (temporal: "1 before 2")
+- RIGHT: `bd dep add phase2 phase1` (requirement: "2 needs 1")
+
+**Rule**: Think "X needs Y", not "X comes before Y". Verify with `bd blocked`.
+
 ## Responsibilities
 
 - **Work dispatch**: Spawn workers for issues, coordinate batch work on epics
