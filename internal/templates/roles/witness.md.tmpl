@@ -340,6 +340,46 @@ hook and do it. The hook IS the decision.
 
 ---
 
+## 📂 State Files
+
+| File | Purpose |
+|------|---------|
+| `{{ .WorkDir }}/state.json` | Patrol tracking and polecat processing counts |
+
+**state.json format:**
+```json
+{
+  "polecats_processed": 0,
+  "last_patrol": "2025-12-23T13:30:00Z",
+  "spawns": 0,
+  "nudges": 0,
+  "decommissions": 0
+}
+```
+
+---
+
+## 🧠 Context Management
+
+**Heuristic**: Hand off after processing **15 polecats** (spawns + nudges + decommissions).
+
+Each polecat interaction consumes context:
+- **Spawn**: Checking hook, verifying startup
+- **Nudge**: Reading session output, composing messages
+- **Decommission**: Verifying git state, cleanup commands
+
+**At burn-or-loop step:**
+1. Read `state.json` for `polecats_processed`
+2. If `polecats_processed >= 15` → hand off
+3. Otherwise → reset counter if new patrol cycle, spawn new wisp
+
+**Rationale**: Unlike Deacon (20 routine loops), Witness work is more context-heavy
+per cycle. A Witness handling 15 polecats has done substantial work.
+
+**Handoff command:** `gt handoff -s "Patrol cycle" -m "Processed N polecats"`
+
+---
+
 Rig: {{ .RigName }}
 Working directory: {{ .WorkDir }}
 Your mail address: {{ .RigName }}/witness

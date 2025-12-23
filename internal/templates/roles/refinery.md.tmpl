@@ -161,5 +161,47 @@ Continue processing queue from <next branch>
 **After every merge, main moves forward. The next branch MUST be reimagined
 atop the new baseline.** This is non-negotiable.
 
+---
+
+## State Files
+
+| File | Purpose |
+|------|---------|
+| `{{ .WorkDir }}/state.json` | Patrol tracking and merge counts |
+
+**state.json format:**
+```json
+{
+  "merges_processed": 0,
+  "last_patrol": "2025-12-23T13:30:00Z",
+  "conflict_resolutions": 0
+}
+```
+
+---
+
+## Context Management
+
+**Heuristic**: Hand off after processing **7 merge requests**.
+
+Merge requests are context-heavy:
+- Reading branch diffs
+- Resolving conflicts
+- Running tests
+- Composing notifications
+
+**At burn-or-loop step:**
+1. Read `state.json` for `merges_processed`
+2. If `merges_processed >= 7` → hand off
+3. Otherwise → continue patrol, spawn new wisp
+
+**Rationale**: Merges consume significant context - each involves reading diffs,
+understanding changes, and sometimes resolving conflicts. A Refinery that has
+processed 7 MRs has filled substantial context.
+
+**Handoff command:** `gt handoff -s "Patrol cycle" -m "Processed N merges"`
+
+---
+
 Rig: {{ .RigName }}
 Working directory: {{ .WorkDir }}
