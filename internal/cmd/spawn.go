@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -354,41 +353,30 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// Check if already running
 	running, _ := sessMgr.IsRunning(polecatName)
 	if running {
-		// Session already running - send notification to check inbox
-		fmt.Printf("Session already running, notifying to check inbox...\n")
-		time.Sleep(500 * time.Millisecond) // Brief pause for notification
+		fmt.Printf("Session already running\n")
 	} else {
 		// Start new session
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 		if err := sessMgr.Start(polecatName, session.StartOptions{}); err != nil {
 			return fmt.Errorf("starting session: %w", err)
 		}
-		// Wait for Claude Code to fully initialize (banner, prompt ready)
-		// 3 seconds is enough for the UI to stabilize
-		time.Sleep(3 * time.Second)
 	}
 
 	fmt.Printf("%s Session started. Attach with: %s\n",
 		style.Bold.Render("✓"),
 		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
 
-	// Send direct nudge to start working using reliable NudgeSession
-	// The polecat has a work assignment in its inbox; just tell it to check
-	sessionName := sessMgr.SessionName(polecatName)
-	nudgeMsg := fmt.Sprintf("You have a work assignment. Run 'gt mail inbox' to see it, then start working on issue %s.", assignmentID)
-	if err := t.NudgeSession(sessionName, nudgeMsg); err != nil {
-		fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not nudge polecat: %v", err)))
-	} else {
-		fmt.Printf("  %s\n", style.Dim.Render("Polecat nudged to start working"))
-	}
+	// NOTE: We do NOT send a nudge here. Claude Code takes 10-20+ seconds to initialize,
+	// and sending keys before the prompt is ready causes them to be mangled.
+	// The Deacon will poll with WaitForClaudeReady and send a trigger when ready.
+	// The polecat's SessionStart hook runs gt prime, and work assignment is in its inbox.
 
-	// Notify Witness about the spawn - Witness will monitor startup and nudge when ready
-	// Note: If Witness is down, Deacon's health check will wake it and Witness will
-	// process the SPAWN message from its inbox on startup.
+	// Notify Witness about the spawn for monitoring
 	// Use town-level beads for cross-agent mail (gt-c6b: mail coordination uses town-level)
 	townRouter := mail.NewRouter(townRoot)
 	witnessAddr := fmt.Sprintf("%s/witness", rigName)
 	sender := detectSender()
+	sessionName := sessMgr.SessionName(polecatName)
 	spawnNotification := &mail.Message{
 		To:      witnessAddr,
 		From:    sender,
@@ -400,12 +388,9 @@ Issue: %s
 Session: %s
 Spawned by: %s
 
-Please monitor this polecat's startup. When Claude is ready (you can see the prompt
-in the tmux session), send a nudge to start working:
-
-    tmux send-keys -t %s "Check your inbox with 'gt mail inbox' and begin working." Enter
-
-The polecat has a work assignment in its inbox.`, polecatName, assignmentID, sessMgr.SessionName(polecatName), sender, sessMgr.SessionName(polecatName)),
+The Deacon will trigger this polecat when Claude is ready (WaitForClaudeReady).
+The polecat's SessionStart hook runs gt prime, and work assignment is in its inbox.
+Monitor for stuck/idle state after a few minutes.`, polecatName, assignmentID, sessionName, sender),
 	}
 
 	if err := townRouter.Send(spawnNotification); err != nil {

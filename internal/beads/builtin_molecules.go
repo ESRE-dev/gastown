@@ -632,6 +632,31 @@ gt mail read <id>
 
 Callbacks may spawn new polecats, update issue state, or trigger other actions.
 
+## Step: trigger-pending-spawns
+Nudge newly spawned polecats that are ready for input.
+
+When polecats are spawned, their Claude session takes 10-20 seconds to initialize.
+The spawn command returns immediately without waiting. This step finds spawned
+polecats that are now ready and sends them a trigger to start working.
+
+` + "```" + `bash
+# For each rig with polecats
+for rig in gastown beads; do
+    gt polecats $rig
+    # For each working polecat, check if Claude is ready
+    # Use tmux capture-pane to look for "> " prompt
+done
+` + "```" + `
+
+For each ready polecat that hasn't been triggered yet:
+1. Send "Begin." to trigger UserPromptSubmit hook
+2. The hook injects mail, polecat sees its assignment
+3. Mark polecat as triggered in state
+
+Use WaitForClaudeReady from tmux package (polls for "> " prompt).
+Timeout: 60 seconds per polecat. If not ready, try again next cycle.
+Needs: inbox-check
+
 ## Step: health-scan
 Ping Witnesses and Refineries.
 
@@ -649,7 +674,7 @@ done
 ` + "```" + `
 
 Report any issues found. Restart unresponsive components if needed.
-Needs: inbox-check
+Needs: trigger-pending-spawns
 
 ## Step: plugin-run
 Execute registered plugins.
