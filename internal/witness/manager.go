@@ -27,8 +27,9 @@ var (
 
 // Manager handles witness lifecycle and monitoring operations.
 type Manager struct {
-	rig     *rig.Rig
-	workDir string
+	rig          *rig.Rig
+	workDir      string
+	handoffState *WitnessHandoffState // Cached handoff state for persistence across burns
 }
 
 // NewManager creates a new witness manager for a rig.
@@ -78,6 +79,166 @@ func (m *Manager) saveState(w *Witness) error {
 	}
 
 	return os.WriteFile(m.stateFile(), data, 0644)
+}
+
+// handoffBeadID returns the well-known ID for this rig's witness handoff bead.
+func (m *Manager) handoffBeadID() string {
+	return fmt.Sprintf("gt-%s-%s", m.rig.Name, HandoffBeadID)
+}
+
+// loadHandoffState loads worker states from the handoff bead.
+// If the bead doesn't exist, returns an empty state and creates the bead.
+func (m *Manager) loadHandoffState() (*WitnessHandoffState, error) {
+	beadID := m.handoffBeadID()
+
+	// Try to read the bead
+	cmd := exec.Command("bd", "show", beadID, "--json")
+	cmd.Dir = m.workDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		// Bead doesn't exist - create it
+		if strings.Contains(stderr.String(), "not found") || strings.Contains(stderr.String(), "No issue") {
+			if err := m.ensureHandoffBead(); err != nil {
+				return nil, fmt.Errorf("creating handoff bead: %w", err)
+			}
+			return &WitnessHandoffState{
+				WorkerStates: make(map[string]WorkerState),
+			}, nil
+		}
+		return nil, fmt.Errorf("reading handoff bead: %s", stderr.String())
+	}
+
+	// Parse the bead JSON
+	var issues []struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return nil, fmt.Errorf("parsing handoff bead: %w", err)
+	}
+
+	if len(issues) == 0 {
+		return &WitnessHandoffState{
+			WorkerStates: make(map[string]WorkerState),
+		}, nil
+	}
+
+	// The description contains our JSON state
+	desc := issues[0].Description
+
+	// Extract JSON from description (skip any markdown header)
+	state := &WitnessHandoffState{
+		WorkerStates: make(map[string]WorkerState),
+	}
+
+	// Try to find JSON in the description
+	if idx := strings.Index(desc, "{"); idx >= 0 {
+		jsonPart := desc[idx:]
+		// Find the matching closing brace
+		if endIdx := findMatchingBrace(jsonPart); endIdx > 0 {
+			jsonPart = jsonPart[:endIdx+1]
+			if err := json.Unmarshal([]byte(jsonPart), state); err != nil {
+				// If parsing fails, just return empty state
+				return &WitnessHandoffState{
+					WorkerStates: make(map[string]WorkerState),
+				}, nil
+			}
+		}
+	}
+
+	return state, nil
+}
+
+// findMatchingBrace finds the index of the matching closing brace.
+func findMatchingBrace(s string) int {
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i, c := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if c == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if c == '{' {
+			depth++
+		} else if c == '}' {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// saveHandoffState persists worker states to the handoff bead.
+func (m *Manager) saveHandoffState(state *WitnessHandoffState) error {
+	beadID := m.handoffBeadID()
+
+	// Serialize state to JSON
+	stateJSON, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("serializing state: %w", err)
+	}
+
+	// Update the bead's description with the JSON state
+	desc := fmt.Sprintf("Witness handoff state for %s.\n\n```json\n%s\n```", m.rig.Name, string(stateJSON))
+
+	cmd := exec.Command("bd", "update", beadID, "--description", desc)
+	cmd.Dir = m.workDir
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("updating handoff bead: %s", strings.TrimSpace(string(out)))
+	}
+
+	return nil
+}
+
+// ensureHandoffBead creates the handoff bead if it doesn't exist.
+func (m *Manager) ensureHandoffBead() error {
+	beadID := m.handoffBeadID()
+	title := fmt.Sprintf("Witness handoff state (%s)", m.rig.Name)
+	desc := fmt.Sprintf("Witness handoff state for %s.\n\n```json\n{\"worker_states\": {}, \"last_patrol\": null}\n```", m.rig.Name)
+
+	// Create pinned handoff bead with specific ID
+	cmd := exec.Command("bd", "create",
+		"--id", beadID,
+		"--title", title,
+		"--type", "task",
+		"--priority", "4", // Low priority - just state storage
+		"--description", desc,
+	)
+	cmd.Dir = m.workDir
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// If it already exists, that's fine
+		if strings.Contains(string(out), "already exists") {
+			return nil
+		}
+		return fmt.Errorf("creating handoff bead: %s", strings.TrimSpace(string(out)))
+	}
+
+	// Pin the bead so it survives cleanup
+	cmd = exec.Command("bd", "update", beadID, "--pinned")
+	cmd.Dir = m.workDir
+	_ = cmd.Run() // Best effort - pinning might not be supported
+
+	return nil
 }
 
 // Status returns the current witness status.
@@ -165,6 +326,17 @@ func (m *Manager) run(w *Witness) error {
 	fmt.Println("Witness running...")
 	fmt.Println("Press Ctrl+C to stop")
 
+	// Load handoff state from persistent bead (survives wisp burns)
+	handoffState, err := m.loadHandoffState()
+	if err != nil {
+		fmt.Printf("Warning: could not load handoff state: %v\n", err)
+		handoffState = &WitnessHandoffState{
+			WorkerStates: make(map[string]WorkerState),
+		}
+	}
+	m.handoffState = handoffState
+	fmt.Printf("Loaded handoff state with %d worker(s)\n", len(m.handoffState.WorkerStates))
+
 	// Initial check immediately
 	m.checkAndProcess(w)
 
@@ -194,6 +366,13 @@ func (m *Manager) checkAndProcess(w *Witness) {
 		if err := m.autoSpawnForReadyWork(w); err != nil {
 			fmt.Printf("Auto-spawn error: %v\n", err)
 		}
+	}
+
+	// Update last patrol time and persist handoff state
+	if m.handoffState != nil {
+		now := time.Now()
+		m.handoffState.LastPatrol = &now
+		// Note: individual nudge/activity updates already persist, so this is just for LastPatrol
 	}
 }
 
@@ -225,6 +404,9 @@ func (m *Manager) healthCheck(w *Witness) error {
 			status := m.checkPolecatHealth(p.Name, p.ClonePath)
 			if status == PolecatStuck {
 				m.handleStuckPolecat(w, p.Name)
+			} else if status == PolecatHealthy {
+				// Worker is active - update activity tracking and clear nudge count
+				m.updateWorkerActivity(p.Name, "")
 			}
 		}
 	}
@@ -331,9 +513,16 @@ func (m *Manager) handleStuckPolecat(w *Witness, polecatName string) {
 }
 
 // getNudgeCount returns how many times a polecat has been nudged.
+// Uses handoff state for persistence across wisp burns.
 func (m *Manager) getNudgeCount(w *Witness, polecatName string) int {
-	// Count occurrences in SpawnedIssues that start with "nudge:" prefix
-	// We reuse SpawnedIssues to track nudges with a "nudge:<name>" pattern
+	// First check handoff state (persistent across burns)
+	if m.handoffState != nil {
+		if ws, ok := m.handoffState.WorkerStates[polecatName]; ok {
+			return ws.NudgeCount
+		}
+	}
+
+	// Fallback to legacy SpawnedIssues for backwards compatibility
 	count := 0
 	nudgeKey := "nudge:" + polecatName
 	for _, entry := range w.SpawnedIssues {
@@ -345,9 +534,68 @@ func (m *Manager) getNudgeCount(w *Witness, polecatName string) int {
 }
 
 // recordNudge records that a nudge was sent to a polecat.
+// Updates both handoff state (persistent) and legacy SpawnedIssues.
 func (m *Manager) recordNudge(w *Witness, polecatName string) {
+	now := time.Now()
+
+	// Update handoff state (persistent across burns)
+	if m.handoffState != nil {
+		if m.handoffState.WorkerStates == nil {
+			m.handoffState.WorkerStates = make(map[string]WorkerState)
+		}
+		ws := m.handoffState.WorkerStates[polecatName]
+		ws.NudgeCount++
+		ws.LastNudge = &now
+		m.handoffState.WorkerStates[polecatName] = ws
+
+		// Persist to handoff bead
+		if err := m.saveHandoffState(m.handoffState); err != nil {
+			fmt.Printf("Warning: failed to persist handoff state: %v\n", err)
+		}
+	}
+
+	// Also update legacy SpawnedIssues for backwards compatibility
 	nudgeKey := "nudge:" + polecatName
 	w.SpawnedIssues = append(w.SpawnedIssues, nudgeKey)
+}
+
+// clearNudgeCount clears the nudge count for a polecat (e.g., when they become active again).
+func (m *Manager) clearNudgeCount(polecatName string) {
+	if m.handoffState != nil && m.handoffState.WorkerStates != nil {
+		if ws, ok := m.handoffState.WorkerStates[polecatName]; ok {
+			ws.NudgeCount = 0
+			ws.LastNudge = nil
+			now := time.Now()
+			ws.LastActive = &now
+			m.handoffState.WorkerStates[polecatName] = ws
+
+			// Persist to handoff bead
+			if err := m.saveHandoffState(m.handoffState); err != nil {
+				fmt.Printf("Warning: failed to persist handoff state: %v\n", err)
+			}
+		}
+	}
+}
+
+// updateWorkerActivity updates the last active time for a worker.
+func (m *Manager) updateWorkerActivity(polecatName, issueID string) {
+	if m.handoffState != nil {
+		if m.handoffState.WorkerStates == nil {
+			m.handoffState.WorkerStates = make(map[string]WorkerState)
+		}
+		ws := m.handoffState.WorkerStates[polecatName]
+		now := time.Now()
+		ws.LastActive = &now
+		if issueID != "" {
+			ws.Issue = issueID
+		}
+		// Reset nudge count if worker is active
+		if ws.NudgeCount > 0 {
+			ws.NudgeCount = 0
+			ws.LastNudge = nil
+		}
+		m.handoffState.WorkerStates[polecatName] = ws
+	}
 }
 
 // escalateToMayor sends an escalation message to the Mayor.

@@ -84,3 +84,32 @@ type WitnessStats struct {
 	// TodayNudges is the number of nudges today.
 	TodayNudges int `json:"today_nudges"`
 }
+
+// WorkerState tracks the state of a single worker (polecat) across wisp burns.
+type WorkerState struct {
+	// Issue is the current issue the worker is assigned to.
+	Issue string `json:"issue,omitempty"`
+
+	// NudgeCount is how many times this worker has been nudged.
+	NudgeCount int `json:"nudge_count"`
+
+	// LastNudge is when the worker was last nudged.
+	LastNudge *time.Time `json:"last_nudge,omitempty"`
+
+	// LastActive is when the worker was last seen active.
+	LastActive *time.Time `json:"last_active,omitempty"`
+}
+
+// WitnessHandoffState tracks all worker states across wisp burns.
+// This is persisted in a pinned handoff bead that survives wisp burns.
+type WitnessHandoffState struct {
+	// WorkerStates maps polecat names to their state.
+	WorkerStates map[string]WorkerState `json:"worker_states"`
+
+	// LastPatrol is when the last patrol cycle completed.
+	LastPatrol *time.Time `json:"last_patrol,omitempty"`
+}
+
+// HandoffBeadID is the well-known ID suffix for the witness handoff bead.
+// The full ID is constructed as "<rig>-witness-state" (e.g., "gastown-witness-state").
+const HandoffBeadID = "witness-state"
