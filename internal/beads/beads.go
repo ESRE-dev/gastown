@@ -392,6 +392,10 @@ func (b *Beads) CloseWithReason(reason string, ids ...string) error {
 // Pin pins an issue to an agent's hook.
 // This sets the pinned boolean field and optionally the assignee.
 // If agent is empty, only sets the pinned field.
+// NOTE: There's a known issue (gt-o3is) where the pinned field gets overwritten
+// by subsequent bd commands due to a bug in beads auto-import logic.
+// The handoff bead attachment mechanism works correctly and is the primary
+// work assignment mechanism. The pinned field is cosmetic for bd hook visibility.
 func (b *Beads) Pin(id string, agent string) error {
 	args := []string{"--no-daemon", "pin", id}
 	if agent != "" {
