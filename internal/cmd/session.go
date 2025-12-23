@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/suggest"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -212,7 +213,9 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf("polecat '%s' not found in rig '%s'", polecatName, rigName)
+		suggestions := suggest.FindSimilar(polecatName, r.Polecats, 3)
+		hint := fmt.Sprintf("Create with: gt polecat add %s/%s", rigName, polecatName)
+		return fmt.Errorf("%s", suggest.FormatSuggestion("Polecat", polecatName, suggestions, hint))
 	}
 
 	opts := session.StartOptions{

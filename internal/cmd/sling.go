@@ -19,6 +19,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/suggest"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -43,21 +44,39 @@ Based on the Universal Gas Town Propulsion Principle:
 
   "If you find something on your hook, YOU RUN IT."
 
-Arguments:
-  thing     What to sling: proto name, issue ID, or epic ID
-  target    Who to sling at: agent address (polecat/name, deacon/, etc.)
+SLING MECHANICS:
+  ┌─────────┐      ┌───────────────────────────────────────────┐
+  │  THING  │─────▶│              SLING PIPELINE               │
+  └─────────┘      │                                           │
+   proto           │  1. SPAWN   Proto → Molecule instance     │
+   issue           │  2. ASSIGN  Molecule → Target agent       │
+   epic            │  3. PIN     Work → Agent's hook           │
+                   │  4. IGNITE  Session starts automatically  │
+                   │                                           │
+                   │        ┌─────────────────────────────┐    │
+                   │        │  🪝 TARGET's HOOK           │    │
+                   │        │  └── [work lands here]     │    │
+                   │        └─────────────────────────────┘    │
+                   └───────────────────────────────────────────┘
+                                        │
+                                        ▼
+                              Agent runs the work!
+
+THING TYPES:
+  proto     Molecule template name (e.g., "feature", "bugfix")
+  issue     Beads issue ID (e.g., "gt-abc123")
+  epic      Epic ID for batch dispatch
+
+TARGET FORMATS:
+  gastown/Toast      → Polecat in rig
+  gastown/witness    → Rig's Witness
+  gastown/refinery   → Rig's Refinery
+  deacon/            → Global Deacon
 
 Examples:
-  gt sling feature polecat/alpha              # Spawn feature mol, sling to alpha
-  gt sling gt-xyz polecat/beta -m bugfix      # Sling issue with bugfix workflow
-  gt sling patrol deacon/ --wisp              # Ephemeral patrol wisp
-  gt sling gt-epic-batch refinery/            # Batch work to refinery
-
-What Happens When You Sling:
-  1. SPAWN (if proto) - Create molecule from template
-  2. ASSIGN - Assign molecule/issue to target agent
-  3. PIN - Put work on agent's hook (pinned bead)
-  4. IGNITION - Agent wakes and runs the work`,
+  gt sling feature gastown/Toast           # Spawn feature, sling to Toast
+  gt sling gt-abc gastown/Nux -m bugfix    # Issue with workflow
+  gt sling patrol deacon/ --wisp           # Ephemeral patrol wisp`,
 	Args: cobra.ExactArgs(2),
 	RunE: runSling,
 }
@@ -361,7 +380,10 @@ func slingToPolecat(townRoot string, target *SlingTarget, thing *SlingThing) err
 		fmt.Printf("%s Fresh worktree created\n", style.Bold.Render("✓"))
 	} else if err == polecat.ErrPolecatNotFound {
 		if !slingCreate {
-			return fmt.Errorf("polecat '%s' not found (use --create to create)", polecatName)
+			suggestions := suggest.FindSimilar(polecatName, r.Polecats, 3)
+			hint := fmt.Sprintf("Or use --create to create: gt sling %s %s/%s --create",
+				thing.ID, target.Rig, polecatName)
+			return fmt.Errorf("%s", suggest.FormatSuggestion("Polecat", polecatName, suggestions, hint))
 		}
 		fmt.Printf("Creating polecat %s...\n", polecatName)
 		if _, err = polecatMgr.Add(polecatName); err != nil {

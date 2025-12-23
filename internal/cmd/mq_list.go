@@ -104,12 +104,17 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Print header
-	fmt.Printf("  %-12s %-12s %-8s %-30s %-10s %s\n",
-		"ID", "STATUS", "PRIORITY", "BRANCH", "WORKER", "AGE")
-	fmt.Printf("  %s\n", strings.Repeat("-", 90))
+	// Create styled table
+	table := style.NewTable(
+		style.Column{Name: "ID", Width: 12},
+		style.Column{Name: "STATUS", Width: 12},
+		style.Column{Name: "PRI", Width: 4},
+		style.Column{Name: "BRANCH", Width: 28},
+		style.Column{Name: "WORKER", Width: 10},
+		style.Column{Name: "AGE", Width: 6, Align: style.AlignRight},
+	)
 
-	// Print each MR
+	// Add rows
 	for _, issue := range filtered {
 		fields := beads.ParseMRFields(issue)
 
@@ -127,9 +132,9 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		styledStatus := displayStatus
 		switch displayStatus {
 		case "ready":
-			styledStatus = style.Bold.Render("ready")
+			styledStatus = style.Success.Render("ready")
 		case "in_progress":
-			styledStatus = style.Bold.Render("in_progress")
+			styledStatus = style.Warning.Render("active")
 		case "blocked":
 			styledStatus = style.Dim.Render("blocked")
 		case "closed":
@@ -144,13 +149,13 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			worker = fields.Worker
 		}
 
-		// Truncate branch if too long
-		if len(branch) > 30 {
-			branch = branch[:27] + "..."
-		}
-
-		// Format priority
+		// Format priority with color
 		priority := fmt.Sprintf("P%d", issue.Priority)
+		if issue.Priority <= 1 {
+			priority = style.Error.Render(priority)
+		} else if issue.Priority == 2 {
+			priority = style.Warning.Render(priority)
+		}
 
 		// Calculate age
 		age := formatMRAge(issue.CreatedAt)
@@ -161,12 +166,24 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			displayID = displayID[:12]
 		}
 
-		fmt.Printf("  %-12s %-12s %-8s %-30s %-10s %s\n",
-			displayID, styledStatus, priority, branch, worker, style.Dim.Render(age))
+		table.AddRow(displayID, styledStatus, priority, branch, worker, style.Dim.Render(age))
+	}
 
-		// Show blocking info if blocked
+	fmt.Print(table.Render())
+
+	// Show blocking details below table
+	for _, issue := range filtered {
+		displayStatus := issue.Status
+		if issue.Status == "open" && (len(issue.BlockedBy) > 0 || issue.BlockedByCount > 0) {
+			displayStatus = "blocked"
+		}
 		if displayStatus == "blocked" && len(issue.BlockedBy) > 0 {
-			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("             (waiting on %s)", issue.BlockedBy[0])))
+			displayID := issue.ID
+			if len(displayID) > 12 {
+				displayID = displayID[:12]
+			}
+			fmt.Printf("  %s %s\n", style.Dim.Render(displayID+":"),
+				style.Dim.Render(fmt.Sprintf("waiting on %s", issue.BlockedBy[0])))
 		}
 	}
 

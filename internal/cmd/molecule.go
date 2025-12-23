@@ -30,7 +30,39 @@ var moleculeCmd = &cobra.Command{
 	Long: `Manage molecule workflow templates.
 
 Molecules are composable workflow patterns stored as beads issues.
-When instantiated on a parent issue, they create child beads forming a DAG.`,
+When instantiated on a parent issue, they create child beads forming a DAG.
+
+LIFECYCLE:
+  Proto (template)
+       │
+       ▼ instantiate/bond
+  ┌─────────────────┐
+  │ Mol (durable)   │ ← tracked in .beads/
+  │ Wisp (ephemeral)│ ← tracked in .beads-wisp/
+  └────────┬────────┘
+           │
+    ┌──────┴──────┐
+    ▼             ▼
+  burn         squash
+  (no record)  (→ digest)
+
+PHASE TRANSITIONS (for pluggable molecules):
+  ┌─────────────┬─────────────┬─────────────┬─────────────────────┐
+  │ Phase       │ Parallelism │ Blocks      │ Purpose             │
+  ├─────────────┼─────────────┼─────────────┼─────────────────────┤
+  │ discovery   │ full        │ (nothing)   │ Inventory, gather   │
+  │ structural  │ sequential  │ discovery   │ Big-picture review  │
+  │ tactical    │ parallel    │ structural  │ Detailed work       │
+  │ synthesis   │ single      │ tactical    │ Aggregate results   │
+  └─────────────┴─────────────┴─────────────┴─────────────────────┘
+
+COMMANDS:
+  catalog      List available molecule protos
+  instantiate  Create steps from a molecule template
+  progress     Show execution progress of an instantiated molecule
+  status       Show what's on an agent's hook
+  burn         Discard molecule without creating a digest
+  squash       Complete molecule and create a digest`,
 }
 
 var moleculeListCmd = &cobra.Command{
@@ -386,22 +418,34 @@ func runMoleculeList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Create styled table
+	table := style.NewTable(
+		style.Column{Name: "ID", Width: 20},
+		style.Column{Name: "TITLE", Width: 35},
+		style.Column{Name: "STEPS", Width: 5, Align: style.AlignRight},
+		style.Column{Name: "SOURCE", Width: 10},
+	)
+
 	for _, mol := range entries {
-		sourceMarker := style.Dim.Render(fmt.Sprintf("[%s]", mol.Source))
-
-		stepCount := ""
+		// Format steps count
+		stepStr := ""
 		if mol.StepCount > 0 {
-			stepCount = fmt.Sprintf(" (%d steps)", mol.StepCount)
+			stepStr = fmt.Sprintf("%d", mol.StepCount)
 		}
 
-		statusMarker := ""
+		// Format title with status
+		title := mol.Title
 		if mol.Status == "closed" {
-			statusMarker = " " + style.Dim.Render("[closed]")
+			title = style.Dim.Render(mol.Title + " [closed]")
 		}
 
-		fmt.Printf("  %s: %s%s%s %s\n",
-			style.Bold.Render(mol.ID), mol.Title, stepCount, statusMarker, sourceMarker)
+		// Format source
+		source := style.Dim.Render(mol.Source)
+
+		table.AddRow(mol.ID, title, stepStr, source)
 	}
+
+	fmt.Print(table.Render())
 
 	return nil
 }

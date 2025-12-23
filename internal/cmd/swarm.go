@@ -39,7 +39,42 @@ var swarmCmd = &cobra.Command{
 	Long: `Manage coordinated multi-agent work units (swarms).
 
 A swarm coordinates multiple polecats working on related tasks from a shared
-base commit. Work is merged to an integration branch, then landed to main.`,
+base commit. Work is merged to an integration branch, then landed to main.
+
+SWARM LIFECYCLE:
+                          epic (tasks)
+                              │
+                              ▼
+  ┌────────────────────────────────────────────┐
+  │                   SWARM                    │
+  │  ┌──────────┐ ┌──────────┐ ┌──────────┐   │
+  │  │ Polecat  │ │ Polecat  │ │ Polecat  │   │
+  │  │  Toast   │ │   Nux    │ │ Capable  │   │
+  │  └────┬─────┘ └────┬─────┘ └────┬─────┘   │
+  │       │            │            │         │
+  │       ▼            ▼            ▼         │
+  │  ┌──────────────────────────────────────┐ │
+  │  │        integration/<epic>            │ │
+  │  └───────────────────┬──────────────────┘ │
+  └──────────────────────┼────────────────────┘
+                         │
+                         ▼ land
+                      main
+
+STATES:
+  creating  → Swarm being set up
+  active    → Workers executing tasks
+  merging   → Work being integrated
+  landed    → Successfully merged to main
+  cancelled → Swarm aborted
+
+COMMANDS:
+  create    Create a new swarm from an epic
+  status    Show swarm progress
+  list      List swarms in a rig
+  land      Manually land completed swarm
+  cancel    Cancel an active swarm
+  dispatch  Assign next ready task to a worker`,
 }
 
 var swarmCreateCmd = &cobra.Command{

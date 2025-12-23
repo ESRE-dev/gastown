@@ -43,7 +43,38 @@ var mailCmd = &cobra.Command{
 	Long: `Send and receive messages between agents.
 
 The mail system allows Mayor, polecats, and the Refinery to communicate.
-Messages are stored in beads as issues with type=message.`,
+Messages are stored in beads as issues with type=message.
+
+MAIL ROUTING:
+  ┌─────────────────────────────────────────────────────┐
+  │                    Town (.beads/)                   │
+  │  ┌─────────────────────────────────────────────┐   │
+  │  │                 Mayor Inbox                 │   │
+  │  │  └── mayor/                                 │   │
+  │  └─────────────────────────────────────────────┘   │
+  │                                                     │
+  │  ┌─────────────────────────────────────────────┐   │
+  │  │           gastown/ (rig mailboxes)          │   │
+  │  │  ├── witness      ← gastown/witness         │   │
+  │  │  ├── refinery     ← gastown/refinery        │   │
+  │  │  ├── Toast        ← gastown/Toast           │   │
+  │  │  └── crew/max     ← gastown/crew/max        │   │
+  │  └─────────────────────────────────────────────┘   │
+  └─────────────────────────────────────────────────────┘
+
+ADDRESS FORMATS:
+  mayor/              → Mayor inbox
+  <rig>/witness       → Rig's Witness
+  <rig>/refinery      → Rig's Refinery
+  <rig>/<polecat>     → Polecat (e.g., gastown/Toast)
+  <rig>/crew/<name>   → Crew worker (e.g., gastown/crew/max)
+  --human             → Special: human overseer
+
+COMMANDS:
+  inbox     View your inbox
+  send      Send a message
+  read      Read a specific message
+  mark      Mark messages read/unread`,
 }
 
 var mailSendCmd = &cobra.Command{
