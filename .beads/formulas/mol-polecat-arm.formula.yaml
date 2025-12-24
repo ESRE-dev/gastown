@@ -14,6 +14,7 @@ description: |
   |----------|----------|-------------|
   | polecat_name | Yes | Name of the polecat to inspect |
   | rig | Yes | Rig containing the polecat |
+  | nudge_text | No | Text to send when nudging (default: "How's progress?...") |
 version: 1
 
 variables:
@@ -23,6 +24,10 @@ variables:
   - name: rig
     required: true
     description: Rig containing the polecat
+  - name: nudge_text
+    required: false
+    default: "How's progress? Need any help?"
+    description: Text to send when nudging the polecat
 
 steps:
   - id: capture
