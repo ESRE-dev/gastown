@@ -13,6 +13,7 @@ version: 1
 
 steps:
   - id: inbox-check
+    title: Handle callbacks from agents
     description: |
       Handle callbacks from agents.
 
@@ -32,6 +33,7 @@ steps:
       Callbacks may spawn new polecats, update issue state, or trigger other actions.
 
   - id: trigger-pending-spawns
+    title: Nudge newly spawned polecats
     needs: [inbox-check]
     description: |
       Nudge newly spawned polecats that are ready for input.
@@ -58,6 +60,7 @@ steps:
       Timeout: 60 seconds per polecat. If not ready, try again next cycle.
 
   - id: health-scan
+    title: Check Witness and Refinery health
     needs: [trigger-pending-spawns]
     description: |
       Check Witness and Refinery health for each rig.
@@ -118,6 +121,7 @@ steps:
       Reset unresponsive_cycles to 0 when component responds normally.
 
   - id: plugin-run
+    title: Execute registered plugins
     needs: [health-scan]
     description: |
       Execute registered plugins.
@@ -144,6 +148,7 @@ steps:
       Skip this step if ~/gt/plugins/ does not exist or is empty.
 
   - id: orphan-check
+    title: Find abandoned work
     needs: [health-scan]
     description: |
       Find abandoned work.
@@ -165,6 +170,7 @@ steps:
       - File incident beads if data loss occurred
 
   - id: session-gc
+    title: Clean dead sessions
     needs: [orphan-check]
     description: |
       Clean dead sessions.
@@ -183,6 +189,7 @@ steps:
       Preserve audit trail. Only clean sessions confirmed dead.
 
   - id: context-check
+    title: Check own context limit
     needs: [session-gc]
     description: |
       Check own context limit.
@@ -202,6 +209,7 @@ steps:
       This enables the Deacon to burn and respawn cleanly.
 
   - id: loop-or-exit
+    title: Burn and respawn or loop
     needs: [context-check]
     description: |
       Burn and let daemon respawn, or exit if context high.

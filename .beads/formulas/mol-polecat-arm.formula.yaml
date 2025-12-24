@@ -26,6 +26,7 @@ variables:
 
 steps:
   - id: capture
+    title: Capture polecat state
     description: |
       Capture recent tmux output for {{polecat_name}}.
 
@@ -39,6 +40,7 @@ steps:
       - Completion indicators ("Done", "Finished", etc.)
 
   - id: assess
+    title: Assess work status
     needs: [capture]
     description: |
       Categorize polecat state based on captured output.
@@ -53,6 +55,7 @@ steps:
       Calculate: minutes since last activity.
 
   - id: load-history
+    title: Load intervention history
     needs: [assess]
     description: |
       Read nudge history for {{polecat_name}} from patrol state.
@@ -66,6 +69,7 @@ steps:
       to the arm via the bonding context.
 
   - id: decide
+    title: Decide intervention action
     needs: [load-history]
     description: |
       Apply the nudge matrix to determine action for {{polecat_name}}.
@@ -90,6 +94,7 @@ steps:
       Record decision and rationale.
 
   - id: execute
+    title: Execute intervention
     needs: [decide]
     description: |
       Take the decided action for {{polecat_name}}.

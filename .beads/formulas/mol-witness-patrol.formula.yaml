@@ -36,6 +36,7 @@ steps:
   # --- PREFLIGHT PHASE ---
 
   - id: inbox-check
+    title: Process witness mail
     description: |
       Process witness mail: lifecycle requests, help requests.
 
@@ -53,6 +54,7 @@ steps:
       Mark messages as processed when complete.
 
   - id: check-refinery
+    title: Ensure refinery is alive
     needs: [inbox-check]
     description: |
       Ensure the refinery is alive and processing merge requests.
@@ -78,6 +80,7 @@ steps:
       This ensures polecats don't wait forever for their branches to merge.
 
   - id: load-state
+    title: Load persisted patrol state
     needs: [check-refinery]
     description: |
       Read handoff bead and get nudge counts.
@@ -98,6 +101,7 @@ steps:
   # --- DISCOVERY PHASE (Dynamic Bonding) ---
 
   - id: survey-workers
+    title: Survey all polecats (fanout)
     needs: [load-state]
     description: |
       List polecats and bond mol-polecat-arm for each one.
@@ -131,6 +135,7 @@ steps:
   # --- CLEANUP PHASE (Gate + Fixed Steps) ---
 
   - id: aggregate
+    title: Aggregate arm results
     needs: [survey-workers]
     waits_for: all-children
     description: |
@@ -147,6 +152,7 @@ steps:
       Build the consolidated state for save-state.
 
   - id: save-state
+    title: Persist patrol state
     needs: [aggregate]
     description: |
       Update handoff bead with new states.
@@ -165,6 +171,7 @@ steps:
       This state survives wisp burns and session cycles.
 
   - id: generate-summary
+    title: Generate handoff summary
     needs: [save-state]
     description: |
       Summarize this patrol cycle for digest.
@@ -180,6 +187,7 @@ steps:
       This becomes the digest when the patrol wisp is squashed.
 
   - id: context-check
+    title: Check own context limit
     needs: [generate-summary]
     description: |
       Check own context usage.
@@ -192,6 +200,7 @@ steps:
       - Can continue patrolling
 
   - id: burn-or-loop
+    title: Burn and respawn or loop
     needs: [context-check]
     description: |
       End of patrol cycle decision.

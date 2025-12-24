@@ -15,6 +15,7 @@ version: 1
 
 steps:
   - id: inbox-check
+    title: Check refinery mail
     description: |
       Check mail for MR submissions, escalations, messages.
 
@@ -26,6 +27,7 @@ steps:
       Handle shutdown requests, escalations, and status queries.
 
   - id: queue-scan
+    title: Scan merge queue
     needs: [inbox-check]
     description: |
       Fetch remote and identify polecat branches waiting.
@@ -40,6 +42,7 @@ steps:
       Track branch list for this cycle.
 
   - id: process-branch
+    title: Process next branch
     needs: [queue-scan]
     description: |
       Pick next branch. Rebase on current main.
@@ -55,6 +58,7 @@ steps:
       - Skip to loop-check for next branch
 
   - id: run-tests
+    title: Run test suite
     needs: [process-branch]
     description: |
       Run the test suite.
@@ -66,6 +70,7 @@ steps:
       Track results: pass count, fail count, specific failures.
 
   - id: handle-failures
+    title: Handle test failures
     needs: [run-tests]
     description: |
       **VERIFICATION GATE**: This step enforces the Beads Promise.
@@ -90,6 +95,7 @@ steps:
       This is non-negotiable. Never disavow. Never "note and proceed."
 
   - id: merge-push
+    title: Merge and push to main
     needs: [handle-failures]
     description: |
       Merge to main and push immediately.
@@ -105,6 +111,7 @@ steps:
       Main has moved. Any remaining branches need rebasing on new baseline.
 
   - id: loop-check
+    title: Check for more work
     needs: [merge-push]
     description: |
       More branches to process?
@@ -115,6 +122,7 @@ steps:
       Track: branches processed, branches skipped (with reasons).
 
   - id: generate-summary
+    title: Generate handoff summary
     needs: [loop-check]
     description: |
       Summarize this patrol cycle.
@@ -129,6 +137,7 @@ steps:
       This becomes the digest when the patrol is squashed.
 
   - id: context-check
+    title: Check own context limit
     needs: [generate-summary]
     description: |
       Check own context usage.
@@ -141,6 +150,7 @@ steps:
       - Can continue processing
 
   - id: burn-or-loop
+    title: Burn and respawn or loop
     needs: [context-check]
     description: |
       End of patrol cycle decision.
