@@ -18,6 +18,124 @@ Molecules = Graph Algebra (mechanical, gt executes)
 Steps = AI Cognition (agent provides)
 ```
 
+## Formulas and Cooking
+
+> *"Let's cook."* - Walter White
+
+The molecule algebra lives above molecular chemistry. **Formulas** are the
+source code; **cooking** is the process that produces executable protos.
+
+### The Four-Tier Model
+
+```
+Formula (.formula.yaml)     ← "The secret formula" (source code)
+    ↓ cook                  ← "Let's cook" (pre-expand, flatten)
+Proto (frozen in beads)     ← "Pure product" (compiled, flat graph)
+    ↓ pour/wisp             ← Instantiate
+Mol/Wisp (running)          ← The work flowing
+```
+
+| Tier | Name | Format | Nature |
+|------|------|--------|--------|
+| Source | **Formula** | YAML | Composable, has macros/aspects |
+| Compiled | **Proto** | Beads issue | Frozen, flat graph, fast instantiation |
+| Running | **Mol/Wisp** | Beads issue | Active, flowing work |
+
+### Why Cook?
+
+Cooking **pre-expands** all composition at "compile time":
+- Macros (Rule of Five) expand to flat steps
+- Aspects apply to matching pointcuts
+- Branches and gates wire up
+- Result: pure step graph with no interpretation needed
+
+Instantiation then becomes pure **copy + variable substitution**. Fast, mechanical,
+deterministic.
+
+### Formula Format
+
+Formulas are YAML files with `.formula.yaml` extension:
+
+```yaml
+# shiny.formula.yaml
+formula: shiny
+description: Engineer in a Box - the canonical right way
+version: 1
+
+steps:
+  - id: design
+    description: Think carefully about architecture
+  - id: implement
+    needs: [design]
+  - id: review
+    needs: [implement]
+  - id: test
+    needs: [review]
+  - id: submit
+    needs: [test]
+```
+
+Formulas with composition:
+
+```yaml
+# shiny-enterprise.formula.yaml
+formula: shiny-enterprise
+extends: shiny
+version: 1
+
+compose:
+  - expand:
+      target: implement
+      with: rule-of-five
+  - aspect:
+      pointcut: "implement.*"
+      with: security-audit
+  - gate:
+      before: submit
+      condition: "security-postscan.approved"
+```
+
+### CLI
+
+```bash
+# Cook a formula into a proto
+bd cook shiny-enterprise.formula.yaml
+# "Cooking shiny-enterprise..."
+# "✓ Cooked proto: shiny-enterprise (30 steps)"
+
+# Preview without saving
+bd cook shiny-enterprise.formula.yaml --dry-run
+
+# List available formulas
+bd formula list
+
+# Show formula details
+bd formula show rule-of-five
+
+# Instantiate the cooked proto
+bd pour shiny-enterprise --var feature="auth"
+```
+
+### Formula Storage
+
+```
+~/.beads/formulas/          # User formulas
+~/gt/.beads/formulas/       # Town formulas
+.beads/formulas/            # Project formulas
+```
+
+### Breaking Bad × Mad Max
+
+The naming spans both universes:
+- **Formula** = the chemistry, the secret (Breaking Bad, mad scientist)
+- **Cook** = the process, the craft (Breaking Bad iconic)
+- **Proto** = the pure product, crystallized (the "blue sky")
+- Both work in Mad Max (fuel formulas, cooking up schemes)
+
+Heisenberg's formula is worthless without the cook. The cook is where purity
+comes from. Same here: formulas define the algebra, but cooking produces the
+pure proto.
+
 ## The Phases of Matter
 
 Work in Gas Town exists in three phases:
@@ -528,21 +646,28 @@ This keeps evaluation decidable and safe for mechanical execution.
                │           MOL MALL (Marketplace)        │
                │  ┌─────────┐ ┌─────────┐ ┌───────────┐  │
                │  │ Shiny   │ │ Rule of │ │ Security  │  │
-               │  │         │ │ Five    │ │ Aspect    │  │
+               │  │ Formula │ │ Five    │ │ Aspect    │  │
                │  └─────────┘ └─────────┘ └───────────┘  │
                │  ┌─────────┐ ┌─────────┐ ┌───────────┐  │
                │  │Planning │ │ Release │ │ Company   │  │
-               │  │ Form    │ │ Cycle   │ │ Onboard   │  │
+               │  │ Formula │ │ Formula │ │ Onboard   │  │
                │  └─────────┘ └─────────┘ └───────────┘  │
                └─────────────────────────────────────────┘
                               │
                               ▼ compose
                ┌─────────────────────────────────────────┐
-               │         YOUR ORGANIZATION WORKFLOW       │
+               │       YOUR ORGANIZATION FORMULA          │
                │                                          │
                │  Planning + Shiny + R5 + Security +     │
                │  Release + Onboarding = Company in Box   │
                │                                          │
+               └─────────────────────────────────────────┘
+                              │
+                              ▼ cook ("Let's cook")
+               ┌─────────────────────────────────────────┐
+               │              PURE PROTO                  │
+               │  Pre-expanded, flat graph, 99.1% pure   │
+               │  No macros, no aspects, just steps      │
                └─────────────────────────────────────────┘
                               │
                               ▼ pour/wisp
@@ -558,4 +683,4 @@ From issues in git → work composition algebra → companies in a box.
 
 ---
 
-*The algebra is the interface. The ledger is the truth. The work gets done.*
+*The formula is the secret. The cook is the craft. The work gets done.*
