@@ -86,26 +86,7 @@ func Read(workspaceRoot string) *State {
 // Returns a very large duration if the state is nil.
 func (s *State) Age() time.Duration {
 	if s == nil {
-		return 24 * time.Hour * 365 // Very stale
+		return 24 * time.Hour * 365 // No keepalive
 	}
 	return time.Since(s.Timestamp)
-}
-
-// IsFresh returns true if the keepalive is less than 2 minutes old.
-func (s *State) IsFresh() bool {
-	return s != nil && s.Age() < 2*time.Minute
-}
-
-// IsStale returns true if the keepalive is 2-5 minutes old.
-func (s *State) IsStale() bool {
-	if s == nil {
-		return false
-	}
-	age := s.Age()
-	return age >= 2*time.Minute && age < 5*time.Minute
-}
-
-// IsVeryStale returns true if the keepalive is more than 5 minutes old.
-func (s *State) IsVeryStale() bool {
-	return s == nil || s.Age() >= 5*time.Minute
 }

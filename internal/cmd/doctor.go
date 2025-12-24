@@ -85,8 +85,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewPatrolPluginsAccessibleCheck())
 	d.Register(doctor.NewPatrolRolesHavePromptsCheck())
 
-	// Attachment checks
-	d.Register(doctor.NewStaleAttachmentsCheck())
+	// NOTE: StaleAttachmentsCheck removed - staleness detection belongs in Deacon molecule
+	// See gt-gaxo epic for ZFC cleanup rationale
 
 	// Config architecture checks
 	d.Register(doctor.NewSettingsCheck())

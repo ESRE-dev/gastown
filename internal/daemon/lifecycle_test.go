@@ -1,14 +1,16 @@
 package daemon
 
 import (
+	"io"
+	"log"
 	"testing"
 )
 
 // testDaemon creates a minimal Daemon for testing.
-// We only need the struct to call methods on it.
 func testDaemon() *Daemon {
 	return &Daemon{
 		config: &Config{TownRoot: "/tmp/test"},
+		logger: log.New(io.Discard, "", 0), // silent logger for tests
 	}
 }
 
@@ -16,59 +18,62 @@ func TestParseLifecycleRequest_Cycle(t *testing.T) {
 	d := testDaemon()
 
 	tests := []struct {
-		title    string
+		subject  string
+		body     string
 		expected LifecycleAction
 	}{
-		// Explicit cycle requests
-		{"LIFECYCLE: mayor requesting cycle", ActionCycle},
-		{"lifecycle: gastown-witness requesting cycling", ActionCycle},
-		{"LIFECYCLE: witness requesting cycle now", ActionCycle},
+		// JSON body format
+		{"LIFECYCLE: requesting action", `{"action": "cycle"}`, ActionCycle},
+		// Simple text body format
+		{"LIFECYCLE: requesting action", "cycle", ActionCycle},
+		{"lifecycle: action request", "action: cycle", ActionCycle},
 	}
 
 	for _, tc := range tests {
 		msg := &BeadsMessage{
-			Subject: tc.title,
+			Subject: tc.subject,
+			Body:    tc.body,
 			From:    "test-sender",
 		}
 		result := d.parseLifecycleRequest(msg)
 		if result == nil {
-			t.Errorf("parseLifecycleRequest(%q) returned nil, expected action %s", tc.title, tc.expected)
+			t.Errorf("parseLifecycleRequest(subject=%q, body=%q) returned nil, expected action %s", tc.subject, tc.body, tc.expected)
 			continue
 		}
 		if result.Action != tc.expected {
-			t.Errorf("parseLifecycleRequest(%q) action = %s, expected %s", tc.title, result.Action, tc.expected)
+			t.Errorf("parseLifecycleRequest(subject=%q, body=%q) action = %s, expected %s", tc.subject, tc.body, result.Action, tc.expected)
 		}
 	}
 }
 
 func TestParseLifecycleRequest_RestartAndShutdown(t *testing.T) {
-	// Verify that restart and shutdown are correctly parsed.
-	// Previously, the "lifecycle:" prefix contained "cycle", which caused
-	// all messages to match as cycle. Fixed by checking restart/shutdown
-	// before cycle, and using " cycle" (with space) to avoid prefix match.
+	// Verify that restart and shutdown are correctly parsed using structured body.
 	d := testDaemon()
 
 	tests := []struct {
-		title    string
+		subject  string
+		body     string
 		expected LifecycleAction
 	}{
-		{"LIFECYCLE: mayor requesting restart", ActionRestart},
-		{"LIFECYCLE: mayor requesting shutdown", ActionShutdown},
-		{"lifecycle: witness requesting stop", ActionShutdown},
+		{"LIFECYCLE: action", `{"action": "restart"}`, ActionRestart},
+		{"LIFECYCLE: action", `{"action": "shutdown"}`, ActionShutdown},
+		{"lifecycle: action", "stop", ActionShutdown},
+		{"LIFECYCLE: action", "restart", ActionRestart},
 	}
 
 	for _, tc := range tests {
 		msg := &BeadsMessage{
-			Subject: tc.title,
+			Subject: tc.subject,
+			Body:    tc.body,
 			From:    "test-sender",
 		}
 		result := d.parseLifecycleRequest(msg)
 		if result == nil {
-			t.Errorf("parseLifecycleRequest(%q) returned nil", tc.title)
+			t.Errorf("parseLifecycleRequest(subject=%q, body=%q) returned nil", tc.subject, tc.body)
 			continue
 		}
 		if result.Action != tc.expected {
-			t.Errorf("parseLifecycleRequest(%q) action = %s, expected %s", tc.title, result.Action, tc.expected)
+			t.Errorf("parseLifecycleRequest(subject=%q, body=%q) action = %s, expected %s", tc.subject, tc.body, result.Action, tc.expected)
 		}
 	}
 }
@@ -96,52 +101,53 @@ func TestParseLifecycleRequest_NotLifecycle(t *testing.T) {
 	}
 }
 
-func TestParseLifecycleRequest_ExtractsFrom(t *testing.T) {
+func TestParseLifecycleRequest_UsesFromField(t *testing.T) {
 	d := testDaemon()
 
+	// Now that we use structured body, the From field comes directly from the message
 	tests := []struct {
-		title        string
+		subject      string
+		body         string
 		sender       string
 		expectedFrom string
 	}{
-		{"LIFECYCLE: mayor requesting cycle", "fallback", "mayor"},
-		{"LIFECYCLE: gastown-witness requesting restart", "fallback", "gastown-witness"},
-		{"lifecycle: my-rig-witness requesting shutdown", "fallback", "my-rig-witness"},
+		{"LIFECYCLE: action", `{"action": "cycle"}`, "mayor", "mayor"},
+		{"LIFECYCLE: action", "restart", "gastown-witness", "gastown-witness"},
+		{"lifecycle: action", "shutdown", "my-rig-refinery", "my-rig-refinery"},
 	}
 
 	for _, tc := range tests {
 		msg := &BeadsMessage{
-			Subject: tc.title,
+			Subject: tc.subject,
+			Body:    tc.body,
 			From:    tc.sender,
 		}
 		result := d.parseLifecycleRequest(msg)
 		if result == nil {
-			t.Errorf("parseLifecycleRequest(%q) returned nil", tc.title)
+			t.Errorf("parseLifecycleRequest(body=%q) returned nil", tc.body)
 			continue
 		}
 		if result.From != tc.expectedFrom {
-			t.Errorf("parseLifecycleRequest(%q) from = %q, expected %q", tc.title, result.From, tc.expectedFrom)
+			t.Errorf("parseLifecycleRequest() from = %q, expected %q", result.From, tc.expectedFrom)
 		}
 	}
 }
 
-func TestParseLifecycleRequest_FallsBackToSender(t *testing.T) {
+func TestParseLifecycleRequest_AlwaysUsesFromField(t *testing.T) {
 	d := testDaemon()
 
-	// When the title doesn't contain a parseable "from", use sender
+	// With structured body parsing, From always comes from message From field
 	msg := &BeadsMessage{
-		Subject: "LIFECYCLE: requesting cycle", // no role before "requesting"
-		From:    "fallback-sender",
+		Subject: "LIFECYCLE: action",
+		Body:    "cycle",
+		From:    "the-sender",
 	}
 	result := d.parseLifecycleRequest(msg)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	// The "from" should be empty string from title parsing, then fallback to sender
-	if result.From != "fallback-sender" && result.From != "" {
-		// Note: the actual behavior may just be empty string if parsing gives nothing
-		// Let's check what actually happens
-		t.Logf("parseLifecycleRequest fallback: from=%q", result.From)
+	if result.From != "the-sender" {
+		t.Errorf("parseLifecycleRequest() from = %q, expected 'the-sender'", result.From)
 	}
 }
 

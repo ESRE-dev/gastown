@@ -70,46 +70,55 @@ func (d *Daemon) ProcessLifecycleRequests() {
 	}
 }
 
-// parseLifecycleRequest extracts a lifecycle request from a message.
-func (d *Daemon) parseLifecycleRequest(msg *BeadsMessage) *LifecycleRequest {
-	// Look for lifecycle keywords in subject
-	// Expected format: "LIFECYCLE: <role> requesting <action>"
-	subject := strings.ToLower(msg.Subject)
+// LifecycleBody is the structured body format for lifecycle requests.
+// Claude should send mail with JSON body: {"action": "cycle"} or {"action": "shutdown"}
+type LifecycleBody struct {
+	Action string `json:"action"`
+}
 
+// parseLifecycleRequest extracts a lifecycle request from a message.
+// Uses structured body parsing instead of keyword matching on subject.
+func (d *Daemon) parseLifecycleRequest(msg *BeadsMessage) *LifecycleRequest {
+	// Gate: subject must start with "LIFECYCLE:"
+	subject := strings.ToLower(msg.Subject)
 	if !strings.HasPrefix(subject, "lifecycle:") {
 		return nil
 	}
 
-	var action LifecycleAction
-	var from string
+	// Parse structured body for action
+	var body LifecycleBody
+	if err := json.Unmarshal([]byte(msg.Body), &body); err != nil {
+		// Fallback: check for simple action strings in body
+		bodyLower := strings.ToLower(strings.TrimSpace(msg.Body))
+		switch {
+		case bodyLower == "restart" || bodyLower == "action: restart":
+			body.Action = "restart"
+		case bodyLower == "shutdown" || bodyLower == "action: shutdown" || bodyLower == "stop":
+			body.Action = "shutdown"
+		case bodyLower == "cycle" || bodyLower == "action: cycle":
+			body.Action = "cycle"
+		default:
+			d.logger.Printf("Lifecycle request with unparseable body: %q", msg.Body)
+			return nil
+		}
+	}
 
-	// Check restart/shutdown before cycle.
-	// Note: Can't use Contains(subject, "cycle") because "lifecycle:" contains "cycle".
-	// Use " cycle" (with leading space) to match the word, not the prefix.
-	if strings.Contains(subject, "restart") {
+	// Map action string to enum
+	var action LifecycleAction
+	switch strings.ToLower(body.Action) {
+	case "restart":
 		action = ActionRestart
-	} else if strings.Contains(subject, "shutdown") || strings.Contains(subject, "stop") {
+	case "shutdown", "stop":
 		action = ActionShutdown
-	} else if strings.Contains(subject, " cycle") || strings.Contains(subject, "cycling") {
+	case "cycle":
 		action = ActionCycle
-	} else {
+	default:
+		d.logger.Printf("Unknown lifecycle action: %q", body.Action)
 		return nil
 	}
 
-	// Extract role from subject: "LIFECYCLE: <role> requesting ..."
-	// Parse between "lifecycle: " and " requesting"
-	parts := strings.Split(subject, " requesting")
-	if len(parts) >= 1 {
-		rolePart := strings.TrimPrefix(parts[0], "lifecycle:")
-		from = strings.TrimSpace(rolePart)
-	}
-
-	if from == "" {
-		from = msg.From // fallback
-	}
-
 	return &LifecycleRequest{
-		From:      from,
+		From:      msg.From,
 		Action:    action,
 		Timestamp: time.Now(),
 	}

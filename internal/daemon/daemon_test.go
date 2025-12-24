@@ -206,32 +206,8 @@ func TestSaveLoadState_Roundtrip(t *testing.T) {
 	}
 }
 
-func TestIsWitnessSession(t *testing.T) {
-	tests := []struct {
-		name     string
-		expected bool
-	}{
-		{"gt-gastown-witness", true},
-		{"gt-myrig-witness", true},
-		{"gt-my-rig-name-witness", true},
-		{"gt-a-witness", true},  // minimum valid
-		{"gt-witness", false},   // no rig name
-		{"gastown-witness", false}, // missing gt- prefix
-		{"gt-gastown", false},      // missing -witness suffix
-		{"gt-mayor", false},        // not a witness
-		{"random-session", false},
-		{"", false},
-		{"gt-", false},
-		{"witness", false},
-	}
-
-	for _, tc := range tests {
-		result := isWitnessSession(tc.name)
-		if result != tc.expected {
-			t.Errorf("isWitnessSession(%q) = %v, expected %v", tc.name, result, tc.expected)
-		}
-	}
-}
+// NOTE: TestIsWitnessSession removed - isWitnessSession function was deleted
+// as part of ZFC cleanup (gt-gaxo). Witness poking is now Deacon's responsibility.
 
 func TestLifecycleAction_Constants(t *testing.T) {
 	// Verify constants have expected string values

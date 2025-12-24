@@ -2,34 +2,27 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/git"
-	"github.com/steveyegge/gastown/internal/keepalive"
-	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // Daemon is the town-level background service.
+// Its only job is to ensure Deacon is running and send periodic heartbeats.
+// All health checking, nudging, and decision-making belongs in the Deacon molecule.
 type Daemon struct {
 	config        *Config
 	tmux          *tmux.Tmux
 	logger        *log.Logger
 	ctx           context.Context
 	cancel        context.CancelFunc
-	backoff       *BackoffManager
-	notifications *NotificationManager
 	lastMOTDIndex int // tracks last MOTD to avoid consecutive repeats
 }
 
@@ -50,18 +43,12 @@ func New(config *Config) (*Daemon, error) {
 	logger := log.New(logFile, "", log.LstdFlags)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Initialize notification manager for slot-based deduplication
-	notifDir := filepath.Join(daemonDir, "notifications")
-	notifMaxAge := 5 * time.Minute // Notifications expire after 5 minutes
-
 	return &Daemon{
-		config:       config,
-		tmux:         tmux.NewTmux(),
-		logger:       logger,
-		ctx:          ctx,
-		cancel:       cancel,
-		backoff:      NewBackoffManager(DefaultBackoffConfig()),
-		notifications: NewNotificationManager(notifDir, notifMaxAge),
+		config: config,
+		tmux:   tmux.NewTmux(),
+		logger: logger,
+		ctx:    ctx,
+		cancel: cancel,
 	}, nil
 }
 
@@ -121,17 +108,15 @@ func (d *Daemon) Run() error {
 }
 
 // heartbeat performs one heartbeat cycle.
+// The daemon's job is minimal: ensure Deacon is running and send heartbeats.
+// All health checking and decision-making belongs in the Deacon molecule.
 func (d *Daemon) heartbeat(state *State) {
 	d.logger.Println("Heartbeat starting")
 
-	// 0. Clean up stale notification slots periodically
-	_ = d.notifications.ClearStaleSlots()
-
-	// 1. Ensure Deacon is running (the Deacon is the heartbeat of the system)
+	// 1. Ensure Deacon is running (process management)
 	d.ensureDeaconRunning()
 
-	// 2. Poke Deacon - the Deacon monitors Mayor and Witnesses
-	// Note: Deacon self-spawns wisps for patrol cycles (no daemon attachment needed)
+	// 2. Send heartbeat to Deacon (simple notification, no decision-making)
 	d.pokeDeacon()
 
 	// 3. Process lifecycle requests
@@ -243,10 +228,9 @@ func (d *Daemon) ensureDeaconRunning() {
 }
 
 // pokeDeacon sends a heartbeat message to the Deacon session.
-// The Deacon is responsible for monitoring Mayor and Witnesses.
+// Simple notification - no staleness checking or backoff logic.
+// The Deacon molecule decides what to do with heartbeats.
 func (d *Daemon) pokeDeacon() {
-	const agentID = "deacon"
-
 	running, err := d.tmux.HasSession(DeaconSessionName)
 	if err != nil {
 		d.logger.Printf("Error checking Deacon session: %v", err)
@@ -258,49 +242,6 @@ func (d *Daemon) pokeDeacon() {
 		return
 	}
 
-	// Check deacon heartbeat to see if it's active
-	deaconHeartbeatFile := filepath.Join(d.config.TownRoot, "deacon", "heartbeat.json")
-	var isFresh, isStale, isVeryStale bool
-
-	data, err := os.ReadFile(deaconHeartbeatFile)
-	if err == nil {
-		var hb struct {
-			Timestamp time.Time `json:"timestamp"`
-		}
-		if json.Unmarshal(data, &hb) == nil {
-			age := time.Since(hb.Timestamp)
-			isFresh = age < 2*time.Minute
-			isStale = age >= 2*time.Minute && age < 5*time.Minute
-			isVeryStale = age >= 5*time.Minute
-		} else {
-			isVeryStale = true
-		}
-	} else {
-		isVeryStale = true // No heartbeat file
-	}
-
-	if isFresh {
-		// Deacon is actively working, reset backoff and mark notifications consumed
-		d.backoff.RecordActivity(agentID)
-		_ = d.notifications.MarkConsumed(DeaconSessionName, SlotHeartbeat)
-		d.logger.Println("Deacon is fresh, skipping poke")
-		return
-	}
-
-	// Check if we should poke based on backoff interval
-	if !d.backoff.ShouldPoke(agentID) {
-		interval := d.backoff.GetInterval(agentID)
-		d.logger.Printf("Deacon backoff in effect (interval: %v), skipping poke", interval)
-		return
-	}
-
-	// Check if we should send (slot-based deduplication)
-	shouldSend, _ := d.notifications.ShouldSend(DeaconSessionName, SlotHeartbeat)
-	if !shouldSend {
-		d.logger.Println("Heartbeat already pending for Deacon, skipping")
-		return
-	}
-
 	// Send heartbeat message with rotating MOTD
 	motd := d.nextMOTD()
 	msg := fmt.Sprintf("HEARTBEAT: %s", motd)
@@ -309,253 +250,12 @@ func (d *Daemon) pokeDeacon() {
 		return
 	}
 
-	// Record the send for slot deduplication
-	_ = d.notifications.RecordSend(DeaconSessionName, SlotHeartbeat, msg)
-	d.backoff.RecordPoke(agentID)
-
-	// Adjust backoff based on staleness
-	if isVeryStale {
-		d.backoff.RecordMiss(agentID)
-		interval := d.backoff.GetInterval(agentID)
-		d.logger.Printf("Poked Deacon (very stale, backoff now: %v)", interval)
-	} else if isStale {
-		d.logger.Println("Poked Deacon (stale)")
-	} else {
-		d.logger.Println("Poked Deacon")
-	}
+	d.logger.Println("Poked Deacon")
 }
 
-// pokeMayor sends a heartbeat to the Mayor session.
-func (d *Daemon) pokeMayor() {
-	mayorSession := constants.SessionMayor
-	agentID := constants.RoleMayor
-
-	running, err := d.tmux.HasSession(mayorSession)
-	if err != nil {
-		d.logger.Printf("Error checking Mayor session: %v", err)
-		return
-	}
-
-	if !running {
-		d.logger.Println("Mayor session not running, skipping poke")
-		return
-	}
-
-	// Check keepalive to see if agent is active
-	state := keepalive.Read(d.config.TownRoot)
-	if state != nil && state.IsFresh() {
-		// Agent is actively working, reset backoff and mark notifications consumed
-		d.backoff.RecordActivity(agentID)
-		_ = d.notifications.MarkConsumed(mayorSession, SlotHeartbeat)
-		d.logger.Printf("Mayor is fresh (cmd: %s), skipping poke", state.LastCommand)
-		return
-	}
-
-	// Check if we should poke based on backoff interval
-	if !d.backoff.ShouldPoke(agentID) {
-		interval := d.backoff.GetInterval(agentID)
-		d.logger.Printf("Mayor backoff in effect (interval: %v), skipping poke", interval)
-		return
-	}
-
-	// Check if we should send (slot-based deduplication)
-	shouldSend, _ := d.notifications.ShouldSend(mayorSession, SlotHeartbeat)
-	if !shouldSend {
-		d.logger.Println("Heartbeat already pending for Mayor, skipping")
-		return
-	}
-
-	// Send heartbeat message via tmux, replacing any pending input
-	msg := "HEARTBEAT: check your rigs"
-	if err := d.tmux.SendKeysReplace(mayorSession, msg, 50); err != nil {
-		d.logger.Printf("Error poking Mayor: %v", err)
-		return
-	}
-
-	// Record the send for slot deduplication
-	_ = d.notifications.RecordSend(mayorSession, SlotHeartbeat, msg)
-	d.backoff.RecordPoke(agentID)
-
-	// If agent is stale or very stale, record a miss (increase backoff)
-	if state == nil || state.IsVeryStale() {
-		d.backoff.RecordMiss(agentID)
-		interval := d.backoff.GetInterval(agentID)
-		d.logger.Printf("Poked Mayor (very stale, backoff now: %v)", interval)
-	} else if state.IsStale() {
-		// Stale but not very stale - don't increase backoff, but don't reset either
-		d.logger.Println("Poked Mayor (stale)")
-	} else {
-		d.logger.Println("Poked Mayor")
-	}
-}
-
-// pokeWitnesses sends heartbeats to all Witness sessions.
-// Uses proper rig discovery from rigs.json instead of scanning tmux sessions.
-func (d *Daemon) pokeWitnesses() {
-	// Discover rigs from configuration
-	rigs := d.discoverRigs()
-	if len(rigs) == 0 {
-		d.logger.Println("No rigs discovered")
-		return
-	}
-
-	for _, r := range rigs {
-		session := fmt.Sprintf("gt-%s-witness", r.Name)
-
-		// Check if witness session exists
-		running, err := d.tmux.HasSession(session)
-		if err != nil {
-			d.logger.Printf("Error checking witness session for rig %s: %v", r.Name, err)
-			continue
-		}
-
-		if !running {
-			// Rig exists but no witness session - log for visibility
-			d.logger.Printf("Rig %s has no witness session (may need: gt witness start %s)", r.Name, r.Name)
-			continue
-		}
-
-		d.pokeWitness(session)
-	}
-}
-
-// discoverRigs finds all registered rigs using the rig manager.
-// Falls back to directory scanning if rigs.json is not available.
-func (d *Daemon) discoverRigs() []*rig.Rig {
-	// Load rigs config from mayor/rigs.json
-	rigsConfigPath := constants.MayorRigsPath(d.config.TownRoot)
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
-	if err != nil {
-		// Try fallback: scan town directory for rig directories
-		return d.discoverRigsFromDirectory()
-	}
-
-	// Use rig manager for proper discovery
-	g := git.NewGit(d.config.TownRoot)
-	mgr := rig.NewManager(d.config.TownRoot, rigsConfig, g)
-	rigs, err := mgr.DiscoverRigs()
-	if err != nil {
-		d.logger.Printf("Error discovering rigs from config: %v", err)
-		return d.discoverRigsFromDirectory()
-	}
-
-	return rigs
-}
-
-// discoverRigsFromDirectory scans the town directory for rig directories.
-// A directory is considered a rig if it has a .beads subdirectory or config.json.
-func (d *Daemon) discoverRigsFromDirectory() []*rig.Rig {
-	entries, err := os.ReadDir(d.config.TownRoot)
-	if err != nil {
-		d.logger.Printf("Error reading town directory: %v", err)
-		return nil
-	}
-
-	var rigs []*rig.Rig
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		// Skip known non-rig directories
-		if name == "mayor" || name == "daemon" || name == ".git" || name[0] == '.' {
-			continue
-		}
-
-		dirPath := filepath.Join(d.config.TownRoot, name)
-
-		// Check for .beads directory (indicates a rig)
-		beadsPath := filepath.Join(dirPath, ".beads")
-		if _, err := os.Stat(beadsPath); err == nil {
-			rigs = append(rigs, &rig.Rig{Name: name, Path: dirPath})
-			continue
-		}
-
-		// Check for config.json with type: rig
-		configPath := filepath.Join(dirPath, "config.json")
-		if _, err := os.Stat(configPath); err == nil {
-			// For simplicity, assume any directory with config.json is a rig
-			rigs = append(rigs, &rig.Rig{Name: name, Path: dirPath})
-		}
-	}
-
-	return rigs
-}
-
-// pokeWitness sends a heartbeat to a single witness session with backoff.
-func (d *Daemon) pokeWitness(session string) {
-	// Extract rig name from session (gt-<rig>-witness -> <rig>)
-	rigName := extractRigName(session)
-	agentID := session // Use session name as agent ID
-
-	// Find the rig's workspace for keepalive check
-	rigWorkspace := filepath.Join(d.config.TownRoot, "gastown", rigName)
-
-	// Check keepalive to see if the witness is active
-	state := keepalive.Read(rigWorkspace)
-	if state != nil && state.IsFresh() {
-		// Witness is actively working, reset backoff and mark notifications consumed
-		d.backoff.RecordActivity(agentID)
-		_ = d.notifications.MarkConsumed(session, SlotHeartbeat)
-		d.logger.Printf("Witness %s is fresh (cmd: %s), skipping poke", session, state.LastCommand)
-		return
-	}
-
-	// Check if we should poke based on backoff interval
-	if !d.backoff.ShouldPoke(agentID) {
-		interval := d.backoff.GetInterval(agentID)
-		d.logger.Printf("Witness %s backoff in effect (interval: %v), skipping poke", session, interval)
-		return
-	}
-
-	// Check if we should send (slot-based deduplication)
-	shouldSend, _ := d.notifications.ShouldSend(session, SlotHeartbeat)
-	if !shouldSend {
-		d.logger.Printf("Heartbeat already pending for Witness %s, skipping", session)
-		return
-	}
-
-	// Send heartbeat message, replacing any pending input
-	msg := "HEARTBEAT: check your workers"
-	if err := d.tmux.SendKeysReplace(session, msg, 50); err != nil {
-		d.logger.Printf("Error poking Witness %s: %v", session, err)
-		return
-	}
-
-	// Record the send for slot deduplication
-	_ = d.notifications.RecordSend(session, SlotHeartbeat, msg)
-	d.backoff.RecordPoke(agentID)
-
-	// If agent is stale or very stale, record a miss (increase backoff)
-	if state == nil || state.IsVeryStale() {
-		d.backoff.RecordMiss(agentID)
-		interval := d.backoff.GetInterval(agentID)
-		d.logger.Printf("Poked Witness %s (very stale, backoff now: %v)", session, interval)
-	} else if state.IsStale() {
-		d.logger.Printf("Poked Witness %s (stale)", session)
-	} else {
-		d.logger.Printf("Poked Witness %s", session)
-	}
-}
-
-// extractRigName extracts the rig name from a witness session name.
-// "gt-gastown-witness" -> "gastown"
-func extractRigName(session string) string {
-	// Remove "gt-" prefix and "-witness" suffix
-	name := strings.TrimPrefix(session, "gt-")
-	name = strings.TrimSuffix(name, "-witness")
-	return name
-}
-
-// isWitnessSession checks if a session name is a witness session.
-func isWitnessSession(name string) bool {
-	// Pattern: gt-<rig>-witness
-	if len(name) < 12 { // "gt-x-witness" minimum
-		return false
-	}
-	return name[:3] == "gt-" && name[len(name)-8:] == "-witness"
-}
+// NOTE: pokeMayor, pokeWitnesses, and pokeWitness have been removed.
+// The Deacon molecule is responsible for monitoring Mayor and Witnesses.
+// The daemon only ensures Deacon is running and sends it heartbeats.
 
 // processLifecycleRequests checks for and processes lifecycle requests.
 func (d *Daemon) processLifecycleRequests() {

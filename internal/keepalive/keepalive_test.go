@@ -39,47 +39,29 @@ func TestReadNonExistent(t *testing.T) {
 }
 
 func TestStateAge(t *testing.T) {
-	// Test nil state
+	// Test nil state returns very large age
 	var nilState *State
 	if nilState.Age() < 24*time.Hour {
 		t.Error("nil state should have very large age")
 	}
 
-	// Test fresh state
+	// Test fresh state returns accurate age
 	freshState := &State{Timestamp: time.Now().Add(-30 * time.Second)}
-	if !freshState.IsFresh() {
-		t.Error("30-second-old state should be fresh")
-	}
-	if freshState.IsStale() {
-		t.Error("30-second-old state should not be stale")
-	}
-	if freshState.IsVeryStale() {
-		t.Error("30-second-old state should not be very stale")
+	age := freshState.Age()
+	if age < 29*time.Second || age > 31*time.Second {
+		t.Errorf("expected ~30s age, got %v", age)
 	}
 
-	// Test stale state (3 minutes)
-	staleState := &State{Timestamp: time.Now().Add(-3 * time.Minute)}
-	if staleState.IsFresh() {
-		t.Error("3-minute-old state should not be fresh")
-	}
-	if !staleState.IsStale() {
-		t.Error("3-minute-old state should be stale")
-	}
-	if staleState.IsVeryStale() {
-		t.Error("3-minute-old state should not be very stale")
+	// Test older state returns accurate age
+	olderState := &State{Timestamp: time.Now().Add(-5 * time.Minute)}
+	age = olderState.Age()
+	if age < 4*time.Minute+55*time.Second || age > 5*time.Minute+5*time.Second {
+		t.Errorf("expected ~5m age, got %v", age)
 	}
 
-	// Test very stale state (10 minutes)
-	veryStaleState := &State{Timestamp: time.Now().Add(-10 * time.Minute)}
-	if veryStaleState.IsFresh() {
-		t.Error("10-minute-old state should not be fresh")
-	}
-	if veryStaleState.IsStale() {
-		t.Error("10-minute-old state should not be stale (it's very stale)")
-	}
-	if !veryStaleState.IsVeryStale() {
-		t.Error("10-minute-old state should be very stale")
-	}
+	// NOTE: IsFresh(), IsStale(), IsVeryStale() were removed as part of ZFC cleanup.
+	// Staleness classification belongs in Deacon molecule, not Go code.
+	// See gt-gaxo epic for rationale.
 }
 
 func TestDirectoryCreation(t *testing.T) {
