@@ -639,3 +639,49 @@ func (g *Git) CheckUncommittedWork() (*UncommittedWorkStatus, error) {
 
 	return status, nil
 }
+
+// BranchPushedToRemote checks if a branch has been pushed to the remote.
+// Returns (pushed bool, unpushedCount int, err).
+// This handles polecat branches that don't have upstream tracking configured.
+func (g *Git) BranchPushedToRemote(localBranch, remote string) (bool, int, error) {
+	remoteBranch := remote + "/" + localBranch
+
+	// First check if the remote branch exists
+	exists, err := g.RemoteBranchExists(remote, localBranch)
+	if err != nil {
+		return false, 0, fmt.Errorf("checking remote branch: %w", err)
+	}
+
+	if !exists {
+		// Remote branch doesn't exist - count commits since origin/main (or HEAD if that fails)
+		count, err := g.run("rev-list", "--count", "origin/main..HEAD")
+		if err != nil {
+			// Fallback: just count all commits on HEAD
+			count, err = g.run("rev-list", "--count", "HEAD")
+			if err != nil {
+				return false, 0, fmt.Errorf("counting commits: %w", err)
+			}
+		}
+		var n int
+		_, err = fmt.Sscanf(count, "%d", &n)
+		if err != nil {
+			return false, 0, fmt.Errorf("parsing commit count: %w", err)
+		}
+		// If there are any commits since main, branch is not pushed
+		return n == 0, n, nil
+	}
+
+	// Remote branch exists - check if local is ahead
+	count, err := g.run("rev-list", "--count", remoteBranch+"..HEAD")
+	if err != nil {
+		return false, 0, fmt.Errorf("counting unpushed commits: %w", err)
+	}
+
+	var n int
+	_, err = fmt.Sscanf(count, "%d", &n)
+	if err != nil {
+		return false, 0, fmt.Errorf("parsing unpushed count: %w", err)
+	}
+
+	return n == 0, n, nil
+}

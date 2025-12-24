@@ -765,9 +765,18 @@ func (m *Manager) verifyPolecatState(polecatName string) error {
 	// Note: beads changes would be reflected in git status above,
 	// since beads files are tracked in git.
 
-	// Note: MR submission is now done automatically by polecat's handoff command,
-	// so we don't need to verify it here - the polecat wouldn't have requested
-	// shutdown if that step failed
+	// 2. Check that the polecat branch was pushed to remote
+	// This catches the case where a polecat closes an issue without pushing their work.
+	// Without this check, work can be lost when the polecat worktree is cleaned up.
+	branchName := "polecat/" + polecatName
+	pushed, unpushedCount, err := polecatGit.BranchPushedToRemote(branchName, "origin")
+	if err != nil {
+		// Log but don't fail - could be network issue
+		fmt.Printf("  Warning: could not verify branch push status: %v\n", err)
+	} else if !pushed {
+		return fmt.Errorf("branch %s has %d unpushed commit(s) - run 'git push origin %s' before closing",
+			branchName, unpushedCount, branchName)
+	}
 
 	return nil
 }
