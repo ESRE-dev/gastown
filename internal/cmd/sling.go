@@ -350,10 +350,15 @@ func slingToPolecat(townRoot string, target *SlingTarget, thing *SlingThing) err
 	polecatExists := err == nil
 
 	if polecatExists {
-		// Check for existing work on hook (unless --force)
-		if !slingForce {
-			if err := checkHookCollision(polecatAddress, r.Path); err != nil {
-				return err
+		// Check for existing work on hook
+		displacedID, err := checkHookCollision(polecatAddress, r.Path, slingForce)
+		if err != nil {
+			return err
+		}
+		if displacedID != "" {
+			fmt.Printf("%s Displaced %s back to ready pool\n", style.Warning.Render("⚠"), displacedID)
+			if err := releaseDisplacedWork(r.Path, displacedID); err != nil {
+				fmt.Printf("  %s could not release: %v\n", style.Dim.Render("Warning:"), err)
 			}
 		}
 
@@ -595,10 +600,15 @@ func slingToCrew(townRoot string, target *SlingTarget, thing *SlingThing) error 
 		return fmt.Errorf("crew member '%s' not found at %s", target.Name, crewPath)
 	}
 
-	// Check for existing work on hook (unless --force)
-	if !slingForce {
-		if err := checkHookCollision(crewAddress, beadsPath); err != nil {
-			return err
+	// Check for existing work on hook
+	displacedID, err := checkHookCollision(crewAddress, beadsPath, slingForce)
+	if err != nil {
+		return err
+	}
+	if displacedID != "" {
+		fmt.Printf("%s Displaced %s back to ready pool\n", style.Warning.Render("⚠"), displacedID)
+		if err := releaseDisplacedWork(beadsPath, displacedID); err != nil {
+			fmt.Printf("  %s could not release: %v\n", style.Dim.Render("Warning:"), err)
 		}
 	}
 
@@ -610,7 +620,6 @@ func slingToCrew(townRoot string, target *SlingTarget, thing *SlingThing) error 
 	// Process the thing based on its kind
 	var issueID string
 	var moleculeCtx *MoleculeContext
-	var err error
 
 	switch thing.Kind {
 	case "proto":
@@ -683,10 +692,15 @@ func slingToWitness(townRoot string, target *SlingTarget, thing *SlingThing) err
 			style.Dim.Render("Note:"))
 	}
 
-	// Check for existing work on hook (unless --force)
-	if !slingForce {
-		if err := checkHookCollision(witnessAddress, beadsPath); err != nil {
-			return err
+	// Check for existing work on hook
+	displacedID, err := checkHookCollision(witnessAddress, beadsPath, slingForce)
+	if err != nil {
+		return err
+	}
+	if displacedID != "" {
+		fmt.Printf("%s Displaced %s back to ready pool\n", style.Warning.Render("⚠"), displacedID)
+		if err := releaseDisplacedWork(beadsPath, displacedID); err != nil {
+			fmt.Printf("  %s could not release: %v\n", style.Dim.Render("Warning:"), err)
 		}
 	}
 
@@ -698,7 +712,6 @@ func slingToWitness(townRoot string, target *SlingTarget, thing *SlingThing) err
 	// Process the thing
 	var issueID string
 	var moleculeCtx *MoleculeContext
-	var err error
 
 	switch thing.Kind {
 	case "proto":
@@ -741,10 +754,15 @@ func slingToRefinery(townRoot string, target *SlingTarget, thing *SlingThing) er
 	beadsPath := filepath.Join(townRoot, target.Rig)
 	refineryAddress := fmt.Sprintf("%s/refinery", target.Rig)
 
-	// Check for existing work on hook (unless --force)
-	if !slingForce {
-		if err := checkHookCollision(refineryAddress, beadsPath); err != nil {
-			return err
+	// Check for existing work on hook
+	displacedID, err := checkHookCollision(refineryAddress, beadsPath, slingForce)
+	if err != nil {
+		return err
+	}
+	if displacedID != "" {
+		fmt.Printf("%s Displaced %s back to ready pool\n", style.Warning.Render("⚠"), displacedID)
+		if err := releaseDisplacedWork(beadsPath, displacedID); err != nil {
+			fmt.Printf("  %s could not release: %v\n", style.Dim.Render("Warning:"), err)
 		}
 	}
 
@@ -756,7 +774,6 @@ func slingToRefinery(townRoot string, target *SlingTarget, thing *SlingThing) er
 	// Process the thing
 	var issueID string
 	var moleculeCtx *MoleculeContext
-	var err error
 
 	switch thing.Kind {
 	case "proto":
@@ -802,10 +819,15 @@ func slingToMayor(townRoot string, target *SlingTarget, thing *SlingThing) error
 	beadsPath := townRoot
 	mayorAddress := "mayor/"
 
-	// Check for existing work on hook (unless --force)
-	if !slingForce {
-		if err := checkHookCollision(mayorAddress, beadsPath); err != nil {
-			return err
+	// Check for existing work on hook
+	displacedID, err := checkHookCollision(mayorAddress, beadsPath, slingForce)
+	if err != nil {
+		return err
+	}
+	if displacedID != "" {
+		fmt.Printf("%s Displaced %s back to ready pool\n", style.Warning.Render("⚠"), displacedID)
+		if err := releaseDisplacedWork(beadsPath, displacedID); err != nil {
+			fmt.Printf("  %s could not release: %v\n", style.Dim.Render("Warning:"), err)
 		}
 	}
 
@@ -817,7 +839,6 @@ func slingToMayor(townRoot string, target *SlingTarget, thing *SlingThing) error
 	// Process the thing
 	var issueID string
 	var moleculeCtx *MoleculeContext
-	var err error
 
 	switch thing.Kind {
 	case "proto":
@@ -1000,7 +1021,10 @@ func spawnMoleculeOnIssue(beadsPath string, thing *SlingThing, assignee string) 
 }
 
 // checkHookCollision checks if the agent's hook already has work.
-func checkHookCollision(agentAddress, beadsPath string) error {
+// If force is true and hook is occupied, returns the displaced molecule ID.
+// If force is false and hook is occupied, returns an error.
+// Returns ("", nil) if hook is empty.
+func checkHookCollision(agentAddress, beadsPath string, force bool) (string, error) {
 	// Parse agent address to get the role for handoff bead lookup
 	parts := strings.Split(agentAddress, "/")
 	var role string
@@ -1014,19 +1038,42 @@ func checkHookCollision(agentAddress, beadsPath string) error {
 	handoff, err := b.FindHandoffBead(role)
 	if err != nil {
 		// Can't check, assume OK
-		return nil
+		return "", nil
 	}
 
 	if handoff == nil {
 		// No handoff bead exists, no collision
-		return nil
+		return "", nil
 	}
 
 	// Check if there's an attached molecule
 	attachment := beads.ParseAttachmentFields(handoff)
 	if attachment != nil && attachment.AttachedMolecule != "" {
-		return fmt.Errorf("hook already occupied by %s\nUse --force to re-sling",
-			attachment.AttachedMolecule)
+		if !force {
+			return "", fmt.Errorf("hook already occupied by %s\nUse --force to re-sling",
+				attachment.AttachedMolecule)
+		}
+		// Force mode: return the displaced molecule ID
+		return attachment.AttachedMolecule, nil
+	}
+
+	return "", nil
+}
+
+// releaseDisplacedWork returns displaced work to the ready pool.
+// It unpins the molecule and sets status back to open with cleared assignee.
+func releaseDisplacedWork(beadsPath, displacedID string) error {
+	b := beads.New(beadsPath)
+
+	// Unpin the molecule
+	if err := b.Unpin(displacedID); err != nil {
+		// Non-fatal, continue with release
+		fmt.Printf("  %s could not unpin %s: %v\n", style.Dim.Render("Note:"), displacedID, err)
+	}
+
+	// Release: set status=open, clear assignee
+	if err := b.ReleaseWithReason(displacedID, "displaced by new sling"); err != nil {
+		return fmt.Errorf("releasing displaced work: %w", err)
 	}
 
 	return nil
