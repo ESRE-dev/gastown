@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/claude"
@@ -294,13 +295,25 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 		return false, nil
 	}
 
+	// Working directory is the witness's rig clone (if it exists) or witness dir
+	// This ensures gt prime detects the Witness role correctly
+	witnessDir := filepath.Join(r.Path, "witness", "rig")
+	if _, err := os.Stat(witnessDir); os.IsNotExist(err) {
+		// Try witness/ without rig subdirectory
+		witnessDir = filepath.Join(r.Path, "witness")
+		if _, err := os.Stat(witnessDir); os.IsNotExist(err) {
+			// Fall back to rig path (shouldn't happen in normal setup)
+			witnessDir = r.Path
+		}
+	}
+
 	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(r.Path, "witness"); err != nil {
+	if err := claude.EnsureSettingsForRole(witnessDir, "witness"); err != nil {
 		return false, fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
 	// Create new tmux session
-	if err := t.NewSession(sessionName, r.Path); err != nil {
+	if err := t.NewSession(sessionName, witnessDir); err != nil {
 		return false, fmt.Errorf("creating session: %w", err)
 	}
 
