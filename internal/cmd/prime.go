@@ -680,7 +680,7 @@ func showMoleculeProgress(b *beads.Beads, rootID string) {
 
 // outputDeaconPatrolContext shows patrol molecule status for the Deacon.
 // Deacon uses wisps (Wisp:true issues in main .beads/) for patrol cycles.
-// Spawn creates wisp-marked issues that are auto-deleted on squash.
+// bd wisp creates wisp-marked issues that are auto-deleted on squash.
 func outputDeaconPatrolContext(ctx RoleContext) {
 	fmt.Println()
 	fmt.Printf("%s\n\n", style.Bold.Render("## 🔄 Patrol Status (Wisp-based)"))
@@ -732,8 +732,8 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 	}
 
 	if !hasPatrol {
-		// No active patrol - AUTO-CREATE one
-		fmt.Println("Status: **No active patrol** - creating mol-deacon-patrol wisp...")
+		// No active patrol - AUTO-SPAWN one
+		fmt.Println("Status: **No active patrol** - creating mol-deacon-patrol...")
 		fmt.Println()
 
 		// Find the proto ID for mol-deacon-patrol
@@ -767,7 +767,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 			return
 		}
 
-		// Create the wisp
+		// Create the patrol wisp
 		cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", protoID, "--assignee", "deacon")
 		cmdSpawn.Dir = rigBeadsDir
 		var stdoutSpawn, stderrSpawn bytes.Buffer
@@ -776,7 +776,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 
 		if err := cmdSpawn.Run(); err != nil {
 			fmt.Printf("Failed to create patrol wisp: %s\n", stderrSpawn.String())
-			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp " + protoID))
+			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp" + protoID))
 			return
 		}
 
@@ -816,7 +816,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 	fmt.Println("5. At cycle end (loop-or-exit step):")
 	fmt.Println("   - Generate summary of patrol cycle")
 	fmt.Println("   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`")
-	fmt.Println("   - Loop back to spawn new wisp, or exit if context high")
+	fmt.Println("   - Loop back to create new wisp, or exit if context high")
 	if patrolID != "" {
 		fmt.Println()
 		fmt.Printf("Current patrol ID: %s\n", patrolID)
@@ -898,8 +898,8 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 	}
 
 	if !hasPatrol {
-		// No active patrol - AUTO-CREATE one
-		fmt.Println("Status: **No active patrol** - creating mol-witness-patrol wisp...")
+		// No active patrol - AUTO-SPAWN one
+		fmt.Println("Status: **No active patrol** - creating mol-witness-patrol...")
 		fmt.Println()
 
 		// Find the proto ID for mol-witness-patrol
@@ -933,7 +933,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 			return
 		}
 
-		// Create the wisp
+		// Create the patrol wisp
 		cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", protoID, "--assignee", ctx.Rig+"/witness")
 		cmdSpawn.Dir = witnessBeadsDir
 		var stdoutSpawn, stderrSpawn bytes.Buffer
@@ -942,7 +942,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 
 		if err := cmdSpawn.Run(); err != nil {
 			fmt.Printf("Failed to create patrol wisp: %s\n", stderrSpawn.String())
-			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp " + protoID))
+			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp" + protoID))
 			return
 		}
 
@@ -982,7 +982,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 	fmt.Println("6. At cycle end (burn-or-loop step):")
 	fmt.Println("   - Generate summary of patrol cycle")
 	fmt.Println("   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`")
-	fmt.Println("   - Loop back to spawn new wisp, or exit if context high")
+	fmt.Println("   - Loop back to create new wisp, or exit if context high")
 	if patrolID != "" {
 		fmt.Println()
 		fmt.Printf("Current patrol ID: %s\n", patrolID)
@@ -1064,8 +1064,8 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 	}
 
 	if !hasPatrol {
-		// No active patrol - AUTO-CREATE one
-		fmt.Println("Status: **No active patrol** - creating mol-refinery-patrol wisp...")
+		// No active patrol - AUTO-SPAWN one
+		fmt.Println("Status: **No active patrol** - creating mol-refinery-patrol...")
 		fmt.Println()
 
 		// Find the proto ID for mol-refinery-patrol
@@ -1099,7 +1099,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 			return
 		}
 
-		// Create the wisp
+		// Create the patrol wisp
 		cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", protoID, "--assignee", ctx.Rig+"/refinery")
 		cmdSpawn.Dir = refineryBeadsDir
 		var stdoutSpawn, stderrSpawn bytes.Buffer
@@ -1108,7 +1108,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 
 		if err := cmdSpawn.Run(); err != nil {
 			fmt.Printf("Failed to create patrol wisp: %s\n", stderrSpawn.String())
-			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp " + protoID))
+			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp" + protoID))
 			return
 		}
 
@@ -1148,7 +1148,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 	fmt.Println("6. At cycle end (burn-or-loop step):")
 	fmt.Println("   - Generate summary of patrol cycle")
 	fmt.Println("   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`")
-	fmt.Println("   - Loop back to spawn new wisp, or exit if context high")
+	fmt.Println("   - Loop back to create new wisp, or exit if context high")
 	if patrolID != "" {
 		fmt.Println()
 		fmt.Printf("Current patrol ID: %s\n", patrolID)

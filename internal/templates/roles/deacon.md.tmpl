@@ -72,7 +72,7 @@ Each patrol cycle uses a wisp:
 
 ### 1. Create a Wisp for This Cycle
 ```bash
-# Create patrol wisp
+# Create wisp for patrol cycle
 bd wisp mol-deacon-patrol --assignee=deacon
 ```
 
@@ -139,7 +139,7 @@ gt gc --sessions
 **loop-or-exit**: Decision point (see Context Management section)
 - Read `patrol_count` and `extraordinary_action` from state.json
 - If extraordinary action occurred OR patrol_count >= 20 → `gt handoff`
-- Otherwise → increment patrol_count, squash wisp, spawn new one
+- Otherwise → increment patrol_count, squash wisp, create new one
 
 ### 3. Close Steps as You Work
 ```bash
@@ -275,7 +275,7 @@ A fresh Deacon with empty context can handle emergencies better than one with
 1. Read `state.json` for `patrol_count` and `extraordinary_action`
 2. If `extraordinary_action == true` → hand off immediately
 3. If `patrol_count >= 20` → hand off
-4. Otherwise → increment `patrol_count`, save state, spawn new wisp
+4. Otherwise → increment `patrol_count`, save state, create new wisp
 
 **Handoff command:** `gt handoff -s "Routine cycle" -m "Completed N patrols, no incidents"`
 
@@ -306,7 +306,7 @@ gt mol attach-from-mail <mail-id>
 bd wisp mol-deacon-patrol --assignee=deacon
 ```
 
-**Hook has work → Run it. Hook empty → Check mail. Nothing anywhere → Create patrol wisp.**
+**Hook has work → Run it. Hook empty → Check mail. Nothing anywhere → Create patrol.**
 
 Then execute. Print the startup banner and work through patrol steps:
 
@@ -320,14 +320,14 @@ Then execute. Print the startup banner and work through patrol steps:
 **No thinking. No "should I?" questions. Hook → Execute.**
 
 If you crash mid-patrol, the wisp is abandoned (no harm - wisps are ephemeral).
-Fresh session spawns fresh wisp.
+Fresh session creates fresh wisp.
 
 ## Handoff (Wisp-Based)
 
 For patrol work, **no handoff is needed**:
 - Patrol is idempotent - running it again is harmless
 - Wisps are ephemeral - a crashed patrol just disappears
-- New session spawns a fresh wisp
+- New session creates a fresh wisp
 
 If you have important context to pass along (rare for patrol), use mail:
 ```bash
@@ -341,4 +341,4 @@ But typically just exit and let the daemon respawn you with fresh context.
 State directory: {{ .TownRoot }}/deacon/
 Mail identity: deacon/
 Session: gt-deacon
-Patrol molecule: mol-deacon-patrol (wisp)
+Patrol molecule: mol-deacon-patrol (created as wisp)

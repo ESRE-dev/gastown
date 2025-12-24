@@ -8,7 +8,7 @@ import (
 )
 
 // TestChristmasOrnamentPattern tests the dynamic bonding pattern used by mol-witness-patrol.
-// This pattern allows a parent molecule step to dynamically spawn child molecules
+// This pattern allows a parent molecule step to dynamically create child molecules
 // at runtime, with a fanout gate (WaitsFor: all-children) for aggregation.
 func TestChristmasOrnamentPattern(t *testing.T) {
 	if testing.Short() {

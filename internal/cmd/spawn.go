@@ -250,7 +250,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 
 	// Handle molecule instantiation if specified
 	if spawnMolecule != "" {
-		// Use bd mol run to spawn the molecule - this handles everything:
+		// Use bd mol run to create the molecule - this handles everything:
 		// - Creates child issues from proto template
 		// - Assigns root to polecat
 		// - Sets root status to in_progress
@@ -285,7 +285,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("parsing molecule result: %w", err)
 		}
 
-		fmt.Printf("%s Molecule spawned: %s (%d steps)\n",
+		fmt.Printf("%s Molecule created: %s (%d steps)\n",
 			style.Bold.Render("✓"), molResult.RootID, molResult.Created-1) // -1 for root
 
 		// Build molecule context for work assignment
@@ -616,7 +616,7 @@ func buildSpawnContext(issue *BeadsIssue, message string) string {
 // MoleculeContext contains information about a molecule workflow assignment.
 type MoleculeContext struct {
 	MoleculeID  string // The molecule template ID (proto)
-	RootIssueID string // The spawned molecule root issue
+	RootIssueID string // The created molecule root issue
 	TotalSteps  int    // Total number of steps in the molecule
 	StepNumber  int    // Which step this is (1-indexed)
 	IsWisp      bool   // True if this is a wisp (not durable mol)

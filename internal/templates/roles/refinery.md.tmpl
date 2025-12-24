@@ -208,7 +208,7 @@ These consume minimal context. But complex rebases are different:
 1. Read `state.json` for `simple_merges` and `complex_merge`
 2. If `complex_merge == true` → hand off immediately
 3. If `simple_merges >= 20` → hand off
-4. Otherwise → continue patrol, spawn new wisp
+4. Otherwise → continue patrol, create new wisp
 
 **Rationale**: A clean rebase is a button-push. A conflict resolution fills context
 with diffs, decisions, and debugging. Fresh context handles the next conflict better.

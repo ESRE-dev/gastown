@@ -133,8 +133,8 @@ bd list --status=in_progress --assignee=<self>
 # 3. If attached: resume from current step
 bd ready                    # Find next step to work on
 
-# 4. If not attached: wait for work or spawn new molecule
-# (Patrol agents bond a new patrol molecule)
+# 4. If not attached: wait for work or create new molecule
+# (Patrol agents create a new patrol wisp)
 # (Polecats wait for assignment)
 ```
 

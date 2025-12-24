@@ -162,9 +162,9 @@ source formulas). Bond adapts to its operands:
 
 | bond | Proto | Mol | Wisp |
 |------|-------|-----|------|
-| **Proto** | Compound Proto | Spawn + attach | Spawn wisp + attach |
-| **Mol** | Spawn + attach | Link | Link |
-| **Wisp** | Spawn + attach | Link | Link |
+| **Proto** | Compound Proto | Pour + attach | Wisp + attach |
+| **Mol** | Pour + attach | Link | Link |
+| **Wisp** | Wisp + attach | Link | Link |
 
 This enables patterns like:
 - Patrol wisp discovers issue → bonds new work mol
@@ -240,7 +240,7 @@ Patrol agents run ephemeral wisps for their cycles:
 - Wisp starts at cycle begin
 - Steps complete as work progresses
 - Wisp squashes to digest at cycle end
-- New wisp spawns for next cycle
+- New wisp created for next cycle
 
 This prevents accumulation: patrol work is vapor that condenses to minimal
 digests, not liquid that pools forever.

@@ -67,12 +67,12 @@ The **sling** operation puts work on an agent's hook. Here's the full lifecycle:
 │                    gt sling lifecycle                    │
 ├─────────────────────────────────────────────────────────┤
 │                                                          │
-│  1. SPAWN (if proto)     2. ASSIGN           3. PIN     │
+│  1. POUR (if proto)      2. ASSIGN           3. PIN     │
 │     proto → molecule        mol → agent         → hook  │
 │                                                          │
 │  ┌─────────┐            ┌─────────┐        ┌─────────┐  │
 │  │  Proto  │ ────────►  │Molecule │ ─────► │  Hook   │  │
-│  │(catalog)│   spawn    │(instance)│ assign │(pinned) │  │
+│  │(catalog)│   pour     │(instance)│ assign │(pinned) │  │
 │  └─────────┘            └─────────┘        └─────────┘  │
 │                                                  │       │
 │                                            agent wakes   │

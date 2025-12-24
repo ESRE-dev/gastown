@@ -50,7 +50,7 @@ SLING MECHANICS:
   ┌─────────┐      ┌───────────────────────────────────────────┐
   │  THING  │─────▶│              SLING PIPELINE               │
   └─────────┘      │                                           │
-   proto           │  1. SPAWN   Proto → Molecule instance     │
+   proto           │  1. POUR    Proto → Molecule instance     │
    issue           │  2. ASSIGN  Molecule → Target agent       │
    epic            │  3. PIN     Work → Agent's hook           │
                    │  4. IGNITE  Session starts automatically  │
@@ -525,8 +525,8 @@ func slingToPolecat(townRoot string, target *SlingTarget, thing *SlingThing) err
 
 	switch thing.Kind {
 	case "proto":
-		// Spawn molecule from proto
-		issueID, moleculeCtx, err = spawnMoleculeFromProto(beadsPath, thing, polecatAddress)
+		// Pour molecule from proto
+		issueID, moleculeCtx, err = pourMoleculeFromProto(beadsPath, thing, polecatAddress)
 		if err != nil {
 			return err
 		}
@@ -535,7 +535,7 @@ func slingToPolecat(townRoot string, target *SlingTarget, thing *SlingThing) err
 		issueID = thing.ID
 		if thing.Proto != "" {
 			// Sling issue with molecule workflow
-			issueID, moleculeCtx, err = spawnMoleculeOnIssue(beadsPath, thing, polecatAddress)
+			issueID, moleculeCtx, err = runMoleculeOnIssue(beadsPath, thing, polecatAddress)
 			if err != nil {
 				return err
 			}
@@ -679,7 +679,7 @@ func slingToDeacon(townRoot string, target *SlingTarget, thing *SlingThing) erro
 			ID:     patrolIssueID, // Use the resolved beads issue ID
 			IsWisp: true,          // Patrol cycles are ephemeral (gt-jsup)
 		}
-		patrolID, _, err = spawnMoleculeFromProto(beadsPath, patrolThing, deaconAddress)
+		patrolID, _, err = pourMoleculeFromProto(beadsPath, patrolThing, deaconAddress)
 		if err != nil {
 			return fmt.Errorf("starting patrol: %w", err)
 		}
@@ -699,17 +699,17 @@ func slingToDeacon(townRoot string, target *SlingTarget, thing *SlingThing) erro
 	var beadsIssue *BeadsIssue
 	issueID := thing.ID
 
-	// For protos, we need to spawn the molecule but NOT pin it
+	// For protos, we need to pour the molecule but NOT pin it
 	var moleculeCtx *MoleculeContext
 	var err error
 	if thing.Kind == "proto" {
-		issueID, moleculeCtx, err = spawnMoleculeFromProto(beadsPath, thing, deaconAddress)
+		issueID, moleculeCtx, err = pourMoleculeFromProto(beadsPath, thing, deaconAddress)
 		if err != nil {
 			return err
 		}
 	} else if thing.Kind == "issue" {
 		if thing.Proto != "" {
-			issueID, moleculeCtx, err = spawnMoleculeOnIssue(beadsPath, thing, deaconAddress)
+			issueID, moleculeCtx, err = runMoleculeOnIssue(beadsPath, thing, deaconAddress)
 			if err != nil {
 				return err
 			}
@@ -788,14 +788,14 @@ func slingToCrew(townRoot string, target *SlingTarget, thing *SlingThing) error 
 
 	switch thing.Kind {
 	case "proto":
-		issueID, moleculeCtx, err = spawnMoleculeFromProto(beadsPath, thing, crewAddress)
+		issueID, moleculeCtx, err = pourMoleculeFromProto(beadsPath, thing, crewAddress)
 		if err != nil {
 			return err
 		}
 	case "issue":
 		issueID = thing.ID
 		if thing.Proto != "" {
-			issueID, moleculeCtx, err = spawnMoleculeOnIssue(beadsPath, thing, crewAddress)
+			issueID, moleculeCtx, err = runMoleculeOnIssue(beadsPath, thing, crewAddress)
 			if err != nil {
 				return err
 			}
@@ -882,7 +882,7 @@ func slingToWitness(townRoot string, target *SlingTarget, thing *SlingThing) err
 			ID:     patrolIssueID, // Use the resolved beads issue ID
 			IsWisp: true,          // Patrol cycles are ephemeral (gt-jsup)
 		}
-		patrolID, _, err = spawnMoleculeFromProto(beadsPath, patrolThing, witnessAddress)
+		patrolID, _, err = pourMoleculeFromProto(beadsPath, patrolThing, witnessAddress)
 		if err != nil {
 			return fmt.Errorf("starting patrol: %w", err)
 		}
@@ -902,17 +902,17 @@ func slingToWitness(townRoot string, target *SlingTarget, thing *SlingThing) err
 	var beadsIssue *BeadsIssue
 	issueID := thing.ID
 
-	// For protos, we need to spawn the molecule but NOT pin it
+	// For protos, we need to pour the molecule but NOT pin it
 	var moleculeCtx *MoleculeContext
 	var err error
 	if thing.Kind == "proto" {
-		// Spawn molecule without pinning
-		issueID, moleculeCtx, err = spawnMoleculeFromProto(beadsPath, thing, witnessAddress)
+		// Pour molecule without pinning
+		issueID, moleculeCtx, err = pourMoleculeFromProto(beadsPath, thing, witnessAddress)
 		if err != nil {
 			return err
 		}
 	} else if thing.Kind == "issue" && thing.Proto != "" {
-		issueID, moleculeCtx, err = spawnMoleculeOnIssue(beadsPath, thing, witnessAddress)
+		issueID, moleculeCtx, err = runMoleculeOnIssue(beadsPath, thing, witnessAddress)
 		if err != nil {
 			return err
 		}
@@ -980,14 +980,14 @@ func slingToPatrolWithReplace(townRoot, beadsPath, agentAddress string, thing *S
 
 	switch thing.Kind {
 	case "proto":
-		issueID, moleculeCtx, err = spawnMoleculeFromProto(beadsPath, thing, agentAddress)
+		issueID, moleculeCtx, err = pourMoleculeFromProto(beadsPath, thing, agentAddress)
 		if err != nil {
 			return err
 		}
 	case "issue":
 		issueID = thing.ID
 		if thing.Proto != "" {
-			issueID, moleculeCtx, err = spawnMoleculeOnIssue(beadsPath, thing, agentAddress)
+			issueID, moleculeCtx, err = runMoleculeOnIssue(beadsPath, thing, agentAddress)
 			if err != nil {
 				return err
 			}
@@ -1049,7 +1049,7 @@ func slingToRefinery(townRoot string, target *SlingTarget, thing *SlingThing) er
 			ID:     patrolIssueID, // Use the resolved beads issue ID
 			IsWisp: true,          // Patrol cycles are ephemeral (gt-jsup)
 		}
-		patrolID, _, err = spawnMoleculeFromProto(beadsPath, patrolThing, refineryAddress)
+		patrolID, _, err = pourMoleculeFromProto(beadsPath, patrolThing, refineryAddress)
 		if err != nil {
 			return fmt.Errorf("starting patrol: %w", err)
 		}
@@ -1069,16 +1069,16 @@ func slingToRefinery(townRoot string, target *SlingTarget, thing *SlingThing) er
 	var beadsIssue *BeadsIssue
 	issueID := thing.ID
 
-	// For protos, we need to spawn the molecule but NOT pin it
+	// For protos, we need to pour the molecule but NOT pin it
 	var moleculeCtx *MoleculeContext
 	var err error
 	if thing.Kind == "proto" {
-		issueID, moleculeCtx, err = spawnMoleculeFromProto(beadsPath, thing, refineryAddress)
+		issueID, moleculeCtx, err = pourMoleculeFromProto(beadsPath, thing, refineryAddress)
 		if err != nil {
 			return err
 		}
 	} else if thing.Kind == "issue" && thing.Proto != "" {
-		issueID, moleculeCtx, err = spawnMoleculeOnIssue(beadsPath, thing, refineryAddress)
+		issueID, moleculeCtx, err = runMoleculeOnIssue(beadsPath, thing, refineryAddress)
 		if err != nil {
 			return err
 		}
@@ -1151,14 +1151,14 @@ func slingToMayor(townRoot string, target *SlingTarget, thing *SlingThing) error
 
 	switch thing.Kind {
 	case "proto":
-		issueID, moleculeCtx, err = spawnMoleculeFromProto(beadsPath, thing, mayorAddress)
+		issueID, moleculeCtx, err = pourMoleculeFromProto(beadsPath, thing, mayorAddress)
 		if err != nil {
 			return err
 		}
 	case "issue":
 		issueID = thing.ID
 		if thing.Proto != "" {
-			issueID, moleculeCtx, err = spawnMoleculeOnIssue(beadsPath, thing, mayorAddress)
+			issueID, moleculeCtx, err = runMoleculeOnIssue(beadsPath, thing, mayorAddress)
 			if err != nil {
 				return err
 			}
@@ -1209,15 +1209,15 @@ func slingToMayor(townRoot string, target *SlingTarget, thing *SlingThing) error
 	return nil
 }
 
-// spawnMoleculeFromProto spawns a molecule from a proto template.
-func spawnMoleculeFromProto(beadsPath string, thing *SlingThing, assignee string) (string, *MoleculeContext, error) {
+// pourMoleculeFromProto creates a molecule from a proto template.
+func pourMoleculeFromProto(beadsPath string, thing *SlingThing, assignee string) (string, *MoleculeContext, error) {
 	moleculeType := "molecule"
 	if thing.IsWisp {
 		moleculeType = "wisp"
 	}
-	fmt.Printf("Spawning %s from proto %s...\n", moleculeType, thing.ID)
+	fmt.Printf("Creating %s from proto %s...\n", moleculeType, thing.ID)
 
-	// Use bd mol run to spawn the molecule
+	// Use bd mol run to create the molecule
 	args := []string{"--no-daemon", "mol", "run", thing.ID, "--json"}
 	if assignee != "" {
 		args = append(args, "--var", "assignee="+assignee)
@@ -1266,7 +1266,7 @@ func spawnMoleculeFromProto(beadsPath string, thing *SlingThing, assignee string
 		return "", nil, fmt.Errorf("parsing molecule result: %w", err)
 	}
 
-	fmt.Printf("%s %s spawned: %s (%d steps)\n",
+	fmt.Printf("%s %s created: %s (%d steps)\n",
 		style.Bold.Render("✓"), moleculeType, molResult.RootID, molResult.Created-1)
 
 	moleculeCtx := &MoleculeContext{
@@ -1280,8 +1280,8 @@ func spawnMoleculeFromProto(beadsPath string, thing *SlingThing, assignee string
 	return molResult.RootID, moleculeCtx, nil
 }
 
-// spawnMoleculeOnIssue spawns a molecule workflow on an existing issue.
-func spawnMoleculeOnIssue(beadsPath string, thing *SlingThing, assignee string) (string, *MoleculeContext, error) {
+// runMoleculeOnIssue runs a molecule workflow on an existing issue.
+func runMoleculeOnIssue(beadsPath string, thing *SlingThing, assignee string) (string, *MoleculeContext, error) {
 	fmt.Printf("Running molecule %s on issue %s...\n", thing.Proto, thing.ID)
 
 	args := []string{"--no-daemon", "mol", "run", thing.Proto,

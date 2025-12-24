@@ -200,7 +200,7 @@ Work in Gas Town exists in three phases:
 
 **"Is this the work, or is this wrapping the work?"**
 
-| Spawn as Mol when... | Spawn as Wisp when... |
+| Pour when... | Wisp when... |
 |---------------------|----------------------|
 | This IS the work item | This SHAPES execution |
 | Multiple agents coordinate | Single agent executes |
@@ -539,8 +539,8 @@ Still declarative, still mechanical.
 | Operands | Result |
 |----------|--------|
 | proto + proto | compound proto (frozen) |
-| proto + mol | spawn proto as mol, attach |
-| proto + wisp | spawn proto as wisp, attach |
+| proto + mol | pour proto, attach |
+| proto + wisp | wisp proto, attach |
 | mol + mol | link via edges |
 | wisp + wisp | link via edges |
 | mol + wisp | reference link (cross-phase) |
@@ -548,8 +548,8 @@ Still declarative, still mechanical.
 | aspect + molecule | advised molecule |
 
 Phase override flags:
-- `--pour`: Force spawn as mol
-- `--wisp`: Force spawn as wisp
+- `--pour`: Force creation as mol
+- `--wisp`: Force creation as wisp
 
 ## Complete Example: Shiny-Enterprise
 

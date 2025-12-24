@@ -604,7 +604,7 @@ Some workflows need **dynamic structure** - steps that emerge at runtime based
 on discovered work. Consider mol-witness-patrol: it monitors N polecats where
 N varies. A static molecule can't express "for each polecat, do these steps."
 
-The solution is **dynamic bonding** - spawning child molecules at runtime:
+The solution is **dynamic bonding** - creating child molecules at runtime:
 
 ```bash
 # In survey-workers step:

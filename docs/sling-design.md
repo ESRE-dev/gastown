@@ -52,7 +52,7 @@ gt sling gt-epic-123 refinery/
 
 | Thing | Prefix | Example | Notes |
 |-------|--------|---------|-------|
-| Molecule proto | none | `gt sling feature polecat/alpha` | Spawns from proto |
+| Molecule proto | none | `gt sling feature polecat/alpha` | Pours from proto |
 | Issue/Bead | `gt-*`, `bd-*` | `gt sling gt-xyz polecat/alpha` | Work item |
 | Epic | `gt-*` (type=epic) | `gt sling gt-epic refinery/` | Batch of issues |
 | Wisp | `--wisp` flag | `gt sling patrol deacon/ --wisp` | Wisp (no audit trail) |
@@ -64,12 +64,12 @@ gt sling gt-epic-123 refinery/
 │                    gt sling lifecycle                    │
 ├─────────────────────────────────────────────────────────┤
 │                                                          │
-│  1. SPAWN (if proto)     2. ASSIGN           3. PIN     │
+│  1. POUR (if proto)      2. ASSIGN           3. PIN     │
 │     proto → molecule        mol → agent         → hook  │
 │                                                          │
 │  ┌─────────┐            ┌─────────┐        ┌─────────┐  │
 │  │  Proto  │ ────────►  │Molecule │ ─────► │  Hook   │  │
-│  │(catalog)│   spawn    │(instance)│ assign │(pinned) │  │
+│  │(catalog)│   pour     │(instance)│ assign │(pinned) │  │
 │  └─────────┘            └─────────┘        └─────────┘  │
 │                                                  │       │
 │                                            agent wakes   │
@@ -131,7 +131,7 @@ Flags:
   --force          Re-sling even if hook already has work
 
 Examples:
-  gt sling feature polecat/alpha              # Spawn feature mol, sling to alpha
+  gt sling feature polecat/alpha              # Pour feature mol, sling to alpha
   gt sling gt-xyz polecat/beta -m bugfix      # Sling issue with bugfix workflow
   gt sling patrol deacon/ --wisp              # Patrol wisp
   gt sling gt-epic-batch refinery/            # Batch work to refinery
@@ -172,7 +172,7 @@ Output:
 
 | Command | gt mol | bd mol | Notes |
 |---------|--------|--------|-------|
-| Create molecule | via `gt sling` | `bd mol spawn` | gt adds assignment |
+| Create molecule | via `gt sling` | `bd pour` | gt adds assignment |
 | List protos | `gt mol catalog` | `bd mol catalog` | Same data |
 | Show molecule | `gt mol status` | `bd mol show` | gt adds agent context |
 | Combine | - | `bd mol bond` | Data operation only |
@@ -181,26 +181,6 @@ Output:
 
 **Design principle**: `bd mol` is pure data operations. `gt sling` and `gt mol`
 add agent context (assignment, hooks, sessions).
-
-## Migration Path
-
-### Old Commands → New
-
-| Old | New | Notes |
-|-----|-----|-------|
-| `gt molecule instantiate` | `gt sling` | With assignment |
-| `gt molecule attach` | `gt sling --force` | Re-sling to hook |
-| `gt molecule detach` | `gt mol burn` | Or auto on complete |
-| `gt molecule progress` | `gt mol status` | Better name |
-| `gt molecule list` | `gt mol catalog` | Protos only |
-| `gt spawn --molecule` | `gt sling` | Unified |
-
-### Template Updates Required
-
-1. **deacon.md.tmpl** - Use `gt mol status`, remove decision logic
-2. **polecat.md.tmpl** - Propulsion principle, check hook on wake
-3. **witness.md.tmpl** - Sling wisps to agents it spawns
-4. **refinery.md.tmpl** - Accept slung epics
 
 ## Open Design Questions
 

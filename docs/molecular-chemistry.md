@@ -344,9 +344,9 @@ behavior.
 
 | bond | Proto | Mol | Wisp |
 |------|-------|-----|------|
-| **Proto** | Compound Proto | Spawn Mol, attach | Spawn Wisp, attach |
-| **Mol** | Spawn Mol, attach | Link via edges | Link via edges |
-| **Wisp** | Spawn Wisp, attach | Link via edges | Link via edges |
+| **Proto** | Compound Proto | Pour, attach | Wisp, attach |
+| **Mol** | Pour, attach | Link via edges | Link via edges |
+| **Wisp** | Wisp, attach | Link via edges | Link via edges |
 
 The table is symmetric: bonding A+B produces the same structure as B+A.
 
@@ -363,7 +363,7 @@ bd mol bond mol-review mol-deploy --as "Review and Deploy"
 Creates a compound proto that includes both workflows. The result is a
 reusable template (solid phase).
 
-### Bond: Proto + Mol → Spawn + Attach
+### Bond: Proto + Mol → Pour + Attach
 
 A solid template melts into an existing liquid workflow.
 
@@ -374,7 +374,7 @@ bd mol bond mol-hotfix bd-feature-123
 The proto is instantiated (as liquid by default) and attached to the
 existing mol. The new issues become part of the flowing work.
 
-### Bond: Proto + Wisp → Spawn + Attach (Vapor)
+### Bond: Proto + Wisp → Wisp + Attach
 
 A solid template sublimates into an existing vapor workflow.
 
@@ -382,7 +382,7 @@ A solid template sublimates into an existing vapor workflow.
 bd mol bond mol-extra-check wisp-patrol-456
 ```
 
-The proto instantiates as vapor (following the wisp's phase) and attaches.
+The proto is created as a wisp (following the target's phase) and attaches.
 
 ### Bond: Mol + Mol → Compound Mol
 
@@ -416,8 +416,8 @@ bd mol bond mol-temp-check bd-feature --wisp
 
 | Flag | Effect | Use Case |
 |------|--------|----------|
-| `--pour` | Force create as liquid | "This matters, persist it" |
-| `--wisp` | Force create as vapor | "This is ephemeral, let it evaporate" |
+| `--pour` | Force creation as liquid | "This matters, persist it" |
+| `--wisp` | Force creation as vapor | "This is ephemeral, let it evaporate" |
 
 ### Cross-Phase Bonding
 
@@ -480,7 +480,7 @@ Wisps are single-cycle and don't survive session boundaries in the
 traditional sense. Agents hold them in working memory for one cycle:
 
 ```bash
-# Deacon creates patrol (no pin needed)
+# Deacon creates patrol wisp (no pin needed)
 bd wisp mol-deacon-patrol              # Create vapor
 # ... execute steps ...
 bd mol squash <id> --summary="..."     # Condense and dissipate
@@ -908,8 +908,8 @@ Install alternatives from the Mol Mall:
 
 ### For Beads
 
-1. **New commands**: `bd pour`, `bd wisp`, `bd pin`
-2. **Flag changes**: `--persistent` → `--pour` (or phase follows operand)
+1. **Commands**: `bd pour`, `bd wisp`, `bd pin`
+2. **Flags**: `--pour` forces liquid phase when bonding
 3. **Wisp storage**: `.beads-wisp/` directory, gitignored
 4. **Digest ID reservation**: Placeholder in permanent store on wisp creation
 

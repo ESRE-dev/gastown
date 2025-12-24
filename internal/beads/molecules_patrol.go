@@ -234,7 +234,7 @@ completion, verify clean git state before kills, and escalate stuck workers.
 
 **You do NOT do implementation work.** Your job is oversight, not coding.
 
-This molecule uses dynamic bonding to spawn mol-polecat-arm for each worker,
+This molecule uses dynamic bonding to create mol-polecat-arm for each worker,
 enabling parallel inspection with a fanout gate for aggregation.
 
 ## The Christmas Ornament Shape
