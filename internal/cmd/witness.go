@@ -131,14 +131,16 @@ func runWitnessStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Starting witness for %s...\n", rigName)
 
 	if witnessForeground {
-		// Foreground mode: run monitoring loop in current process (blocking)
-		if err := mgr.Start(true); err != nil {
+		// Foreground mode is no longer supported - patrol logic moved to mol-witness-patrol
+		if err := mgr.Start(); err != nil {
 			if err == witness.ErrAlreadyRunning {
 				fmt.Printf("%s Witness is already running\n", style.Dim.Render("⚠"))
 				return nil
 			}
 			return fmt.Errorf("starting witness: %w", err)
 		}
+		fmt.Printf("%s Note: Foreground mode no longer runs patrol loop\n", style.Dim.Render("⚠"))
+		fmt.Printf("  %s\n", style.Dim.Render("Patrol logic is now handled by mol-witness-patrol molecule"))
 		return nil
 	}
 
@@ -155,7 +157,7 @@ func runWitnessStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Update manager state to reflect running session
-	_ = mgr.Start(false) // Mark as running in state file
+	_ = mgr.Start() // Mark as running in state file
 
 	fmt.Printf("%s Witness started for %s\n", style.Bold.Render("✓"), rigName)
 	fmt.Printf("  %s\n", style.Dim.Render("Use 'gt witness attach' to connect"))
@@ -399,7 +401,7 @@ func runWitnessRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	if created {
-		_ = mgr.Start(false) // Mark as running in state file
+		_ = mgr.Start() // Mark as running in state file
 	}
 
 	fmt.Printf("%s Witness restarted for %s\n", style.Bold.Render("✓"), rigName)

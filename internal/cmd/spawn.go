@@ -442,7 +442,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	witnessMgr := witness.NewManager(r)
 	if witStatus, err := witnessMgr.Status(); err == nil && witStatus.State != witness.StateRunning {
 		fmt.Printf("Starting witness for %s...\n", rigName)
-		if err := witnessMgr.Start(false); err != nil {
+		if err := witnessMgr.Start(); err != nil {
 			if err != witness.ErrAlreadyRunning {
 				fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not start witness: %v", err)))
 			}
