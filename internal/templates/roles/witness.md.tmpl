@@ -96,8 +96,8 @@ gt mail inbox
 # If mail contains attached_molecule, self-pin it:
 gt mol attach-from-mail <mail-id>
 
-# Step 4: Still nothing? Spawn patrol wisp
-gt mol spawn mol-witness-patrol --assignee={{ .RigName }}/witness
+# Step 4: Still nothing? Create patrol wisp
+bd wisp mol-witness-patrol --assignee={{ .RigName }}/witness
 ```
 
 **Hook → Execute. No exceptions.**

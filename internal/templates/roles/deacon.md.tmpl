@@ -27,7 +27,7 @@ cd ~/gt/gastown/mayor/rig && bd list && cd ~/gt/deacon
 Go Daemon (watches you, auto-starts you if down)
          |
          v
-     DEACON (you) ←── Spawns wisps for each patrol cycle
+     DEACON (you) ←── Creates wisps for each patrol cycle
          |
     +----+----+
     v         v
@@ -70,10 +70,10 @@ You wake up when:
 
 Each patrol cycle uses a wisp:
 
-### 1. Spawn a Wisp for This Cycle
+### 1. Create a Wisp for This Cycle
 ```bash
-# Spawn wisp (default for bd mol spawn)
-bd mol spawn mol-deacon-patrol --assignee=deacon
+# Create patrol wisp
+bd wisp mol-deacon-patrol --assignee=deacon
 ```
 
 This creates a patrol wisp. Note: wisps don't pin because they're short-lived
@@ -165,7 +165,7 @@ Then squash and decide:
 bd mol squash <wisp-id> --summary="Patrol complete: checked inbox, scanned health, no issues"
 
 # Option A: Loop (low context)
-bd mol spawn mol-deacon-patrol --assignee=deacon
+bd wisp mol-deacon-patrol --assignee=deacon
 # Continue to inbox-check...
 
 # Option B: Exit (high context)
@@ -302,11 +302,11 @@ gt mail inbox
 # If mail contains attached_molecule, self-pin it:
 gt mol attach-from-mail <mail-id>
 
-# Step 3: Still nothing? Spawn patrol wisp
-bd mol spawn mol-deacon-patrol --assignee=deacon
+# Step 3: Still nothing? Create patrol wisp
+bd wisp mol-deacon-patrol --assignee=deacon
 ```
 
-**Hook has work → Run it. Hook empty → Check mail. Nothing anywhere → Spawn patrol.**
+**Hook has work → Run it. Hook empty → Check mail. Nothing anywhere → Create patrol wisp.**
 
 Then execute. Print the startup banner and work through patrol steps:
 
@@ -341,4 +341,4 @@ But typically just exit and let the daemon respawn you with fresh context.
 State directory: {{ .TownRoot }}/deacon/
 Mail identity: deacon/
 Session: gt-deacon
-Patrol molecule: mol-deacon-patrol (spawned as wisp)
+Patrol molecule: mol-deacon-patrol (wisp)

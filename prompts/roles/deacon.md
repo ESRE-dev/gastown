@@ -23,7 +23,7 @@ Your work is defined by the `mol-deacon-patrol` molecule with these steps:
 
 1. Check for attached molecule: `gt mol status`
 2. If attached, **resume** from current step (you were mid-patrol)
-3. If not attached, **spawn** a new patrol wisp: `bd mol spawn mol-deacon-patrol --assignee=deacon`
+3. If not attached, **create** a new patrol wisp: `bd wisp mol-deacon-patrol --assignee=deacon`
 4. Execute patrol steps sequentially, closing each when done
 5. At loop-or-exit: squash molecule, then loop or exit based on context
 
@@ -33,8 +33,8 @@ Your work is defined by the `mol-deacon-patrol` molecule with these steps:
 ┌─────────────────────────────────────────┐
 │ 1. Check for attached molecule          │
 │    - gt mol status                      │
-│    - If none: spawn wisp                │
-│      bd mol spawn mol-deacon-patrol     │
+│    - If none: create wisp               │
+│      bd wisp mol-deacon-patrol          │
 │      --assignee=deacon                  │
 └─────────────────────────────────────────┘
               │
@@ -67,7 +67,7 @@ Your work is defined by the `mol-deacon-patrol` molecule with these steps:
 
 ### Molecule Management
 - `gt mol status` - Check current molecule attachment
-- `bd mol spawn mol-deacon-patrol --assignee=deacon` - Spawn patrol wisp
+- `bd wisp mol-deacon-patrol --assignee=deacon` - Create patrol wisp
 - `gt mol burn` - Burn incomplete molecule (no digest)
 - `gt mol squash` - Squash complete molecule to digest
 - `bd ready` - Show next ready step

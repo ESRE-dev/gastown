@@ -382,7 +382,7 @@ A solid template sublimates into an existing vapor workflow.
 bd mol bond mol-extra-check wisp-patrol-456
 ```
 
-The proto spawns as vapor (following the wisp's phase) and attaches.
+The proto instantiates as vapor (following the wisp's phase) and attaches.
 
 ### Bond: Mol + Mol → Compound Mol
 
@@ -404,7 +404,7 @@ bd mol bond wisp-123 wisp-456
 
 ### Phase Override Flags
 
-Bond's spawning behavior can be overridden:
+Bond's creation behavior can be overridden:
 
 ```bash
 # Force liquid when attaching to wisp (found something important!)
@@ -416,8 +416,8 @@ bd mol bond mol-temp-check bd-feature --wisp
 
 | Flag | Effect | Use Case |
 |------|--------|----------|
-| `--pour` | Force spawn as liquid | "This matters, persist it" |
-| `--wisp` | Force spawn as vapor | "This is ephemeral, let it evaporate" |
+| `--pour` | Force create as liquid | "This matters, persist it" |
+| `--wisp` | Force create as vapor | "This is ephemeral, let it evaporate" |
 
 ### Cross-Phase Bonding
 
@@ -433,7 +433,7 @@ across the phase boundary without forcing conversion.
 
 This enables patterns like:
 - Patrol wisp discovers issue → creates liquid mol for the fix
-- Feature mol needs diagnostic → spawns vapor wisp for the check
+- Feature mol needs diagnostic → creates vapor wisp for the check
 - The reference survives even when the wisp evaporates (ID stable)
 
 ## Agent Attachment: Hooks and Pins
@@ -480,7 +480,7 @@ Wisps are single-cycle and don't survive session boundaries in the
 traditional sense. Agents hold them in working memory for one cycle:
 
 ```bash
-# Deacon self-spawns patrol (no pin needed)
+# Deacon creates patrol (no pin needed)
 bd wisp mol-deacon-patrol              # Create vapor
 # ... execute steps ...
 bd mol squash <id> --summary="..."     # Condense and dissipate
@@ -612,7 +612,7 @@ bd mol squash bd-abc123 --summary="Implemented auth feature"
 ### Patrol Work (Vapor Path)
 
 ```bash
-# 1. Self-spawn wisp (no pin needed)
+# 1. Create wisp (no pin needed)
 bd wisp mol-deacon-patrol
 
 # 2. Execute cycle steps
@@ -749,7 +749,7 @@ A static molecule can't express "for each polecat, do these steps."
 
 ### The Solution: Dynamic Bond
 
-The **bond** operator becomes a runtime spawner:
+The **bond** operator becomes a runtime instantiator:
 
 ```bash
 # In survey-workers step:
@@ -923,7 +923,7 @@ Install alternatives from the Mol Mall:
 ### For Agents
 
 1. **Polecats**: Receive pinned mols, execute, squash, request shutdown
-2. **Patrol roles**: Self-spawn wisps, execute cycle, squash, loop
+2. **Patrol roles**: Create wisps, execute cycle, squash, loop
 3. **Recovery**: Re-read beads state, continue from last completed step
 
 ---

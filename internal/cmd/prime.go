@@ -427,7 +427,7 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("2. Check mail: `gt mail inbox` - look for 🤝 HANDOFF messages")
 		fmt.Println("3. Check for attached patrol: `gt mol status`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
-		fmt.Println("   - If no mol → spawn patrol: `bd mol spawn mol-witness-patrol`")
+		fmt.Println("   - If no mol → create patrol: `bd wisp mol-witness-patrol`")
 	case RolePolecat:
 		fmt.Println()
 		fmt.Println("---")
@@ -448,7 +448,7 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("2. Check mail: `gt mail inbox` - look for 🤝 HANDOFF messages")
 		fmt.Println("3. Check for attached patrol: `gt mol status`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
-		fmt.Println("   - If no mol → spawn patrol: `bd mol spawn mol-refinery-patrol`")
+		fmt.Println("   - If no mol → create patrol: `bd wisp mol-refinery-patrol`")
 	case RoleCrew:
 		fmt.Println()
 		fmt.Println("---")
@@ -470,7 +470,7 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("3. Check mail: `gt mail inbox` - look for 🤝 HANDOFF messages")
 		fmt.Println("4. Check for attached patrol: `gt mol status`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
-		fmt.Println("   - If no mol → spawn patrol: `bd mol spawn mol-deacon-patrol`")
+		fmt.Println("   - If no mol → create patrol: `bd wisp mol-deacon-patrol`")
 	}
 }
 
@@ -732,8 +732,8 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 	}
 
 	if !hasPatrol {
-		// No active patrol - AUTO-SPAWN one
-		fmt.Println("Status: **No active patrol** - spawning mol-deacon-patrol...")
+		// No active patrol - AUTO-CREATE one
+		fmt.Println("Status: **No active patrol** - creating mol-deacon-patrol wisp...")
 		fmt.Println()
 
 		// Find the proto ID for mol-deacon-patrol
@@ -767,24 +767,24 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 			return
 		}
 
-		// Spawn the wisp (default spawn creates wisp)
-		cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "spawn", protoID, "--assignee", "deacon")
+		// Create the wisp
+		cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", protoID, "--assignee", "deacon")
 		cmdSpawn.Dir = rigBeadsDir
 		var stdoutSpawn, stderrSpawn bytes.Buffer
 		cmdSpawn.Stdout = &stdoutSpawn
 		cmdSpawn.Stderr = &stderrSpawn
 
 		if err := cmdSpawn.Run(); err != nil {
-			fmt.Printf("Failed to spawn patrol: %s\n", stderrSpawn.String())
-			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon mol spawn " + protoID))
+			fmt.Printf("Failed to create patrol wisp: %s\n", stderrSpawn.String())
+			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp " + protoID))
 			return
 		}
 
-		// Parse the spawned molecule ID from output
+		// Parse the created molecule ID from output
 		spawnOutput := stdoutSpawn.String()
-		fmt.Printf("✓ Spawned patrol molecule\n")
+		fmt.Printf("✓ Created patrol wisp\n")
 
-		// Extract molecule ID from spawn output (format: "Created molecule: gt-xxxx")
+		// Extract molecule ID from output (format: "Created molecule: gt-xxxx")
 		for _, line := range strings.Split(spawnOutput, "\n") {
 			if strings.Contains(line, "molecule:") || strings.Contains(line, "Created") {
 				parts := strings.Fields(line)
@@ -898,8 +898,8 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 	}
 
 	if !hasPatrol {
-		// No active patrol - AUTO-SPAWN one
-		fmt.Println("Status: **No active patrol** - spawning mol-witness-patrol...")
+		// No active patrol - AUTO-CREATE one
+		fmt.Println("Status: **No active patrol** - creating mol-witness-patrol wisp...")
 		fmt.Println()
 
 		// Find the proto ID for mol-witness-patrol
@@ -933,24 +933,24 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 			return
 		}
 
-		// Spawn the wisp (default spawn creates wisp)
-		cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "spawn", protoID, "--assignee", ctx.Rig+"/witness")
+		// Create the wisp
+		cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", protoID, "--assignee", ctx.Rig+"/witness")
 		cmdSpawn.Dir = witnessBeadsDir
 		var stdoutSpawn, stderrSpawn bytes.Buffer
 		cmdSpawn.Stdout = &stdoutSpawn
 		cmdSpawn.Stderr = &stderrSpawn
 
 		if err := cmdSpawn.Run(); err != nil {
-			fmt.Printf("Failed to spawn patrol: %s\n", stderrSpawn.String())
-			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon mol spawn " + protoID))
+			fmt.Printf("Failed to create patrol wisp: %s\n", stderrSpawn.String())
+			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp " + protoID))
 			return
 		}
 
-		// Parse the spawned molecule ID from output
+		// Parse the created molecule ID from output
 		spawnOutput := stdoutSpawn.String()
-		fmt.Printf("✓ Spawned patrol molecule\n")
+		fmt.Printf("✓ Created patrol wisp\n")
 
-		// Extract molecule ID from spawn output (format: "Created molecule: gt-xxxx")
+		// Extract molecule ID from output (format: "Created molecule: gt-xxxx")
 		for _, line := range strings.Split(spawnOutput, "\n") {
 			if strings.Contains(line, "molecule:") || strings.Contains(line, "Created") {
 				parts := strings.Fields(line)
@@ -1064,8 +1064,8 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 	}
 
 	if !hasPatrol {
-		// No active patrol - AUTO-SPAWN one
-		fmt.Println("Status: **No active patrol** - spawning mol-refinery-patrol...")
+		// No active patrol - AUTO-CREATE one
+		fmt.Println("Status: **No active patrol** - creating mol-refinery-patrol wisp...")
 		fmt.Println()
 
 		// Find the proto ID for mol-refinery-patrol
@@ -1099,24 +1099,24 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 			return
 		}
 
-		// Spawn the wisp (default spawn creates wisp)
-		cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "spawn", protoID, "--assignee", ctx.Rig+"/refinery")
+		// Create the wisp
+		cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", protoID, "--assignee", ctx.Rig+"/refinery")
 		cmdSpawn.Dir = refineryBeadsDir
 		var stdoutSpawn, stderrSpawn bytes.Buffer
 		cmdSpawn.Stdout = &stdoutSpawn
 		cmdSpawn.Stderr = &stderrSpawn
 
 		if err := cmdSpawn.Run(); err != nil {
-			fmt.Printf("Failed to spawn patrol: %s\n", stderrSpawn.String())
-			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon mol spawn " + protoID))
+			fmt.Printf("Failed to create patrol wisp: %s\n", stderrSpawn.String())
+			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp " + protoID))
 			return
 		}
 
-		// Parse the spawned molecule ID from output
+		// Parse the created molecule ID from output
 		spawnOutput := stdoutSpawn.String()
-		fmt.Printf("✓ Spawned patrol molecule\n")
+		fmt.Printf("✓ Created patrol wisp\n")
 
-		// Extract molecule ID from spawn output (format: "Created molecule: gt-xxxx")
+		// Extract molecule ID from output (format: "Created molecule: gt-xxxx")
 		for _, line := range strings.Split(spawnOutput, "\n") {
 			if strings.Contains(line, "molecule:") || strings.Contains(line, "Created") {
 				parts := strings.Fields(line)
