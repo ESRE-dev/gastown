@@ -58,22 +58,62 @@ Timeout: 60 seconds per polecat. If not ready, try again next cycle.
 Needs: inbox-check
 
 ## Step: health-scan
-Ping Witnesses and Refineries.
+Check Witness and Refinery health for each rig.
 
-For each rig, verify:
-- Witness is responsive
-- Refinery is processing queue
-- No stalled operations
+**ZFC Principle**: You (Claude) make the judgment call about what is "stuck" or
+"unresponsive" - there are no hardcoded thresholds in Go. Read the signals,
+consider context, and decide.
 
+For each rig, run:
 ` + "```" + `bash
-gt status --health
-# Check each rig
-for rig in $(gt rigs); do
-    gt rig status $rig
-done
+gt witness status <rig>
+gt refinery status <rig>
 ` + "```" + `
 
-Report any issues found. Restart unresponsive components if needed.
+**Signals to assess:**
+
+| Component | Healthy Signals | Concerning Signals |
+|-----------|-----------------|-------------------|
+| Witness | State: running, recent activity | State: not running, no heartbeat |
+| Refinery | State: running, queue processing | Queue stuck, merge failures |
+
+**Tracking unresponsive cycles:**
+
+Maintain in your patrol state (persisted across cycles):
+` + "```" + `
+health_state:
+  <rig>:
+    witness:
+      unresponsive_cycles: 0
+      last_seen_healthy: <timestamp>
+    refinery:
+      unresponsive_cycles: 0
+      last_seen_healthy: <timestamp>
+` + "```" + `
+
+**Decision matrix** (you decide the thresholds based on context):
+
+| Cycles Unresponsive | Suggested Action |
+|---------------------|------------------|
+| 1-2 | Note it, check again next cycle |
+| 3-4 | Attempt restart: gt witness restart <rig> |
+| 5+ | Escalate to Mayor with context |
+
+**Restart commands:**
+` + "```" + `bash
+gt witness restart <rig>
+gt refinery restart <rig>
+` + "```" + `
+
+**Escalation:**
+` + "```" + `bash
+gt mail send mayor/ -s "Health: <rig> <component> unresponsive" \
+  -m "Component has been unresponsive for N cycles. Restart attempts failed.
+      Last healthy: <timestamp>
+      Error signals: <details>"
+` + "```" + `
+
+Reset unresponsive_cycles to 0 when component responds normally.
 Needs: trigger-pending-spawns
 
 ## Step: plugin-run
