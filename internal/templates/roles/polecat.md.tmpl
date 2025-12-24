@@ -36,11 +36,11 @@ Town ({{ .TownRoot }})
 | Rig | `polecats/{{ .Polecat }}/.beads/` | `beads-sync` | project prefix | Project issues |
 
 **Key points:**
-- You're in a project git clone - your `.beads/` is tracked in the project repo
+- You're in a project git worktree - your `.beads/` is tracked in the project repo
 - The rig-level `{{ .RigName }}/.beads/` is **gitignored** (local runtime state)
 - Run `bd sync` to push/pull beads changes via the `beads-sync` branch
 
-## Dependency Trap
+## Gotchas when Filing Beads
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
 - WRONG: `bd dep add phase1 phase2` (temporal: "1 before 2")
@@ -58,8 +58,8 @@ Town ({{ .TownRoot }})
 ## Key Commands
 
 ### Your Work
-- `bd show <issue>` - View your assigned issue
-- `bd list --status=in_progress` - Your active work
+- `gt mol status` - Check your hooked molecule (primary work source)
+- `bd show <issue>` - View specific issue details
 
 ### Progress
 - `bd update <id> --status=in_progress` - Claim work
@@ -78,9 +78,7 @@ bd create --title="gt session capture: Support positional line count" --type=tas
 Agent-friendly UX is critical. Your guesses reveal what's intuitive.
 
 ### Completion
-- `gt done` - Signal work ready for merge queue (preferred)
-- `gt handoff` - Also works (redirects to `gt done` for polecats)
-- `bd sync` - Sync beads changes
+- `gt done` - Signal work ready for merge queue (handles beads sync internally)
 
 ## Startup Protocol: Propulsion
 
@@ -111,43 +109,18 @@ hook with all your steps. Resume from the next unclosed step and execute.
 
 ## Work Protocol
 
-Your work follows the **mol-polecat-work** molecule steps:
-
-1. **load-context** - Run `gt prime`, read your assignment
-2. **implement** - Write the solution, make commits
-3. **self-review** - Check for bugs, style issues
-4. **verify-tests** - Run tests, fix any failures
-5. **rebase-main** - Rebase on origin/main
-6. **submit-merge** - Run `gt done` to submit to merge queue
-7. **generate-summary** - Write a summary of what you did
-8. **request-shutdown** - Signal done, Witness cleans you up
-
-As you complete each step, close it:
+Your work follows the **mol-polecat-work** molecule. As you complete each step:
 ```bash
-bd close <step-id>
-bd ready --parent=<mol-id>  # See next step
+bd close <step-id>         # Mark step complete
+bd ready                   # See next step
 ```
 
-When finished, squash the molecule:
-```bash
-bd mol squash <mol-id> --summary="Implemented X, tests pass, ready for merge"
-```
+When all steps are done, the molecule gets squashed automatically when you run `gt done`.
 
 ## Before Signaling Done
 
-Run this checklist:
-
-```
-[ ] git status clean (no uncommitted changes)
-[ ] Tests pass (if applicable)
-[ ] bd close <issue> (issue marked complete)
-[ ] bd sync (beads synced)
-```
-
-**DO NOT push your branch to origin.** The `gt done` command handles submission
-to the merge queue. The Refinery will merge your work to main.
-
-The Witness will verify git state is clean before killing your session.
+Run `gt done` when your work is complete. It verifies git is clean, syncs beads,
+and submits your branch to the merge queue. The Witness handles the rest.
 
 ## If You're Stuck
 

@@ -46,7 +46,7 @@ Town ({{ .TownRoot }})
 │   └── witness/    ← Worker lifecycle
 ```
 
-## Dependency Trap
+## Gotchas when Filing Beads
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
 - WRONG: `bd dep add phase1 phase2` (temporal: "1 before 2")
