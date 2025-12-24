@@ -160,6 +160,18 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		return execClaude("gt prime")
 	}
 
-	// Attach to session using exec to properly forward TTY
+	// If inside tmux (but different session), don't switch - just inform user
+	if tmux.IsInsideTmux() {
+		fmt.Printf("Started %s/%s. Use C-b s to switch.\n", r.Name, name)
+		return nil
+	}
+
+	// Outside tmux: attach unless --detached flag is set
+	if crewDetached {
+		fmt.Printf("Started %s/%s. Run 'gt crew at %s' to attach.\n", r.Name, name, name)
+		return nil
+	}
+
+	// Attach to session
 	return attachToTmuxSession(sessionID)
 }

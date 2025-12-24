@@ -12,7 +12,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -169,21 +168,9 @@ func isInTmuxSession(targetSession string) bool {
 	return currentSession == targetSession
 }
 
-// attachToTmuxSession attaches to a tmux session with smart behavior:
-// - If already inside tmux: links the session as a new tab (use C-b n/p to switch)
-// - If outside tmux: attaches normally (takes over terminal)
+// attachToTmuxSession attaches to a tmux session.
+// Should only be called from outside tmux.
 func attachToTmuxSession(sessionID string) error {
-	// If already inside tmux, link the window as a tab instead of switching sessions
-	if tmux.IsInsideTmux() {
-		t := tmux.NewTmux()
-		if err := t.LinkWindow(sessionID, 0); err != nil {
-			return fmt.Errorf("linking window: %w", err)
-		}
-		fmt.Printf("Linked %s as a new tab. Use C-b n to switch to it.\n", sessionID)
-		return nil
-	}
-
-	// Outside tmux: attach normally
 	tmuxPath, err := exec.LookPath("tmux")
 	if err != nil {
 		return fmt.Errorf("tmux not found: %w", err)

@@ -6,13 +6,14 @@ import (
 
 // Crew command flags
 var (
-	crewRig     string
-	crewBranch  bool
-	crewJSON    bool
-	crewForce   bool
-	crewNoTmux  bool
-	crewMessage string
-	crewAccount string
+	crewRig      string
+	crewBranch   bool
+	crewJSON     bool
+	crewForce    bool
+	crewNoTmux   bool
+	crewDetached bool
+	crewMessage  string
+	crewAccount  string
 )
 
 var crewCmd = &cobra.Command{
@@ -79,6 +80,12 @@ var crewAtCmd = &cobra.Command{
 Creates a new tmux session if none exists, or attaches to existing.
 Use --no-tmux to just print the directory path instead.
 
+When run from inside tmux, the session is started but you stay in your
+current pane. Use C-b s to switch to the new session.
+
+When run from outside tmux, you are attached to the session (unless
+--detached is specified).
+
 Role Discovery:
   If no name is provided, attempts to detect the crew workspace from the
   current directory. If you're in <rig>/crew/<name>/, it will attach to
@@ -87,6 +94,7 @@ Role Discovery:
 Examples:
   gt crew at dave                 # Attach to dave's session
   gt crew at                      # Auto-detect from cwd
+  gt crew at dave --detached      # Start session without attaching
   gt crew at dave --no-tmux       # Just print path`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runCrewAt,
@@ -198,6 +206,7 @@ func init() {
 
 	crewAtCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 	crewAtCmd.Flags().BoolVar(&crewNoTmux, "no-tmux", false, "Just print directory path")
+	crewAtCmd.Flags().BoolVarP(&crewDetached, "detached", "d", false, "Start session without attaching")
 	crewAtCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use (overrides default)")
 
 	crewRemoveCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
