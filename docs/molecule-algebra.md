@@ -151,18 +151,6 @@ bd pour shiny-enterprise --var feature="auth"
 .beads/formulas/            # Project formulas
 ```
 
-### Breaking Bad × Mad Max
-
-The naming spans both universes:
-- **Formula** = the chemistry, the secret (Breaking Bad, mad scientist)
-- **Cook** = the process, the craft (Breaking Bad iconic)
-- **Proto** = the pure product, crystallized (the "blue sky")
-- Both work in Mad Max (fuel formulas, cooking up schemes)
-
-Heisenberg's formula is worthless without the cook. The cook is where purity
-comes from. Same here: formulas define the algebra, but cooking produces the
-pure proto.
-
 ## The Phases of Matter
 
 Work in Gas Town exists in three phases:
