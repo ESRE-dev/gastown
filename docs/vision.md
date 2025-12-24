@@ -104,7 +104,7 @@ RIG ────→ COOK ────→ RUN
 **Rig** is source-level composition (formula YAML).
 **Bond** is artifact-level composition (protos, mols, wisps).
 
-See [rig-cook-run.md](rig-cook-run.md) for the full specification.
+See [molecular-chemistry.md](molecular-chemistry.md) for the full specification.
 
 ### The Three Phases of Matter
 

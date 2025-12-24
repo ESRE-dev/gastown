@@ -32,7 +32,7 @@ RIG ────→ COOK ────→ RUN
 | **Cook** | Instantiate work | cook, pour, wisp | Proto, Mol, Wisp |
 | **Run** | Execute steps | (agent execution) | Work done |
 
-See [rig-cook-run.md](rig-cook-run.md) for the full specification.
+See [molecular-chemistry.md](molecular-chemistry.md) for the full specification.
 
 ## Formulas and Cooking
 
@@ -69,7 +69,7 @@ Mol/Wisp (running)          ← The work flowing
 **Rig** is source-level composition (formula YAML with `extends`, `compose`).
 **Bond** is artifact-level composition (combining cooked protos, linking mols).
 
-See the Bond Table in [rig-cook-run.md](rig-cook-run.md) for full semantics.
+See the Bond Table in [molecular-chemistry.md](molecular-chemistry.md) for full semantics.
 
 ### Why Cook?
 

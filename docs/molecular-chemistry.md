@@ -4,9 +4,82 @@
 > searching for its purpose."*
 
 Gas Town is a **work composition and execution engine**. This document describes
-the chemistry-inspired system for expressing, instantiating, and executing work
-at any scale - from single tasks to massive polymers that can grind through
-weekends of autonomous operation.
+the chemical algebra for expressing, instantiating, and executing work at any
+scale - from single tasks to massive polymers that can grind through weekends
+of autonomous operation.
+
+**Core insight**: Structure is computation. Content is cognition. They're separate.
+
+## The Work Lifecycle: Rig → Cook → Run
+
+Gas Town work flows through three phases:
+
+```
+RIG ────→ COOK ────→ RUN
+(source)  (artifact)  (execution)
+```
+
+| Phase | What Happens | Operator | Output |
+|-------|--------------|----------|--------|
+| **Rig** | Compose formulas (source level) | `extends`, `compose` | Compound Formula |
+| **Cook** | Instantiate artifacts | `cook`, `pour`, `wisp` | Proto, Mol, Wisp |
+| **Run** | Execute steps | (agent execution) | Work done |
+
+**Rig** is authoring time - writing and composing formula YAML files.
+**Cook** is compile time - expanding macros, applying aspects, flattening to pure graphs.
+**Run** is execution time - agents provide cognition for each step.
+
+## The Complete Artifact Graph
+
+```
+                    SOURCE LEVEL (Rig)
+                    ══════════════════
+
+Formula ─────rig─────→ Compound Formula
+    │     (extends,         │
+    │      compose)         │
+    └──────────┬────────────┘
+               │
+              cook
+               │
+               ▼
+                    ARTIFACT LEVEL (Bond)
+                    ════════════════════
+
+Proto ──────bond─────→ Compound Proto
+  │ \                      │ \
+  │  \                     │  \
+pour  wisp               pour  wisp
+  │     \                  │     \
+  ▼      ▼                 ▼      ▼
+ Mol    Wisp ────bond────→ Linked Work
+  │       │
+  └───┬───┘
+      │
+     run
+      │
+      ▼
+                    EXECUTION
+                    ═════════
+
+              Steps complete
+              Work gets done
+              Digests created
+```
+
+## Two Composition Operators
+
+Gas Town has **two** composition operators at different abstraction levels:
+
+| Operator | Level | Inputs | When to Use |
+|----------|-------|--------|-------------|
+| **Rig** | Source | Formula + Formula | Authoring time, in YAML |
+| **Bond** | Artifact | Proto/Mol/Wisp + any | Runtime, on cooked artifacts |
+
+**Rig** composes formulas (YAML with `extends`, `compose`).
+**Bond** composes artifacts (cooked protos, running mols/wisps).
+
+This separation is key: rig for design-time composition, bond for runtime composition.
 
 ## The Steam Engine Metaphor
 
@@ -20,10 +93,74 @@ Beads = Railroad Tracks (the persistent ledger of work)
 ```
 
 In our chemistry:
-- **Proto molecules** are the fuel (templates that define workflows)
+- **Formulas** are the secret recipe (source code for workflows)
+- **Proto molecules** are the fuel (cooked templates, ready to instantiate)
 - **Mols** are liquid work (flowing, dynamic, adapting as steps complete)
 - **Wisps** are the steam (transient execution traces that rise and dissipate)
 - **Digests** are the distillate (condensed permanent records of completed work)
+
+## Formulas: The Source Layer
+
+> *"The formula is the secret. The cook is the craft."*
+
+**Formulas** sit above protos in the artifact hierarchy. They're the source code -
+YAML files that define workflows with composition operators.
+
+```yaml
+# shiny.formula.yaml - a basic workflow
+formula: shiny
+description: The canonical right way
+version: 1
+steps:
+  - id: design
+    description: Think carefully about architecture
+  - id: implement
+    needs: [design]
+  - id: review
+    needs: [implement]
+  - id: test
+    needs: [review]
+  - id: submit
+    needs: [test]
+```
+
+### Formula Composition (Rigging)
+
+Formulas compose at the source level using `extends` and `compose`:
+
+```yaml
+# shiny-enterprise.formula.yaml
+formula: shiny-enterprise
+extends: shiny                    # Inherit from base formula
+compose:
+  - expand:
+      target: implement
+      with: rule-of-five          # Apply macro expansion
+  - aspect:
+      pointcut: "implement.*"
+      with: security-audit        # Weave in cross-cutting concern
+```
+
+### Cooking: Formula → Proto
+
+The `cook` command flattens a formula into a pure proto:
+
+```bash
+bd cook shiny-enterprise
+# Cooking shiny-enterprise...
+# ✓ Cooked proto: shiny-enterprise (30 steps)
+```
+
+Cooking pre-expands all composition - macros, aspects, branches, gates.
+The result is a flat step graph with no interpretation needed at runtime.
+
+### Formula Types
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| **workflow** | Standard work definition | shiny, patrol |
+| **expansion** | Macro template | rule-of-five |
+| **aspect** | Cross-cutting concern | security-audit |
 
 ## The Three Phases of Matter
 
@@ -201,22 +338,21 @@ bd mol distill bd-abc123 --var feature=auth --var version=1.0
 
 ## The Polymorphic Bond Operator
 
-Gas Town has **two composition operators** at different abstraction levels:
+**Bond** is Gas Town's polymorphic combiner for artifacts. It operates at the
+artifact level (post-cooking), handling different operand types with phase-aware
+behavior.
 
-| Operator | Level | Inputs | When to Use |
-|----------|-------|--------|-------------|
-| **Rig** | Source | Formula + Formula | Authoring time, in YAML |
-| **Bond** | Artifact | Proto/Mol/Wisp + any | Runtime, on cooked artifacts |
+### The Bond Table (Symmetric)
 
-**Rig** composes formulas (source YAML with `extends`, `compose`).
-**Bond** composes artifacts (cooked protos, running mols/wisps).
+| bond | Proto | Mol | Wisp |
+|------|-------|-----|------|
+| **Proto** | Compound Proto | Spawn Mol, attach | Spawn Wisp, attach |
+| **Mol** | Spawn Mol, attach | Link via edges | Link via edges |
+| **Wisp** | Spawn Wisp, attach | Link via edges | Link via edges |
 
-See [rig-cook-run.md](rig-cook-run.md) for the full Rig/Cook/Run lifecycle.
+The table is symmetric: bonding A+B produces the same structure as B+A.
 
----
-
-**Bond** is Gas Town's polymorphic combiner for artifacts - it handles different
-operand types with different phase behaviors:
+**Bond** handles different operand types with different phase behaviors:
 
 ### Bond: Proto + Proto → Compound Proto
 
@@ -796,23 +932,46 @@ Install alternatives from the Mol Mall:
 
 ## Appendix: The Vocabulary
 
+### Lifecycle Phases
+
 | Term | Meaning |
 |------|---------|
-| **Proto** | Frozen template molecule (solid phase) |
+| **Rig** | Compose formulas at source level (authoring time) |
+| **Cook** | Transform formula to proto (compile time) |
+| **Run** | Execute mol/wisp steps (agent execution time) |
+
+### Artifacts
+
+| Term | Meaning |
+|------|---------|
+| **Formula** | Source YAML defining workflow with composition rules |
+| **Proto** | Frozen template molecule (solid phase, cooked) |
 | **Mol** | Flowing work instance (liquid phase) |
 | **Wisp** | Ephemeral execution trace (vapor phase) |
 | **Digest** | Condensed permanent record |
-| **Pour** | Instantiate proto as mol (solid → liquid) |
-| **Wisp** (verb) | Instantiate proto as wisp (solid → vapor) |
-| **Bond** | Combine molecules (polymorphic) |
-| **Squash** | Condense to digest |
-| **Burn** | Discard wisp without digest |
-| **Distill** | Extract proto from experience |
-| **Hook** | Agent's attachment point for work |
-| **Pin** | Attach mol to agent's hook |
 | **Polymer** | Large composed proto chain |
 | **Epic** | Simple mol shape (flat TODO list) |
 
+### Operators
+
+| Term | Meaning |
+|------|---------|
+| **Pour** | Instantiate proto as mol (solid → liquid) |
+| **Wisp** (verb) | Instantiate proto as wisp (solid → vapor) |
+| **Bond** | Combine artifacts (polymorphic, symmetric) |
+| **Squash** | Condense to digest |
+| **Burn** | Discard wisp without digest |
+| **Distill** | Extract proto from experience |
+
+### Agent Mechanics
+
+| Term | Meaning |
+|------|---------|
+| **Hook** | Agent's attachment point for work |
+| **Pin** | Attach mol to agent's hook |
+| **Sling** | Cook + assign to agent hook |
+
 ---
 
-*The chemistry is the interface. The ledger is the truth. The work gets done.*
+*The formula is the secret. The cook is the craft. The chemistry is the interface.
+The ledger is the truth. The work gets done.*
