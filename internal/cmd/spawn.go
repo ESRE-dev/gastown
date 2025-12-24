@@ -608,8 +608,7 @@ func buildSpawnContext(issue *BeadsIssue, message string) string {
 	sb.WriteString("2. Work on your task, commit changes regularly\n")
 	sb.WriteString("3. Run `bd close <issue-id>` when done\n")
 	sb.WriteString("4. Run `bd sync` to push beads changes\n")
-	sb.WriteString("5. Push code: `git push origin HEAD`\n")
-	sb.WriteString("6. Run `gt done` to signal completion\n")
+	sb.WriteString("5. Run `gt done` to signal completion (branch stays local)\n")
 
 	return sb.String()
 }
@@ -673,18 +672,16 @@ func buildWorkAssignmentMail(issue *BeadsIssue, message, polecatAddress string, 
 	if moleculeCtx != nil {
 		body.WriteString("4. Check `bd ready --parent " + moleculeCtx.RootIssueID + "` for more steps\n")
 		body.WriteString("5. Repeat steps 2-4 for each ready step\n")
-		body.WriteString("6. When all steps done: run `bd sync`, push code, run `gt done`\n")
+		body.WriteString("6. When all steps done: run `bd sync`, then `gt done`\n")
 	} else {
 		body.WriteString("4. Run `bd sync` to push beads changes\n")
-		body.WriteString("5. Push code: `git push origin HEAD`\n")
-		body.WriteString("6. Run `gt done` to signal completion\n")
+		body.WriteString("5. Run `gt done` to signal completion (branch stays local)\n")
 	}
 	body.WriteString("\n## Handoff Protocol\n")
 	body.WriteString("Before signaling done, ensure:\n")
 	body.WriteString("- Git status is clean (no uncommitted changes)\n")
 	body.WriteString("- Issue is closed with `bd close`\n")
 	body.WriteString("- Beads are synced with `bd sync`\n")
-	body.WriteString("- Code is pushed to origin\n")
 	body.WriteString("\nThe `gt done` command verifies these and signals the Witness.\n")
 
 	return &mail.Message{

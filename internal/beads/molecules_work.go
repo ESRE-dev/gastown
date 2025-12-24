@@ -163,13 +163,12 @@ Submit to merge queue via beads.
 
 **IMPORTANT**: Do NOT use gh pr create or GitHub PRs.
 The Refinery processes merges via beads merge-request issues.
+Branch stays local (refinery sees it via shared worktree).
 
-1. Push your branch to origin
-2. Create a beads merge-request: bd create --type=merge-request --title="Merge: <summary>"
-3. Signal ready: gt done
+1. Create a beads merge-request: bd create --type=merge-request --title="Merge: <summary>"
+2. Signal ready: gt done
 
 ` + "```" + `bash
-git push origin HEAD
 bd create --type=merge-request --title="Merge: <issue-summary>"
 gt done  # Signal work ready for merge queue
 ` + "```" + `

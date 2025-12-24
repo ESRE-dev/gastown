@@ -409,9 +409,9 @@ End session with proper handoff.
 1. Sync all state:
 ` + "```" + `bash
 git add -A && git commit -m "WIP: <summary>" || true
-git push origin HEAD
 bd sync
 ` + "```" + `
+Note: Branch stays local (commits saved in shared .git).
 
 2. Write handoff to successor (yourself):
 ` + "```" + `bash
@@ -522,8 +522,8 @@ Finalize session and request termination.
 1. Sync all state:
 ` + "```" + `bash
 bd sync
-git push origin HEAD
 ` + "```" + `
+Note: Branch stays local (commits saved in shared .git).
 
 2. Update work mol based on exit type:
    - COMPLETED: ` + "`bd close <work-mol-root>`" + `

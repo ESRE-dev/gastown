@@ -1,8 +1,39 @@
 # Merge Queue Design
 
-The merge queue is the coordination mechanism for landing completed work. It's implemented entirely in Beads - merge requests are just another issue type with dependencies.
+The merge queue coordinates landing completed work. MRs are ephemeral wisps (not synced beads), and polecat branches stay local (never pushed to origin).
 
-**Key insight**: Git is already a ledger. Beads is already federated. The merge queue is just a query pattern over beads issues.
+**Key insight**: Git is already a ledger. Beads track durable state (issues). MRs are transient operational state - perfect for wisps.
+
+## Architecture (Current)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    LOCAL MERGE QUEUE                             │
+│                                                                  │
+│  Polecat worktree ──commit──► local branch (polecat/nux)        │
+│         │                          │                             │
+│         │                          │ (same .git)                 │
+│         ▼                          ▼                             │
+│  .beads-wisp/mq/mr-xxx.json    Refinery worktree                │
+│         │                          │                             │
+│         └──────────────────────────┘                             │
+│                     │                                            │
+│              Refinery reads MR, merges branch                   │
+│                     │                                            │
+│                     ▼                                            │
+│               git push origin main                               │
+│                     │                                            │
+│              Delete local branch                                 │
+│              Delete MR wisp file                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key points:**
+- Refinery is a worktree of the same git repo as polecats (shared .git)
+- Polecat branches are local only - never pushed to origin
+- MRs stored in `.beads-wisp/mq/` (ephemeral, not synced)
+- Only `main` branch gets pushed to origin after merge
+- Source issues tracked in beads (durable), closed after merge
 
 ## Overview
 
@@ -30,61 +61,47 @@ The merge queue is the coordination mechanism for landing completed work. It's i
 
 ## Merge Request Schema
 
-A merge request is a beads issue with `type: merge-request`:
+A merge request is a JSON file in `.beads-wisp/mq/`:
 
-```yaml
-id: gt-mr-abc123
-type: merge-request
-status: open                    # open, in_progress, closed
-priority: P1                    # Inherited from source issue
-title: "Merge: Fix login timeout (gt-xyz)"
-
-# MR-specific fields (in description or structured)
-branch: polecat/Nux/gt-xyz      # Source branch
-target: main                    # Target branch (or integration/epic-id)
-source_issue: gt-xyz            # The work being merged
-worker: Nux                     # Who did the work
-rig: gastown                    # Which rig
-
-# Set on completion
-merge_commit: abc123def         # SHA of merge commit (on success)
-close_reason: merged            # merged, rejected, conflict, superseded
-
-# Standard beads fields
-created: 2025-12-17T10:00:00Z
-updated: 2025-12-17T10:30:00Z
-assignee: engineer              # The Engineer processing it
-depends_on: [gt-mr-earlier]     # Ordering dependencies
+```json
+// .beads-wisp/mq/mr-1703372400-a1b2c3d4.json
+{
+  "id": "mr-1703372400-a1b2c3d4",
+  "branch": "polecat/nux",
+  "target": "main",
+  "source_issue": "gt-xyz",
+  "worker": "nux",
+  "rig": "gastown",
+  "title": "Merge: gt-xyz",
+  "priority": 1,
+  "created_at": "2025-12-23T20:00:00Z"
+}
 ```
 
 ### ID Convention
 
-Merge request IDs follow the pattern: `<prefix>-mr-<hash>`
+MR IDs follow the pattern: `mr-<timestamp>-<random>`
 
-Example: `gt-mr-abc123` for a gastown merge request.
+Example: `mr-1703372400-a1b2c3d4`
 
-This distinguishes them from regular issues while keeping them in the same namespace.
+These are ephemeral - deleted after merge. Source issues in beads provide the durable record.
 
 ### Creating Merge Requests
 
 Workers submit to the queue via:
 
 ```bash
-# Worker signals work is ready
+# Worker signals work is ready (preferred)
+gt done                         # Auto-detects branch, issue, creates MR
+
+# Or explicit submission
 gt mq submit                    # Auto-detects branch, issue, worker
+gt mq submit --issue gt-xyz     # Explicit issue
 
-# Explicit submission
-gt mq submit --branch polecat/Nux/gt-xyz --issue gt-xyz
-
-# Under the hood, this creates:
-bd create --type=merge-request \
-  --title="Merge: Fix login timeout (gt-xyz)" \
-  --priority=P1 \
-  --body="branch: polecat/Nux/gt-xyz
-target: main
-source_issue: gt-xyz
-worker: Nux
-rig: gastown"
+# Under the hood, this writes to .beads-wisp/mq/:
+# - Creates mr-<timestamp>-<random>.json
+# - No beads issue created (MRs are ephemeral wisps)
+# - Branch stays local (never pushed to origin)
 ```
 
 ## Queue Ordering
@@ -175,8 +192,8 @@ The Engineer (formerly Refinery) processes the merge queue continuously:
 
 ```python
 def process_merge(mr):
-    # 1. Fetch the branch
-    git fetch origin {mr.branch}
+    # 1. Branch is already local (shared .git with polecats)
+    # No fetch needed - refinery worktree sees polecat branches directly
 
     # 2. Check for conflicts with target
     conflicts = git_check_conflicts(mr.branch, mr.target)
@@ -194,12 +211,15 @@ def process_merge(mr):
             git reset --hard HEAD~1  # Undo merge
             return Failure(reason="tests_failed", output=result.output)
 
-    # 5. Push to origin
+    # 5. Push to origin (only main goes to origin)
     git push origin {mr.target}
 
-    # 6. Clean up source branch (optional)
+    # 6. Clean up source branch (local delete only)
     if config.delete_merged_branches:
-        git push origin --delete {mr.branch}
+        git branch -D {mr.branch}  # Local delete, not remote
+
+    # 7. Remove MR wisp file
+    os.remove(.beads-wisp/mq/{mr.id}.json)
 
     return Success(merge_commit=git_rev_parse("HEAD"))
 ```

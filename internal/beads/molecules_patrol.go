@@ -601,7 +601,7 @@ git checkout main
 git merge --ff-only temp
 git push origin main
 git branch -d temp
-git push origin --delete <polecat-branch>
+git branch -D <polecat-branch>  # Local delete (branches never go to origin)
 ` + "```" + `
 
 Main has moved. Any remaining branches need rebasing on new baseline.

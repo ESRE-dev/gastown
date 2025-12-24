@@ -183,7 +183,7 @@ func (m *Manager) Start(foreground bool) error {
 	// Background mode: spawn a Claude agent in a tmux session
 	// The Claude agent handles MR processing using git commands and beads
 
-	// Working directory is the refinery's rig clone (canonical main branch view)
+	// Working directory is the refinery worktree (shares .git with mayor/polecats)
 	refineryRigDir := filepath.Join(m.rig.Path, "refinery", "rig")
 	if _, err := os.Stat(refineryRigDir); os.IsNotExist(err) {
 		// Fall back to rig path if refinery/rig doesn't exist
@@ -506,9 +506,9 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 	// Notify worker of success
 	m.notifyWorkerMerged(mr)
 
-	// Optionally delete the merged branch
+	// Optionally delete the merged branch (local only - branches never go to origin)
 	if config.DeleteMergedBranches {
-		_ = m.gitRun("push", "origin", "--delete", mr.Branch)
+		_ = m.gitRun("branch", "-D", mr.Branch)
 	}
 
 	return result

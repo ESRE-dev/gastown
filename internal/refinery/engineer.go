@@ -12,6 +12,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/mrqueue"
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
@@ -69,6 +70,7 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 type Engineer struct {
 	rig     *rig.Rig
 	beads   *beads.Beads
+	mrQueue *mrqueue.Queue
 	git     *git.Git
 	config  *MergeQueueConfig
 	workDir string
@@ -83,6 +85,7 @@ func NewEngineer(r *rig.Rig) *Engineer {
 	return &Engineer{
 		rig:     r,
 		beads:   beads.New(r.Path),
+		mrQueue: mrqueue.New(r.Path),
 		git:     git.NewGit(r.Path),
 		config:  DefaultMergeQueueConfig(),
 		workDir: r.Path,
@@ -229,7 +232,7 @@ func (e *Engineer) Stop() {
 }
 
 // processOnce performs one iteration of the Engineer loop:
-// 1. Query for ready merge-requests
+// 1. Query for ready merge-requests from wisp storage
 // 2. If none, return (will try again on next tick)
 // 3. Process the highest priority, oldest MR
 func (e *Engineer) processOnce(ctx context.Context) error {
@@ -240,38 +243,30 @@ func (e *Engineer) processOnce(ctx context.Context) error {
 	default:
 	}
 
-	// 1. Query: bd ready --type=merge-request (filtered client-side)
-	readyMRs, err := e.beads.ReadyWithType("merge-request")
+	// 1. Query MR queue (wisp storage - already sorted by priority/age)
+	pendingMRs, err := e.mrQueue.List()
 	if err != nil {
-		return fmt.Errorf("querying ready merge-requests: %w", err)
+		return fmt.Errorf("querying merge queue: %w", err)
 	}
 
 	// 2. If empty, return
-	if len(readyMRs) == 0 {
+	if len(pendingMRs) == 0 {
 		return nil
 	}
 
-	// 3. Select highest priority, oldest MR
-	// bd ready already returns sorted by priority then age, so first is best
-	mr := readyMRs[0]
+	// 3. Select highest priority, oldest MR (List already returns sorted)
+	mr := pendingMRs[0]
 
 	fmt.Fprintf(e.output, "[Engineer] Processing: %s (%s)\n", mr.ID, mr.Title)
 
-	// 4. Claim: bd update <id> --status=in_progress
-	inProgress := "in_progress"
-	if err := e.beads.Update(mr.ID, beads.UpdateOptions{Status: &inProgress}); err != nil {
-		return fmt.Errorf("claiming MR %s: %w", mr.ID, err)
-	}
+	// 4. Process MR
+	result := e.ProcessMRFromQueue(ctx, mr)
 
-	// 5. Process (delegate to ProcessMR - implementation in separate issue gt-3x1.2)
-	result := e.ProcessMR(ctx, mr)
-
-	// 6. Handle result
+	// 5. Handle result
 	if result.Success {
-		e.handleSuccess(mr, result)
+		e.handleSuccessFromQueue(mr, result)
 	} else {
-		// Failure handling (detailed implementation in gt-3x1.4)
-		e.handleFailure(mr, result)
+		e.handleFailureFromQueue(mr, result)
 	}
 
 	return nil
@@ -349,12 +344,12 @@ func (e *Engineer) handleSuccess(mr *beads.Issue, result ProcessResult) {
 		}
 	}
 
-	// 4. Delete source branch if configured
+	// 4. Delete source branch if configured (local only - branches never go to origin)
 	if e.config.DeleteMergedBranches && mrFields.Branch != "" {
-		if err := e.git.DeleteRemoteBranch("origin", mrFields.Branch); err != nil {
+		if err := e.git.DeleteBranch(mrFields.Branch, true); err != nil {
 			fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete branch %s: %v\n", mrFields.Branch, err)
 		} else {
-			fmt.Fprintf(e.output, "[Engineer] Deleted branch: %s\n", mrFields.Branch)
+			fmt.Fprintf(e.output, "[Engineer] Deleted local branch: %s\n", mrFields.Branch)
 		}
 	}
 
@@ -375,4 +370,59 @@ func (e *Engineer) handleFailure(mr *beads.Issue, result ProcessResult) {
 	fmt.Fprintf(e.output, "[Engineer] ✗ Failed: %s - %s\n", mr.ID, result.Error)
 
 	// Full failure handling (assign back to worker, labels) in gt-3x1.4
+}
+
+// ProcessMRFromQueue processes a merge request from wisp queue.
+func (e *Engineer) ProcessMRFromQueue(ctx context.Context, mr *mrqueue.MR) ProcessResult {
+	// MR fields are directly on the struct (no parsing needed)
+	fmt.Fprintln(e.output, "[Engineer] Processing MR from queue:")
+	fmt.Fprintf(e.output, "  Branch: %s\n", mr.Branch)
+	fmt.Fprintf(e.output, "  Target: %s\n", mr.Target)
+	fmt.Fprintf(e.output, "  Worker: %s\n", mr.Worker)
+	fmt.Fprintf(e.output, "  Source: %s\n", mr.SourceIssue)
+
+	// TODO: Actual merge implementation
+	// For now, return failure - actual implementation in gt-3x1.2
+	return ProcessResult{
+		Success: false,
+		Error:   "ProcessMRFromQueue not fully implemented (see gt-3x1.2)",
+	}
+}
+
+// handleSuccessFromQueue handles a successful merge from wisp queue.
+func (e *Engineer) handleSuccessFromQueue(mr *mrqueue.MR, result ProcessResult) {
+	// 1. Close source issue with reference to MR
+	if mr.SourceIssue != "" {
+		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
+		if err := e.beads.CloseWithReason(closeReason, mr.SourceIssue); err != nil {
+			fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mr.SourceIssue, err)
+		} else {
+			fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mr.SourceIssue)
+		}
+	}
+
+	// 2. Delete source branch if configured (local only)
+	if e.config.DeleteMergedBranches && mr.Branch != "" {
+		if err := e.git.DeleteBranch(mr.Branch, true); err != nil {
+			fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete branch %s: %v\n", mr.Branch, err)
+		} else {
+			fmt.Fprintf(e.output, "[Engineer] Deleted local branch: %s\n", mr.Branch)
+		}
+	}
+
+	// 3. Remove MR from queue (ephemeral - just delete the file)
+	if err := e.mrQueue.Remove(mr.ID); err != nil {
+		fmt.Fprintf(e.output, "[Engineer] Warning: failed to remove MR from queue: %v\n", err)
+	}
+
+	// 4. Log success
+	fmt.Fprintf(e.output, "[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
+}
+
+// handleFailureFromQueue handles a failed merge from wisp queue.
+func (e *Engineer) handleFailureFromQueue(mr *mrqueue.MR, result ProcessResult) {
+	// MR stays in queue for retry - no action needed on the file
+	// Log the failure
+	fmt.Fprintf(e.output, "[Engineer] ✗ Failed: %s - %s\n", mr.ID, result.Error)
+	fmt.Fprintln(e.output, "[Engineer] MR remains in queue for retry")
 }

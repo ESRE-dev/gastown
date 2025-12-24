@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/mrqueue"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -133,40 +135,30 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	// Build title
 	title := fmt.Sprintf("Merge: %s", issueID)
 
-	// CRITICAL: Push branch to origin BEFORE creating MR
-	// Without this, the worktree can be deleted and the branch lost forever
-	fmt.Printf("Pushing branch to origin...\n")
-	if err := g.Push("origin", branch, false); err != nil {
-		return fmt.Errorf("pushing branch to origin: %w", err)
-	}
-	fmt.Printf("%s Branch pushed to origin/%s\n", style.Bold.Render("✓"), branch)
+	// Note: Branch stays local. Refinery sees it via shared .git (worktree).
+	// Only main gets pushed to origin after merge.
 
-	// Build description with MR fields
-	mrFields := &beads.MRFields{
+	// Submit to MR queue (wisp storage - ephemeral, not synced)
+	rigPath := filepath.Join(townRoot, rigName)
+	queue := mrqueue.New(rigPath)
+
+	mr := &mrqueue.MR{
 		Branch:      branch,
 		Target:      target,
 		SourceIssue: issueID,
 		Worker:      worker,
 		Rig:         rigName,
-	}
-	description := beads.FormatMRFields(mrFields)
-
-	// Create the merge-request issue
-	createOpts := beads.CreateOptions{
 		Title:       title,
-		Type:        "merge-request",
 		Priority:    priority,
-		Description: description,
 	}
 
-	issue, err := bd.Create(createOpts)
-	if err != nil {
-		return fmt.Errorf("creating merge request: %w", err)
+	if err := queue.Submit(mr); err != nil {
+		return fmt.Errorf("submitting to merge queue: %w", err)
 	}
 
 	// Success output
-	fmt.Printf("%s Created merge request\n", style.Bold.Render("✓"))
-	fmt.Printf("  MR ID: %s\n", style.Bold.Render(issue.ID))
+	fmt.Printf("%s Submitted to merge queue\n", style.Bold.Render("✓"))
+	fmt.Printf("  MR ID: %s\n", style.Bold.Render(mr.ID))
 	fmt.Printf("  Source: %s\n", branch)
 	fmt.Printf("  Target: %s\n", target)
 	fmt.Printf("  Issue: %s\n", issueID)

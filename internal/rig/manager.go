@@ -217,20 +217,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("saving rig config: %w", err)
 	}
 
-	// Clone repository for refinery (canonical main)
-	refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
-	if err := os.MkdirAll(filepath.Dir(refineryRigPath), 0755); err != nil {
-		return nil, fmt.Errorf("creating refinery dir: %w", err)
-	}
-	if err := m.git.Clone(opts.GitURL, refineryRigPath); err != nil {
-		return nil, fmt.Errorf("cloning for refinery: %w", err)
-	}
-	// Create refinery CLAUDE.md (overrides any from cloned repo)
-	if err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
-		return nil, fmt.Errorf("creating refinery CLAUDE.md: %w", err)
-	}
-
-	// Clone repository for mayor
+	// Clone repository for mayor (must be first - serves as base for worktrees)
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
@@ -241,6 +228,22 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Create mayor CLAUDE.md (overrides any from cloned repo)
 	if err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
+	}
+
+	// Create refinery as a worktree of mayor's clone.
+	// This allows refinery to see polecat branches locally (shared .git).
+	// Refinery uses the "refinery" branch which tracks main.
+	refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
+	if err := os.MkdirAll(filepath.Dir(refineryRigPath), 0755); err != nil {
+		return nil, fmt.Errorf("creating refinery dir: %w", err)
+	}
+	mayorGit := git.NewGit(mayorRigPath)
+	if err := mayorGit.WorktreeAdd(refineryRigPath, "refinery"); err != nil {
+		return nil, fmt.Errorf("creating refinery worktree: %w", err)
+	}
+	// Create refinery CLAUDE.md (overrides any from cloned repo)
+	if err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
+		return nil, fmt.Errorf("creating refinery CLAUDE.md: %w", err)
 	}
 
 	// Clone repository for default crew workspace
