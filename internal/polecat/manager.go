@@ -549,10 +549,9 @@ func (m *Manager) Reset(name string) error {
 	return m.ClearIssue(name)
 }
 
-// loadFromBeads derives polecat state from beads assignee field.
-// State is derived as follows:
-// - If an issue is assigned to this polecat and is open/in_progress: StateWorking
-// - If no issue assigned: StateIdle
+// loadFromBeads gets polecat info from beads assignee field.
+// State is simple: issue assigned → working, no issue → idle.
+// We don't interpret issue status (ZFC: Go is transport, not decision-maker).
 func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	polecatPath := m.polecatDir(name)
 	branchName := fmt.Sprintf("polecat/%s", name)
@@ -572,20 +571,13 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		}, nil
 	}
 
-	// Derive state from issue
+	// Simple rule: has issue = working, no issue = idle
+	// We don't interpret issue.Status - that's for Claude to decide
 	state := StateIdle
 	issueID := ""
 	if issue != nil {
 		issueID = issue.ID
-		switch issue.Status {
-		case "open", "in_progress":
-			state = StateWorking
-		case "closed":
-			state = StateDone
-		default:
-			// Unknown status, assume working if assigned
-			state = StateWorking
-		}
+		state = StateWorking
 	}
 
 	return &Polecat{
