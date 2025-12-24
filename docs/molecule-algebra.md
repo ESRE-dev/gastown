@@ -54,49 +54,54 @@ deterministic.
 
 ### Formula Format
 
-Formulas are JSON files with `.formula.json` extension. JSON for consistency
-with beads (agents create/manage these; humans use visualizers):
+Formulas are YAML files with `.formula.yaml` extension. YAML for human
+readability (humans author these; agents cook them):
 
-```json
-{
-  "formula": "shiny",
-  "description": "Engineer in a Box - the canonical right way",
-  "version": 1,
-  "steps": [
-    {"id": "design", "description": "Think carefully about architecture"},
-    {"id": "implement", "needs": ["design"]},
-    {"id": "review", "needs": ["implement"]},
-    {"id": "test", "needs": ["review"]},
-    {"id": "submit", "needs": ["test"]}
-  ]
-}
+```yaml
+formula: shiny
+description: Engineer in a Box - the canonical right way
+version: 1
+steps:
+  - id: design
+    description: Think carefully about architecture
+  - id: implement
+    needs: [design]
+  - id: review
+    needs: [implement]
+  - id: test
+    needs: [review]
+  - id: submit
+    needs: [test]
 ```
 
 Formulas with composition:
 
-```json
-{
-  "formula": "shiny-enterprise",
-  "extends": "shiny",
-  "version": 1,
-  "compose": [
-    {"expand": {"target": "implement", "with": "rule-of-five"}},
-    {"aspect": {"pointcut": "implement.*", "with": "security-audit"}},
-    {"gate": {"before": "submit", "condition": "security-postscan.approved"}}
-  ]
-}
+```yaml
+formula: shiny-enterprise
+extends: shiny
+version: 1
+compose:
+  - expand:
+      target: implement
+      with: rule-of-five
+  - aspect:
+      pointcut: "implement.*"
+      with: security-audit
+  - gate:
+      before: submit
+      condition: "security-postscan.approved"
 ```
 
 ### CLI
 
 ```bash
 # Cook a formula into a proto
-bd cook shiny-enterprise.formula.yaml
+bd cook shiny-enterprise
 # "Cooking shiny-enterprise..."
 # "✓ Cooked proto: shiny-enterprise (30 steps)"
 
 # Preview without saving
-bd cook shiny-enterprise.formula.yaml --dry-run
+bd cook shiny-enterprise --dry-run
 
 # List available formulas
 bd formula list
@@ -620,6 +625,36 @@ The algebra is intentionally restricted:
 - No arbitrary code execution
 
 This keeps evaluation decidable and safe for mechanical execution.
+
+## Safety Constraints
+
+The cooker enforces these constraints to prevent runaway expansion:
+
+### Cycle Detection
+Circular `extends` chains are detected and rejected:
+```
+A extends B extends C extends A  →  ERROR: cycle detected
+```
+
+### Aspect Self-Matching Prevention
+Aspects only match *original* steps, not steps inserted by the same aspect.
+Without this, a pointcut like `*.implement` that inserts `security-prescan`
+could match its own insertion infinitely.
+
+### Maximum Expansion Depth
+Nested expansions are bounded (default: 5 levels). This allows massive work
+generation while preventing runaway recursion. Configurable via:
+```yaml
+cooking:
+  max_expansion_depth: 5
+```
+
+### Graceful Degradation
+Cooking errors produce warnings, not failures where possible. Philosophy:
+get it working as well as possible, warn the human, continue. Invalid steps
+may be annotated with error metadata rather than blocking the entire cook.
+
+Errors are written to the Gas Town escalation channel for human review.
 
 ## What This Enables
 

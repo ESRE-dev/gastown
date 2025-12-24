@@ -40,37 +40,31 @@ Work in Gas Town exists in three phases, following the states of matter:
 Protos or protomolecules are **frozen workflow patterns** - crystallized templates that
 encode reusable work structures. They're the "molds" from which instances are cast.
 
-```markdown
-## Molecule: engineer-in-box
-Full workflow from design to merge.
+Protos are stored as beads issues with `labels: ["template"]` and structured step data:
 
-## Step: design
-Think carefully about architecture.
-Needs: (none)
-
-## Step: implement
-Write the code.
-Needs: design
-
-## Step: review
-Perform initial code review.
-Needs: implement
-
-## Step: test
-Write and run tests.
-Needs: review
-
-## Step: submit
-Submit for merge.
-Needs: test
+```yaml
+# Example: shiny.formula.yaml (source) → cooked proto (beads)
+formula: shiny
+description: The canonical right way
+version: 1
+steps:
+  - id: design
+    description: Think carefully about architecture
+  - id: implement
+    needs: [design]
+  - id: review
+    needs: [implement]
+  - id: test
+    needs: [review]
+  - id: submit
+    needs: [test]
 ```
 
 **Properties:**
-- Considered immutable once defined (frozen), though editable
-- Named (e.g., `mol-engineer-in-box`, `wisp-deacon-patrol`)
-  - Can have any name, but convention says how they will materialize.
+- Considered immutable once cooked (frozen), though source formulas are editable
+- Named (e.g., `shiny`, `rule-of-five`)
 - Stored in permanent beads with `template` label
-- Can be composed into larger protos (compounds, polymers)
+- Can be composed into larger protos via formula algebra (extends, compose)
 
 ### Mol (Liquid Phase)
 
