@@ -436,6 +436,92 @@ type: patrol-instance
 	return nil
 }
 
+// ensurePolecatArm ensures a mol-polecat-arm instance exists for tracking a polecat.
+// If one already exists (from a previous patrol), it's reused. Otherwise, a new
+// arm is bonded to the patrol instance.
+func (m *Manager) ensurePolecatArm(polecatName string) error {
+	// Check if we have handoff state and a patrol instance
+	if m.handoffState == nil {
+		return nil // No handoff state, can't bond arms
+	}
+	if m.handoffState.PatrolInstanceID == "" {
+		return nil // No patrol instance, can't bond arms
+	}
+
+	// Check if we already have an arm for this polecat
+	ws := m.handoffState.WorkerStates[polecatName]
+	if ws.ArmID != "" {
+		// Verify it still exists
+		cmd := exec.Command("bd", "show", ws.ArmID, "--json")
+		cmd.Dir = m.workDir
+		if err := cmd.Run(); err == nil {
+			return nil // Arm exists, nothing to do
+		}
+		// Arm no longer exists, clear it
+		ws.ArmID = ""
+		m.handoffState.WorkerStates[polecatName] = ws
+	}
+
+	// Bond a new arm using gt mol bond
+	armRef := fmt.Sprintf("arm-%s", polecatName)
+	cmd := exec.Command("gt", "mol", "bond", "mol-polecat-arm",
+		"--parent", m.handoffState.PatrolInstanceID,
+		"--ref", armRef,
+		"--var", fmt.Sprintf("polecat_name=%s", polecatName),
+		"--var", fmt.Sprintf("rig=%s", m.rig.Name),
+	)
+	cmd.Dir = m.workDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("bonding arm: %s", stderr.String())
+	}
+
+	// Parse the arm ID from output
+	// Expected format: "🔗 Bonded mol-polecat-arm as arm-toast (gt-xyz.1)"
+	output := stdout.String()
+	var armID string
+	// Try to extract ID from parentheses
+	if start := strings.LastIndex(output, "("); start != -1 {
+		if end := strings.LastIndex(output, ")"); end > start {
+			armID = strings.TrimSpace(output[start+1 : end])
+		}
+	}
+
+	if armID == "" {
+		// Fallback: try to find an issue ID pattern
+		for _, word := range strings.Fields(output) {
+			if strings.HasPrefix(word, "gt-") || strings.HasPrefix(word, "(gt-") {
+				armID = strings.Trim(word, "()")
+				break
+			}
+		}
+	}
+
+	if armID == "" {
+		return fmt.Errorf("could not parse arm ID from: %s", output)
+	}
+
+	// Store the arm ID
+	if m.handoffState.WorkerStates == nil {
+		m.handoffState.WorkerStates = make(map[string]WorkerState)
+	}
+	ws = m.handoffState.WorkerStates[polecatName]
+	ws.ArmID = armID
+	m.handoffState.WorkerStates[polecatName] = ws
+
+	// Persist the updated handoff state
+	if err := m.saveHandoffState(m.handoffState); err != nil {
+		return fmt.Errorf("saving handoff state: %w", err)
+	}
+
+	fmt.Printf("Bonded arm for %s: %s\n", polecatName, armID)
+	return nil
+}
+
 // checkAndProcess performs health check, shutdown processing, and auto-spawn.
 func (m *Manager) checkAndProcess(w *Witness) {
 	// Perform health check
@@ -491,6 +577,11 @@ func (m *Manager) healthCheck(w *Witness) error {
 		running, _ := sessMgr.IsRunning(p.Name)
 		if running {
 			active = append(active, p.Name)
+
+			// Ensure we have a tracking arm for this polecat
+			if err := m.ensurePolecatArm(p.Name); err != nil {
+				fmt.Printf("Warning: could not ensure arm for %s: %v\n", p.Name, err)
+			}
 
 			// Check health of each active polecat
 			status := m.checkPolecatHealth(p.Name, p.ClonePath)
