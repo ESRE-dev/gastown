@@ -146,7 +146,6 @@ Read polecat.md protocol. Understand:
 
 Load context:
 - gt prime
-- bd sync --from-main
 - gt mail inbox
 
 ## Step: handoff-read

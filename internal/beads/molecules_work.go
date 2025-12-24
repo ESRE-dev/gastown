@@ -287,7 +287,6 @@ Load context and check for interrupts.
 
 ` + "```" + `bash
 gt prime                    # Load Gas Town context
-bd sync --from-main         # Fresh beads state
 ` + "```" + `
 
 Check for:

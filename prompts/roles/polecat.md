@@ -144,8 +144,7 @@ Gas Town has TWO beads databases:
 
 ### On Startup
 ```bash
-bd sync --from-main    # Pull latest beads state
-bd show <your-issue>   # Verify your assignment
+bd show <your-issue>   # Verify your assignment (beads synced by refinery/witness)
 ```
 
 ### During Work

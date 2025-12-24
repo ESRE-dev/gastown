@@ -456,7 +456,6 @@ Read polecat.md protocol and initialize context.
 
 ` + "```" + `bash
 gt prime               # Load Gas Town context
-bd sync --from-main    # Fresh beads state
 gt mail inbox          # Check for work assignment
 ` + "```" + `
 
