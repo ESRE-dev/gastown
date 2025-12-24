@@ -677,7 +677,7 @@ func slingToDeacon(townRoot string, target *SlingTarget, thing *SlingThing) erro
 		patrolThing := &SlingThing{
 			Kind:   "proto",
 			ID:     patrolIssueID, // Use the resolved beads issue ID
-			IsWisp: false,         // Templates are in main DB, spawn there for now
+			IsWisp: true,          // Patrol cycles are ephemeral (gt-jsup)
 		}
 		patrolID, _, err = spawnMoleculeFromProto(beadsPath, patrolThing, deaconAddress)
 		if err != nil {
@@ -880,7 +880,7 @@ func slingToWitness(townRoot string, target *SlingTarget, thing *SlingThing) err
 		patrolThing := &SlingThing{
 			Kind:   "proto",
 			ID:     patrolIssueID, // Use the resolved beads issue ID
-			IsWisp: false,         // Templates are in main DB, spawn there for now
+			IsWisp: true,          // Patrol cycles are ephemeral (gt-jsup)
 		}
 		patrolID, _, err = spawnMoleculeFromProto(beadsPath, patrolThing, witnessAddress)
 		if err != nil {
@@ -1047,7 +1047,7 @@ func slingToRefinery(townRoot string, target *SlingTarget, thing *SlingThing) er
 		patrolThing := &SlingThing{
 			Kind:   "proto",
 			ID:     patrolIssueID, // Use the resolved beads issue ID
-			IsWisp: false,         // Templates are in main DB, spawn there for now
+			IsWisp: true,          // Patrol cycles are ephemeral (gt-jsup)
 		}
 		patrolID, _, err = spawnMoleculeFromProto(beadsPath, patrolThing, refineryAddress)
 		if err != nil {
@@ -1230,6 +1230,7 @@ func spawnMoleculeFromProto(beadsPath string, thing *SlingThing, assignee string
 		// Check if wisp storage exists
 		if _, err := os.Stat(wispPath); err == nil {
 			// Use wisp storage - pass --db to point bd at the wisp directory
+			// bd mol run auto-discovers the main DB for templates when --db contains .beads-wisp (gt-jsup)
 			args = append([]string{"--db", filepath.Join(wispPath, "beads.db")}, args...)
 			fmt.Printf("  Using ephemeral storage: %s\n", style.Dim.Render(".beads-wisp/"))
 		} else {
