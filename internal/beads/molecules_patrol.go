@@ -182,20 +182,41 @@ Needs: context-check`,
 }
 
 // WitnessPatrolMolecule returns the witness-patrol molecule definition.
-// This is the per-rig worker monitor's patrol loop with progressive nudging.
+// This is the per-rig worker monitor's patrol loop using the Christmas Ornament pattern.
 func WitnessPatrolMolecule() BuiltinMolecule {
 	return BuiltinMolecule{
 		ID:    "mol-witness-patrol",
 		Title: "Witness Patrol",
-		Description: `Per-rig worker monitor patrol loop.
+		Description: `Per-rig worker monitor patrol loop using the Christmas Ornament pattern.
 
 The Witness is the Pit Boss for your rig. You watch polecats, nudge them toward
 completion, verify clean git state before kills, and escalate stuck workers.
 
 **You do NOT do implementation work.** Your job is oversight, not coding.
 
-This molecule uses wisp storage (.beads-wisp/) for ephemeral patrol state.
-Persistent state (nudge counts, handoffs) is stored in a witness handoff bead.
+This molecule uses dynamic bonding to spawn mol-polecat-arm for each worker,
+enabling parallel inspection with a fanout gate for aggregation.
+
+## The Christmas Ornament Shape
+
+` + "```" + `
+                     ★ mol-witness-patrol (trunk)
+                    /|\
+          ┌────────┘ │ └────────┐
+       PREFLIGHT  DISCOVERY  CLEANUP
+          │          │           │
+      inbox-check  survey    aggregate (WaitsFor: all-children)
+      check-refnry   │       save-state
+      load-state     │       generate-summary
+                     ↓       context-check
+             ┌───────┼───────┐  burn-or-loop
+             ●       ●       ●   mol-polecat-arm (dynamic)
+            ace     nux    toast
+` + "```" + `
+
+---
+# PREFLIGHT PHASE
+---
 
 ## Step: inbox-check
 Process witness mail: lifecycle requests, help requests.
@@ -254,114 +275,64 @@ If no handoff exists (fresh start), initialize empty state.
 This state persists across wisp burns and session cycles.
 Needs: check-refinery
 
+---
+# DISCOVERY PHASE (Dynamic Bonding)
+---
+
 ## Step: survey-workers
-List polecats and categorize by status.
+List polecats and bond mol-polecat-arm for each one.
 
 ` + "```" + `bash
+# Get list of polecats
 gt polecat list <rig>
 ` + "```" + `
 
-Categorize each polecat:
-- **working**: Actively processing (needs inspection)
-- **idle**: At prompt, not active (may need nudge)
-- **pending_shutdown**: Requested termination (needs pre-kill)
-- **error**: Showing errors (needs assessment)
+For each polecat discovered, dynamically bond an inspection arm:
 
-Build action queue for next steps.
+` + "```" + `bash
+# Bond mol-polecat-arm for each polecat
+for polecat in $(gt polecat list <rig> --names); do
+  bd mol bond mol-polecat-arm $PATROL_WISP_ID \
+    --ref arm-$polecat \
+    --var polecat_name=$polecat \
+    --var rig=<rig>
+done
+` + "```" + `
+
+This creates child wisps like:
+- patrol-x7k.arm-ace (5 steps)
+- patrol-x7k.arm-nux (5 steps)
+- patrol-x7k.arm-toast (5 steps)
+
+Each arm runs in PARALLEL. The aggregate step will wait for all to complete.
+
+If no polecats are found, this step completes immediately with no children.
 Needs: load-state
 
-## Step: inspect-workers
-Capture output for each 'working' polecat.
+---
+# CLEANUP PHASE (Gate + Fixed Steps)
+---
 
-For each polecat showing "working" status:
-` + "```" + `bash
-tmux capture-pane -t gt-<rig>-<name> -p | tail -40
-` + "```" + `
+## Step: aggregate
+Collect outcomes from all polecat inspection arms.
+WaitsFor: all-children
 
-Look for:
-- Recent tool calls (good - actively working)
-- Prompt waiting for input (may be stuck)
-- Error messages or stack traces
-- "Done" or completion indicators
-- Time since last activity
+This is a **fanout gate** - it cannot proceed until ALL dynamically-bonded
+polecat arms have completed their inspection cycles.
 
-Update worker status based on inspection.
+Once all arms complete, collect their outcomes:
+- Actions taken per polecat (nudge, kill, escalate, none)
+- Updated nudge counts
+- Any errors or issues discovered
+
+Build the consolidated state for save-state.
 Needs: survey-workers
-
-## Step: decide-actions
-Apply nudge matrix and queue actions.
-
-For each worker, apply decision rules:
-
-**Progressing normally**: No action needed
-**Idle <10 min**: Continue monitoring
-**Idle 10-15 min**: Queue first nudge (gentle)
-**Idle 15-20 min with no progress since nudge 1**: Queue second nudge (direct)
-**Idle 20+ min with no progress since nudge 2**: Queue third nudge (final warning)
-**No response after 3 nudges**: Queue escalation to Mayor
-**Requesting shutdown**: Queue pre-kill verification
-**Showing errors**: Assess severity, queue nudge or escalation
-
-Progressive nudge text:
-1. "How's progress on <issue>? Need any help?"
-2. "Please wrap up <issue> soon. What's blocking you?"
-3. "Final check on <issue>. Will escalate in 5 min if no response."
-
-Track nudge counts in state - never exceed 3 per issue.
-Needs: inspect-workers
-
-## Step: execute-actions
-Nudge, kill, or escalate as decided.
-
-Process action queue in order:
-
-**Nudges:**
-` + "```" + `bash
-tmux send-keys -t gt-<rig>-<name> "<nudge text>" Enter
-` + "```" + `
-Update nudge count and timestamp in state.
-
-**Pre-kill verification:**
-` + "```" + `bash
-cd polecats/<name> && git status    # Must be clean
-git log origin/main..HEAD           # Check for unpushed commits
-bd show <issue-id>                  # Verify issue closed
-` + "```" + `
-
-If clean:
-` + "```" + `bash
-tmux kill-session -t gt-<rig>-<name>
-git worktree remove polecats/<name>  # If transient
-git branch -d polecat/<name>         # If transient
-` + "```" + `
-
-If dirty: nudge worker to clean up, wait for retry.
-If dirty after 3 attempts: escalate to Mayor.
-
-**Escalations:**
-` + "```" + `bash
-gt mail send mayor/ -s "Escalation: <polecat> stuck on <issue>" -m "
-Worker: <polecat>
-Issue: <issue-id>
-Problem: <description>
-
-Timeline:
-- Nudge 1: <time> - <response>
-- Nudge 2: <time> - <response>
-- Nudge 3: <time> - <response>
-
-Git state: <clean/dirty>
-My assessment: <what's happening>
-Recommendation: <what should happen>
-"
-` + "```" + `
-Needs: decide-actions
 
 ## Step: save-state
 Update handoff bead with new states.
 
 Persist state to the witness handoff bead:
-- Updated worker statuses
+- Updated worker statuses from all arms
 - Current nudge counts per worker
 - Nudge timestamps
 - Actions taken this cycle
@@ -372,7 +343,7 @@ bd update <handoff-bead-id> --description="<serialized state>"
 ` + "```" + `
 
 This state survives wisp burns and session cycles.
-Needs: execute-actions
+Needs: aggregate
 
 ## Step: generate-summary
 Summarize this patrol cycle for digest.
@@ -417,6 +388,123 @@ bd mol burn   # Destroy ephemeral wisp
 
 The daemon ensures Witness is always running.
 Needs: context-check`,
+	}
+}
+
+// PolecatArmMolecule returns the polecat-arm molecule definition.
+// This is dynamically bonded by mol-witness-patrol for each polecat being monitored.
+func PolecatArmMolecule() BuiltinMolecule {
+	return BuiltinMolecule{
+		ID:    "mol-polecat-arm",
+		Title: "Polecat Arm",
+		Description: `Single polecat inspection and action cycle.
+
+This molecule is bonded dynamically by mol-witness-patrol's survey-workers step.
+Each polecat being monitored gets one arm that runs in parallel with other arms.
+
+## Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| polecat_name | Yes | Name of the polecat to inspect |
+| rig | Yes | Rig containing the polecat |
+
+## Step: capture
+Capture recent tmux output for {{polecat_name}}.
+
+` + "```" + `bash
+tmux capture-pane -t gt-{{rig}}-{{polecat_name}} -p | tail -50
+` + "```" + `
+
+Record:
+- Last activity timestamp (when was last tool call?)
+- Visible errors or stack traces
+- Completion indicators ("Done", "Finished", etc.)
+
+## Step: assess
+Categorize polecat state based on captured output.
+
+States:
+- **working**: Recent tool calls, active processing
+- **idle**: At prompt, no recent activity
+- **error**: Showing errors or stack traces
+- **requesting_shutdown**: Sent LIFECYCLE/Shutdown mail
+- **done**: Showing completion indicators
+
+Calculate: minutes since last activity.
+Needs: capture
+
+## Step: load-history
+Read nudge history for {{polecat_name}} from patrol state.
+
+` + "```" + `
+nudge_count = state.nudges[{{polecat_name}}].count
+last_nudge_time = state.nudges[{{polecat_name}}].timestamp
+` + "```" + `
+
+This data was loaded by the parent patrol's load-state step and passed
+to the arm via the bonding context.
+Needs: assess
+
+## Step: decide
+Apply the nudge matrix to determine action for {{polecat_name}}.
+
+| State | Idle Time | Nudge Count | Action |
+|-------|-----------|-------------|--------|
+| working | any | any | none |
+| idle | <10min | any | none |
+| idle | 10-15min | 0 | nudge-1 (gentle) |
+| idle | 15-20min | 1 | nudge-2 (direct) |
+| idle | 20+min | 2 | nudge-3 (final) |
+| idle | any | 3 | escalate |
+| error | any | any | assess-severity |
+| requesting_shutdown | any | any | pre-kill-verify |
+| done | any | any | pre-kill-verify |
+
+Nudge text:
+1. "How's progress? Need any help?"
+2. "Please wrap up soon. What's blocking you?"
+3. "Final check. Will escalate in 5 min if no response."
+
+Record decision and rationale.
+Needs: load-history
+
+## Step: execute
+Take the decided action for {{polecat_name}}.
+
+**nudge-N**:
+` + "```" + `bash
+tmux send-keys -t gt-{{rig}}-{{polecat_name}} "{{nudge_text}}" Enter
+` + "```" + `
+
+**pre-kill-verify**:
+` + "```" + `bash
+cd polecats/{{polecat_name}}
+git status                    # Must be clean
+git log origin/main..HEAD     # Check for unpushed
+bd show <assigned-issue>      # Verify closed/deferred
+` + "```" + `
+If clean: kill session, remove worktree, delete branch
+If dirty: record failure, retry next cycle
+
+**escalate**:
+` + "```" + `bash
+gt mail send mayor/ -s "Escalation: {{polecat_name}} stuck" -m "..."
+` + "```" + `
+
+**none**: No action needed.
+
+Record: action taken, result, updated nudge count.
+Needs: decide
+
+## Output
+
+The arm completes with:
+- action_taken: none | nudge-1 | nudge-2 | nudge-3 | killed | escalated
+- result: success | failed | pending
+- updated_state: New nudge count and timestamp for {{polecat_name}}
+
+This data feeds back to the parent patrol's aggregate step.`,
 	}
 }
 

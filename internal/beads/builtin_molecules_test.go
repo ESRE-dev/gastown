@@ -5,8 +5,8 @@ import "testing"
 func TestBuiltinMolecules(t *testing.T) {
 	molecules := BuiltinMolecules()
 
-	if len(molecules) != 13 {
-		t.Errorf("expected 13 built-in molecules, got %d", len(molecules))
+	if len(molecules) != 14 {
+		t.Errorf("expected 14 built-in molecules, got %d", len(molecules))
 	}
 
 	// Verify each molecule can be parsed and validated
@@ -300,17 +300,17 @@ func TestWitnessPatrolMolecule(t *testing.T) {
 		t.Fatalf("failed to parse: %v", err)
 	}
 
-	// Should have 11 steps: inbox-check, check-refinery, load-state, survey-workers,
-	// inspect-workers, decide-actions, execute-actions, save-state, generate-summary,
-	// context-check, burn-or-loop
-	if len(steps) != 11 {
-		t.Errorf("expected 11 steps, got %d", len(steps))
+	// Should have 9 steps using Christmas Ornament pattern:
+	// PREFLIGHT: inbox-check, check-refinery, load-state
+	// DISCOVERY: survey-workers (bonds mol-polecat-arm dynamically)
+	// CLEANUP: aggregate, save-state, generate-summary, context-check, burn-or-loop
+	if len(steps) != 9 {
+		t.Errorf("expected 9 steps, got %d", len(steps))
 	}
 
 	expectedRefs := []string{
 		"inbox-check", "check-refinery", "load-state", "survey-workers",
-		"inspect-workers", "decide-actions", "execute-actions", "save-state",
-		"generate-summary", "context-check", "burn-or-loop",
+		"aggregate", "save-state", "generate-summary", "context-check", "burn-or-loop",
 	}
 	for i, expected := range expectedRefs {
 		if i >= len(steps) {
@@ -338,8 +338,72 @@ func TestWitnessPatrolMolecule(t *testing.T) {
 		t.Errorf("load-state should need check-refinery, got %v", steps[2].Needs)
 	}
 
+	// aggregate needs survey-workers (fanout gate)
+	if len(steps[4].Needs) != 1 || steps[4].Needs[0] != "survey-workers" {
+		t.Errorf("aggregate should need survey-workers, got %v", steps[4].Needs)
+	}
+
 	// burn-or-loop needs context-check
-	if len(steps[10].Needs) != 1 || steps[10].Needs[0] != "context-check" {
-		t.Errorf("burn-or-loop should need context-check, got %v", steps[10].Needs)
+	if len(steps[8].Needs) != 1 || steps[8].Needs[0] != "context-check" {
+		t.Errorf("burn-or-loop should need context-check, got %v", steps[8].Needs)
+	}
+}
+
+func TestPolecatArmMolecule(t *testing.T) {
+	mol := PolecatArmMolecule()
+
+	if mol.ID != "mol-polecat-arm" {
+		t.Errorf("expected ID 'mol-polecat-arm', got %q", mol.ID)
+	}
+
+	if mol.Title != "Polecat Arm" {
+		t.Errorf("expected Title 'Polecat Arm', got %q", mol.Title)
+	}
+
+	steps, err := ParseMoleculeSteps(mol.Description)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	// Should have 5 steps: capture, assess, load-history, decide, execute
+	if len(steps) != 5 {
+		t.Errorf("expected 5 steps, got %d", len(steps))
+	}
+
+	expectedRefs := []string{"capture", "assess", "load-history", "decide", "execute"}
+	for i, expected := range expectedRefs {
+		if i >= len(steps) {
+			t.Errorf("missing step %d: expected %q", i, expected)
+			continue
+		}
+		if steps[i].Ref != expected {
+			t.Errorf("step %d: expected ref %q, got %q", i, expected, steps[i].Ref)
+		}
+	}
+
+	// Verify dependencies form a chain
+	// capture has no deps (first step)
+	if len(steps[0].Needs) != 0 {
+		t.Errorf("capture should have no deps, got %v", steps[0].Needs)
+	}
+
+	// assess needs capture
+	if len(steps[1].Needs) != 1 || steps[1].Needs[0] != "capture" {
+		t.Errorf("assess should need capture, got %v", steps[1].Needs)
+	}
+
+	// load-history needs assess
+	if len(steps[2].Needs) != 1 || steps[2].Needs[0] != "assess" {
+		t.Errorf("load-history should need assess, got %v", steps[2].Needs)
+	}
+
+	// decide needs load-history
+	if len(steps[3].Needs) != 1 || steps[3].Needs[0] != "load-history" {
+		t.Errorf("decide should need load-history, got %v", steps[3].Needs)
+	}
+
+	// execute needs decide
+	if len(steps[4].Needs) != 1 || steps[4].Needs[0] != "decide" {
+		t.Errorf("execute should need decide, got %v", steps[4].Needs)
 	}
 }

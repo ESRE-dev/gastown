@@ -26,6 +26,7 @@ func BuiltinMolecules() []BuiltinMolecule {
 		DeaconPatrolMolecule(),
 		RefineryPatrolMolecule(),
 		WitnessPatrolMolecule(),
+		PolecatArmMolecule(),
 
 		// Session and utility molecules
 		CrewSessionMolecule(),
