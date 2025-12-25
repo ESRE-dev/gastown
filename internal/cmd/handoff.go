@@ -10,10 +10,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/wisp"
 )
 
 var handoffCmd = &cobra.Command{
-	Use:   "handoff [role]",
+	Use:   "handoff [bead-or-role]",
 	Short: "Hand off to a fresh session, work continues from hook",
 	Long: `End watch. Hand off to a fresh agent session.
 
@@ -23,10 +24,13 @@ This is the canonical way to end any agent session. It handles all roles:
   - Polecats: Calls 'gt done --exit DEFERRED' (Witness handles lifecycle)
 
 When run without arguments, hands off the current session.
+When given a bead ID (gt-xxx, hq-xxx), hooks that work first, then restarts.
 When given a role name, hands off that role's session (and switches to it).
 
 Examples:
   gt handoff                          # Hand off current session
+  gt handoff gt-abc                   # Hook bead, then restart
+  gt handoff gt-abc -s "Fix it"       # Hook with context, then restart
   gt handoff -s "Context" -m "Notes"  # Hand off with custom message
   gt handoff crew                     # Hand off crew session
   gt handoff mayor                    # Hand off mayor session
@@ -83,13 +87,27 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting session name: %w", err)
 	}
 
-	// Determine target session
+	// Determine target session and check for bead hook
 	targetSession := currentSession
 	if len(args) > 0 {
-		// User specified a role to hand off
-		targetSession, err = resolveRoleToSession(args[0])
-		if err != nil {
-			return fmt.Errorf("resolving role: %w", err)
+		arg := args[0]
+
+		// Check if arg is a bead ID (gt-xxx, hq-xxx, bd-xxx, etc.)
+		if looksLikeBeadID(arg) {
+			// Hook the bead first
+			if err := hookBeadForHandoff(arg); err != nil {
+				return fmt.Errorf("hooking bead: %w", err)
+			}
+			// Update subject if not set
+			if handoffSubject == "" {
+				handoffSubject = fmt.Sprintf("🪝 HOOKED: %s", arg)
+			}
+		} else {
+			// User specified a role to hand off
+			targetSession, err = resolveRoleToSession(arg)
+			if err != nil {
+				return fmt.Errorf("resolving role: %w", err)
+			}
 		}
 	}
 
@@ -394,4 +412,58 @@ func sendHandoffMail(subject, message string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// looksLikeBeadID checks if a string looks like a bead ID.
+// Bead IDs have format: prefix-xxxx where prefix is 2+ letters and xxxx is alphanumeric.
+func looksLikeBeadID(s string) bool {
+	// Common bead prefixes
+	prefixes := []string{"gt-", "hq-", "bd-", "beads-"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// hookBeadForHandoff attaches a bead to the current agent's hook.
+func hookBeadForHandoff(beadID string) error {
+	// Verify the bead exists first
+	verifyCmd := exec.Command("bd", "show", beadID, "--json")
+	if err := verifyCmd.Run(); err != nil {
+		return fmt.Errorf("bead '%s' not found", beadID)
+	}
+
+	// Determine agent identity
+	agentID, err := detectAgentIdentity()
+	if err != nil {
+		return fmt.Errorf("detecting agent identity: %w", err)
+	}
+
+	// Get clone root for wisp storage
+	cloneRoot, err := detectCloneRoot()
+	if err != nil {
+		return fmt.Errorf("detecting clone root: %w", err)
+	}
+
+	// Create the slung work wisp
+	sw := wisp.NewSlungWork(beadID, agentID)
+	sw.Subject = handoffSubject
+	sw.Context = handoffMessage
+
+	fmt.Printf("%s Hooking %s...\n", style.Bold.Render("🪝"), beadID)
+
+	if handoffDryRun {
+		fmt.Printf("Would create wisp: %s\n", wisp.HookPath(cloneRoot, agentID))
+		return nil
+	}
+
+	// Write the wisp to the hook
+	if err := wisp.WriteSlungWork(cloneRoot, agentID, sw); err != nil {
+		return fmt.Errorf("writing wisp: %w", err)
+	}
+
+	fmt.Printf("%s Work attached to hook\n", style.Bold.Render("✓"))
+	return nil
 }

@@ -13,16 +13,19 @@ import (
 )
 
 var slingCmd = &cobra.Command{
-	Use:   "sling <bead-id>",
-	Short: "Attach work to hook and restart agent",
-	Long: `Sling work onto the agent's hook and restart with that context.
+	Use:        "sling <bead-id>",
+	Short:      "[DEPRECATED] Use 'gt hook' or 'gt handoff <bead>' instead",
+	Deprecated: "Use 'gt hook <bead>' to attach work, or 'gt handoff <bead>' to attach and restart.",
+	Long: `DEPRECATED: This command is deprecated. Use instead:
+
+  gt hook <bead>      # Just attach work to hook (no restart)
+  gt handoff <bead>   # Attach work AND restart (what sling did)
+
+Sling work onto the agent's hook and restart with that context.
 
 This is the "restart-and-resume" mechanism - attach a bead (issue) to your hook,
 then restart with a fresh context. The new session wakes up, finds the slung work
 on its hook, and begins working on it immediately.
-
-The wisp is ephemeral (stored in .beads-wisp/, not git-tracked). It's burned
-after the agent picks it up.
 
 Examples:
   gt sling gt-abc                       # Attach issue and restart
