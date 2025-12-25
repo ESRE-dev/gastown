@@ -259,54 +259,68 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 
 	// Handle molecule instantiation if specified
 	if spawnMolecule != "" {
-		// Use bd mol run to create the molecule - this handles everything:
-		// - Creates child issues from proto template
-		// - Assigns root to polecat
-		// - Sets root status to in_progress
-		// - Pins root for session recovery
+		// Molecule instantiation uses three separate bd commands:
+		// 1. bd pour - creates issues from proto template
+		// 2. bd update - sets status to in_progress (claims work)
+		// 3. bd pin - pins root for session recovery
+		// This keeps bd as pure data operations and gt as orchestration.
 		fmt.Printf("Running molecule %s on %s...\n", spawnMolecule, spawnIssue)
 
-		cmd := exec.Command("bd", "--no-daemon", "mol", "run", spawnMolecule,
+		// Step 1: Pour the molecule (create issues from template)
+		pourCmd := exec.Command("bd", "--no-daemon", "pour", spawnMolecule,
 			"--var", "issue="+spawnIssue, "--json")
-		cmd.Dir = beadsPath
+		pourCmd.Dir = beadsPath
 
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
+		var pourStdout, pourStderr bytes.Buffer
+		pourCmd.Stdout = &pourStdout
+		pourCmd.Stderr = &pourStderr
 
-		if err := cmd.Run(); err != nil {
-			errMsg := strings.TrimSpace(stderr.String())
+		if err := pourCmd.Run(); err != nil {
+			errMsg := strings.TrimSpace(pourStderr.String())
 			if errMsg != "" {
-				return fmt.Errorf("running molecule: %s", errMsg)
+				return fmt.Errorf("pouring molecule: %s", errMsg)
 			}
-			return fmt.Errorf("running molecule: %w", err)
+			return fmt.Errorf("pouring molecule: %w", err)
 		}
 
-		// Parse mol run output
-		var molResult struct {
-			RootID    string            `json:"root_id"`
+		// Parse pour output to get root ID
+		var pourResult struct {
+			NewEpicID string            `json:"new_epic_id"`
 			IDMapping map[string]string `json:"id_mapping"`
 			Created   int               `json:"created"`
-			Assignee  string            `json:"assignee"`
-			Pinned    bool              `json:"pinned"`
 		}
-		if err := json.Unmarshal(stdout.Bytes(), &molResult); err != nil {
-			return fmt.Errorf("parsing molecule result: %w", err)
+		if err := json.Unmarshal(pourStdout.Bytes(), &pourResult); err != nil {
+			return fmt.Errorf("parsing pour result: %w", err)
 		}
 
-		fmt.Printf("%s Molecule created: %s (%d steps)\n",
-			style.Bold.Render("✓"), molResult.RootID, molResult.Created-1) // -1 for root
+		rootID := pourResult.NewEpicID
+		fmt.Printf("%s Molecule poured: %s (%d steps)\n",
+			style.Bold.Render("✓"), rootID, pourResult.Created-1) // -1 for root
+
+		// Step 2: Set status to in_progress (claim work)
+		updateCmd := exec.Command("bd", "--no-daemon", "update", rootID, "--status=in_progress")
+		updateCmd.Dir = beadsPath
+		if err := updateCmd.Run(); err != nil {
+			return fmt.Errorf("setting molecule status: %w", err)
+		}
+
+		// Step 3: Pin the root for session recovery
+		pinCmd := exec.Command("bd", "--no-daemon", "pin", rootID)
+		pinCmd.Dir = beadsPath
+		if err := pinCmd.Run(); err != nil {
+			return fmt.Errorf("pinning molecule: %w", err)
+		}
 
 		// Build molecule context for work assignment
 		moleculeCtx = &MoleculeContext{
 			MoleculeID:  spawnMolecule,
-			RootIssueID: molResult.RootID,
-			TotalSteps:  molResult.Created - 1, // -1 for root
-			StepNumber:  1,                     // Starting on first step
+			RootIssueID: rootID,
+			TotalSteps:  pourResult.Created - 1, // -1 for root
+			StepNumber:  1,                      // Starting on first step
 		}
 
 		// Update spawnIssue to be the molecule root (for assignment tracking)
-		spawnIssue = molResult.RootID
+		spawnIssue = rootID
 	}
 
 	// Get or create issue
