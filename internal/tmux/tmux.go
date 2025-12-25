@@ -409,6 +409,24 @@ func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
 // WaitForClaudeReady polls until Claude's prompt indicator appears in the pane.
 // Claude is ready when we see "> " at the start of a line (the input prompt).
 // This is more reliable than just checking if node is running.
+//
+// IMPORTANT: Bootstrap vs Steady-State Observation
+//
+// This function uses regex to detect Claude's prompt - a ZFC violation.
+// ZFC (Zero False Commands) principle: AI should observe AI, not regex.
+//
+// Bootstrap (acceptable):
+//   During cold startup when no AI agent is running, the daemon uses this
+//   function to get the Deacon online. Regex is acceptable here.
+//
+// Steady-State (use AI observation instead):
+//   Once any AI agent is running, observation should be AI-to-AI:
+//   - Deacon starting polecats → use 'gt deacon pending' + AI analysis
+//   - Deacon restarting → Mayor watches via 'gt peek'
+//   - Mayor restarting → Deacon watches via 'gt peek'
+//
+// See: gt deacon pending (ZFC-compliant AI observation)
+// See: gt deacon trigger-pending (bootstrap mode, regex-based)
 func (t *Tmux) WaitForClaudeReady(session string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

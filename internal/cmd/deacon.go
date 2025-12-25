@@ -93,17 +93,46 @@ Examples:
 
 var deaconTriggerPendingCmd = &cobra.Command{
 	Use:   "trigger-pending",
-	Short: "Trigger pending polecat spawns",
+	Short: "Trigger pending polecat spawns (bootstrap mode)",
 	Long: `Check inbox for POLECAT_STARTED messages and trigger ready polecats.
 
-When gt spawn creates a new polecat, Claude takes 10-20 seconds to initialize.
-This command polls pending spawns and sends "Begin." when Claude is ready.
+⚠️  BOOTSTRAP MODE ONLY - Uses regex detection (ZFC violation acceptable).
 
-This is typically called during the Deacon's patrol loop.`,
+This command uses WaitForClaudeReady (regex) to detect when Claude is ready.
+This is appropriate for daemon bootstrap when no AI is available.
+
+In steady-state, the Deacon should use AI-based observation instead:
+  gt deacon pending     # View pending spawns with captured output
+  gt peek <session>     # Observe session output (AI analyzes)
+  gt nudge <session>    # Trigger when AI determines ready
+
+This command is typically called by the daemon during cold startup.`,
 	RunE: runDeaconTriggerPending,
 }
 
+var deaconPendingCmd = &cobra.Command{
+	Use:   "pending [session-to-clear]",
+	Short: "List pending spawns with captured output (for AI observation)",
+	Long: `List pending polecat spawns with their terminal output for AI analysis.
+
+This is the ZFC-compliant way for the Deacon (AI) to observe polecats:
+1. Run 'gt deacon pending' to see pending spawns and their output
+2. Analyze the output to determine if Claude is ready (look for "> " prompt)
+3. Run 'gt nudge <session> "Begin."' to trigger ready polecats
+4. Run 'gt deacon pending <session>' to clear from pending list
+
+This replaces the regex-based trigger-pending for steady-state operation.
+The AI makes the readiness judgment, not hardcoded regex.
+
+Examples:
+  gt deacon pending                    # List all pending with output
+  gt deacon pending gastown/p-abc123   # Clear specific session from pending`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runDeaconPending,
+}
+
 var triggerTimeout time.Duration
+var pendingLines int
 
 func init() {
 	deaconCmd.AddCommand(deaconStartCmd)
@@ -113,10 +142,15 @@ func init() {
 	deaconCmd.AddCommand(deaconRestartCmd)
 	deaconCmd.AddCommand(deaconHeartbeatCmd)
 	deaconCmd.AddCommand(deaconTriggerPendingCmd)
+	deaconCmd.AddCommand(deaconPendingCmd)
 
 	// Flags for trigger-pending
 	deaconTriggerPendingCmd.Flags().DurationVar(&triggerTimeout, "timeout", 2*time.Second,
 		"Timeout for checking if Claude is ready")
+
+	// Flags for pending
+	deaconPendingCmd.Flags().IntVarP(&pendingLines, "lines", "n", 15,
+		"Number of terminal lines to capture per session")
 
 	rootCmd.AddCommand(deaconCmd)
 }
@@ -375,5 +409,110 @@ func runDeaconTriggerPending(cmd *cobra.Command, args []string) error {
 			style.Dim.Render("○"), remaining)
 	}
 
+	return nil
+}
+
+// runDeaconPending shows pending spawns with captured output for AI observation.
+// This is the ZFC-compliant way for Deacon to observe polecats.
+func runDeaconPending(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// If session argument provided, clear it from pending
+	if len(args) == 1 {
+		return clearPendingSession(townRoot, args[0])
+	}
+
+	// Step 1: Check inbox for new POLECAT_STARTED messages
+	pending, err := deacon.CheckInboxForSpawns(townRoot)
+	if err != nil {
+		return fmt.Errorf("checking inbox: %w", err)
+	}
+
+	if len(pending) == 0 {
+		fmt.Printf("%s No pending spawns\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	t := tmux.NewTmux()
+
+	fmt.Printf("%s Pending spawns (%d):\n\n", style.Bold.Render("●"), len(pending))
+
+	for i, ps := range pending {
+		// Check if session still exists
+		running, err := t.HasSession(ps.Session)
+		if err != nil {
+			fmt.Printf("Session: %s\n", ps.Session)
+			fmt.Printf("  Status: error checking session: %v\n\n", err)
+			continue
+		}
+
+		if !running {
+			fmt.Printf("Session: %s\n", ps.Session)
+			fmt.Printf("  Status: session no longer exists\n\n")
+			continue
+		}
+
+		// Capture terminal output for AI analysis
+		output, err := t.CapturePane(ps.Session, pendingLines)
+		if err != nil {
+			fmt.Printf("Session: %s\n", ps.Session)
+			fmt.Printf("  Status: error capturing output: %v\n\n", err)
+			continue
+		}
+
+		// Print session info
+		fmt.Printf("Session: %s\n", ps.Session)
+		fmt.Printf("  Rig: %s\n", ps.Rig)
+		fmt.Printf("  Polecat: %s\n", ps.Polecat)
+		if ps.Issue != "" {
+			fmt.Printf("  Issue: %s\n", ps.Issue)
+		}
+		fmt.Printf("  Spawned: %s ago\n", time.Since(ps.SpawnedAt).Round(time.Second))
+		fmt.Printf("  Terminal output (last %d lines):\n", pendingLines)
+		fmt.Println(strings.Repeat("─", 50))
+		fmt.Println(output)
+		fmt.Println(strings.Repeat("─", 50))
+
+		if i < len(pending)-1 {
+			fmt.Println()
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("%s To trigger a ready polecat:\n", style.Dim.Render("→"))
+	fmt.Printf("  gt nudge <session> \"Begin.\"\n")
+
+	return nil
+}
+
+// clearPendingSession removes a session from the pending list.
+func clearPendingSession(townRoot, session string) error {
+	pending, err := deacon.LoadPending(townRoot)
+	if err != nil {
+		return fmt.Errorf("loading pending: %w", err)
+	}
+
+	var remaining []*deacon.PendingSpawn
+	found := false
+	for _, ps := range pending {
+		if ps.Session == session {
+			found = true
+			continue
+		}
+		remaining = append(remaining, ps)
+	}
+
+	if !found {
+		return fmt.Errorf("session %s not found in pending list", session)
+	}
+
+	if err := deacon.SavePending(townRoot, remaining); err != nil {
+		return fmt.Errorf("saving pending: %w", err)
+	}
+
+	fmt.Printf("%s Cleared %s from pending list\n", style.Bold.Render("✓"), session)
 	return nil
 }
