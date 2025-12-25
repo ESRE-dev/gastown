@@ -2,24 +2,20 @@
   "formula": "mol-polecat-arm",
   "description": "Single polecat inspection and action cycle.\n\nThis molecule is bonded dynamically by mol-witness-patrol's survey-workers step. Each polecat being monitored gets one arm that runs in parallel with other arms.\n\n## Variables\n\n| Variable | Required | Description |\n|----------|----------|-------------|\n| polecat_name | Yes | Name of the polecat to inspect |\n| rig | Yes | Rig containing the polecat |\n| nudge_text | No | Text to send when nudging (default: \"How's progress?...\") |",
   "version": 1,
-  "variables": [
-    {
-      "name": "polecat_name",
+  "vars": {
+    "polecat_name": {
       "required": true,
       "description": "Name of the polecat to inspect"
     },
-    {
-      "name": "rig",
+    "rig": {
       "required": true,
       "description": "Rig containing the polecat"
     },
-    {
-      "name": "nudge_text",
-      "required": false,
+    "nudge_text": {
       "default": "How's progress? Need any help?",
       "description": "Text to send when nudging the polecat"
     }
-  ],
+  },
   "steps": [
     {
       "id": "capture",
