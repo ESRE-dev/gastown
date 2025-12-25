@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -153,6 +154,26 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Attach with: %s\n", style.Dim.Render(fmt.Sprintf("gt crew at %s", name)))
 
 	return nil
+}
+
+// runCrewStart is an alias for runStartCrew, handling multiple input formats.
+// It supports: "name", "rig/name", and "rig/crew/name" formats.
+func runCrewStart(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	// Handle rig/crew/name format (e.g., "gastown/crew/joe" -> "gastown/joe")
+	if strings.Contains(name, "/crew/") {
+		parts := strings.SplitN(name, "/crew/", 2)
+		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			name = parts[0] + "/" + parts[1]
+		}
+	}
+
+	// Set the start.go flags from crew.go flags before calling
+	startCrewRig = crewRig
+	startCrewAccount = crewAccount
+
+	return runStartCrew(cmd, []string{name})
 }
 
 func runCrewRestart(cmd *cobra.Command, args []string) error {

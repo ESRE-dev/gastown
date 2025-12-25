@@ -30,6 +30,7 @@ Unlike polecats which are witness-managed and transient, crew workers are:
 - Tmux optional: Can work in terminal directly
 
 Commands:
+  gt crew start <name>     Start a crew workspace (creates if needed)
   gt crew add <name>       Create a new crew workspace
   gt crew list             List crew workspaces with status
   gt crew at <name>        Attach to crew workspace session
@@ -211,6 +212,25 @@ var crewPrevCmd = &cobra.Command{
 	RunE:   runCrewPrev,
 }
 
+var crewStartCmd = &cobra.Command{
+	Use:   "start <name>",
+	Short: "Start a crew workspace (creates if needed)",
+	Long: `Start a crew workspace, creating it if it doesn't exist.
+
+This is an alias for 'gt start crew'. It combines 'gt crew add' and 'gt crew at --detached'.
+The crew session starts in the background with Claude running and ready.
+
+The name can include the rig in slash format (e.g., gastown/joe).
+If not specified, the rig is inferred from the current directory.
+
+Examples:
+  gt crew start joe                    # Start joe in current rig
+  gt crew start gastown/joe            # Start joe in gastown rig
+  gt crew start joe --rig beads        # Start joe in beads rig`,
+	Args: cobra.ExactArgs(1),
+	RunE: runCrewStart,
+}
+
 func init() {
 	// Add flags
 	crewAddCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to create crew workspace in")
@@ -240,6 +260,9 @@ func init() {
 
 	crewRestartCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 
+	crewStartCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
+	crewStartCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use")
+
 	// Add subcommands
 	crewCmd.AddCommand(crewAddCmd)
 	crewCmd.AddCommand(crewListCmd)
@@ -252,6 +275,7 @@ func init() {
 	crewCmd.AddCommand(crewRestartCmd)
 	crewCmd.AddCommand(crewNextCmd)
 	crewCmd.AddCommand(crewPrevCmd)
+	crewCmd.AddCommand(crewStartCmd)
 
 	rootCmd.AddCommand(crewCmd)
 }
