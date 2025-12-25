@@ -88,6 +88,40 @@ func isTownLevelAddress(address string) bool {
 	return addr == "mayor" || addr == "deacon"
 }
 
+// resolveWispDir returns the .beads-wisp/.beads directory for ephemeral mail.
+// Like resolveBeadsDir, mail wisps use town-level storage.
+// Note: bd init creates .beads/ subdirectory, so the full path is .beads-wisp/.beads
+func (r *Router) resolveWispDir() string {
+	if r.townRoot == "" {
+		return filepath.Join(r.workDir, ".beads-wisp", ".beads")
+	}
+	return filepath.Join(r.townRoot, ".beads-wisp", ".beads")
+}
+
+// shouldBeEphemeral determines if a message should be stored as a wisp.
+// Returns true if:
+// - Message.Ephemeral is explicitly set
+// - Subject matches lifecycle message patterns (POLECAT_*, NUDGE, etc.)
+func (r *Router) shouldBeEphemeral(msg *Message) bool {
+	if msg.Ephemeral {
+		return true
+	}
+	// Auto-detect lifecycle messages by subject prefix
+	subjectLower := strings.ToLower(msg.Subject)
+	ephemeralPrefixes := []string{
+		"polecat_started",
+		"polecat_done",
+		"start_work",
+		"nudge",
+	}
+	for _, prefix := range ephemeralPrefixes {
+		if strings.HasPrefix(subjectLower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // Send delivers a message via beads message.
 // Routes the message to the correct beads database based on recipient address.
 func (r *Router) Send(msg *Message) error {
@@ -120,8 +154,17 @@ func (r *Router) Send(msg *Message) error {
 		args = append(args, "--labels", strings.Join(labels, ","))
 	}
 
-	// Resolve the correct beads directory for the recipient
-	beadsDir := r.resolveBeadsDir(msg.To)
+	// Resolve the correct beads directory based on ephemeral status
+	var beadsDir string
+	if r.shouldBeEphemeral(msg) {
+		beadsDir = r.resolveWispDir()
+		// Ensure wisp directory exists
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			return fmt.Errorf("creating wisp dir: %w", err)
+		}
+	} else {
+		beadsDir = r.resolveBeadsDir(msg.To)
+	}
 
 	cmd := exec.Command("bd", args...)
 	cmd.Env = append(cmd.Environ(),

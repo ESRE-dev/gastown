@@ -22,6 +22,7 @@ var (
 	mailPriority      int
 	mailUrgent        bool
 	mailPinned        bool
+	mailEphemeral     bool
 	mailType          string
 	mailReplyTo       string
 	mailNotify        bool
@@ -235,6 +236,7 @@ func init() {
 	mailSendCmd.Flags().StringVar(&mailReplyTo, "reply-to", "", "Message ID this is replying to")
 	mailSendCmd.Flags().BoolVarP(&mailNotify, "notify", "n", false, "Send tmux notification to recipient")
 	mailSendCmd.Flags().BoolVar(&mailPinned, "pinned", false, "Pin message (for handoff context that persists)")
+	mailSendCmd.Flags().BoolVar(&mailEphemeral, "ephemeral", false, "Send as ephemeral wisp (auto-cleanup on patrol squash)")
 	mailSendCmd.Flags().BoolVar(&mailSendSelf, "self", false, "Send to self (auto-detect from cwd)")
 	_ = mailSendCmd.MarkFlagRequired("subject")
 
@@ -331,6 +333,9 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 
 	// Set pinned flag
 	msg.Pinned = mailPinned
+
+	// Set ephemeral flag
+	msg.Ephemeral = mailEphemeral
 
 	// Handle reply-to: auto-set type to reply and look up thread
 	if mailReplyTo != "" {
@@ -434,8 +439,12 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 		if msg.Priority == mail.PriorityHigh || msg.Priority == mail.PriorityUrgent {
 			priorityMarker = " " + style.Bold.Render("!")
 		}
+		ephemeralMarker := ""
+		if msg.Ephemeral || msg.Source == mail.SourceWisp {
+			ephemeralMarker = " " + style.Dim.Render("(ephemeral)")
+		}
 
-		fmt.Printf("  %s %s%s%s\n", readMarker, msg.Subject, typeMarker, priorityMarker)
+		fmt.Printf("  %s %s%s%s%s\n", readMarker, msg.Subject, typeMarker, priorityMarker, ephemeralMarker)
 		fmt.Printf("    %s from %s\n",
 			style.Dim.Render(msg.ID),
 			msg.From)

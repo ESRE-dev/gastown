@@ -28,6 +28,17 @@ const (
 // MessageType indicates the purpose of a message.
 type MessageType string
 
+// MessageSource indicates where a message is stored.
+type MessageSource string
+
+const (
+	// SourcePersistent indicates the message is in permanent .beads storage.
+	SourcePersistent MessageSource = "persistent"
+
+	// SourceWisp indicates the message is in ephemeral .beads-wisp storage.
+	SourceWisp MessageSource = "wisp"
+)
+
 const (
 	// TypeTask indicates a message requiring action from the recipient.
 	TypeTask MessageType = "task"
@@ -97,6 +108,14 @@ type Message struct {
 
 	// Pinned marks the message as pinned (won't be auto-archived).
 	Pinned bool `json:"pinned,omitempty"`
+
+	// Ephemeral marks this as a transient message stored in wisps.
+	// Ephemeral messages auto-cleanup on patrol squash.
+	Ephemeral bool `json:"ephemeral,omitempty"`
+
+	// Source indicates where this message is stored (persistent or wisp).
+	// Set during List(), not serialized.
+	Source MessageSource `json:"-"`
 }
 
 // NewMessage creates a new message with a generated ID and thread ID.
