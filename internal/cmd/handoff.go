@@ -137,8 +137,15 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 
 	// Dry run mode - show what would happen
 	if handoffDryRun {
+		fmt.Printf("Would execute: tmux clear-history -t %s\n", pane)
 		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", pane, restartCmd)
 		return nil
+	}
+
+	// Clear scrollback history before respawn (resets copy-mode from [0/N] to [0/0])
+	if err := t.ClearHistory(pane); err != nil {
+		// Non-fatal - continue with respawn even if clear fails
+		fmt.Printf("%s Warning: could not clear history: %v\n", style.Dim.Render("⚠"), err)
 	}
 
 	// Use exec to respawn the pane - this kills us and restarts
@@ -395,11 +402,18 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 
 	// Dry run mode
 	if handoffDryRun {
+		fmt.Printf("Would execute: tmux clear-history -t %s\n", targetPane)
 		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", targetPane, restartCmd)
 		if handoffWatch {
 			fmt.Printf("Would execute: tmux switch-client -t %s\n", targetSession)
 		}
 		return nil
+	}
+
+	// Clear scrollback history before respawn (resets copy-mode from [0/N] to [0/0])
+	if err := t.ClearHistory(targetPane); err != nil {
+		// Non-fatal - continue with respawn even if clear fails
+		fmt.Printf("%s Warning: could not clear history: %v\n", style.Dim.Render("⚠"), err)
 	}
 
 	// Respawn the remote session's pane

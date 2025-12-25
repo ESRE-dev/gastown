@@ -582,6 +582,14 @@ func (t *Tmux) RespawnPane(pane, command string) error {
 	return err
 }
 
+// ClearHistory clears the scrollback history buffer for a pane.
+// This resets copy-mode display from [0/N] to [0/0].
+// The pane parameter should be a pane ID (e.g., "%0") or session:window.pane format.
+func (t *Tmux) ClearHistory(pane string) error {
+	_, err := t.run("clear-history", "-t", pane)
+	return err
+}
+
 // SwitchClient switches the current tmux client to a different session.
 // Used after remote recycle to move the user's view to the recycled session.
 func (t *Tmux) SwitchClient(targetSession string) error {
