@@ -705,9 +705,9 @@ gt spawn --issue gt-xyz --molecule mol-engineer-in-box
 - Each instance has an `instantiated_from` edge to the source molecule
 - Enables querying: "show all instances of mol-engineer-in-box"
 
-### Built-in Molecules
+### Standard Molecules
 
-Gas Town ships with three built-in molecules:
+Gas Town includes formula files (`.beads/formulas/`) for standard molecules:
 
 **mol-engineer-in-box** (5 steps):
 ```
@@ -727,9 +727,9 @@ investigate → document
 ```
 Exploration workflow for understanding problems.
 
-Seed built-in molecules with:
+Cook formula files into proto beads:
 ```bash
-gt molecule seed
+bd cook <formula-id>
 ```
 
 ### Usage

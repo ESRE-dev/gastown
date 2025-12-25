@@ -478,7 +478,6 @@ func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName 
 // These molecules define the work loops for Deacon, Witness, and Refinery roles.
 func (m *Manager) seedPatrolMolecules(rigPath string) error {
 	// Use bd command to seed molecules (more reliable than internal API)
-	// The bd mol seed command creates built-in molecules if they don't exist
 	cmd := exec.Command("bd", "mol", "seed", "--patrol")
 	cmd.Dir = rigPath
 	if err := cmd.Run(); err != nil {
@@ -491,7 +490,7 @@ func (m *Manager) seedPatrolMolecules(rigPath string) error {
 
 // seedPatrolMoleculesManually creates patrol molecules using bd create commands.
 func (m *Manager) seedPatrolMoleculesManually(rigPath string) error {
-	// Patrol molecule definitions (subset of builtin_molecules.go for seeding)
+	// Patrol molecule definitions for seeding
 	patrolMols := []struct {
 		title string
 		desc  string

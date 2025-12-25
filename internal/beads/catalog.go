@@ -16,15 +16,14 @@ type CatalogMolecule struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
-	Source      string `json:"source,omitempty"` // "builtin", "town", "rig", "project"
+	Source      string `json:"source,omitempty"` // "town", "rig", "project"
 }
 
 // MoleculeCatalog provides hierarchical molecule template loading.
 // It loads molecules from multiple sources in priority order:
-// 1. Built-in molecules (shipped with the binary)
-// 2. Town-level: <town>/.beads/molecules.jsonl
-// 3. Rig-level: <town>/<rig>/.beads/molecules.jsonl
-// 4. Project-level: .beads/molecules.jsonl in current directory
+// 1. Town-level: <town>/.beads/molecules.jsonl
+// 2. Rig-level: <town>/<rig>/.beads/molecules.jsonl
+// 3. Project-level: .beads/molecules.jsonl in current directory
 //
 // Later sources can override earlier ones by ID.
 type MoleculeCatalog struct {
@@ -46,21 +45,11 @@ func NewMoleculeCatalog() *MoleculeCatalog {
 //   - rigPath: Path to the rig directory (e.g., ~/gt/gastown). Empty to skip rig-level.
 //   - projectPath: Path to the project directory. Empty to skip project-level.
 //
-// Built-in molecules are always loaded first.
+// Molecules are loaded from town, rig, and project levels (no builtin molecules).
 func LoadCatalog(townRoot, rigPath, projectPath string) (*MoleculeCatalog, error) {
 	catalog := NewMoleculeCatalog()
 
-	// 1. Load built-in molecules
-	for _, builtin := range BuiltinMolecules() {
-		catalog.Add(&CatalogMolecule{
-			ID:          builtin.ID,
-			Title:       builtin.Title,
-			Description: builtin.Description,
-			Source:      "builtin",
-		})
-	}
-
-	// 2. Load town-level molecules
+	// 1. Load town-level molecules
 	if townRoot != "" {
 		townMolsPath := filepath.Join(townRoot, ".beads", "molecules.jsonl")
 		if err := catalog.LoadFromFile(townMolsPath, "town"); err != nil && !os.IsNotExist(err) {
@@ -68,7 +57,7 @@ func LoadCatalog(townRoot, rigPath, projectPath string) (*MoleculeCatalog, error
 		}
 	}
 
-	// 3. Load rig-level molecules
+	// 2. Load rig-level molecules
 	if rigPath != "" {
 		rigMolsPath := filepath.Join(rigPath, ".beads", "molecules.jsonl")
 		if err := catalog.LoadFromFile(rigMolsPath, "rig"); err != nil && !os.IsNotExist(err) {
@@ -76,7 +65,7 @@ func LoadCatalog(townRoot, rigPath, projectPath string) (*MoleculeCatalog, error
 		}
 	}
 
-	// 4. Load project-level molecules
+	// 3. Load project-level molecules
 	if projectPath != "" {
 		projectMolsPath := filepath.Join(projectPath, ".beads", "molecules.jsonl")
 		if err := catalog.LoadFromFile(projectMolsPath, "project"); err != nil && !os.IsNotExist(err) {
@@ -196,17 +185,3 @@ func (mol *CatalogMolecule) ToIssue() *Issue {
 	}
 }
 
-// ExportBuiltinMolecules writes all built-in molecules to a JSONL file.
-// This is useful for creating a base molecules.jsonl file.
-func ExportBuiltinMolecules(path string) error {
-	catalog := NewMoleculeCatalog()
-	for _, builtin := range BuiltinMolecules() {
-		catalog.Add(&CatalogMolecule{
-			ID:          builtin.ID,
-			Title:       builtin.Title,
-			Description: builtin.Description,
-			Source:      "builtin",
-		})
-	}
-	return catalog.SaveToFile(path)
-}

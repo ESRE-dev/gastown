@@ -285,8 +285,8 @@ bd mol detach
 
 ### Phase 1: Core Infrastructure (P0)
 
-1. Add `mol-crew-session` to builtin_molecules.go
-2. Add `mol-polecat-session` to builtin_molecules.go
+1. Create `mol-crew-session.formula.json` in `.beads/formulas/`
+2. Create `mol-polecat-session.formula.json` in `.beads/formulas/`
 3. Add wisp attachment mechanism to beads
 4. Update spawn.go for polecat session wisps
 

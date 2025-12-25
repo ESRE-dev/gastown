@@ -80,22 +80,6 @@ Use --db to show only database molecules.`,
 	RunE: runMoleculeList,
 }
 
-var moleculeExportCmd = &cobra.Command{
-	Use:   "export <path>",
-	Short: "Export built-in molecules to JSONL",
-	Long: `Export built-in molecule templates to a JSONL file.
-
-This creates a molecules.jsonl file containing all built-in molecules.
-You can place this in:
-- <town>/.beads/molecules.jsonl (town-level)
-- <rig>/.beads/molecules.jsonl (rig-level)
-- .beads/molecules.jsonl (project-level)
-
-The file can be edited to customize or add new molecules.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runMoleculeExport,
-}
-
 var moleculeShowCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show molecule with parsed steps",
@@ -408,7 +392,6 @@ func init() {
 	moleculeCmd.AddCommand(moleculeParseCmd)
 	moleculeCmd.AddCommand(moleculeInstantiateCmd)
 	moleculeCmd.AddCommand(moleculeInstancesCmd)
-	moleculeCmd.AddCommand(moleculeExportCmd)
 	moleculeCmd.AddCommand(moleculeProgressCmd)
 	moleculeCmd.AddCommand(moleculeAttachCmd)
 	moleculeCmd.AddCommand(moleculeDetachCmd)

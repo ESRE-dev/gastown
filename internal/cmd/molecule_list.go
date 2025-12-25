@@ -130,19 +130,6 @@ func runMoleculeList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runMoleculeExport(cmd *cobra.Command, args []string) error {
-	path := args[0]
-
-	if err := beads.ExportBuiltinMolecules(path); err != nil {
-		return fmt.Errorf("exporting molecules: %w", err)
-	}
-
-	fmt.Printf("%s Exported %d built-in molecules to %s\n",
-		style.Bold.Render("✓"), len(beads.BuiltinMolecules()), path)
-
-	return nil
-}
-
 func runMoleculeShow(cmd *cobra.Command, args []string) error {
 	molID := args[0]
 
