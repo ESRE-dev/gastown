@@ -53,6 +53,11 @@ type SlungWork struct {
 	// BeadID is the issue/bead to work on (e.g., "gt-xxx").
 	BeadID string `json:"bead_id"`
 
+	// Formula is the optional formula/form to apply to the work.
+	// When set, this creates scaffolding around the target bead.
+	// Used by `gt sling <formula> --on <bead>`.
+	Formula string `json:"formula,omitempty"`
+
 	// Context is optional additional context from the slinger.
 	Context string `json:"context,omitempty"`
 

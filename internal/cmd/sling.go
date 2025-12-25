@@ -35,6 +35,13 @@ Examples:
   gt sling gt-abc crew                  # Sling to crew worker
   gt sling gt-abc gastown/crew/max      # Sling to specific agent
 
+Formula scaffolding (--on flag):
+  gt sling shiny --on gt-abc            # Apply shiny formula to existing work
+  gt sling mol-review --on gt-abc crew  # Apply review formula, sling to crew
+
+When --on is specified, the first argument is a formula name (not a bead).
+The formula shapes execution of the target bead, creating wisp scaffolding.
+
 Compare:
   gt hook <bead>      # Just attach (no action)
   gt sling <bead>     # Attach + start now (keep context)
@@ -46,20 +53,33 @@ The propulsion principle: if it's on your hook, YOU RUN IT.`,
 }
 
 var (
-	slingSubject string
-	slingMessage string
-	slingDryRun  bool
+	slingSubject  string
+	slingMessage  string
+	slingDryRun   bool
+	slingOnTarget string // --on flag: target bead when slinging a formula
 )
 
 func init() {
 	slingCmd.Flags().StringVarP(&slingSubject, "subject", "s", "", "Context subject for the work")
 	slingCmd.Flags().StringVarP(&slingMessage, "message", "m", "", "Context message for the work")
 	slingCmd.Flags().BoolVarP(&slingDryRun, "dry-run", "n", false, "Show what would be done")
+	slingCmd.Flags().StringVar(&slingOnTarget, "on", "", "Apply formula to existing bead (implies wisp scaffolding)")
 	rootCmd.AddCommand(slingCmd)
 }
 
 func runSling(cmd *cobra.Command, args []string) error {
-	beadID := args[0]
+	// Determine if we're in formula mode (--on flag)
+	var beadID string
+	var formulaName string
+
+	if slingOnTarget != "" {
+		// Formula mode: gt sling <formula> --on <bead>
+		formulaName = args[0]
+		beadID = slingOnTarget
+	} else {
+		// Normal mode: gt sling <bead>
+		beadID = args[0]
+	}
 
 	// Polecats cannot sling - check early before writing anything
 	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
@@ -69,6 +89,13 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Verify the bead exists
 	if err := verifyBeadExists(beadID); err != nil {
 		return err
+	}
+
+	// If formula specified, verify it exists
+	if formulaName != "" {
+		if err := verifyFormulaExists(formulaName); err != nil {
+			return err
+		}
 	}
 
 	// Determine target agent (self or specified)
@@ -128,12 +155,21 @@ func runSling(cmd *cobra.Command, args []string) error {
 	sw := wisp.NewSlungWork(beadID, targetAgent)
 	sw.Subject = slingSubject
 	sw.Context = slingMessage
+	sw.Formula = formulaName
 
-	fmt.Printf("%s Slinging %s to %s...\n", style.Bold.Render("🎯"), beadID, targetAgent)
+	// Display what we're doing
+	if formulaName != "" {
+		fmt.Printf("%s Slinging formula %s on %s to %s...\n", style.Bold.Render("🎯"), formulaName, beadID, targetAgent)
+	} else {
+		fmt.Printf("%s Slinging %s to %s...\n", style.Bold.Render("🎯"), beadID, targetAgent)
+	}
 
 	if slingDryRun {
 		fmt.Printf("Would create wisp: %s\n", wisp.HookPath(hookRoot, targetAgent))
 		fmt.Printf("  bead_id: %s\n", beadID)
+		if formulaName != "" {
+			fmt.Printf("  formula: %s\n", formulaName)
+		}
 		fmt.Printf("  agent: %s\n", targetAgent)
 		fmt.Printf("  hook_root: %s\n", hookRoot)
 		if slingSubject != "" {
@@ -293,4 +329,25 @@ func detectCloneRoot() (string, error) {
 		return "", fmt.Errorf("not in a git repository")
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// verifyFormulaExists checks that the formula exists using bd formula show.
+// Formulas can be proto beads (mol-*) or formula files (.formula.json).
+func verifyFormulaExists(formulaName string) error {
+	// Try as a proto bead first (mol-* prefix is common)
+	cmd := exec.Command("bd", "show", formulaName, "--json")
+	if err := cmd.Run(); err == nil {
+		return nil // Found as a proto
+	}
+
+	// Try with mol- prefix
+	cmd = exec.Command("bd", "show", "mol-"+formulaName, "--json")
+	if err := cmd.Run(); err == nil {
+		return nil // Found as mol-<name>
+	}
+
+	// TODO: Check for .formula.json file in search paths
+	// For now, we require the formula to exist as a proto
+
+	return fmt.Errorf("formula '%s' not found (try 'bd cook' to create it from a .formula.json file)", formulaName)
 }
