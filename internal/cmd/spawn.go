@@ -45,20 +45,21 @@ var spawnCmd = &cobra.Command{
 Assigns an issue or task to a polecat and starts a session. If no polecat
 is specified, auto-selects an idle polecat in the rig.
 
-When --molecule is specified, the molecule is first instantiated on the parent
-issue (creating child steps), then the polecat is spawned on the first ready step.
+Issue-based spawns automatically use mol-polecat-work for structured workflow
+with crash recovery checkpoints. Use --molecule to override with a different
+molecule, or -m/--message for free-form tasks without a molecule.
 
 Examples:
-  gt spawn gastown/Toast --issue gt-abc
+  gt spawn gastown/Toast --issue gt-abc    # uses mol-polecat-work
   gt spawn gastown --issue gt-def          # auto-select polecat
-  gt spawn gastown/Nux -m "Fix the tests"  # free-form task
+  gt spawn gastown/Nux -m "Fix the tests"  # free-form task (no molecule)
   gt spawn gastown/Capable --issue gt-xyz --create  # create if missing
 
   # Flag-based selection (rig inferred from current directory):
   gt spawn --issue gt-xyz --polecat Angharad
   gt spawn --issue gt-abc --rig gastown --polecat Toast
 
-  # With molecule workflow:
+  # With custom molecule workflow:
   gt spawn --issue gt-abc --molecule mol-engineer-box`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runSpawn,
@@ -96,6 +97,13 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// --molecule requires --issue
 	if spawnMolecule != "" && spawnIssue == "" {
 		return fmt.Errorf("--molecule requires --issue to be specified")
+	}
+
+	// Auto-use mol-polecat-work for issue-based spawns (Phase 3: Polecat Work Cycle)
+	// This gives polecats a structured workflow with checkpoints for crash recovery.
+	// Can be overridden with explicit --molecule flag.
+	if spawnIssue != "" && spawnMolecule == "" {
+		spawnMolecule = "mol-polecat-work"
 	}
 
 	// Find workspace first (needed for rig inference)
