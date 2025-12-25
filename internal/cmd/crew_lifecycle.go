@@ -205,9 +205,11 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send crew resume prompt after prime completes
-	// Use longer debounce (300ms) to ensure paste completes before Enter
+	// Use NudgeSession (the canonical way to message Claude) with longer pre-delay
+	// to ensure gt prime has finished processing
+	time.Sleep(5 * time.Second)
 	crewPrompt := "Read your mail, act on anything urgent, else await instructions."
-	if err := t.SendKeysDelayedDebounced(sessionID, crewPrompt, 3000, 300); err != nil {
+	if err := t.NudgeSession(sessionID, crewPrompt); err != nil {
 		fmt.Printf("Warning: Could not send resume prompt: %v\n", err)
 	}
 
