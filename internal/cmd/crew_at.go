@@ -103,6 +103,9 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		theme := getThemeForRig(r.Name)
 		_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
 
+		// Set up C-b n/p keybindings for crew session cycling
+		_ = t.SetCrewCycleBindings(sessionID)
+
 		// Wait for shell to be ready after session creation
 		if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
 			return fmt.Errorf("waiting for shell: %w", err)

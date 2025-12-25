@@ -11,8 +11,11 @@ import (
 // cycleCrewSession switches to the next or previous crew session in the same rig.
 // direction: 1 for next, -1 for previous
 func cycleCrewSession(direction int) error {
-	// Get current session
-	currentSession := getCurrentTmuxSession()
+	// Get current session (uses existing function from handoff.go)
+	currentSession, err := getCurrentTmuxSession()
+	if err != nil {
+		return fmt.Errorf("not in a tmux session: %w", err)
+	}
 	if currentSession == "" {
 		return fmt.Errorf("not in a tmux session")
 	}
@@ -55,7 +58,6 @@ func cycleCrewSession(direction int) error {
 
 	if targetIdx == currentIdx {
 		// Only one session, nothing to switch to
-		fmt.Printf("Only one crew session in rig %s\n", rigName)
 		return nil
 	}
 

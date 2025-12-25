@@ -268,22 +268,6 @@ func parseCrewSessionName(sessionName string) (rigName, crewName string, ok bool
 	return rigName, crewName, true
 }
 
-// getCurrentTmuxSession returns the current tmux session name.
-// Returns empty string if not in tmux.
-func getCurrentTmuxSession() string {
-	if os.Getenv("TMUX") == "" {
-		return ""
-	}
-
-	cmd := exec.Command("tmux", "display-message", "-p", "#{session_name}")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-
-	return strings.TrimSpace(string(out))
-}
-
 // findRigCrewSessions returns all crew sessions for a given rig, sorted alphabetically.
 // Uses tmux list-sessions to find sessions matching gt-<rig>-crew-* pattern.
 func findRigCrewSessions(rigName string) ([]string, error) {

@@ -198,33 +198,17 @@ Examples:
 }
 
 var crewNextCmd = &cobra.Command{
-	Use:   "next",
-	Short: "Switch to next crew session in same rig",
-	Long: `Switch to the next crew session in the same rig.
-
-Cycles through crew sessions alphabetically. When you reach the last
-crew, wraps around to the first.
-
-This command is bound to C-b n in crew sessions for quick switching.
-
-Examples:
-  gt crew next                    # Switch to next crew in same rig`,
-	RunE: runCrewNext,
+	Use:    "next",
+	Short:  "Switch to next crew session in same rig",
+	Hidden: true, // Internal command for tmux keybindings
+	RunE:   runCrewNext,
 }
 
 var crewPrevCmd = &cobra.Command{
-	Use:   "prev",
-	Short: "Switch to previous crew session in same rig",
-	Long: `Switch to the previous crew session in the same rig.
-
-Cycles through crew sessions in reverse alphabetical order. When you
-reach the first crew, wraps around to the last.
-
-This command is bound to C-b p in crew sessions for quick switching.
-
-Examples:
-  gt crew prev                    # Switch to previous crew in same rig`,
-	RunE: runCrewPrev,
+	Use:    "prev",
+	Short:  "Switch to previous crew session in same rig",
+	Hidden: true, // Internal command for tmux keybindings
+	RunE:   runCrewPrev,
 }
 
 func init() {
