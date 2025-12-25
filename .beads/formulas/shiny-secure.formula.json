@@ -1,0 +1,10 @@
+{
+  "formula": "shiny-secure",
+  "type": "workflow",
+  "description": "Shiny workflow with security audit aspect applied.",
+  "version": 1,
+  "extends": ["shiny"],
+  "compose": {
+    "aspects": ["security-audit"]
+  }
+}
