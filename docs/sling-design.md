@@ -1,16 +1,16 @@
-# The Sling: Work Dispatch
+# Hook, Sling, Handoff: Work Assignment Commands
 
-> **Status**: Design Draft
-> **Issue**: gt-z3qf
+> **Status**: Implemented
+> **Updated**: 2024-12-24
 
-## The Propulsion Principle
+## The Propulsion Principle (GUPP)
 
-We're experimenting with a simple rule for agent behavior:
+The Gastown Universal Propulsion Principle is simple:
 
 > **If you find something on your hook, YOU RUN IT.**
 
-No decisions. No "should I?" Just ignition. We call this the Propulsion
-Principle - agents execute what's on their hook rather than deciding what to do.
+No decisions. No "should I?" Just ignition. Agents execute what's on their
+hook rather than deciding what to do.
 
 ```
 Hook has work → Work happens.
@@ -18,188 +18,174 @@ Hook has work → Work happens.
 
 That's the whole engine. Everything else is plumbing.
 
-## The Sling Operation
+## The Command Menagerie
 
-**`gt sling`** is the unified command for putting work on an agent's hook.
+Three commands for putting work on hooks, each with distinct semantics:
+
+| Command | Action | Context | Use Case |
+|---------|--------|---------|----------|
+| `gt hook <bead>` | Attach only | Preserved | Assign work for later |
+| `gt sling <bead>` | Attach + run | Preserved | Kick off work immediately |
+| `gt handoff <bead>` | Attach + restart | Fresh | Restart with new context |
+
+### The Relationships
+
+```
+gt hook = pin (assign)
+gt sling = hook + run now
+gt handoff = hook + restart (fresh context via GUPP)
+```
+
+A hypothetical `gt run` lurks in the liminal UX space - it would be "start
+working on the hooked item now" without the attach step. Currently implicit
+in startup via GUPP.
+
+## gt hook: Durability Primitive
 
 ```bash
-gt sling <thing> <target> [options]
+gt hook <bead-id> [flags]
 ```
 
-Where:
-- `<thing>` - What to sling (molecule, bead, epic)
-- `<target>` - Who to sling it at (agent address)
-- `[options]` - How to sling it (--wisp, --priority, etc.)
+**What it does**: Attaches work to your hook. Nothing more.
 
-### Examples
+**When to use**:
+- You want to assign work but chat with the agent first
+- Setting up work before triggering execution
+- Preparing for a handoff without immediate restart
+
+**Example**:
+```bash
+gt hook gt-abc                    # Attach issue
+gt hook gt-abc -s "Context here"  # With subject for later handoff mail
+```
+
+The hook provides **durability** - the agent can restart, compact, or hand off,
+but until the hook is changed or closed, that agent owns the work.
+
+## gt sling: Hook and Run Now
 
 ```bash
-# Sling a molecule at a polecat
-gt sling feature polecat/alpha
-
-# Sling a specific issue with a molecule
-gt sling gt-xyz polecat/alpha --molecule bugfix
-
-# Sling a wisp at the deacon (ephemeral, won't accumulate)
-gt sling patrol deacon/ --wisp
-
-# Sling an epic at refinery for batch processing
-gt sling gt-epic-123 refinery/
+gt sling <bead-id> [target] [flags]
 ```
 
-### What Can Be Slung?
+**What it does**:
+1. Attaches bead to the hook (durability)
+2. Injects a prompt to start working NOW
 
-| Thing | Prefix | Example | Notes |
-|-------|--------|---------|-------|
-| Molecule proto | none | `gt sling feature polecat/alpha` | Pours from proto |
-| Issue/Bead | `gt-*`, `bd-*` | `gt sling gt-xyz polecat/alpha` | Work item |
-| Epic | `gt-*` (type=epic) | `gt sling gt-epic refinery/` | Batch of issues |
-| Wisp | `--wisp` flag | `gt sling patrol deacon/ --wisp` | Wisp (no audit trail) |
+**When to use**:
+- You've been chatting with an agent and want to kick off a workflow
+- You want to assign work to another agent that has useful context
+- You (Overseer) want to start work then attend to another window
+- Starting work without losing current conversation context
 
-### What Happens When You Sling?
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    gt sling lifecycle                    │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  1. POUR (if proto)      2. ASSIGN           3. PIN     │
-│     proto → molecule        mol → agent         → hook  │
-│                                                          │
-│  ┌─────────┐            ┌─────────┐        ┌─────────┐  │
-│  │  Proto  │ ────────►  │Molecule │ ─────► │  Hook   │  │
-│  │(catalog)│   pour     │(instance)│ assign │(pinned) │  │
-│  └─────────┘            └─────────┘        └─────────┘  │
-│                                                  │       │
-│                                            agent wakes   │
-│                                                  │       │
-│                                                  ▼       │
-│                                            ┌─────────┐  │
-│                                            │ IGNITION│  │
-│                                            └─────────┘  │
-└─────────────────────────────────────────────────────────┘
+**Examples**:
+```bash
+gt sling gt-abc                       # Hook and start on it now
+gt sling gt-abc -s "Fix the bug"      # With context subject
+gt sling gt-abc crew                  # Sling to crew worker
+gt sling gt-abc gastown/crew/max      # Sling to specific agent
 ```
 
-## The Agent's View
+**Key distinction from handoff**: Sling preserves context. The agent doesn't
+restart - they receive an injected prompt and begin working with their current
+conversation history intact.
 
-From the agent's perspective, life is simple:
-
-```markdown
-## Your One Rule
-
-1. Check your hook: `gt mol status`
-2. Found something? **Run it.** No thinking required.
-3. Nothing? Check mail for new slings.
-4. Repeat.
-```
-
-The agent never decides *whether* to run. The molecule tells them *what* to do.
-They execute until complete, then check the hook again.
-
-### Agent Startup (New Model)
+## gt handoff: Hook and Restart
 
 ```bash
-# Old way (too much thinking)
-gt mail inbox
-if has_molecule; then
-    gt molecule instantiate ...
-    # figure out what to do...
-fi
-
-# New way (propulsion)
-gt mol status          # What's on my hook?
-# Output tells you exactly what to do
-# Just follow the molecule phases
+gt handoff [bead-or-role] [flags]
 ```
 
-## Command Reference
+**What it does**:
+1. If bead provided: attaches to hook first
+2. Restarts the session (respawns pane)
+3. New session wakes, finds hook, runs via GUPP
 
-### gt sling
+**When to use**:
+- Context has become too large or stale
+- You want a fresh session but with work continuity
+- Handing off your own session before context limits
+- Triggering restart on another agent's session
 
-```
-gt sling <thing> <target> [flags]
-
-Arguments:
-  thing     Proto name, issue ID, or epic ID
-  target    Agent address (polecat/name, deacon/, witness/, refinery/)
-
-Flags:
-  --wisp           Create wisp (burned on complete, squashed to digest)
-  --molecule, -m   Specify molecule proto when slinging an issue
-  --priority, -p   Override priority (P0-P4)
-  --force          Re-sling even if hook already has work
-
-Examples:
-  gt sling feature polecat/alpha              # Pour feature mol, sling to alpha
-  gt sling gt-xyz polecat/beta -m bugfix      # Sling issue with bugfix workflow
-  gt sling patrol deacon/ --wisp              # Patrol wisp
-  gt sling gt-epic-batch refinery/            # Batch work to refinery
+**Examples**:
+```bash
+gt handoff                          # Just restart (uses existing hook)
+gt handoff gt-abc                   # Hook bead, then restart
+gt handoff gt-abc -s "Fix it"       # Hook with context, then restart
+gt handoff -s "Context" -m "Notes"  # Restart with handoff mail
+gt handoff crew                     # Hand off crew session
+gt handoff mayor                    # Hand off mayor session
 ```
 
-### gt mol status
+**Interaction with roles**: The optional argument is polymorphic:
+- If it looks like a bead ID (prefix `gt-`, `hq-`, `bd-`): hooks it
+- Otherwise: treats it as a role to hand off
+
+## Agent Lifecycle with Hooks
 
 ```
-gt mol status [target]
-
-Shows what's on an agent's hook (or your own if no target).
-
-Output:
-  Slung: feature (gt-abc123)
-  Phase: 2/4 - Implement
-  Progress: ████████░░░░ 67%
-  Wisp: no
-
-  Next: Complete implementation, then run tests
+┌────────────────────────────────────────────────────────────────┐
+│                    Agent Hook Lifecycle                         │
+├────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  STARTUP (GUPP)                                                  │
+│  ┌─────────────────┐                                            │
+│  │ gt mol status   │ → hook has work? → RUN IT                  │
+│  └─────────────────┘                                            │
+│          │                                                       │
+│          ▼                                                       │
+│  ┌─────────────────┐                                            │
+│  │   Work on it    │ ← agent executes molecule/bead             │
+│  └─────────────────┘                                            │
+│          │                                                       │
+│          ▼                                                       │
+│  ┌─────────────────┐                                            │
+│  │  Complete/Exit  │ → close hook, check for next               │
+│  └─────────────────┘                                            │
+│                                                                  │
+│  REASSIGNMENT (sling)                                           │
+│  ┌─────────────────┐                                            │
+│  │ gt sling <id>   │ → hook updates, prompt injected            │
+│  └─────────────────┘                                            │
+│          │                                                       │
+│          ▼                                                       │
+│  ┌─────────────────┐                                            │
+│  │  Starts working │ ← preserves context                        │
+│  └─────────────────┘                                            │
+│                                                                  │
+│  CONTEXT REFRESH (handoff)                                      │
+│  ┌─────────────────┐                                            │
+│  │gt handoff <id>  │ → hook updates, session restarts           │
+│  └─────────────────┘                                            │
+│          │                                                       │
+│          ▼                                                       │
+│  ┌─────────────────┐                                            │
+│  │  Fresh context  │ ← GUPP kicks in on startup                 │
+│  └─────────────────┘                                            │
+│                                                                  │
+└────────────────────────────────────────────────────────────────┘
 ```
 
-### gt mol catalog
+## Command Quick Reference
 
+```bash
+# Just assign, don't start
+gt hook gt-xyz
+
+# Assign and start now (keep context)
+gt sling gt-xyz
+gt sling gt-xyz crew              # To another agent
+
+# Assign and restart (fresh context)
+gt handoff gt-xyz
+gt handoff                        # Just restart, use existing hook
+
+# Check what's on hook
+gt mol status
 ```
-gt mol catalog
 
-Lists available molecule protos that can be slung.
+## See Also
 
-Output:
-  NAME        PHASES  DESCRIPTION
-  feature     4       Feature development workflow
-  bugfix      3       Bug investigation and fix
-  patrol      2       Operational check cycle (wisp-only)
-  review      2       Code review workflow
-```
-
-## Relationship to bd mol
-
-| Command | gt mol | bd mol | Notes |
-|---------|--------|--------|-------|
-| Create molecule | via `gt sling` | `bd pour` | gt adds assignment |
-| List protos | `gt mol catalog` | `bd mol catalog` | Same data |
-| Show molecule | `gt mol status` | `bd mol show` | gt adds agent context |
-| Combine | - | `bd mol bond` | Data operation only |
-| Destroy | `gt mol burn` | `bd mol burn` | gt may need cleanup |
-| Condense wisps | `gt mol squash` | `bd mol squash` | Same operation |
-
-**Design principle**: `bd mol` is pure data operations. `gt sling` and `gt mol`
-add agent context (assignment, hooks, sessions).
-
-## Open Design Questions
-
-1. **Default molecule**: If you `gt sling gt-xyz polecat/alpha` without `-m`,
-   should we infer from issue type? (bug→bugfix, feature→feature)
-
-2. **Hook collision**: If hook already has work and you sling more, error or queue?
-   Current thinking: error unless `--force` (which replaces).
-
-3. **Self-sling**: Can an agent sling to itself? (`gt sling patrol .`)
-   Probably yes for wisp loops.
-
-4. **Sling notification**: Should sling send mail to target, or is hook presence enough?
-   Probably just hook - mail is for human-readable context.
-
-## Implementation Plan
-
-See beads:
-- gt-z3qf: Parent issue (gt mol overhaul)
-- [TBD]: gt sling command implementation
-- [TBD]: gt mol status command
-- [TBD]: Template updates for propulsion principle
-- [TBD]: Documentation updates
+- `docs/propulsion-principle.md` - GUPP design
+- `docs/wisp-architecture.md` - Ephemeral wisps for patrol loops
+- `internal/wisp/` - Hook storage implementation

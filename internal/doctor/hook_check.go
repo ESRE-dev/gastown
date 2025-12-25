@@ -388,7 +388,7 @@ func (c *OrphanedAttachmentsCheck) Run(ctx *CheckContext) *CheckResult {
 		Status:  StatusWarning,
 		Message: fmt.Sprintf("Found %d orphaned handoff bead(s)", len(c.orphans)),
 		Details: details,
-		FixHint: "Re-hook molecule with 'gt hook <id>' then 'gt handoff', or close with 'bd close <id>'",
+		FixHint: "Reassign with 'gt sling <id> <agent>', or close with 'bd close <id>'",
 	}
 }
 

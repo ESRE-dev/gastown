@@ -8,32 +8,39 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
 )
 
 var slingCmd = &cobra.Command{
-	Use:        "sling <bead-id>",
-	Short:      "[DEPRECATED] Use 'gt hook' or 'gt handoff <bead>' instead",
-	Deprecated: "Use 'gt hook <bead>' to attach work, or 'gt handoff <bead>' to attach and restart.",
-	Long: `DEPRECATED: This command is deprecated. Use instead:
+	Use:   "sling <bead-id> [target]",
+	Short: "Hook work and start immediately (no restart)",
+	Long: `Sling work onto an agent's hook and start working immediately.
 
-  gt hook <bead>      # Just attach work to hook (no restart)
-  gt handoff <bead>   # Attach work AND restart (what sling did)
+Unlike 'gt handoff', sling does NOT restart the session. It:
+  1. Attaches the bead to the hook (durability)
+  2. Injects a prompt to start working NOW
 
-Sling work onto the agent's hook and restart with that context.
+This preserves current context while kicking off work. Use when:
+  - You've been chatting with an agent and want to kick off a workflow
+  - You want to assign work to another agent that has useful context
+  - You (Overseer) want to start work then attend to another window
 
-This is the "restart-and-resume" mechanism - attach a bead (issue) to your hook,
-then restart with a fresh context. The new session wakes up, finds the slung work
-on its hook, and begins working on it immediately.
+The hook provides durability - the agent can restart, compact, or hand off,
+but until the hook is changed or closed, that agent owns the work.
 
 Examples:
-  gt sling gt-abc                       # Attach issue and restart
-  gt sling gt-abc -s "Fix the bug"      # With handoff subject
-  gt sling gt-abc -m "Check tests too"  # With handoff message
+  gt sling gt-abc                       # Hook and start on it now
+  gt sling gt-abc -s "Fix the bug"      # With context subject
+  gt sling gt-abc crew                  # Sling to crew worker
+  gt sling gt-abc gastown/crew/max      # Sling to specific agent
 
-The propulsion principle: if you find something on your hook, YOU RUN IT.`,
-	Args: cobra.ExactArgs(1),
+Compare:
+  gt hook <bead>      # Just attach (no action)
+  gt sling <bead>     # Attach + start now (keep context)
+  gt handoff <bead>   # Attach + restart (fresh context)
+
+The propulsion principle: if it's on your hook, YOU RUN IT.`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: runSling,
 }
 
@@ -44,8 +51,8 @@ var (
 )
 
 func init() {
-	slingCmd.Flags().StringVarP(&slingSubject, "subject", "s", "", "Subject for handoff mail")
-	slingCmd.Flags().StringVarP(&slingMessage, "message", "m", "", "Message for handoff mail")
+	slingCmd.Flags().StringVarP(&slingSubject, "subject", "s", "", "Context subject for the work")
+	slingCmd.Flags().StringVarP(&slingMessage, "message", "m", "", "Context message for the work")
 	slingCmd.Flags().BoolVarP(&slingDryRun, "dry-run", "n", false, "Show what would be done")
 	rootCmd.AddCommand(slingCmd)
 }
@@ -63,48 +70,134 @@ func runSling(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Determine agent identity
-	agentID, err := detectAgentIdentity()
-	if err != nil {
-		return fmt.Errorf("detecting agent identity: %w", err)
+	// Determine target agent (self or specified)
+	var targetAgent string
+	var targetPane string
+	var err error
+
+	if len(args) > 1 {
+		// Slinging to another agent
+		targetAgent, targetPane, err = resolveTargetAgent(args[1])
+		if err != nil {
+			return fmt.Errorf("resolving target: %w", err)
+		}
+	} else {
+		// Slinging to self
+		targetAgent, err = detectAgentIdentity()
+		if err != nil {
+			return fmt.Errorf("detecting agent identity: %w", err)
+		}
+		targetPane = os.Getenv("TMUX_PANE")
 	}
 
-	// Get cwd for wisp storage (use clone root, not town root)
+	// Get clone root for wisp storage
 	cloneRoot, err := detectCloneRoot()
 	if err != nil {
 		return fmt.Errorf("detecting clone root: %w", err)
 	}
 
 	// Create the slung work wisp
-	sw := wisp.NewSlungWork(beadID, agentID)
+	sw := wisp.NewSlungWork(beadID, targetAgent)
 	sw.Subject = slingSubject
 	sw.Context = slingMessage
 
-	fmt.Printf("%s Slinging %s onto hook...\n", style.Bold.Render("🎯"), beadID)
+	fmt.Printf("%s Slinging %s to %s...\n", style.Bold.Render("🎯"), beadID, targetAgent)
 
 	if slingDryRun {
-		fmt.Printf("Would create wisp: %s\n", wisp.HookPath(cloneRoot, agentID))
+		fmt.Printf("Would create wisp: %s\n", wisp.HookPath(cloneRoot, targetAgent))
 		fmt.Printf("  bead_id: %s\n", beadID)
-		fmt.Printf("  agent: %s\n", agentID)
+		fmt.Printf("  agent: %s\n", targetAgent)
 		if slingSubject != "" {
 			fmt.Printf("  subject: %s\n", slingSubject)
 		}
 		if slingMessage != "" {
 			fmt.Printf("  context: %s\n", slingMessage)
 		}
-		fmt.Println("Would trigger handoff...")
+		fmt.Printf("Would inject start prompt to pane: %s\n", targetPane)
 		return nil
 	}
 
 	// Write the wisp to the hook
-	if err := wisp.WriteSlungWork(cloneRoot, agentID, sw); err != nil {
+	if err := wisp.WriteSlungWork(cloneRoot, targetAgent, sw); err != nil {
 		return fmt.Errorf("writing wisp: %w", err)
 	}
 
 	fmt.Printf("%s Work attached to hook\n", style.Bold.Render("✓"))
 
-	// Now trigger handoff (reuse existing handoff logic)
-	return triggerHandoff(agentID, beadID)
+	// Inject the "start now" prompt
+	if err := injectStartPrompt(targetPane, beadID, slingSubject); err != nil {
+		return fmt.Errorf("injecting start prompt: %w", err)
+	}
+
+	fmt.Printf("%s Start prompt sent\n", style.Bold.Render("▶"))
+	return nil
+}
+
+// injectStartPrompt sends a prompt to the target pane to start working.
+func injectStartPrompt(pane, beadID, subject string) error {
+	if pane == "" {
+		return fmt.Errorf("no target pane")
+	}
+
+	// Build the prompt to inject
+	var prompt string
+	if subject != "" {
+		prompt = fmt.Sprintf("Work slung: %s (%s). Start working on it now - no questions, just begin.", beadID, subject)
+	} else {
+		prompt = fmt.Sprintf("Work slung: %s. Start working on it now - run `gt mol status` to see the hook, then begin.", beadID)
+	}
+
+	// Use tmux send-keys to inject the prompt
+	// Add Enter to submit it
+	return exec.Command("tmux", "send-keys", "-t", pane, prompt, "Enter").Run()
+}
+
+// resolveTargetAgent converts a target spec to agent ID and pane.
+func resolveTargetAgent(target string) (agentID string, pane string, err error) {
+	// First resolve to session name
+	sessionName, err := resolveRoleToSession(target)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Get the pane for that session
+	pane, err = getSessionPane(sessionName)
+	if err != nil {
+		return "", "", fmt.Errorf("getting pane for %s: %w", sessionName, err)
+	}
+
+	// Convert session name back to agent ID format
+	agentID = sessionToAgentID(sessionName)
+	return agentID, pane, nil
+}
+
+// sessionToAgentID converts a session name to agent ID format.
+func sessionToAgentID(session string) string {
+	switch {
+	case session == "gt-mayor":
+		return "mayor"
+	case session == "gt-deacon":
+		return "deacon"
+	case strings.Contains(session, "-crew-"):
+		// gt-gastown-crew-max -> gastown/crew/max
+		parts := strings.Split(session, "-")
+		for i, p := range parts {
+			if p == "crew" && i > 1 && i < len(parts)-1 {
+				rig := strings.Join(parts[1:i], "-")
+				name := strings.Join(parts[i+1:], "-")
+				return fmt.Sprintf("%s/crew/%s", rig, name)
+			}
+		}
+	case strings.HasSuffix(session, "-witness"):
+		rig := strings.TrimPrefix(session, "gt-")
+		rig = strings.TrimSuffix(rig, "-witness")
+		return fmt.Sprintf("%s/witness", rig)
+	case strings.HasSuffix(session, "-refinery"):
+		rig := strings.TrimPrefix(session, "gt-")
+		rig = strings.TrimSuffix(rig, "-refinery")
+		return fmt.Sprintf("%s/refinery", rig)
+	}
+	return session
 }
 
 // verifyBeadExists checks that the bead exists using bd show.
@@ -170,54 +263,4 @@ func detectCloneRoot() (string, error) {
 		return "", fmt.Errorf("not in a git repository")
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-// triggerHandoff restarts the agent session.
-func triggerHandoff(agentID, beadID string) error {
-	// Must be in tmux
-	if !tmux.IsInsideTmux() {
-		return fmt.Errorf("not running in tmux - cannot restart")
-	}
-
-	pane := os.Getenv("TMUX_PANE")
-	if pane == "" {
-		return fmt.Errorf("TMUX_PANE not set")
-	}
-
-	// Get current session
-	currentSession, err := getCurrentTmuxSession()
-	if err != nil {
-		return fmt.Errorf("getting session: %w", err)
-	}
-
-	// Build restart command
-	restartCmd, err := buildRestartCommand(currentSession)
-	if err != nil {
-		return err
-	}
-
-	// Send handoff mail with the bead reference
-	subject := slingSubject
-	if subject == "" {
-		subject = fmt.Sprintf("🎯 SLUNG: %s", beadID)
-	} else {
-		subject = fmt.Sprintf("🎯 SLUNG: %s", subject)
-	}
-
-	message := slingMessage
-	if message == "" {
-		message = fmt.Sprintf("Work slung onto hook. Run bd show %s for details.", beadID)
-	}
-
-	if err := sendHandoffMail(subject, message); err != nil {
-		fmt.Printf("%s Warning: could not send handoff mail: %v\n", style.Dim.Render("⚠"), err)
-	} else {
-		fmt.Printf("%s Sent handoff mail\n", style.Bold.Render("📬"))
-	}
-
-	fmt.Printf("%s Restarting with slung work...\n", style.Bold.Render("🔄"))
-
-	// Respawn the pane
-	t := tmux.NewTmux()
-	return t.RespawnPane(pane, restartCmd)
 }
