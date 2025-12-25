@@ -31,6 +31,12 @@ beads.right.meta.json
 # bd sync commits to beads-sync, which has its own .gitignore that tracks issues.jsonl
 issues.jsonl
 
+# Hook files (ephemeral, per-agent work attachments)
+hook-*.json
+
+# MR queue (ephemeral, deleted after merge)
+mq/
+
 # Metadata and config are tracked everywhere
 !metadata.json
 !config.json
