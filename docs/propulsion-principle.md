@@ -1,11 +1,11 @@
-# The Universal Gas Town Propulsion Principle
+# The Propulsion Principle
 
-> **Status**: Canonical Theory-of-Operation Documentation
+> **Status**: Design document (experimental)
 > **See also**: [sling-design.md](sling-design.md) for implementation details
 
-## The One Rule
+## The Core Idea
 
-Gas Town runs on a single, universal rule:
+We're trying a simple rule for agent behavior:
 
 > **If you find something on your hook, YOU RUN IT.**
 

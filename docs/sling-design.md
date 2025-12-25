@@ -1,17 +1,16 @@
-# The Sling: Gas Town's Universal Work Dispatch
+# The Sling: Work Dispatch
 
 > **Status**: Design Draft
 > **Issue**: gt-z3qf
 
 ## The Propulsion Principle
 
-Gas Town runs on one rule:
+We're experimenting with a simple rule for agent behavior:
 
 > **If you find something on your hook, YOU RUN IT.**
 
-No decisions. No "should I?" Just ignition. This is the Universal Gas Town
-Propulsion Principle. Every agent - polecat, deacon, witness, refinery - follows
-this single rule.
+No decisions. No "should I?" Just ignition. We call this the Propulsion
+Principle - agents execute what's on their hook rather than deciding what to do.
 
 ```
 Hook has work → Work happens.

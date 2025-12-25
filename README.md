@@ -1,21 +1,19 @@
 # Gas Town
 
-**The IDE of 2026** - not Integrated Development Environment, but **Integrated Delegation Engine**.
+> **Status**: Experimental (v0.1) - We're exploring these ideas and invite you to explore with us.
 
-Gas Town turns Claude Code (the Steam Engine) into a Steam Train, with Beads as the globally distributed railway network. Workers spawn, work molecules, submit to merge queues, and get cleaned up - all autonomously.
+Gas Town is an experiment in multi-agent coordination for Claude Code. It provides infrastructure for spawning workers, tracking work via molecules, and coordinating merges.
 
-## The Vision
+We think of it using steam-age metaphors:
 
 ```
 Claude       = Fire (the energy source)
 Claude Code  = Steam Engine (harnesses the fire)
 Gas Town     = Steam Train (coordinates engines on tracks)
-Beads        = Railroad Tracks (the persistent ledger of work)
+Beads        = Railroad Tracks (the persistent ledger)
 ```
 
-**Core principle: Gas Town is a Village.**
-
-Not a rigid hierarchy with centralized monitoring, but an anti-fragile village where every agent understands the whole system and can help any neighbor. If you see something stuck, you can help. The village heals itself through distributed awareness.
+The goal is a "village" architecture - not rigid hierarchy, but distributed awareness where agents can help neighbors when something is stuck. Whether this actually works at scale is something we're still discovering.
 
 ## Install
 
@@ -49,11 +47,15 @@ Town (~/gt/)
 
 ## Key Concepts
 
+Ideas we're exploring:
+
 - **Molecular Chemistry of Work**: Protos (templates) → Mols (flowing work) → Wisps (ephemeral) → Digests (outcomes)
-- **Beads as Universal Data Plane**: Git-backed, human-readable, fractal ledger ([github.com/steveyegge/beads](https://github.com/steveyegge/beads))
-- **Antifragility**: Self-monitoring village, not centralized hierarchy
-- **Propulsion Principle**: Agents pull work from molecules, don't wait for commands
-- **Nondeterministic Idempotence**: Any worker can continue any molecule after crashes
+- **Beads**: Git-backed, human-readable ledger for tracking work ([github.com/steveyegge/beads](https://github.com/steveyegge/beads))
+- **Village Model**: Distributed awareness instead of centralized monitoring
+- **Propulsion Principle**: Agents pull work from molecules rather than waiting for commands
+- **Nondeterministic Idempotence**: The idea that any worker can continue any molecule after crashes
+
+Some of these are implemented; others are still aspirational. See docs for current status.
 
 ## Commands
 

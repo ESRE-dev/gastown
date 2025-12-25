@@ -1,19 +1,16 @@
-# Beads: The Universal Data Plane
+# Beads as Data Plane
 
-> **Status**: Canonical Architecture Documentation
+> **Status**: Design documentation
 > **See also**: [pinned-beads-design.md](pinned-beads-design.md), [propulsion-principle.md](propulsion-principle.md)
 
 ## Overview
 
-Gas Town agents coordinate through a single, unified data store: **Beads**. Every
-piece of agent state - work assignments, mail messages, molecules, hooks - lives
-in beads as issues with consistent field semantics.
+Gas Town agents coordinate through **Beads** - a git-backed issue tracker.
+We store agent state (work assignments, mail, molecules, hooks) as beads issues.
 
-This document explains the universal data model that powers agent coordination.
+## How We Use It
 
-## The Core Insight
-
-Beads is not just an issue tracker. It's a **universal data plane** where:
+We're treating beads as more than an issue tracker:
 
 - **Work molecules** are issues with steps as child issues
 - **Mail messages** are issues with sender/recipient encoded in fields

@@ -1,15 +1,14 @@
-# Gas Town Vision: Core Innovations
+# Gas Town: Ideas We're Exploring
 
-> *"Work is fractal. Money is crystallized labor. Blockchain was the mechanism
-> searching for its purpose."*
+> **Status**: These are ideas we're experimenting with, not proven solutions.
+> We're sharing them in case others find them useful or want to explore together.
 
-Gas Town is the IDE of 2026 - not an Integrated Development Environment, but an
-**Integrated Delegation Engine**. It turns Claude Code (the Steam Engine) into a
-Steam Train, with Beads as the globally distributed railway network.
+Gas Town is an experiment in multi-agent coordination. We use steam-age metaphors
+to think about how work flows through a system of AI agents.
 
 ---
 
-## Core Innovation 1: The Steam Engine Metaphor
+## Idea 1: The Steam Engine Metaphor
 
 ```
 Claude       = Fire (the energy source)
@@ -31,27 +30,29 @@ ensuring nothing is lost.
 
 ---
 
-## Core Innovation 2: Gas Town is a Village
+## Idea 2: Village vs Hierarchy
 
-**The anti-pattern we reject:**
+We're exploring whether a "village" model works better than centralized monitoring.
+
+**The pattern we're trying to avoid:**
 ```
 Centralized Monitor → watches all workers → single point of failure
                    → fragile protocols → cascading failures
 ```
 
-**The pattern we embrace:**
+**The pattern we're experimenting with:**
 ```
 Every worker → understands the whole → can help any neighbor
            → peek is encouraged → distributed awareness
            → ant colony without murder → self-healing system
 ```
 
-### The Antifragility Principle
+### Aspiration: Antifragility
 
-Gas Town is **anti-fragile by design**. Not merely resilient (bounces back from
-stress), but anti-fragile (gets stronger from stress).
+We're aiming for anti-fragility - a system that gets stronger from stress rather
+than just surviving it. Whether we achieve this is an open question.
 
-Key properties:
+Properties we're trying to build:
 
 - **Distributed awareness**: Every agent understands the system deeply
 - **Mutual monitoring**: Any agent can peek at any other agent's health
@@ -87,7 +88,7 @@ Workers who need help receive it.
 
 ---
 
-## Core Innovation 3: Rig, Cook, Run
+## Idea 3: Rig, Cook, Run
 
 Work in Gas Town flows through three phases:
 
@@ -173,37 +174,26 @@ This enables patterns like:
 
 ---
 
-## Core Innovation 4: Beads as Universal Data Plane
+## Idea 4: Beads as Data Plane
 
-Beads is Git + Issues + Molecules in one human-readable format.
+We use Beads (a separate project) as the persistence layer. It's Git + Issues
+in one human-readable format.
 
-**Key properties:**
-- **Git-backed**: Cryptographic hashes, Merkle trees, distributed
-- **Human-readable**: Markdown, auditable, trustworthy
-- **Fractal**: Work at any scale (task → epic → project → organization)
-- **Federated**: Multi-repo, multi-org, platform-agnostic
+**Properties we liked:**
+- **Git-backed**: Uses existing infrastructure
+- **Human-readable**: You can read `.beads/` files directly
+- **Portable**: No vendor lock-in
 
-**The insight:**
-> "Git IS already a blockchain (Merkle tree, cryptographic hashes, distributed
-> consensus). Beads is what blockchain was meant to enable - not coin
-> speculation, but a universal ledger of work and capability."
+See [github.com/steveyegge/beads](https://github.com/steveyegge/beads) for more.
 
-### The GUPP Principle
-
-**Git as Universal Persistence Protocol**
+### Git as Persistence
 
 Everything persists through git:
 - Issues are JSONL in `.beads/`
 - Molecules are structured issues
 - Mail is issues with labels
-- Work history is commit history
-- Entity chains are git histories
 
-This means:
-- Offline-first by default
-- Distributed without infrastructure
-- Auditable forever
-- No vendor lock-in
+This gives us offline-first operation and no infrastructure requirements.
 
 ### Control Plane = Data Plane
 
@@ -222,7 +212,7 @@ There is no separate orchestrator - Beads IS the orchestrator.
 
 ---
 
-## Core Innovation 5: The Patrol System
+## Idea 5: Patrol Loops
 
 Gas Town runs on continuous monitoring loops called **patrols**.
 
@@ -262,11 +252,10 @@ squashes to a summary digest.
 
 ---
 
-## Core Innovation 6: Propulsion Over Protocol
+## Idea 6: Propulsion Over Protocol
 
-**The Propulsion Principle**
-
-Agents don't wait for explicit commands. They propel themselves through work:
+We're experimenting with "pull-based" work where agents propel themselves
+rather than waiting for explicit commands:
 
 1. **Check hook/pin** - What's attached to me?
 2. **Find next step** - What's ready in my molecule?
@@ -274,8 +263,7 @@ Agents don't wait for explicit commands. They propel themselves through work:
 4. **Advance** - Close step, find next
 5. **Exit properly** - One of four exit types
 
-This is **pull-based work**, not push-based commands. The molecule IS the
-instruction set. The agent IS the executor.
+The idea is pull-based work: the molecule provides instructions, the agent executes.
 
 ### Hooks and Pins
 
@@ -311,9 +299,9 @@ The polecat never exits directly - it waits to be killed by the Witness.
 
 ---
 
-## Core Innovation 7: Nondeterministic Idempotence
+## Idea 7: Nondeterministic Idempotence
 
-The key property enabling autonomous operation:
+An idea we're exploring for crash recovery:
 
 - **Deterministic structure**: Molecule defines exactly what steps exist
 - **Nondeterministic execution**: Any worker can execute any ready step
@@ -403,43 +391,23 @@ The flywheel spins. The village watches itself. The train keeps running.
 
 ---
 
-## Why "IDE of 2026"?
+## What We're Building Toward
 
-The IDE evolved from text editor → syntax highlighting → autocomplete → AI suggestions.
+We're interested in exploring AI as collaborator rather than just assistant.
+Instead of AI suggesting code, what if AI could complete tasks while humans
+review the outcomes?
 
-The next evolution isn't better suggestions - it's **AI as worker, not assistant**.
-
-| 2024 IDE | 2026 IDE (Gas Town) |
-|----------|---------------------|
-| AI suggests code | AI writes code |
-| Human reviews suggestions | Human reviews pull requests |
-| AI helps with tasks | AI completes tasks |
-| Single agent | Coordinated village |
-| Context in memory | Context in Beads |
-| Manual quality checks | Molecule-enforced gates |
-
-Gas Town is what happens when you treat AI agents as employees, not tools.
+This is early-stage experimentation. Some of it works, much of it doesn't yet.
+We're sharing it in case the ideas are useful to others.
 
 ---
 
-## The Vision
+## Summary
 
-Gas Town is the **Integrated Delegation Engine**.
+Gas Town explores:
+- Multi-agent coordination via "molecules" of work
+- Git-backed persistence via Beads
+- Distributed monitoring via the "village" model
+- Crash recovery via nondeterministic idempotence
 
-For developers today. For all knowledge workers tomorrow.
-
-The world has never had a system where:
-- Work is fractal and composable
-- Execution is distributed and self-healing
-- History is permanent and auditable
-- Agents are autonomous yet accountable
-- The village watches itself
-
-Beads is the ledger.
-Gas Town is the execution engine.
-The village watches itself.
-The train keeps running.
-
----
-
-*"If you're not a little bit scared, you're not paying attention."*
+We don't know if these ideas will pan out. We invite you to explore with us.

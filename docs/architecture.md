@@ -108,32 +108,29 @@ Gas Town has four AI agent roles:
 | **Refinery** | Per-rig | Merge queue processing, PR review, integration |
 | **Polecat** | Per-rig | Implementation work on assigned issues |
 
-### Gas Town is a Village
+### Village Architecture
 
-**Core Operating Principle**: Gas Town is anti-fragile by design.
+We're experimenting with a "village" model for agent coordination.
 
-The anti-pattern we reject:
+The pattern we're trying to avoid:
 ```
 Centralized Monitor → watches all workers → single point of failure
                    → fragile protocols → cascading failures
 ```
 
-The pattern we embrace:
+The pattern we're exploring:
 ```
 Every worker → understands the whole → can help any neighbor
            → peek is encouraged → distributed awareness
-           → ant colony without murder → self-healing system
 ```
 
-**Key properties:**
+**Properties we're building toward:**
 
-- **Distributed awareness**: Every agent understands the system deeply
+- **Distributed awareness**: Agents understand the system, not just their task
 - **Mutual monitoring**: Any agent can peek at any other agent's health
 - **Collective intervention**: If you see something stuck, you can help
-- **No single point of failure**: The village survives individual failures
-- **Organic healing**: Problems get fixed by whoever notices them first
 
-This is an ant colony, except the ants don't kill defective members - they help them recover. Workers who crash are respawned. Workers who get stuck are nudged. Workers who need help receive it.
+Whether this achieves actual resilience at scale is still being tested.
 
 **Practical implications:**
 
@@ -215,11 +212,13 @@ sync-branch: beads-sync    # Separate branch for beads commits
 
 **Why sync-branch?** When multiple agents share a beads database, using a dedicated sync branch prevents beads commits from interleaving with code commits on feature branches.
 
-#### Beads as Universal Data Plane (and Control Plane)
+#### Beads as Data Plane
 
-Beads is the data plane for ALL Gas Town operations. Everything flows through beads.
+Gas Town uses Beads for persistence. We've combined the data plane and control plane:
+- Traditional systems separate "what's stored" from "what to do next"
+- We store both in beads, so agent state survives crashes
 
-**Key architectural insight**: Gas Town intentionally blurs the line between data plane and control plane. In traditional systems:
+In traditional systems:
 - **Data plane**: Stores information (issues, messages)
 - **Control plane**: Coordinates behavior (what to do next, who does what)
 
@@ -745,9 +744,9 @@ gt spawn --issue gt-xyz --molecule mol-engineer-in-box
 
 ### Why Molecules?
 
-**The core value proposition: Nondeterministic Idempotence**
+**Goal: Nondeterministic Idempotence**
 
-Molecules guarantee that any workflow, once started, will eventually complete correctly - even through crashes, context compaction, and agent restarts. This is what enables Gas Town to run autonomously for extended periods.
+The idea is that workflows can survive crashes, context compaction, and restarts because state is stored externally in beads, not in agent memory.
 
 1. **Crash recovery**: Agent dies mid-workflow? Restart and continue from last completed step. No work is lost.
 2. **Context survival**: Claude's context compacts? Agent re-reads molecule state from beads and knows exactly where it was.
