@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -37,6 +39,8 @@ type MoleculeStatusInfo struct {
 	IsWisp           bool                  `json:"is_wisp"`
 	Progress         *MoleculeProgressInfo `json:"progress,omitempty"`
 	NextAction       string                `json:"next_action,omitempty"`
+	// SlungWork is set when there's a wisp hook file (from gt hook/sling/handoff)
+	SlungWork *wisp.SlungWork `json:"slung_work,omitempty"`
 }
 
 // MoleculeCurrentInfo contains info about what an agent should be working on.
@@ -244,6 +248,17 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		HasWork: len(pinnedBeads) > 0,
 	}
 
+	// Also check for wisp hook files (from gt hook/sling/handoff)
+	// These are stored at the git clone root, not the beads dir
+	gitRoot, _ := getGitRootForMolStatus()
+	if gitRoot != "" {
+		sw, err := wisp.ReadHook(gitRoot, target)
+		if err == nil && sw != nil {
+			status.SlungWork = sw
+			status.HasWork = true
+		}
+	}
+
 	if len(pinnedBeads) > 0 {
 		// Take the first pinned bead (agents typically have one pinned bead)
 		status.PinnedBead = pinnedBeads[0]
@@ -428,7 +443,36 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 		return nil
 	}
 
-	// Show pinned bead info
+	// Show slung work (wisp hook file) if present
+	if status.SlungWork != nil {
+		fmt.Printf("%s %s\n", style.Bold.Render("🎯 SLUNG WORK:"), status.SlungWork.BeadID)
+		if status.SlungWork.Subject != "" {
+			fmt.Printf("   Subject: %s\n", status.SlungWork.Subject)
+		}
+		if status.SlungWork.Context != "" {
+			fmt.Printf("   Context: %s\n", status.SlungWork.Context)
+		}
+		fmt.Printf("   Slung by: %s at %s\n",
+			status.SlungWork.CreatedBy,
+			status.SlungWork.CreatedAt.Format("2006-01-02 15:04:05"))
+
+		// Show bead details
+		fmt.Println()
+		fmt.Println(style.Bold.Render("Bead details:"))
+		cmd := exec.Command("bd", "show", status.SlungWork.BeadID)
+		cmd.Stdout = os.Stdout
+		cmd.Run()
+
+		fmt.Println()
+		fmt.Println(style.Bold.Render("→ PROPULSION: Work is on your hook. RUN IT."))
+		return nil
+	}
+
+	// Show pinned bead info (legacy beads pinned field)
+	if status.PinnedBead == nil {
+		fmt.Printf("%s\n", style.Dim.Render("Work indicated but no bead found"))
+		return nil
+	}
 	fmt.Printf("%s %s: %s\n", style.Bold.Render("📌 Pinned:"), status.PinnedBead.ID, status.PinnedBead.Title)
 
 	// Show attached molecule
@@ -670,4 +714,14 @@ func outputMoleculeCurrent(info MoleculeCurrentInfo) error {
 	}
 
 	return nil
+}
+
+// getGitRootForMolStatus returns the git root for hook file lookup.
+func getGitRootForMolStatus() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
