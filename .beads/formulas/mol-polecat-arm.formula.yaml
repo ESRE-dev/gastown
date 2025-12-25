@@ -115,7 +115,16 @@ steps:
       git status                    # Must be clean
       git log origin/main..HEAD     # Check for unpushed
       bd show <assigned-issue>      # Verify closed/deferred
+
+      # Verify productive work (for 'done' closures)
+      git log --oneline --grep='<issue-id>' | head -1
       ```
+
+      **Commit verification** (ZFC principle - agent makes the call):
+      - If issue closed as 'done' but no commits reference it → flag for review
+      - Legitimate exceptions: already fixed elsewhere, duplicate, deferred
+      - Agent must provide justification if closing without commits
+
       If clean: kill session, remove worktree, delete branch
       If dirty: record failure, retry next cycle
 
