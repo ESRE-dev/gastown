@@ -364,11 +364,19 @@ composable, nondeterministic-idempotent workflow templates**. They encode struct
 workflows that any worker can execute, with full auditability and the ability for
 any worker to pick up where another left off.
 
+Work flows through the **Rig → Cook → Run** lifecycle:
+- **Rig**: Compose workflow formulas (YAML source files with `extends`, `compose`)
+- **Cook**: Transform formulas into executable protos (`bd cook` expands macros, applies aspects)
+- **Run**: Agents execute the cooked workflow (pour creates mols, wisp creates ephemeral traces)
+
+See [molecular-chemistry.md](molecular-chemistry.md) for the full lifecycle specification.
+
 ### Core Concepts
 
 | Concept | Name | Description |
 |---------|------|-------------|
-| Template | **Proto Molecule** | Read-only workflow pattern (the "fuel") |
+| Source | **Formula** | YAML workflow definition with composition rules (.formula.yaml) |
+| Template | **Proto Molecule** | Cooked workflow pattern (the "fuel") |
 | Running execution | **Wisp Molecule** | Transient execution trace (the "steam") |
 | Permanent record | **Digest** | Compressed summary of completed work (the "distillate") |
 | Individual step | **Atom/Step** | Smallest unit of work within a molecule |

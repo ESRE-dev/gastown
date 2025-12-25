@@ -2,6 +2,7 @@
 
 > **Status**: Design document (experimental)
 > **See also**: [sling-design.md](sling-design.md) for implementation details
+> **See also**: [molecular-chemistry.md](molecular-chemistry.md) for the full Rig/Cook/Run lifecycle
 
 ## The Core Idea
 
@@ -36,14 +37,19 @@ Stateless agents can:
 
 ### 2. Work Is Molecule-Driven
 
-All work in Gas Town is encoded in **molecules** - crystallized workflow patterns
-stored as beads. A molecule defines:
+All work in Gas Town follows the **Rig → Cook → Run** lifecycle:
+- **Rig**: Compose workflow formulas (YAML source files)
+- **Cook**: Transform formulas into executable protos (expand macros, apply aspects)
+- **Run**: Agents execute the cooked workflow
+
+A molecule (proto, mol, or wisp) defines:
 - What steps need to happen
 - What order they happen in (via dependencies)
 - What each step should accomplish
 
 The agent doesn't decide what to do. The molecule tells it. The agent's job is
-execution, not planning.
+execution, not planning. See [molecular-chemistry.md](molecular-chemistry.md)
+for the full lifecycle.
 
 ### 3. Hooks Deliver Work
 
@@ -60,7 +66,8 @@ it's your work. Run it.
 
 ## The Sling Lifecycle
 
-The **sling** operation puts work on an agent's hook. Here's the full lifecycle:
+The **sling** operation puts work on an agent's hook. This is the **Run** phase
+of the Rig → Cook → Run lifecycle (formulas have already been cooked into protos):
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -68,11 +75,11 @@ The **sling** operation puts work on an agent's hook. Here's the full lifecycle:
 ├─────────────────────────────────────────────────────────┤
 │                                                          │
 │  1. POUR (if proto)      2. ASSIGN           3. PIN     │
-│     proto → molecule        mol → agent         → hook  │
+│     proto → mol/wisp        mol → agent         → hook  │
 │                                                          │
 │  ┌─────────┐            ┌─────────┐        ┌─────────┐  │
-│  │  Proto  │ ────────►  │Molecule │ ─────► │  Hook   │  │
-│  │(catalog)│   pour     │(instance)│ assign │(pinned) │  │
+│  │  Proto  │ ────────►  │Mol/Wisp │ ─────► │  Hook   │  │
+│  │(cooked) │   pour     │(instance)│ assign │(pinned) │  │
 │  └─────────┘            └─────────┘        └─────────┘  │
 │                                                  │       │
 │                                            agent wakes   │
@@ -83,6 +90,9 @@ The **sling** operation puts work on an agent's hook. Here's the full lifecycle:
 │                                            └─────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
+
+**Pour** instantiates a proto into a running mol (persistent) or wisp (ephemeral).
+This is a phase transition from the Cook output to the Run phase.
 
 **Key insight**: The agent never decides *whether* to run. The molecule tells
 it *what* to do. It executes until complete, then checks the hook again.
@@ -125,15 +135,17 @@ situation and make decisions. The new way requires only execution.
 
 ## The Steam Engine Metaphor
 
-Gas Town uses steam engine vocabulary throughout:
+Gas Town uses steam engine vocabulary throughout. The full lifecycle is
+**Rig → Cook → Run**:
 
-| Metaphor | Gas Town | Description |
-|----------|----------|-------------|
-| **Fuel** | Proto molecules | Templates that define workflows |
-| **Steam** | Wisps/Mols | Active execution traces |
-| **Distillate** | Digests | Condensed permanent records |
-| **Burn** | `bd mol burn` | Discard without record |
-| **Squash** | `bd mol squash` | Compress into digest |
+| Metaphor | Gas Town | Lifecycle Phase | Description |
+|----------|----------|-----------------|-------------|
+| **Recipe** | Formulas | Rig (source) | YAML files that compose workflows |
+| **Fuel** | Proto molecules | Cook (artifact) | Cooked templates ready to instantiate |
+| **Steam** | Wisps/Mols | Run (execution) | Active execution traces |
+| **Distillate** | Digests | (post-Run) | Condensed permanent records |
+| **Burn** | `bd mol burn` | (post-Run) | Discard without record |
+| **Squash** | `bd mol squash` | (post-Run) | Compress into digest |
 
 Claude is fire. Claude Code is a Steam engine. Gas Town is a Steam Train, with
 Beads as the tracks. Wisps are steam vapors that dissipate after work is done.

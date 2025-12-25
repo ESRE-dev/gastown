@@ -2,6 +2,7 @@
 
 > **Status**: Implemented
 > **Updated**: 2024-12-24
+> **See also**: [molecular-chemistry.md](molecular-chemistry.md) for the full Rig → Cook → Run lifecycle
 
 ## The Propulsion Principle (GUPP)
 
@@ -187,5 +188,6 @@ gt mol status
 ## See Also
 
 - `docs/propulsion-principle.md` - GUPP design
+- `docs/molecular-chemistry.md` - Full Rig/Cook/Run lifecycle (formulas → protos → mols/wisps)
 - `docs/wisp-architecture.md` - Ephemeral wisps for patrol loops
 - `internal/wisp/` - Hook storage implementation

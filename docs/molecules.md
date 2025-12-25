@@ -3,6 +3,7 @@
 This document covers the molecule system in depth.
 
 For an overview, see [architecture.md](architecture.md#molecules-composable-workflow-templates).
+For the full lifecycle (Rig → Cook → Run), see [molecular-chemistry.md](molecular-chemistry.md).
 
 ## Core Concepts
 
@@ -264,30 +265,29 @@ bd mol bond mol-code-review --var scope="src/"
 
 ## Lifecycle Summary
 
+Gas Town work follows the **Rig → Cook → Run** lifecycle:
+
 ```
-┌─────────────┐
-│   Proto     │  Template in molecules.jsonl
-│  (frozen)   │  labels: ["template"]
-└──────┬──────┘
-       │
-       ▼ bd mol bond [--wisp]
-┌─────────────┐
-│  Mol/Wisp   │  Active execution
-│ (flowing)   │  Mol: .beads/ | Wisp: .beads-wisp/
-└──────┬──────┘
-       │
-  ┌────┴────┐
-  ▼         ▼
-burn      squash
-  │         │
-  ▼         ▼
-(gone)   Digest
-         (permanent)
+           RIG (source)              COOK (artifact)           RUN (execution)
+      ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+      │    Formula      │──────►│     Proto       │──────►│   Mol/Wisp      │
+      │   (.yaml)       │ cook  │  (cooked/frozen)│ pour/ │   (flowing)     │
+      │                 │       │                 │ wisp  │                 │
+      └─────────────────┘       └─────────────────┘       └────────┬────────┘
+                                                                   │
+                                                              ┌────┴────┐
+                                                              ▼         ▼
+                                                            burn      squash
+                                                              │         │
+                                                              ▼         ▼
+                                                           (gone)   Digest
+                                                                   (permanent)
 ```
 
-**Steam engine metaphor:**
-- Proto = Fuel (potential energy)
-- Mol/Wisp = Steam (kinetic energy)
-- Digest = Distillate (crystallized work)
-- Burn = Steam dissipates
-- Squash = Steam condenses
+**Full lifecycle:**
+- **Formula** (.formula.yaml) = Recipe (source code for workflows)
+- **Proto** = Fuel (cooked template, ready to instantiate)
+- **Mol/Wisp** = Steam (active execution)
+- **Digest** = Distillate (crystallized work)
+
+See [molecular-chemistry.md](molecular-chemistry.md) for the complete specification.
