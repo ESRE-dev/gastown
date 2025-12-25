@@ -35,7 +35,7 @@ LIFECYCLE:
        ▼ instantiate/bond
   ┌─────────────────┐
   │ Mol (durable)   │ ← tracked in .beads/
-  │ Wisp (ephemeral)│ ← tracked in .beads-wisp/
+  │ Wisp (ephemeral)│ ← tracked in .beads/ with Wisp=true
   └────────┬────────┘
            │
     ┌──────┴──────┐

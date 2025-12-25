@@ -1,5 +1,5 @@
-// Package mrqueue provides wisp-based merge request queue storage.
-// MRs are ephemeral - stored locally in .beads-wisp/mq/ and deleted after merge.
+// Package mrqueue provides merge request queue storage.
+// MRs are stored locally in .beads/mq/ and deleted after merge.
 // This avoids sync overhead for transient MR state.
 package mrqueue
 
@@ -28,31 +28,31 @@ type MR struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// Queue manages the MR wisp storage.
+// Queue manages the MR storage.
 type Queue struct {
-	dir string // .beads-wisp/mq/ directory
+	dir string // .beads/mq/ directory
 }
 
 // New creates a new MR queue for the given rig path.
 func New(rigPath string) *Queue {
 	return &Queue{
-		dir: filepath.Join(rigPath, ".beads-wisp", "mq"),
+		dir: filepath.Join(rigPath, ".beads", "mq"),
 	}
 }
 
 // NewFromWorkdir creates a queue by finding the rig root from a working directory.
 func NewFromWorkdir(workdir string) (*Queue, error) {
-	// Walk up to find .beads-wisp or rig root
+	// Walk up to find .beads or rig root
 	dir := workdir
 	for {
-		wispDir := filepath.Join(dir, ".beads-wisp")
-		if info, err := os.Stat(wispDir); err == nil && info.IsDir() {
-			return &Queue{dir: filepath.Join(wispDir, "mq")}, nil
+		beadsDir := filepath.Join(dir, ".beads")
+		if info, err := os.Stat(beadsDir); err == nil && info.IsDir() {
+			return &Queue{dir: filepath.Join(beadsDir, "mq")}, nil
 		}
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil, fmt.Errorf("could not find .beads-wisp directory from %s", workdir)
+			return nil, fmt.Errorf("could not find .beads directory from %s", workdir)
 		}
 		dir = parent
 	}

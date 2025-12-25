@@ -1,32 +1,30 @@
-// Package wisp provides ephemeral molecule support for Gas Town agents.
+// Package wisp provides hook file support for Gas Town agents.
 //
-// Wisps are short-lived workflow state that lives in .beads-wisp/ and is
-// never git-tracked. They are used for:
-//   - Slung work: attaching a bead to an agent's hook for restart-and-resume
-//   - Patrol cycles: ephemeral state for continuous loops (Deacon, Witness, etc)
+// Hooks are used to attach work to an agent for restart-and-resume:
+//   - hook-<agent>.json files track what bead is assigned to an agent
+//   - Created by `gt hook`, `gt sling`, `gt handoff`
+//   - Read on session start to restore work context
+//   - Burned after pickup
 //
-// Unlike regular molecules in .beads/, wisps are burned after use.
+// Hook files live in .beads/ alongside other beads data.
 package wisp
 
 import (
 	"time"
 )
 
-// WispType identifies the kind of wisp.
+// WispType identifies the kind of hook file.
 type WispType string
 
 const (
-	// TypeSlungWork is a wisp that attaches a bead to an agent's hook.
-	// Created by `gt sling <bead-id>` and burned after pickup.
+	// TypeSlungWork is a hook that attaches a bead to an agent's hook.
+	// Created by `gt hook`, `gt sling`, or `gt handoff`, and burned after pickup.
 	TypeSlungWork WispType = "slung-work"
-
-	// TypePatrolCycle is a wisp tracking patrol execution state.
-	// Used by Deacon, Witness, Refinery for their continuous loops.
-	TypePatrolCycle WispType = "patrol-cycle"
 )
 
-// WispDir is the directory name for ephemeral wisps (not git-tracked).
-const WispDir = ".beads-wisp"
+// WispDir is the directory where hook files are stored.
+// Hook files (hook-<agent>.json) live alongside other beads data.
+const WispDir = ".beads"
 
 // HookPrefix is the filename prefix for hook files.
 const HookPrefix = "hook-"
@@ -34,20 +32,20 @@ const HookPrefix = "hook-"
 // HookSuffix is the filename suffix for hook files.
 const HookSuffix = ".json"
 
-// Wisp is the common header for all wisp types.
+// Wisp is the common header for hook files.
 type Wisp struct {
-	// Type identifies what kind of wisp this is.
+	// Type identifies what kind of hook file this is.
 	Type WispType `json:"type"`
 
-	// CreatedAt is when the wisp was created.
+	// CreatedAt is when the hook was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// CreatedBy identifies who created the wisp (e.g., "crew/joe", "deacon").
+	// CreatedBy identifies who created the hook (e.g., "crew/joe", "deacon").
 	CreatedBy string `json:"created_by"`
 }
 
 // SlungWork represents work attached to an agent's hook.
-// Created by `gt sling` and burned after the agent picks it up.
+// Created by `gt hook`, `gt sling`, or `gt handoff` and burned after pickup.
 type SlungWork struct {
 	Wisp
 
@@ -61,46 +59,7 @@ type SlungWork struct {
 	Subject string `json:"subject,omitempty"`
 }
 
-// PatrolCycle represents the execution state of a patrol loop.
-// Used by roles that run continuous patrols (Deacon, Witness, Refinery).
-type PatrolCycle struct {
-	Wisp
-
-	// Formula is the patrol formula being executed (e.g., "mol-deacon-patrol").
-	Formula string `json:"formula"`
-
-	// CurrentStep is the ID of the step currently being executed.
-	CurrentStep string `json:"current_step"`
-
-	// StepStates tracks completion state of each step.
-	StepStates map[string]StepState `json:"step_states,omitempty"`
-
-	// CycleCount tracks how many complete cycles have been run.
-	CycleCount int `json:"cycle_count"`
-
-	// LastCycleAt is when the last complete cycle finished.
-	LastCycleAt *time.Time `json:"last_cycle_at,omitempty"`
-}
-
-// StepState represents the execution state of a single patrol step.
-type StepState struct {
-	// Status is the current status: pending, in_progress, completed, skipped.
-	Status string `json:"status"`
-
-	// StartedAt is when this step began execution.
-	StartedAt *time.Time `json:"started_at,omitempty"`
-
-	// CompletedAt is when this step finished.
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-
-	// Output is optional output from step execution.
-	Output string `json:"output,omitempty"`
-
-	// Error is set if the step failed.
-	Error string `json:"error,omitempty"`
-}
-
-// NewSlungWork creates a new slung work wisp.
+// NewSlungWork creates a new slung work hook file.
 func NewSlungWork(beadID, createdBy string) *SlungWork {
 	return &SlungWork{
 		Wisp: Wisp{
@@ -109,19 +68,6 @@ func NewSlungWork(beadID, createdBy string) *SlungWork {
 			CreatedBy: createdBy,
 		},
 		BeadID: beadID,
-	}
-}
-
-// NewPatrolCycle creates a new patrol cycle wisp.
-func NewPatrolCycle(formula, createdBy string) *PatrolCycle {
-	return &PatrolCycle{
-		Wisp: Wisp{
-			Type:      TypePatrolCycle,
-			CreatedAt: time.Now(),
-			CreatedBy: createdBy,
-		},
-		Formula:    formula,
-		StepStates: make(map[string]StepState),
 	}
 }
 

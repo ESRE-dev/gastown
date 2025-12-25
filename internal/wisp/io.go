@@ -10,21 +10,21 @@ import (
 
 // Common errors.
 var (
-	ErrNoWispDir   = errors.New("wisp directory does not exist")
+	ErrNoWispDir   = errors.New("beads directory does not exist")
 	ErrNoHook      = errors.New("no hook file found")
-	ErrInvalidWisp = errors.New("invalid wisp format")
+	ErrInvalidWisp = errors.New("invalid hook file format")
 )
 
-// EnsureDir ensures the .beads-wisp directory exists in the given root.
+// EnsureDir ensures the .beads directory exists in the given root.
 func EnsureDir(root string) (string, error) {
 	dir := filepath.Join(root, WispDir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", fmt.Errorf("create wisp dir: %w", err)
+		return "", fmt.Errorf("create beads dir: %w", err)
 	}
 	return dir, nil
 }
 
-// WispPath returns the full path to a wisp file.
+// WispPath returns the full path to a file in the beads directory.
 func WispPath(root, filename string) string {
 	return filepath.Join(root, WispDir, filename)
 }
@@ -34,7 +34,7 @@ func HookPath(root, agent string) string {
 	return WispPath(root, HookFilename(agent))
 }
 
-// WriteSlungWork writes a slung work wisp to the agent's hook.
+// WriteSlungWork writes a slung work hook to the agent's hook file.
 func WriteSlungWork(root, agent string, sw *SlungWork) error {
 	dir, err := EnsureDir(root)
 	if err != nil {
@@ -43,18 +43,6 @@ func WriteSlungWork(root, agent string, sw *SlungWork) error {
 
 	path := filepath.Join(dir, HookFilename(agent))
 	return writeJSON(path, sw)
-}
-
-// WritePatrolCycle writes a patrol cycle wisp.
-func WritePatrolCycle(root, id string, pc *PatrolCycle) error {
-	dir, err := EnsureDir(root)
-	if err != nil {
-		return err
-	}
-
-	filename := "patrol-" + id + ".json"
-	path := filepath.Join(dir, filename)
-	return writeJSON(path, pc)
 }
 
 // ReadHook reads the slung work from an agent's hook file.
@@ -82,45 +70,9 @@ func ReadHook(root, agent string) (*SlungWork, error) {
 	return &sw, nil
 }
 
-// ReadPatrolCycle reads a patrol cycle wisp.
-func ReadPatrolCycle(root, id string) (*PatrolCycle, error) {
-	filename := "patrol-" + id + ".json"
-	path := WispPath(root, filename)
-
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil, ErrNoHook // reuse error for "not found"
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read patrol cycle: %w", err)
-	}
-
-	var pc PatrolCycle
-	if err := json.Unmarshal(data, &pc); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidWisp, err)
-	}
-
-	if pc.Type != TypePatrolCycle {
-		return nil, fmt.Errorf("%w: expected patrol-cycle, got %s", ErrInvalidWisp, pc.Type)
-	}
-
-	return &pc, nil
-}
-
 // BurnHook removes an agent's hook file after it has been picked up.
 func BurnHook(root, agent string) error {
 	path := HookPath(root, agent)
-	err := os.Remove(path)
-	if os.IsNotExist(err) {
-		return nil // already burned
-	}
-	return err
-}
-
-// BurnPatrolCycle removes a patrol cycle wisp.
-func BurnPatrolCycle(root, id string) error {
-	filename := "patrol-" + id + ".json"
-	path := WispPath(root, filename)
 	err := os.Remove(path)
 	if os.IsNotExist(err) {
 		return nil // already burned

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 // PatrolMoleculesExistCheck verifies that patrol molecules exist for each rig.
@@ -259,8 +261,9 @@ func (c *PatrolNotStuckCheck) Run(ctx *CheckContext) *CheckResult {
 
 	var stuckWisps []string
 	for _, rigName := range rigs {
-		wispPath := filepath.Join(ctx.TownRoot, rigName, ".beads-wisp", "issues.jsonl")
-		stuck := c.checkStuckWisps(wispPath, rigName)
+		// Check main beads database for wisps (issues with Wisp=true)
+		beadsPath := filepath.Join(ctx.TownRoot, rigName, ".beads", "issues.jsonl")
+		stuck := c.checkStuckWisps(beadsPath, rigName)
 		stuckWisps = append(stuckWisps, stuck...)
 	}
 
@@ -456,4 +459,27 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 		Status:  StatusOK,
 		Message: "All patrol role prompt templates found",
 	}
+}
+
+// discoverRigs finds all registered rigs.
+func discoverRigs(townRoot string) ([]string, error) {
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	data, err := os.ReadFile(rigsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // No rigs configured
+		}
+		return nil, err
+	}
+
+	var rigsConfig config.RigsConfig
+	if err := json.Unmarshal(data, &rigsConfig); err != nil {
+		return nil, err
+	}
+
+	var rigs []string
+	for name := range rigsConfig.Rigs {
+		rigs = append(rigs, name)
+	}
+	return rigs, nil
 }

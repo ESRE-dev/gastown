@@ -71,13 +71,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewLinkedPaneCheck())
 	d.Register(doctor.NewThemeCheck())
 
-	// Wisp storage checks
-	d.Register(doctor.NewWispExistsCheck())
-	d.Register(doctor.NewWispGitCheck())
-	d.Register(doctor.NewWispOrphansCheck())
-	d.Register(doctor.NewWispSizeCheck())
-	d.Register(doctor.NewWispStaleCheck())
-
 	// Patrol system checks
 	d.Register(doctor.NewPatrolMoleculesExistCheck())
 	d.Register(doctor.NewPatrolHooksWiredCheck())

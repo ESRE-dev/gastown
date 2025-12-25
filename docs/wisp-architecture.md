@@ -1,252 +1,108 @@
-# Wisp Architecture: Transient Molecule Storage
+# Wisp Architecture: Simplified
 
-> Status: Design Spec v1 - December 2024
+> Status: Updated December 2024 - Simplified from separate directory to flag-based
 
 ## Overview
 
-**Wisps** are transient molecule execution traces - the "steam" in Gas Town's engine
-metaphor. Claude is fire; Claude Code is a Steam engine; Gas Town is a Steam Train,
-with Beads as the tracks. Wisps are steam vapors that dissipate after the work is done.
+**Wisps** are ephemeral issues - transient workflow state that should not be synced
+to the shared repository. They're used for operational messages (like lifecycle mail)
+and patrol cycle traces that would otherwise accumulate unbounded.
 
 ## Core Principle
 
-**Wisps are local operational state, not project history.**
+**Wisps are regular issues with `Wisp: true` flag.**
 
-| Artifact | Storage | Git Tracked | Purpose |
-|----------|---------|-------------|---------|
-| Issues | `.beads/issues.jsonl` | Yes | Permanent project history |
-| Wisps | `.beads-wisp/issues.jsonl` | **No** | Transient execution traces |
-| Digests | `.beads/issues.jsonl` | Yes | Compressed summaries of squashed wisps |
+The old architecture used a separate `.beads-wisp/` directory. This was over-engineered.
+The simplified approach:
 
-## Storage Architecture
+| Old | New |
+|-----|-----|
+| `.beads-wisp/issues.jsonl` | `.beads/issues.jsonl` with `Wisp: true` |
+| Separate directory, git init, gitignore | Single database, filtered on sync |
+| Complex dual-inbox routing | Simple flag check |
 
-### Directory Structure
+## How It Works
 
-```
-~/gt/gastown/                     # Rig root (not a git repo)
-├── .beads-wisp/                  # Shared wisp storage (rig-level, gitignored)
-│   └── issues.jsonl              # In-progress wisps (Deacon, Witness, Refinery)
-│
-├── mayor/rig/                    # Mayor's canonical clone
-│   └── .beads/                   # CANONICAL rig beads (versioned)
-│       ├── issues.jsonl          # Permanent issues + digests
-│       └── config.yaml
-│
-├── refinery/rig/                 # Refinery's clone
-│   └── .beads/                   # Inherits from mayor/rig
-│
-├── witness/                      # Witness (no clone needed)
-│
-└── polecats/<name>/              # Polecat worktrees
-    └── .beads/                   # Inherits from mayor/rig
+### Creating Wisps
+
+```bash
+# Create an ephemeral issue
+bd create --title "Patrol cycle" --wisp
+
+# Send ephemeral mail (automatically sets Wisp=true)
+gt mail send --wisp -s "Lifecycle: spawn" -m "..."
 ```
 
-### Key Points
+### Sync Filtering
 
-1. **`.beads-wisp/` is at rig root** - Outside any git clone, naturally isolated
-2. **All rig agents share `<rig>/.beads-wisp/`** - Deacon, Witness, Refinery
-3. **Digests go to canonical `.beads/`** - Permanent record after squash
-4. **Wisps are deleted after squash/burn** - No accumulation
-5. **Polecats don't use wisps** - Each assignment is a deliverable with audit value
+When `bd sync` exports to JSONL for git:
+- Issues with `Wisp: true` are **excluded**
+- Only permanent issues are synced to remote
+- No separate directory needed
 
-### Gitignore Entry
+### Querying
 
-Add to `.beads/.gitignore`:
-```
-.beads-wisp/
-```
+```bash
+# List all issues (including wisps)
+bd list
 
-Or add to rig-level `.gitignore`:
-```
-**/.beads-wisp/
-```
+# List only wisps
+bd list --wisp
 
-## Wisp Lifecycle
-
-```
-bd mol bond <proto> --wisp
-         │
-         ▼
-┌─────────────────────────┐
-│  .beads-wisp/           │
-│  └── issues.jsonl       │  ← Wisp created here
-│      └── {id, wisp: true, ...}
-└────────────┬────────────┘
-             │
-    ┌────────┴────────┐
-    ▼                 ▼
-bd mol burn      bd mol squash
-    │                 │
-    ▼                 ▼
-(deleted)        ┌─────────────────────────┐
-                 │  .beads/issues.jsonl    │
-                 │  └── {id, type: digest} │  ← Digest here
-                 └─────────────────────────┘
+# List only permanent issues
+bd list --no-wisp
 ```
 
-## Role Assignments
+## Use Cases
 
-### Roles That Use Wisps
+### Ephemeral Mail (Lifecycle Messages)
 
-These roles have repetitive/cyclic work that would accumulate without wisps:
+Spawn notifications, session handoffs, and other operational messages that:
+- Don't need to be synced to remote
+- Would accumulate unbounded
+- Have no long-term audit value
 
-| Role | Molecule | Storage Location | Squash Frequency |
-|------|----------|------------------|------------------|
-| **Deacon** | mol-deacon-patrol | `<rig>/.beads-wisp/` | Per cycle |
-| **Witness** | mol-witness-patrol | `<rig>/.beads-wisp/` | Per cycle |
-| **Refinery** | mol-refinery-cycle | `<rig>/.beads-wisp/` | Per cycle |
+```bash
+gt mail send gastown/polecats/nux --wisp \
+  -s "LIFECYCLE: spawn" \
+  -m "Work on issue gt-abc"
+```
 
-### Roles That Use Regular Molecules
+### Patrol Cycle Traces
 
-These roles do discrete work with audit value:
+Deacon, Witness, and Refinery run continuous loops. Each cycle would create
+accumulating history. Wisps let them track cycle state without permanent records.
 
-| Role | Molecule | Storage | Reason |
-|------|----------|---------|--------|
-| **Polecat** | mol-polecat-work | .beads/issues.jsonl | Each assignment is a deliverable |
-| **Mayor** | (ad-hoc) | .beads/issues.jsonl | Coordination has history value |
-| **Crew** | (ad-hoc) | .beads/issues.jsonl | User work needs audit trail |
+### Hook Files
 
-### Decision Matrix
+Agent hook files (`hook-<agent>.json`) are stored in `.beads/` but are local-only
+runtime state, not synced. These track what work is assigned to each agent for
+restart-and-resume.
+
+## Decision Matrix
 
 | Question | Answer | Use |
 |----------|--------|-----|
-| Is this work repetitive/cyclic? | Yes | Wisp |
-| Does the outcome matter more than the trace? | Yes | Wisp |
-| Would this accumulate unbounded over time? | Yes | Wisp |
-| Is this a discrete deliverable? | Yes | Regular Mol |
-| Might I need to reference this later? | Yes | Regular Mol |
-| Does this represent user-requested work? | Yes | Regular Mol |
+| Should this sync to remote? | No | Wisp |
+| Is this operational/lifecycle? | Yes | Wisp |
+| Would this accumulate unbounded? | Yes | Wisp |
+| Does this need audit trail? | Yes | Regular issue |
+| Might others need to see this? | Yes | Regular issue |
 
-## Patrol Pattern
+## Migration from .beads-wisp/
 
-Every role using wisps must implement this pattern:
-
-```go
-func patrolCycle() {
-    // 1. Bond wisp molecule
-    mol := bdMolBond("mol-<role>-patrol", "--wisp")
-
-    // 2. Execute cycle steps
-    for _, step := range mol.Steps {
-        executeStep(step)
-        bdMolStep(step.ID, "--complete")
-    }
-
-    // 3. Generate summary (agent cognition)
-    summary := generateCycleSummary()
-
-    // 4. Squash - REQUIRED (this is the cleanup)
-    bdMolSquash(mol.ID, "--summary", summary)
-    // Wisp deleted from .beads-wisp/
-    // Digest created in .beads/issues.jsonl
-
-    // 5. Sleep until next cycle
-    time.Sleep(patrolInterval)
-}
-```
-
-**Critical**: Without step 4 (squash), wisps become technical debt.
-
-## Beads Implementation Requirements
-
-For this architecture to work, Beads needs:
-
-### New Commands
+The old `.beads-wisp/` directories can be deleted:
 
 ```bash
-# Bond with wisp flag (--ephemeral is an alias)
-bd mol bond <proto> --wisp
-# Creates in .beads-wisp/ instead of .beads/
-
-# List wisps
-bd wisp list
-# Shows in-progress wisps
-
-# Garbage collect orphaned wisps
-bd wisp gc
-# Cleans up wisps from crashed processes
+# Remove legacy wisp directories
+rm -rf ~/gt/.beads-wisp/
+rm -rf ~/gt/gastown/.beads-wisp/
+find ~/gt -type d -name '.beads-wisp' -exec rm -rf {} +
 ```
 
-### Storage Behavior
+No migration needed - these contained transient data with no long-term value.
 
-| Command | With `--wisp` | Without |
-|---------|---------------|---------|
-| `bd mol bond` | Creates in `.beads-wisp/` | Creates in `.beads/` |
-| `bd mol step` | Updates in wisp store | Updates in permanent |
-| `bd mol squash` | Deletes from wisp, creates digest in permanent | Creates digest in permanent |
-| `bd mol burn` | Deletes from wisp | Marks abandoned in permanent |
+## Related
 
-### Config
-
-```yaml
-# .beads/config.yaml
-wisp:
-  enabled: true
-  directory: ../.beads-wisp  # Relative to .beads/
-  auto_gc: true              # Clean orphans on bd init
-```
-
-## Crash Recovery
-
-If a patrol crashes mid-cycle:
-
-1. **Wisp persists in `.beads-wisp/`** - Provides recovery breadcrumb
-2. **On restart, agent can:**
-   - Resume from last step (if step tracking is granular)
-   - Or burn and start fresh (simpler for patrol loops)
-3. **`bd wisp gc` cleans orphans** - Wisps older than threshold with no active process
-
-### Orphan Detection
-
-A wisp is orphaned if:
-- `process_id` field exists and process is dead
-- OR `updated_at` is older than threshold (e.g., 1 hour)
-- AND molecule is not complete
-
-## Digest Format
-
-When a wisp is squashed, the digest captures the outcome:
-
-```json
-{
-  "id": "gt-xyz.digest-001",
-  "type": "digest",
-  "title": "Deacon patrol cycle @ 2024-12-21T10:30:00Z",
-  "description": "Checked 3 witnesses, 2 refineries. All healthy. Processed 5 mail items.",
-  "parent": "gt-xyz",
-  "squashed_from": "gt-xyz.wisp-001",
-  "created_at": "2024-12-21T10:32:00Z"
-}
-```
-
-Digests are queryable:
-```bash
-bd list --type=digest --parent=gt-deacon-patrol
-# Shows all patrol cycle summaries
-```
-
-## Migration Path
-
-For existing Gas Town installations:
-
-1. **Add `.beads-wisp/` to gitignore** (immediate)
-2. **Update patrol runners to use `--wisp`** (as patched)
-3. **No migration of existing data** - Fresh start for wisp storage
-4. **Optional**: Remove old `.beads-ephemeral/` directories
-
-## Open Questions
-
-1. **Digest retention**: Should old digests be pruned? How old?
-2. **Wisp schema**: Do wisps need additional fields (process_id, host, etc.)?
-3. **Cross-process visibility**: Should `bd wisp list` show all wisps or just current process?
-
-## Related Documents
-
+- [molecules.md](molecules.md) - Molecule system (wisps can be molecule instances)
 - [architecture.md](architecture.md) - Overall Gas Town architecture
-- [patrol-system-design.md](../../../docs/patrol-system-design.md) - Patrol system design
-- [molecules.md](molecules.md) - Molecule system details
-
-## Implementation Tracking
-
-- **Beads**: bd-kwjh (Wisp storage: transient molecule tracking)
-- **Gas Town**: gt-3x0z.9 (mol-deacon-patrol uses wisps)

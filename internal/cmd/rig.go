@@ -44,7 +44,6 @@ var rigAddCmd = &cobra.Command{
 This creates a rig container with:
   - config.json           Rig configuration
   - .beads/               Rig-level issue tracking (initialized)
-  - .beads-wisp/          Local wisp/molecule tracking (gitignored)
   - plugins/              Rig-level plugin directory
   - refinery/rig/         Canonical main clone
   - mayor/rig/            Mayor's working clone
@@ -218,7 +217,6 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %s/\n", name)
 	fmt.Printf("  ├── config.json\n")
 	fmt.Printf("  ├── .beads/           (prefix: %s)\n", newRig.Config.Prefix)
-	fmt.Printf("  ├── .beads-wisp/      (local wisp/molecule tracking)\n")
 	fmt.Printf("  ├── plugins/          (rig-level plugins)\n")
 	fmt.Printf("  ├── refinery/rig/     (canonical main)\n")
 	fmt.Printf("  ├── mayor/rig/        (mayor's clone)\n")

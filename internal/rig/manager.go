@@ -281,11 +281,6 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("initializing beads: %w", err)
 	}
 
-	// Initialize wisp beads for wisp/molecule tracking
-	if err := m.initWispBeads(rigPath); err != nil {
-		return nil, fmt.Errorf("initializing wisp beads: %w", err)
-	}
-
 	// Seed patrol molecules for this rig
 	if err := m.seedPatrolMolecules(rigPath); err != nil {
 		// Non-fatal: log warning but continue
@@ -369,34 +364,6 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		}
 	}
 	return nil
-}
-
-// initWispBeads initializes the wisp beads database at rig level.
-// Wisp beads are local-only (no sync-branch) and used for runtime tracking
-// of wisps and molecules.
-func (m *Manager) initWispBeads(rigPath string) error {
-	beadsDir := filepath.Join(rigPath, ".beads-wisp")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
-		return err
-	}
-
-	// Initialize as a git repo (for local versioning, not for sync)
-	cmd := exec.Command("git", "init")
-	cmd.Dir = beadsDir
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git init: %w", err)
-	}
-
-	// Create wisp config (no sync-branch needed)
-	configPath := filepath.Join(beadsDir, "config.yaml")
-	configContent := "wisp: true\n# No sync-branch - wisp is local only\n"
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		return err
-	}
-
-	// Add .beads-wisp/ to .gitignore if not already present
-	gitignorePath := filepath.Join(rigPath, ".gitignore")
-	return m.ensureGitignoreEntry(gitignorePath, ".beads-wisp/")
 }
 
 // ensureGitignoreEntry adds an entry to .gitignore if it doesn't already exist.

@@ -193,52 +193,6 @@ func TestRigSummary(t *testing.T) {
 	}
 }
 
-func TestInitWispBeads(t *testing.T) {
-	root, rigsConfig := setupTestTown(t)
-	manager := NewManager(root, rigsConfig, git.NewGit(root))
-
-	rigPath := filepath.Join(root, "test-rig")
-	if err := os.MkdirAll(rigPath, 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	if err := manager.initWispBeads(rigPath); err != nil {
-		t.Fatalf("initWispBeads: %v", err)
-	}
-
-	// Verify directory was created
-	wispPath := filepath.Join(rigPath, ".beads-wisp")
-	if _, err := os.Stat(wispPath); os.IsNotExist(err) {
-		t.Error(".beads-wisp/ was not created")
-	}
-
-	// Verify it's a git repo
-	gitPath := filepath.Join(wispPath, ".git")
-	if _, err := os.Stat(gitPath); os.IsNotExist(err) {
-		t.Error(".beads-wisp/ was not initialized as git repo")
-	}
-
-	// Verify config.yaml was created with wisp: true
-	configPath := filepath.Join(wispPath, "config.yaml")
-	content, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("reading config.yaml: %v", err)
-	}
-	if string(content) != "wisp: true\n# No sync-branch - wisp is local only\n" {
-		t.Errorf("config.yaml content = %q, want wisp: true with comment", string(content))
-	}
-
-	// Verify .gitignore was updated
-	gitignorePath := filepath.Join(rigPath, ".gitignore")
-	ignoreContent, err := os.ReadFile(gitignorePath)
-	if err != nil {
-		t.Fatalf("reading .gitignore: %v", err)
-	}
-	if string(ignoreContent) != ".beads-wisp/\n" {
-		t.Errorf(".gitignore content = %q, want .beads-wisp/", string(ignoreContent))
-	}
-}
-
 func TestEnsureGitignoreEntry_AddsEntry(t *testing.T) {
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
