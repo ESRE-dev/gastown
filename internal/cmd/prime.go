@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
+	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -94,6 +95,9 @@ func runPrime(cmd *cobra.Command, args []string) error {
 
 	// Output attachment status (for autonomous work detection)
 	outputAttachmentStatus(ctx)
+
+	// Check for slung work on hook (from gt sling)
+	checkSlungWork(ctx)
 
 	// Output molecule context if working on a molecule step
 	outputMoleculeContext(ctx)
@@ -1152,6 +1156,95 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 	if patrolID != "" {
 		fmt.Println()
 		fmt.Printf("Current patrol ID: %s\n", patrolID)
+	}
+}
+
+// checkSlungWork checks for slung work on the agent's hook.
+// If found, displays it prominently and tells the agent to execute it.
+// The wisp is burned after the agent acknowledges it.
+func checkSlungWork(ctx RoleContext) {
+	// Determine agent identity for hook lookup
+	agentID := getAgentIdentity(ctx)
+	if agentID == "" {
+		return
+	}
+
+	// Check for hook file in the clone root
+	cloneRoot := ctx.WorkDir
+	sw, err := wisp.ReadHook(cloneRoot, agentID)
+	if err != nil {
+		if errors.Is(err, wisp.ErrNoHook) {
+			// No hook - normal case, nothing to do
+			return
+		}
+		// Other error - log but continue
+		return
+	}
+
+	// Found slung work! Display prominently
+	fmt.Println()
+	fmt.Printf("%s\n\n", style.Bold.Render("## 🎯 SLUNG WORK ON HOOK"))
+	fmt.Printf("Work was slung onto your hook and awaits execution.\n\n")
+	fmt.Printf("  Bead ID: %s\n", style.Bold.Render(sw.BeadID))
+	if sw.Subject != "" {
+		fmt.Printf("  Subject: %s\n", sw.Subject)
+	}
+	if sw.Context != "" {
+		fmt.Printf("  Context: %s\n", sw.Context)
+	}
+	fmt.Printf("  Slung by: %s\n", sw.CreatedBy)
+	fmt.Printf("  Slung at: %s\n", sw.CreatedAt.Format("2006-01-02 15:04:05"))
+	fmt.Println()
+
+	// Show the bead details
+	fmt.Println("**Bead details:**")
+	cmd := exec.Command("bd", "show", sw.BeadID)
+	cmd.Dir = cloneRoot
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = nil
+	if cmd.Run() == nil {
+		// Show first 20 lines of bead details
+		lines := strings.Split(stdout.String(), "\n")
+		maxLines := 20
+		if len(lines) > maxLines {
+			lines = lines[:maxLines]
+			lines = append(lines, "...")
+		}
+		for _, line := range lines {
+			fmt.Printf("  %s\n", line)
+		}
+	}
+	fmt.Println()
+
+	// The propulsion principle
+	fmt.Println(style.Bold.Render("→ PROPULSION PRINCIPLE: Work is on your hook. RUN IT."))
+	fmt.Println("  Begin working on this bead immediately. No human input needed.")
+	fmt.Println()
+
+	// Burn the hook now that it's been read
+	if err := wisp.BurnHook(cloneRoot, agentID); err != nil {
+		fmt.Printf("%s Warning: could not burn hook: %v\n", style.Dim.Render("⚠"), err)
+	}
+}
+
+// getAgentIdentity returns the agent identity string for hook lookup.
+func getAgentIdentity(ctx RoleContext) string {
+	switch ctx.Role {
+	case RoleCrew:
+		return fmt.Sprintf("%s/crew/%s", ctx.Rig, ctx.Polecat)
+	case RolePolecat:
+		return fmt.Sprintf("%s/polecats/%s", ctx.Rig, ctx.Polecat)
+	case RoleMayor:
+		return "mayor"
+	case RoleDeacon:
+		return "deacon"
+	case RoleWitness:
+		return fmt.Sprintf("%s/witness", ctx.Rig)
+	case RoleRefinery:
+		return fmt.Sprintf("%s/refinery", ctx.Rig)
+	default:
+		return ""
 	}
 }
 

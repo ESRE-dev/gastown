@@ -29,3 +29,6 @@ gt
 # Runtime state
 state.json
 .runtime/
+
+# Ephemeral wisps (never tracked)
+.beads-wisp/
