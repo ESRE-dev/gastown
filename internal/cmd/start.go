@@ -35,9 +35,9 @@ var (
 )
 
 var startCmd = &cobra.Command{
-	Use:     "start",
+	Use:     "start [path]",
 	GroupID: GroupServices,
-	Short:   "Start Gas Town",
+	Short:   "Start Gas Town or a crew workspace",
 	Long: `Start Gas Town by launching the Deacon and Mayor.
 
 The Deacon is the health-check orchestrator that monitors Mayor and Witnesses.
@@ -46,7 +46,12 @@ The Mayor is the global coordinator that dispatches work.
 By default, other agents (Witnesses, Refineries) are started lazily as needed.
 Use --all to start Witnesses and Refineries for all registered rigs immediately.
 
+Crew shortcut:
+  If a path like "rig/crew/name" is provided, starts that crew workspace.
+  This is equivalent to 'gt start crew rig/name'.
+
 To stop Gas Town, use 'gt shutdown'.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runStart,
 }
 
@@ -122,6 +127,17 @@ func init() {
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
+	// Check if arg looks like a crew path (rig/crew/name)
+	if len(args) == 1 && strings.Contains(args[0], "/crew/") {
+		// Parse rig/crew/name format
+		parts := strings.SplitN(args[0], "/crew/", 2)
+		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			// Route to crew start with rig/name format
+			crewArg := parts[0] + "/" + parts[1]
+			return runStartCrew(cmd, []string{crewArg})
+		}
+	}
+
 	// Verify we're in a Gas Town workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
