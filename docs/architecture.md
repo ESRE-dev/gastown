@@ -2,6 +2,8 @@
 
 Gas Town is a multi-agent workspace manager that coordinates AI coding agents working on software projects. It provides the infrastructure for spawning workers, processing work through a priority queue, and coordinating agents through mail and issue tracking.
 
+**Gas Town is a stream engine, not a swarm engine.** Polecats (workers) can start and land at any time, independently. They're ephemeral - once their work merges, they evaporate. You can spawn a batch of polecats to tackle parallelizable work, but there's no "swarm ID" or batch boundary. The merge queue optionally serializes landing, preventing monkey-knife-fights when parallel polecats touch the same code. A single polecat is just a batch of one.
+
 **Key insight**: Work is a stream, not discrete batches. The Refinery's merge queue is the coordination mechanism. Beads (issues) are the data plane. There are no "swarm IDs" - just epics with children, processed by workers, merged through the queue.
 
 **Molecule-first paradigm**: Gas Town is fundamentally a molecule execution engine. Workers don't just "work on issues" - they execute molecules. The issue is seed data; the molecule defines the workflow. This enables nondeterministic idempotence: any worker can pick up where another left off, surviving crashes, context compaction, and restarts. If a process requires cognition, it should be a molecule. See [Molecules](#molecules-composable-workflow-templates) for full details.
@@ -867,7 +869,7 @@ mol-graceful-shutdown
 **Key principle**: If a multi-step process requires cognition and can fail partway through, it should be a molecule. This applies to:
 - Agent lifecycle (startup, work, shutdown)
 - System operations (activation, deactivation)
-- Batch processing (swarm coordination)
+- Batch processing (parallel worker coordination)
 - Recovery procedures (doctor --fix)
 
 ### Pluggable Molecules
@@ -974,7 +976,7 @@ These are the work that "feeds the beast" - the review molecule generates fix be
 You don't need convergence built into the molecule. Just run it again:
 
 1. Run `gt molecule instantiate code-review`
-2. Swarm closes all review beads, generates fix beads
+2. Workers close all review beads, generate fix beads
 3. Fix beads get closed
 4. Run `gt molecule instantiate code-review` again
 5. Fewer findings this time
@@ -1291,7 +1293,7 @@ sequenceDiagram
 4. Tests pass (skippable with --skip-tests)
 
 **When direct landing makes sense:**
-- Mayor is doing sequential, non-swarming work (like GGT scaffolding)
+- Mayor is doing sequential work without parallel polecats
 - Single worker completed an isolated task
 - Hotfix needs to land immediately
 - Refinery agent is down or unavailable
@@ -1344,7 +1346,7 @@ sequenceDiagram
     M->>O: Report results
 ```
 
-**Note**: There is no "swarm ID" or batch boundary. Workers process issues independently. The merge queue handles coordination. "Swarming an epic" is just spawning multiple workers for the epic's child issues.
+**Note**: There is no "swarm ID" or batch boundary. Workers process issues independently. The merge queue handles coordination. Tackling an epic with parallel polecats is just spawning multiple workers for the epic's child issues.
 
 ### Worker Cleanup (Witness-Owned)
 
@@ -1556,7 +1558,7 @@ export BEADS_DIR=/path/to/rig/.beads
 
 **Rationale**:
 - **Flexibility**: Not all work needs merge queue overhead
-- **Sequential work**: Mayor doing non-swarming work (like GGT scaffolding) shouldn't need Refinery
+- **Sequential work**: Mayor doing single-polecat work shouldn't need Refinery
 - **Emergency path**: Hotfixes can land immediately
 - **Resilience**: System works even if Refinery is down
 

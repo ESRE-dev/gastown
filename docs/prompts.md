@@ -18,7 +18,7 @@ Delivered via `gt prime` command. These establish agent identity and capabilitie
 
 | Role | Template | Purpose |
 |------|----------|---------|
-| Mayor | `mayor.md` | Global coordination, swarm dispatch, cross-rig decisions |
+| Mayor | `mayor.md` | Global coordination, work dispatch, cross-rig decisions |
 | Witness | `witness.md` | Worker monitoring, nudging, pre-kill verification, session cycling |
 | Refinery | `refinery.md` | Merge queue processing, PR review, integration |
 | Polecat | `polecat.md` | Implementation work on assigned issues |
@@ -27,16 +27,16 @@ Delivered via `gt prime` command. These establish agent identity and capabilitie
 
 ### 2. Mail Templates (Structured Messages)
 
-Parseable messages for swarm pipeline communication.
+Parseable messages for worker coordination.
 
 | Template | Flow | Purpose |
 |----------|------|---------|
-| `SWARM_STARTED` | Refinery → Mayor | Swarm initialized, workers ready |
+| `BATCH_STARTED` | Refinery → Mayor | Batch initialized, workers ready |
 | `WORKER_READY` | Worker → Refinery | Worker setup complete |
 | `WORK_COMPLETE` | Worker → Refinery | Task finished, ready for merge |
 | `MERGE_CONFLICT` | Refinery → Worker/Mayor | Merge failed, needs resolution |
-| `SWARM_COMPLETE` | Refinery → Mayor | All tasks done |
-| `SWARM_FAILED` | Refinery → Mayor | Swarm failed, needs intervention |
+| `BATCH_COMPLETE` | Refinery → Mayor | All tasks done |
+| `BATCH_FAILED` | Refinery → Mayor | Batch failed, needs intervention |
 
 ### 3. Spawn Injection (Work Assignment)
 
@@ -86,7 +86,7 @@ Templates for session cycling and handoffs.
 - Polecat management commands
 - Work management and sync commands
 - Workflow steps (inbox → ready → spawn → monitor → report)
-- Swarm management commands
+- Worker management commands
 - Session end checklist
 
 **unknown.md.j2** (~20 lines)
@@ -420,7 +420,7 @@ Unlike polecats, crew workers have no Witness oversight:
 
 ### Phase 2: Mail Templates
 1. Define mail template format in Go
-2. Port swarm pipeline templates
+2. Port worker coordination templates
 3. Add handoff and escalation templates
 
 ### Phase 3: Spawn & Lifecycle
