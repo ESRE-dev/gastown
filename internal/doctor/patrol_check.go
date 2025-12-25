@@ -385,7 +385,7 @@ func (c *PatrolPluginsAccessibleCheck) Fix(ctx *CheckContext) error {
 	return nil
 }
 
-// PatrolRolesHavePromptsCheck verifies that prompts/roles/*.md exist for each role.
+// PatrolRolesHavePromptsCheck verifies that internal/templates/roles/*.md.tmpl exist for each role.
 type PatrolRolesHavePromptsCheck struct {
 	BaseCheck
 }
@@ -395,16 +395,16 @@ func NewPatrolRolesHavePromptsCheck() *PatrolRolesHavePromptsCheck {
 	return &PatrolRolesHavePromptsCheck{
 		BaseCheck: BaseCheck{
 			CheckName:        "patrol-roles-have-prompts",
-			CheckDescription: "Check if prompts/roles/*.md exist for each patrol role",
+			CheckDescription: "Check if internal/templates/roles/*.md.tmpl exist for each patrol role",
 		},
 	}
 }
 
-// requiredRolePrompts are the required role prompt files.
+// requiredRolePrompts are the required role prompt template files.
 var requiredRolePrompts = []string{
-	"deacon.md",
-	"witness.md",
-	"refinery.md",
+	"deacon.md.tmpl",
+	"witness.md.tmpl",
+	"refinery.md.tmpl",
 }
 
 // Run checks if role prompts exist.
@@ -431,10 +431,10 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 	for _, rigName := range rigs {
 		// Check in mayor's clone (canonical for the rig)
 		mayorRig := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig")
-		promptsDir := filepath.Join(mayorRig, "prompts", "roles")
+		templatesDir := filepath.Join(mayorRig, "internal", "templates", "roles")
 
 		for _, roleFile := range requiredRolePrompts {
-			promptPath := filepath.Join(promptsDir, roleFile)
+			promptPath := filepath.Join(templatesDir, roleFile)
 			if _, err := os.Stat(promptPath); os.IsNotExist(err) {
 				missingPrompts = append(missingPrompts, fmt.Sprintf("%s: %s", rigName, roleFile))
 			}
@@ -445,15 +445,15 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("%d role prompt(s) missing", len(missingPrompts)),
+			Message: fmt.Sprintf("%d role prompt template(s) missing", len(missingPrompts)),
 			Details: missingPrompts,
-			FixHint: "Role prompts should be in the project repository under prompts/roles/",
+			FixHint: "Role prompt templates should be in the project repository under internal/templates/roles/",
 		}
 	}
 
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusOK,
-		Message: "All patrol role prompts found",
+		Message: "All patrol role prompt templates found",
 	}
 }

@@ -142,28 +142,22 @@ Each role has a `_get_<role>_context_static()` function providing fallback promp
 
 ### 1. Prompt Storage
 
+Templates are embedded in the Go binary via `//go:embed`:
+
 ```
-gastown/
-├── prompts/
-│   ├── roles/
-│   │   ├── mayor.md
-│   │   ├── witness.md
-│   │   ├── refinery.md
-│   │   ├── polecat.md
-│   │   ├── crew.md
-│   │   └── unknown.md
-│   ├── mail/
-│   │   ├── swarm_started.md
-│   │   ├── work_complete.md
-│   │   └── ...
-│   ├── spawn/
-│   │   ├── new_polecat.md
-│   │   ├── reuse_polecat.md
-│   │   └── transient_worker.md
-│   └── lifecycle/
-│       ├── handoff.md
-│       ├── escalation.md
-│       └── nudge.md
+internal/templates/
+├── roles/
+│   ├── mayor.md.tmpl
+│   ├── witness.md.tmpl
+│   ├── refinery.md.tmpl
+│   ├── polecat.md.tmpl
+│   ├── crew.md.tmpl
+│   └── deacon.md.tmpl
+└── messages/
+    ├── spawn.md.tmpl
+    ├── nudge.md.tmpl
+    ├── escalation.md.tmpl
+    └── handoff.md.tmpl
 ```
 
 ### 2. Template Engine

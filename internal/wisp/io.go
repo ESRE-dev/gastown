@@ -136,7 +136,6 @@ func HasHook(root, agent string) bool {
 }
 
 // ListHooks returns a list of agents with active hooks.
-// Agent IDs are returned in their original form (with slashes).
 func ListHooks(root string) ([]string, error) {
 	dir := filepath.Join(root, WispDir)
 	entries, err := os.ReadDir(dir)
@@ -153,8 +152,7 @@ func ListHooks(root string) ([]string, error) {
 		if len(name) > len(HookPrefix)+len(HookSuffix) &&
 			name[:len(HookPrefix)] == HookPrefix &&
 			name[len(name)-len(HookSuffix):] == HookSuffix {
-			sanitized := name[len(HookPrefix) : len(name)-len(HookSuffix)]
-			agent := unsanitizeAgentID(sanitized)
+			agent := name[len(HookPrefix) : len(name)-len(HookSuffix)]
 			agents = append(agents, agent)
 		}
 	}
