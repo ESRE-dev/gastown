@@ -1,0 +1,61 @@
+{
+  "formula": "mol-witness-patrol",
+  "description": "Per-rig worker monitor patrol loop using the Christmas Ornament pattern.\n\nThe Witness is the Pit Boss for your rig. You watch polecats, nudge them toward completion, verify clean git state before kills, and escalate stuck workers.\n\n**You do NOT do implementation work.** Your job is oversight, not coding.\n\nThis molecule uses dynamic bonding to spawn mol-polecat-arm for each worker, enabling parallel inspection with a fanout gate for aggregation.\n\n## The Christmas Ornament Shape\n\n```\n                     ★ mol-witness-patrol (trunk)\n                    /|\\\n          ┌────────┘ │ └────────┐\n       PREFLIGHT  DISCOVERY  CLEANUP\n          │          │           │\n      inbox-check  survey    aggregate (WaitsFor: all-children)\n      check-refnry   │       save-state\n      load-state     │       generate-summary\n                     ↓       context-check\n             ┌───────┼───────┐  burn-or-loop\n             ●       ●       ●   mol-polecat-arm (dynamic)\n            ace     nux    toast\n```",
+  "version": 1,
+  "steps": [
+    {
+      "id": "inbox-check",
+      "title": "Process witness mail",
+      "description": "Process witness mail: lifecycle requests, help requests.\n\n```bash\ngt mail inbox\n```\n\nHandle by message type:\n- **LIFECYCLE/Shutdown**: Queue for pre-kill verification\n- **Blocked/Help**: Assess if resolvable or escalate\n- **HANDOFF**: Load predecessor state\n- **Work complete**: Verify issue closed, proceed to pre-kill\n\nRecord any pending actions for later steps. Mark messages as processed when complete."
+    },
+    {
+      "id": "check-refinery",
+      "title": "Ensure refinery is alive",
+      "needs": ["inbox-check"],
+      "description": "Ensure the refinery is alive and processing merge requests.\n\n**Redundant system**: This check runs in both gt spawn and Witness patrol to ensure the merge queue processor stays operational.\n\n```bash\n# Check if refinery session is running\ngt session status <rig>/refinery\n\n# Check for merge requests in queue\nbd list --type=merge-request --status=open\n```\n\nIf merge requests are waiting AND refinery is not running:\n```bash\ngt session start <rig>/refinery\ngt mail send <rig>/refinery -s \"PATROL: Wake up\" -m \"Merge requests in queue. Please process.\"\n```\n\nIf refinery is running but queue is non-empty for >30 min, send nudge. This ensures polecats don't wait forever for their branches to merge."
+    },
+    {
+      "id": "load-state",
+      "title": "Load persisted patrol state",
+      "needs": ["check-refinery"],
+      "description": "Read handoff bead and get nudge counts.\n\nLoad persistent state from the witness handoff bead:\n- Active workers and their status from last cycle\n- Nudge counts per worker per issue\n- Last nudge timestamps\n- Pending escalations\n\n```bash\nbd show <handoff-bead-id>\n```\n\nIf no handoff exists (fresh start), initialize empty state. This state persists across wisp burns and session cycles."
+    },
+    {
+      "id": "survey-workers",
+      "title": "Survey all polecats (fanout)",
+      "needs": ["load-state"],
+      "description": "List polecats and bond mol-polecat-arm for each one.\n\n```bash\n# Get list of polecats\ngt polecat list <rig>\n```\n\nFor each polecat discovered, dynamically bond an inspection arm:\n\n```bash\n# Bond mol-polecat-arm for each polecat\nfor polecat in $(gt polecat list <rig> --names); do\n  bd mol bond mol-polecat-arm $PATROL_WISP_ID \\\n    --ref arm-$polecat \\\n    --var polecat_name=$polecat \\\n    --var rig=<rig>\ndone\n```\n\nThis creates child wisps like:\n- patrol-x7k.arm-ace (5 steps)\n- patrol-x7k.arm-nux (5 steps)\n- patrol-x7k.arm-toast (5 steps)\n\nEach arm runs in PARALLEL. The aggregate step will wait for all to complete.\n\nIf no polecats are found, this step completes immediately with no children."
+    },
+    {
+      "id": "aggregate",
+      "title": "Aggregate arm results",
+      "needs": ["survey-workers"],
+      "waits_for": "all-children",
+      "description": "Collect outcomes from all polecat inspection arms.\n\nThis is a **fanout gate** - it cannot proceed until ALL dynamically-bonded polecat arms have completed their inspection cycles.\n\nOnce all arms complete, collect their outcomes:\n- Actions taken per polecat (nudge, kill, escalate, none)\n- Updated nudge counts\n- Any errors or issues discovered\n\nBuild the consolidated state for save-state."
+    },
+    {
+      "id": "save-state",
+      "title": "Persist patrol state",
+      "needs": ["aggregate"],
+      "description": "Update handoff bead with new states.\n\nPersist state to the witness handoff bead:\n- Updated worker statuses from all arms\n- Current nudge counts per worker\n- Nudge timestamps\n- Actions taken this cycle\n- Pending items for next cycle\n\n```bash\nbd update <handoff-bead-id> --description=\"<serialized state>\"\n```\n\nThis state survives wisp burns and session cycles."
+    },
+    {
+      "id": "generate-summary",
+      "title": "Generate handoff summary",
+      "needs": ["save-state"],
+      "description": "Summarize this patrol cycle for digest.\n\nInclude:\n- Workers inspected (count, names)\n- Nudges sent (count, to whom)\n- Sessions killed (count, names)\n- Escalations (count, issues)\n- Issues found (brief descriptions)\n- Actions pending for next cycle\n\nThis becomes the digest when the patrol wisp is squashed."
+    },
+    {
+      "id": "context-check",
+      "title": "Check own context limit",
+      "needs": ["generate-summary"],
+      "description": "Check own context usage.\n\nIf context is HIGH (>80%):\n- Ensure state is saved to handoff bead\n- Prepare for burn/respawn\n\nIf context is LOW:\n- Can continue patrolling"
+    },
+    {
+      "id": "burn-or-loop",
+      "title": "Burn and respawn or loop",
+      "needs": ["context-check"],
+      "description": "End of patrol cycle decision.\n\nIf context is LOW:\n- Burn this wisp (no audit trail needed for patrol cycles)\n- Sleep briefly to avoid tight loop (30-60 seconds)\n- Return to inbox-check step\n\nIf context is HIGH:\n- Burn wisp with summary digest\n- Exit cleanly (daemon will respawn fresh Witness)\n\n```bash\nbd mol burn   # Destroy ephemeral wisp\n```\n\nThe daemon ensures Witness is always running."
+    }
+  ]
+}

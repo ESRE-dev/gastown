@@ -1,0 +1,54 @@
+{
+  "formula": "mol-deacon-patrol",
+  "description": "Mayor's daemon patrol loop.\n\nThe Deacon is the Mayor's background process that runs continuously, handling callbacks, monitoring rig health, and performing cleanup. Each patrol cycle runs these steps in sequence, then loops or exits.",
+  "version": 1,
+  "steps": [
+    {
+      "id": "inbox-check",
+      "title": "Handle callbacks from agents",
+      "description": "Handle callbacks from agents.\n\nCheck the Mayor's inbox for messages from:\n- Witnesses reporting polecat status\n- Refineries reporting merge results\n- Polecats requesting help or escalation\n- External triggers (webhooks, timers)\n\n```bash\ngt mail inbox\n# For each message:\ngt mail read <id>\n# Handle based on message type\n```\n\nCallbacks may spawn new polecats, update issue state, or trigger other actions."
+    },
+    {
+      "id": "trigger-pending-spawns",
+      "title": "Nudge newly spawned polecats",
+      "needs": ["inbox-check"],
+      "description": "Nudge newly spawned polecats that are ready for input.\n\nWhen polecats are spawned, their Claude session takes 10-20 seconds to initialize. The spawn command returns immediately without waiting. This step finds spawned polecats that are now ready and sends them a trigger to start working.\n\n```bash\n# For each rig with polecats\nfor rig in gastown beads; do\n    gt polecats $rig\n    # For each working polecat, check if Claude is ready\n    # Use tmux capture-pane to look for \"> \" prompt\ndone\n```\n\nFor each ready polecat that hasn't been triggered yet:\n1. Send \"Begin.\" to trigger UserPromptSubmit hook\n2. The hook injects mail, polecat sees its assignment\n3. Mark polecat as triggered in state\n\nUse WaitForClaudeReady from tmux package (polls for \"> \" prompt). Timeout: 60 seconds per polecat. If not ready, try again next cycle."
+    },
+    {
+      "id": "health-scan",
+      "title": "Check Witness and Refinery health",
+      "needs": ["trigger-pending-spawns"],
+      "description": "Check Witness and Refinery health for each rig.\n\n**ZFC Principle**: You (Claude) make the judgment call about what is \"stuck\" or \"unresponsive\" - there are no hardcoded thresholds in Go. Read the signals, consider context, and decide.\n\nFor each rig, run:\n```bash\ngt witness status <rig>\ngt refinery status <rig>\n```\n\n**Signals to assess:**\n\n| Component | Healthy Signals | Concerning Signals |\n|-----------|-----------------|-------------------|\n| Witness | State: running, recent activity | State: not running, no heartbeat |\n| Refinery | State: running, queue processing | Queue stuck, merge failures |\n\n**Tracking unresponsive cycles:**\n\nMaintain in your patrol state (persisted across cycles):\n```\nhealth_state:\n  <rig>:\n    witness:\n      unresponsive_cycles: 0\n      last_seen_healthy: <timestamp>\n    refinery:\n      unresponsive_cycles: 0\n      last_seen_healthy: <timestamp>\n```\n\n**Decision matrix** (you decide the thresholds based on context):\n\n| Cycles Unresponsive | Suggested Action |\n|---------------------|------------------|\n| 1-2 | Note it, check again next cycle |\n| 3-4 | Attempt restart: gt witness restart <rig> |\n| 5+ | Escalate to Mayor with context |\n\n**Restart commands:**\n```bash\ngt witness restart <rig>\ngt refinery restart <rig>\n```\n\n**Escalation:**\n```bash\ngt mail send mayor/ -s \"Health: <rig> <component> unresponsive\" \\\n  -m \"Component has been unresponsive for N cycles. Restart attempts failed.\n      Last healthy: <timestamp>\n      Error signals: <details>\"\n```\n\nReset unresponsive_cycles to 0 when component responds normally."
+    },
+    {
+      "id": "plugin-run",
+      "title": "Execute registered plugins",
+      "needs": ["health-scan"],
+      "description": "Execute registered plugins.\n\nScan ~/gt/plugins/ for plugin directories. Each plugin has a plugin.md with YAML frontmatter defining its gate (when to run) and instructions (what to do).\n\nSee docs/deacon-plugins.md for full documentation.\n\nGate types:\n- cooldown: Time since last run (e.g., 24h)\n- cron: Schedule-based (e.g., \"0 9 * * *\")\n- condition: Metric threshold (e.g., wisp count > 50)\n- event: Trigger-based (e.g., startup, heartbeat)\n\nFor each plugin:\n1. Read plugin.md frontmatter to check gate\n2. Compare against state.json (last run, etc.)\n3. If gate is open, execute the plugin\n\nPlugins marked parallel: true can run concurrently using Task tool subagents. Sequential plugins run one at a time in directory order.\n\nSkip this step if ~/gt/plugins/ does not exist or is empty."
+    },
+    {
+      "id": "orphan-check",
+      "title": "Find abandoned work",
+      "needs": ["health-scan"],
+      "description": "Find abandoned work.\n\nScan for orphaned state:\n- Issues marked in_progress with no active polecat\n- Polecats that stopped responding mid-work\n- Merge queue entries with no polecat owner\n- Wisp sessions that outlived their spawner\n\n```bash\nbd list --status=in_progress\ngt polecats --all --orphan\n```\n\nFor each orphan:\n- Check if polecat session still exists\n- If not, mark issue for reassignment or retry\n- File incident beads if data loss occurred"
+    },
+    {
+      "id": "session-gc",
+      "title": "Clean dead sessions",
+      "needs": ["orphan-check"],
+      "description": "Clean dead sessions.\n\nGarbage collect terminated sessions:\n- Remove stale polecat directories\n- Clean up wisp session artifacts\n- Prune old logs and temp files\n- Archive completed molecule state\n\n```bash\ngt gc --sessions\ngt gc --wisps --age=1h\n```\n\nPreserve audit trail. Only clean sessions confirmed dead."
+    },
+    {
+      "id": "context-check",
+      "title": "Check own context limit",
+      "needs": ["session-gc"],
+      "description": "Check own context limit.\n\nThe Deacon runs in a Claude session with finite context. Check if approaching the limit:\n\n```bash\ngt context --usage\n```\n\nIf context is high (>80%), prepare for handoff:\n- Summarize current state\n- Note any pending work\n- Write handoff to molecule state\n\nThis enables the Deacon to burn and respawn cleanly."
+    },
+    {
+      "id": "loop-or-exit",
+      "title": "Burn and respawn or loop",
+      "needs": ["context-check"],
+      "description": "Burn and let daemon respawn, or exit if context high.\n\nDecision point at end of patrol cycle:\n\nIf context is LOW:\n- Sleep briefly (avoid tight loop)\n- Return to inbox-check step\n\nIf context is HIGH:\n- Write state to persistent storage\n- Exit cleanly\n- Let the daemon orchestrator respawn a fresh Deacon\n\nThe daemon ensures Deacon is always running:\n```bash\n# Daemon respawns on exit\ngt daemon status\n```\n\nThis enables infinite patrol duration via context-aware respawning."
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "formula": "mol-refinery-patrol",
+  "description": "Merge queue processor patrol loop.\n\nThe Refinery is the Engineer in the engine room. You process polecat branches, merging them to main one at a time with sequential rebasing.\n\n**The Scotty Test**: Before proceeding past any failure, ask yourself: \"Would Scotty walk past a warp core leak because it existed before his shift?\"",
+  "version": 1,
+  "steps": [
+    {
+      "id": "inbox-check",
+      "title": "Check refinery mail",
+      "description": "Check mail for MR submissions, escalations, messages.\n\n```bash\ngt mail inbox\n# Process any urgent items\n```\n\nHandle shutdown requests, escalations, and status queries."
+    },
+    {
+      "id": "queue-scan",
+      "title": "Scan merge queue",
+      "needs": ["inbox-check"],
+      "description": "Fetch remote and identify polecat branches waiting.\n\n```bash\ngit fetch origin\ngit branch -r | grep polecat\ngt refinery queue <rig>\n```\n\nIf queue empty, skip to context-check step. Track branch list for this cycle."
+    },
+    {
+      "id": "process-branch",
+      "title": "Process next branch",
+      "needs": ["queue-scan"],
+      "description": "Pick next branch. Rebase on current main.\n\n```bash\ngit checkout -b temp origin/<polecat-branch>\ngit rebase origin/main\n```\n\nIf rebase conflicts and unresolvable:\n- git rebase --abort\n- Notify polecat to fix and resubmit\n- Skip to loop-check for next branch"
+    },
+    {
+      "id": "run-tests",
+      "title": "Run test suite",
+      "needs": ["process-branch"],
+      "description": "Run the test suite.\n\n```bash\ngo test ./...\n```\n\nTrack results: pass count, fail count, specific failures."
+    },
+    {
+      "id": "handle-failures",
+      "title": "Handle test failures",
+      "needs": ["run-tests"],
+      "description": "**VERIFICATION GATE**: This step enforces the Beads Promise.\n\nIf tests PASSED: This step auto-completes. Proceed to merge.\n\nIf tests FAILED:\n1. Diagnose: Is this a branch regression or pre-existing on main?\n2. If branch caused it:\n   - Abort merge\n   - Notify polecat: \"Tests failing. Please fix and resubmit.\"\n   - Skip to loop-check\n3. If pre-existing on main:\n   - Option A: Fix it yourself (you're the Engineer!)\n   - Option B: File a bead: bd create --type=bug --priority=1 --title=\"...\"\n\n**GATE REQUIREMENT**: You CANNOT proceed to merge-push without:\n- Tests passing, OR\n- Fix committed, OR\n- Bead filed for the failure\n\nThis is non-negotiable. Never disavow. Never \"note and proceed.\""
+    },
+    {
+      "id": "merge-push",
+      "title": "Merge and push to main",
+      "needs": ["handle-failures"],
+      "description": "Merge to main and push immediately.\n\n```bash\ngit checkout main\ngit merge --ff-only temp\ngit push origin main\ngit branch -d temp\ngit branch -D <polecat-branch>  # Local delete (branches never go to origin)\n```\n\nMain has moved. Any remaining branches need rebasing on new baseline."
+    },
+    {
+      "id": "loop-check",
+      "title": "Check for more work",
+      "needs": ["merge-push"],
+      "description": "More branches to process?\n\nIf yes: Return to process-branch with next branch.\nIf no: Continue to generate-summary.\n\nTrack: branches processed, branches skipped (with reasons)."
+    },
+    {
+      "id": "generate-summary",
+      "title": "Generate handoff summary",
+      "needs": ["loop-check"],
+      "description": "Summarize this patrol cycle.\n\nInclude:\n- Branches processed (count, names)\n- Test results (pass/fail)\n- Issues filed (if any)\n- Branches skipped (with reasons)\n- Any escalations sent\n\nThis becomes the digest when the patrol is squashed."
+    },
+    {
+      "id": "context-check",
+      "title": "Check own context limit",
+      "needs": ["generate-summary"],
+      "description": "Check own context usage.\n\nIf context is HIGH (>80%):\n- Write handoff summary\n- Prepare for burn/respawn\n\nIf context is LOW:\n- Can continue processing"
+    },
+    {
+      "id": "burn-or-loop",
+      "title": "Burn and respawn or loop",
+      "needs": ["context-check"],
+      "description": "End of patrol cycle decision.\n\nIf queue non-empty AND context LOW:\n- Burn this wisp, start fresh patrol\n- Return to inbox-check\n\nIf queue empty OR context HIGH:\n- Burn wisp with summary digest\n- Exit (daemon will respawn if needed)"
+    }
+  ]
+}
