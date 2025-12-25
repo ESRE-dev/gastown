@@ -51,14 +51,9 @@ func init() {
 	rootCmd.AddCommand(primeCmd)
 }
 
-// RoleContext contains information about the detected role.
-type RoleContext struct {
-	Role     Role   `json:"role"`
-	Rig      string `json:"rig,omitempty"`
-	Polecat  string `json:"polecat,omitempty"`
-	TownRoot string `json:"town_root"`
-	WorkDir  string `json:"work_dir"`
-}
+// RoleContext is an alias for RoleInfo for backward compatibility.
+// New code should use RoleInfo directly.
+type RoleContext = RoleInfo
 
 func runPrime(cmd *cobra.Command, args []string) error {
 	cwd, err := os.Getwd()
@@ -146,11 +141,12 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func detectRole(cwd, townRoot string) RoleContext {
-	ctx := RoleContext{
+func detectRole(cwd, townRoot string) RoleInfo {
+	ctx := RoleInfo{
 		Role:     RoleUnknown,
 		TownRoot: townRoot,
 		WorkDir:  cwd,
+		Source:   "cwd",
 	}
 
 	// Get relative path from town root

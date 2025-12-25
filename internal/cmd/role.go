@@ -18,6 +18,8 @@ const (
 )
 
 // RoleInfo contains information about a role and its detection source.
+// This is the canonical struct for role detection - used by both GetRole()
+// and detectRole() functions.
 type RoleInfo struct {
 	Role       Role   `json:"role"`
 	Source     string `json:"source"` // "env", "cwd", or "explicit"
@@ -28,6 +30,7 @@ type RoleInfo struct {
 	CwdRole    Role   `json:"cwd_role,omitempty"`    // Role detected from cwd
 	Mismatch   bool   `json:"mismatch,omitempty"`    // True if env != cwd detection
 	TownRoot   string `json:"town_root,omitempty"`
+	WorkDir    string `json:"work_dir,omitempty"`    // Current working directory
 }
 
 var roleCmd = &cobra.Command{
@@ -131,6 +134,7 @@ func GetRole() (RoleInfo, error) {
 func GetRoleWithContext(cwd, townRoot string) (RoleInfo, error) {
 	info := RoleInfo{
 		TownRoot: townRoot,
+		WorkDir:  cwd,
 	}
 
 	// Check environment variable first
@@ -155,7 +159,7 @@ func GetRoleWithContext(cwd, townRoot string) (RoleInfo, error) {
 			info.Mismatch = true
 		}
 	} else {
-		// Fall back to cwd detection
+		// Fall back to cwd detection - copy all fields from cwdCtx
 		info.Role = cwdCtx.Role
 		info.Rig = cwdCtx.Rig
 		info.Polecat = cwdCtx.Polecat
