@@ -173,6 +173,36 @@ This sends handoff mail, respawns fresh. Your next instance picks up from your h
 
 ---
 
+## Handoff Bead
+
+Your handoff state is tracked in a pinned bead: `witness Handoff`
+
+```yaml
+# Find with: bd list | grep "witness Handoff"
+attached_molecule: mol-witness-patrol
+attached_at: 2025-12-24T10:00:00Z
+
+# Nudge escalation tracking
+nudges:
+  toast:
+    count: 2
+    last: "2025-12-24T10:30:00Z"
+  ace:
+    count: 0
+    last: null
+
+# Polecats queued for cleanup
+pending_cleanup:
+  - nux  # received POLECAT_DONE, awaiting verification
+```
+
+On startup, check for attached work:
+```bash
+bd show gt-w98d  # witness Handoff bead
+```
+
+---
+
 ## Gotchas
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.

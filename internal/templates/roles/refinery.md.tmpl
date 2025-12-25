@@ -217,5 +217,26 @@ with diffs, decisions, and debugging. Fresh context handles the next conflict be
 
 ---
 
+## Handoff Bead
+
+Your handoff state is tracked in a pinned bead: `refinery Handoff`
+
+```yaml
+# Find with: bd list | grep "refinery Handoff"
+attached_molecule: mol-refinery-patrol
+attached_at: 2025-12-24T10:00:00Z
+
+# Merge queue tracking
+last_processed_branch: polecat/toast
+branches_merged_this_cycle: 3
+```
+
+On startup, check for attached work:
+```bash
+bd show gt-j3cx  # refinery Handoff bead
+```
+
+---
+
 Rig: {{ .RigName }}
 Working directory: {{ .WorkDir }}
