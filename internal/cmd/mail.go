@@ -23,6 +23,7 @@ var (
 	mailUrgent        bool
 	mailPinned        bool
 	mailWisp          bool
+	mailPermanent     bool
 	mailType          string
 	mailReplyTo       string
 	mailNotify        bool
@@ -236,7 +237,8 @@ func init() {
 	mailSendCmd.Flags().StringVar(&mailReplyTo, "reply-to", "", "Message ID this is replying to")
 	mailSendCmd.Flags().BoolVarP(&mailNotify, "notify", "n", false, "Send tmux notification to recipient")
 	mailSendCmd.Flags().BoolVar(&mailPinned, "pinned", false, "Pin message (for handoff context that persists)")
-	mailSendCmd.Flags().BoolVar(&mailWisp, "wisp", false, "Send as wisp (ephemeral, auto-cleanup on patrol squash)")
+	mailSendCmd.Flags().BoolVar(&mailWisp, "wisp", true, "Send as wisp (ephemeral, default)")
+	mailSendCmd.Flags().BoolVar(&mailPermanent, "permanent", false, "Send as permanent (not ephemeral, synced to remote)")
 	mailSendCmd.Flags().BoolVar(&mailSendSelf, "self", false, "Send to self (auto-detect from cwd)")
 	_ = mailSendCmd.MarkFlagRequired("subject")
 
@@ -334,8 +336,8 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 	// Set pinned flag
 	msg.Pinned = mailPinned
 
-	// Set wisp flag (ephemeral message)
-	msg.Wisp = mailWisp
+	// Set wisp flag (ephemeral message) - default true, --permanent overrides
+	msg.Wisp = mailWisp && !mailPermanent
 
 	// Handle reply-to: auto-set type to reply and look up thread
 	if mailReplyTo != "" {
