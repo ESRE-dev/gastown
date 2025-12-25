@@ -268,7 +268,9 @@ The **handoff mail is supplementary context** (optional but helpful).
 | `gt mail inbox` | Query: `assignee = me AND status = open AND from:*` |
 | `gt mail read X` | Read issue X, no status change |
 | `gt mail delete X` | Close issue X (status → closed) |
-| `gt sling X to Y` | Update X: `assignee = Y, pinned = true` |
+| `gt sling X [Y]` | Hook X to Y (or self), inject start prompt |
+| `gt hook X` | Update X: `pinned = true` (assign without action) |
+| `gt handoff X` | Hook X, restart session (GUPP kicks in) |
 | `bd pin X` | Update X: `pinned = true` |
 | `bd close X` | Update X: `status = closed` |
 

@@ -207,6 +207,25 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	return nil
 }
 
+// NudgePane sends a message to a specific pane reliably.
+// Same pattern as NudgeSession but targets a pane ID (e.g., "%9") instead of session name.
+func (t *Tmux) NudgePane(pane, message string) error {
+	// 1. Send text in literal mode (handles special characters)
+	if _, err := t.run("send-keys", "-t", pane, "-l", message); err != nil {
+		return err
+	}
+
+	// 2. Wait 500ms for paste to complete (tested, required)
+	time.Sleep(500 * time.Millisecond)
+
+	// 3. Send Enter as separate command (key to reliability)
+	if _, err := t.run("send-keys", "-t", pane, "Enter"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // GetPaneCommand returns the current command running in a pane.
 // Returns "bash", "zsh", "claude", "node", etc.
 func (t *Tmux) GetPaneCommand(session string) (string, error) {

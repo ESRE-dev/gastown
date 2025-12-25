@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
 )
 
@@ -134,6 +135,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 }
 
 // injectStartPrompt sends a prompt to the target pane to start working.
+// Uses the reliable nudge pattern: literal mode + 500ms debounce + separate Enter.
 func injectStartPrompt(pane, beadID, subject string) error {
 	if pane == "" {
 		return fmt.Errorf("no target pane")
@@ -147,9 +149,9 @@ func injectStartPrompt(pane, beadID, subject string) error {
 		prompt = fmt.Sprintf("Work slung: %s. Start working on it now - run `gt mol status` to see the hook, then begin.", beadID)
 	}
 
-	// Use tmux send-keys to inject the prompt
-	// Add Enter to submit it
-	return exec.Command("tmux", "send-keys", "-t", pane, prompt, "Enter").Run()
+	// Use the reliable nudge pattern (same as gt nudge / tmux.NudgeSession)
+	t := tmux.NewTmux()
+	return t.NudgePane(pane, prompt)
 }
 
 // resolveTargetAgent converts a target spec to agent ID and pane.

@@ -237,14 +237,21 @@ runs which step, and regardless of crashes or restarts.
 
 ## Implementation Status
 
-The Propulsion Principle is documented but not yet fully implemented in the
-`gt sling` command. See:
+The Propulsion Principle is implemented via three commands:
 
-- **gt-z3qf**: Overhaul gt mol to match bd mol chemistry interface
-- **gt-7hor**: This documentation (Document the Propulsion Principle)
+| Command | Action | Context | Use Case |
+|---------|--------|---------|----------|
+| `gt hook <bead>` | Attach only | Preserved | Assign work for later |
+| `gt sling <bead>` | Attach + run | Preserved | Kick off work immediately |
+| `gt handoff <bead>` | Attach + restart | Fresh | Restart with new context |
 
-Current agents use mail and molecule attachment, which works but has more
-ceremony than the pure propulsion model.
+The algebra:
+```
+gt sling = gt hook + gt nudge "start working"
+gt handoff = gt hook + restart (GUPP kicks in)
+```
+
+See [sling-design.md](sling-design.md) for detailed command reference.
 
 ## Summary
 

@@ -16,12 +16,13 @@ var hookCmd = &cobra.Command{
 	Short: "Attach work to your hook (durable across restarts)",
 	Long: `Attach a bead (issue) to your hook for durable work tracking.
 
-The hook is a lightweight, ephemeral attachment point. When you restart
-(via gt handoff), your SessionStart hook finds the slung work and you
-continue from where you left off.
+The hook is the "durability primitive" - work on your hook survives session
+restarts, context compaction, and handoffs. When you restart (via gt handoff),
+your SessionStart hook finds the attached work and you continue from where
+you left off.
 
-This is the "durability primitive" - work on your hook survives session
-restarts. For the full restart-and-resume flow, use: gt handoff <bead>
+This is "assign without action" - use gt sling to also start immediately,
+or gt handoff to hook and restart with fresh context.
 
 Examples:
   gt hook gt-abc                    # Attach issue gt-abc to your hook
@@ -30,8 +31,9 @@ Examples:
 
 Related commands:
   gt mol status      # See what's on your hook
-  gt handoff <bead>  # Hook + restart in one step
-  gt handoff         # Restart (uses existing hook if present)`,
+  gt sling <bead>    # Hook + start now (keep context)
+  gt handoff <bead>  # Hook + restart (fresh context)
+  gt nudge <agent>   # Send message to trigger execution`,
 	Args: cobra.ExactArgs(1),
 	RunE: runHook,
 }
