@@ -3,10 +3,22 @@
   "description": "Solve Towers of Hanoi for {disks} disks. Generates 2^{disks} - 1 steps, each a trivial move operation. Demonstrates mechanical structure generation for arbitrarily long workflows.",
   "version": 1,
   "vars": {
-    "disks": "{{disks}}",
-    "source_peg": "A",
-    "target_peg": "C",
-    "auxiliary_peg": "B"
+    "disks": {
+      "description": "Number of disks to solve",
+      "required": true
+    },
+    "source_peg": {
+      "description": "Starting peg",
+      "default": "A"
+    },
+    "target_peg": {
+      "description": "Target peg",
+      "default": "C"
+    },
+    "auxiliary_peg": {
+      "description": "Helper peg",
+      "default": "B"
+    }
   },
   "generate": {
     "for-each": {

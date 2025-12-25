@@ -3,8 +3,13 @@
   "description": "Engineer in a Box - the canonical right way. Design before you code. Review before you ship. Test before you submit.",
   "version": 1,
   "vars": {
-    "feature": "{{feature}}",
-    "assignee": "{{assignee}}"
+    "feature": {
+      "description": "The feature being implemented",
+      "required": true
+    },
+    "assignee": {
+      "description": "Who is assigned to this work"
+    }
   },
   "steps": [
     {
