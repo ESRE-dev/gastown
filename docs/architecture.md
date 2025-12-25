@@ -73,7 +73,6 @@ gt install ~/gt --git  # Create HQ with git
 
 **See**: [docs/hq.md](hq.md) for comprehensive HQ documentation, including:
 - Beads redirect patterns for complex setups
-- Multi-system sharing (PGT/GGT coexistence)
 - HQ templates for organizations
 - Migration between HQs
 
@@ -2299,10 +2298,8 @@ Federation is tracked in **gt-9a2** (P3 epic). Key tasks:
 
 ## Implementation Status
 
-Gas Town is being ported from Python (gastown-py) to Go (gastown). The Go port (GGT) is in development:
+Gas Town is written in Go. Current development epics:
 
-- **Epic**: gt-u1j (Port Gas Town to Go)
-- **Scaffolding**: gt-u1j.1 (Go scaffolding - blocker for implementation)
 - **Management**: gt-f9x (Town & Rig Management: install, doctor, federation)
 
 See beads issues with `bd list --status=open` for current work items.

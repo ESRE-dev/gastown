@@ -118,56 +118,8 @@ mayor/rigs/gastown/.beads
 ```
 
 **When to use redirects:**
-- Shared HQ between different Gas Town versions (PGT/GGT)
 - When rig beads should be the canonical town beads
 - Hybrid setups where agents work in different locations
-
-## Multiple Gas Towns in One Location
-
-Sometimes you need to run multiple Gas Town systems from the same parent directory. This creates a "shared HQ" scenario.
-
-### The Problem
-
-If Python Gas Town (PGT) and Go Gas Town (GGT) both use `~/ai/`:
-```
-~/ai/
-├── .gastown/           # PGT runtime config (hidden)
-├── .runtime/           # GGT runtime state (gitignored)
-├── .beads/             # Which system owns this?
-├── mayor/              # PGT mayor? GGT mayor?
-└── gastown/            # PGT rig? GGT rig?
-```
-
-Note: GGT uses `.runtime/` for runtime state and `settings/` for behavioral config.
-PGT uses `.gastown/` for both.
-
-### Solutions
-
-**Option 1: Separate HQs (recommended)**
-```
-~/ai/                   # PGT HQ
-~/gt/                   # GGT HQ (separate)
-```
-
-**Option 2: Namespaced directories**
-```
-~/ai/
-├── pgt/                # PGT HQ
-│   ├── mayor/
-│   └── gastown/
-└── ggt/                # GGT HQ
-    ├── mayor/
-    └── gastown/
-```
-
-**Option 3: Beads redirect (advanced)**
-```
-~/ai/
-├── .beads/redirect     # Points to canonical location
-├── pgt-mayor/          # PGT-specific
-├── ggt-mayor/          # GGT-specific
-└── gastown/            # Shared rig
-```
 
 ## HQ Configuration Files
 

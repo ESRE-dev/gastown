@@ -37,10 +37,9 @@ Town (/Users/stevey/gt)
 
 ## Project Info
 
-This is the **Go port** of Gas Town, a multi-agent workspace manager.
+Gas Town is a multi-agent workspace manager written in Go.
 
 - **Issue prefix**: `gt-`
-- **Python version**: ~/ai/gastown-py (reference implementation)
 - **Architecture**: docs/architecture.md
 
 ## Development
