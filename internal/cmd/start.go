@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -21,6 +23,8 @@ import (
 
 var (
 	startAll             bool
+	startCrewRig         string
+	startCrewAccount     string
 	shutdownGraceful     bool
 	shutdownWait         int
 	shutdownAll          bool
@@ -71,9 +75,32 @@ Use --nuclear to force cleanup even if polecats have uncommitted work (DANGER).`
 	RunE: runShutdown,
 }
 
+var startCrewCmd = &cobra.Command{
+	Use:   "crew <name>",
+	Short: "Start a crew workspace (creates if needed)",
+	Long: `Start a crew workspace, creating it if it doesn't exist.
+
+This is a convenience command that combines 'gt crew add' and 'gt crew at --detached'.
+The crew session starts in the background with Claude running and ready.
+
+The name can include the rig in slash format (e.g., gastown/joe).
+If not specified, the rig is inferred from the current directory.
+
+Examples:
+  gt start crew joe                    # Start joe in current rig
+  gt start crew gastown/joe            # Start joe in gastown rig
+  gt start crew joe --rig beads        # Start joe in beads rig`,
+	Args: cobra.ExactArgs(1),
+	RunE: runStartCrew,
+}
+
 func init() {
 	startCmd.Flags().BoolVarP(&startAll, "all", "a", false,
 		"Also start Witnesses and Refineries for all rigs")
+
+	startCrewCmd.Flags().StringVar(&startCrewRig, "rig", "", "Rig to use")
+	startCrewCmd.Flags().StringVar(&startCrewAccount, "account", "", "Claude Code account handle to use")
+	startCmd.AddCommand(startCrewCmd)
 
 	shutdownCmd.Flags().BoolVarP(&shutdownGraceful, "graceful", "g", false,
 		"Send ESC to agents and wait for them to handoff before killing")
@@ -555,4 +582,160 @@ func cleanupPolecats(townRoot string) {
 	} else {
 		fmt.Printf("  %s No polecats to clean up\n", style.Dim.Render("○"))
 	}
+}
+
+// runStartCrew starts a crew workspace, creating it if it doesn't exist.
+// This combines the functionality of 'gt crew add' and 'gt crew at --detached'.
+func runStartCrew(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	// Parse rig/name format (e.g., "gastown/joe" -> rig=gastown, name=joe)
+	rigName := startCrewRig
+	if parsedRig, crewName, ok := parseRigSlashName(name); ok {
+		if rigName == "" {
+			rigName = parsedRig
+		}
+		name = crewName
+	}
+
+	// Find workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// If rig still not specified, try to infer from cwd
+	if rigName == "" {
+		rigName, err = inferRigFromCwd(townRoot)
+		if err != nil {
+			return fmt.Errorf("could not determine rig (use --rig flag or rig/name format): %w", err)
+		}
+	}
+
+	// Load rigs config
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
+	}
+
+	// Get rig
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+	r, err := rigMgr.GetRig(rigName)
+	if err != nil {
+		return fmt.Errorf("rig '%s' not found", rigName)
+	}
+
+	// Create crew manager
+	crewGit := git.NewGit(r.Path)
+	crewMgr := crew.NewManager(r, crewGit)
+
+	// Check if crew exists, create if not
+	worker, err := crewMgr.Get(name)
+	if err == crew.ErrCrewNotFound {
+		fmt.Printf("Creating crew workspace %s in %s...\n", name, rigName)
+		worker, err = crewMgr.Add(name, false) // No feature branch for crew
+		if err != nil {
+			return fmt.Errorf("creating crew workspace: %w", err)
+		}
+		fmt.Printf("%s Created crew workspace: %s/%s\n",
+			style.Bold.Render("✓"), rigName, name)
+	} else if err != nil {
+		return fmt.Errorf("getting crew worker: %w", err)
+	}
+
+	// Ensure crew workspace is on main branch
+	ensureMainBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", rigName, name))
+
+	// Resolve account for Claude config
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, startCrewAccount)
+	if err != nil {
+		return fmt.Errorf("resolving account: %w", err)
+	}
+	if accountHandle != "" {
+		fmt.Printf("Using account: %s\n", accountHandle)
+	}
+
+	// Check if session exists
+	t := tmux.NewTmux()
+	sessionID := crewSessionName(rigName, name)
+	hasSession, err := t.HasSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+
+	if hasSession {
+		// Session exists - check if Claude is still running
+		if !t.IsClaudeRunning(sessionID) {
+			// Claude has exited, restart it
+			fmt.Printf("Session exists, restarting Claude...\n")
+			if err := t.SendKeys(sessionID, "claude --dangerously-skip-permissions"); err != nil {
+				return fmt.Errorf("restarting claude: %w", err)
+			}
+			// Wait for Claude to start, then prime
+			shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+			if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
+				fmt.Printf("Warning: Timeout waiting for Claude to start: %v\n", err)
+			}
+			time.Sleep(500 * time.Millisecond)
+			if err := t.SendKeys(sessionID, "gt prime"); err != nil {
+				fmt.Printf("Warning: Could not send prime command: %v\n", err)
+			}
+		} else {
+			fmt.Printf("%s Session already running: %s\n", style.Dim.Render("○"), sessionID)
+		}
+	} else {
+		// Create new session
+		if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
+			return fmt.Errorf("creating session: %w", err)
+		}
+
+		// Set environment
+		_ = t.SetEnvironment(sessionID, "GT_RIG", rigName)
+		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
+
+		// Set CLAUDE_CONFIG_DIR for account selection
+		if claudeConfigDir != "" {
+			_ = t.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", claudeConfigDir)
+		}
+
+		// Apply rig-based theming
+		theme := getThemeForRig(rigName)
+		_ = t.ConfigureGasTownSession(sessionID, theme, rigName, name, "crew")
+
+		// Set up C-b n/p keybindings for crew session cycling
+		_ = t.SetCrewCycleBindings(sessionID)
+
+		// Wait for shell to be ready after session creation
+		if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
+			return fmt.Errorf("waiting for shell: %w", err)
+		}
+
+		// Start claude with skip permissions
+		if err := t.SendKeys(sessionID, "claude --dangerously-skip-permissions"); err != nil {
+			return fmt.Errorf("starting claude: %w", err)
+		}
+
+		// Wait for Claude to start
+		shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+		if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
+			fmt.Printf("Warning: Timeout waiting for Claude to start: %v\n", err)
+		}
+
+		// Give Claude time to initialize after process starts
+		time.Sleep(500 * time.Millisecond)
+
+		// Send gt prime to initialize context
+		if err := t.SendKeys(sessionID, "gt prime"); err != nil {
+			fmt.Printf("Warning: Could not send prime command: %v\n", err)
+		}
+
+		fmt.Printf("%s Started crew workspace: %s/%s\n",
+			style.Bold.Render("✓"), rigName, name)
+	}
+
+	fmt.Printf("Attach with: %s\n", style.Dim.Render(fmt.Sprintf("gt crew at %s", name)))
+	return nil
 }

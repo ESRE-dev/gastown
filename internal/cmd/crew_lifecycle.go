@@ -170,12 +170,16 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Get the crew worker
+	// Get the crew worker, create if not exists (idempotent)
 	worker, err := crewMgr.Get(name)
-	if err != nil {
-		if err == crew.ErrCrewNotFound {
-			return fmt.Errorf("crew workspace '%s' not found", name)
+	if err == crew.ErrCrewNotFound {
+		fmt.Printf("Creating crew workspace %s in %s...\n", name, r.Name)
+		worker, err = crewMgr.Add(name, false) // No feature branch for crew
+		if err != nil {
+			return fmt.Errorf("creating crew workspace: %w", err)
 		}
+		fmt.Printf("Created crew workspace: %s/%s\n", r.Name, name)
+	} else if err != nil {
 		return fmt.Errorf("getting crew worker: %w", err)
 	}
 
