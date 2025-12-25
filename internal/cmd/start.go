@@ -643,6 +643,8 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 			style.Bold.Render("✓"), rigName, name)
 	} else if err != nil {
 		return fmt.Errorf("getting crew worker: %w", err)
+	} else {
+		fmt.Printf("Crew workspace %s/%s exists\n", rigName, name)
 	}
 
 	// Ensure crew workspace is on main branch
