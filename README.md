@@ -15,10 +15,29 @@ Beads        = Railroad Tracks (the persistent ledger)
 
 The goal is a "village" architecture - not rigid hierarchy, but distributed awareness where agents can help neighbors when something is stuck. Whether this actually works at scale is something we're still discovering.
 
+## Prerequisites
+
+- **Go 1.23+** - For building from source
+- **Git** - For rig management and beads sync
+- **tmux** - Required for agent sessions (all workers run in tmux panes)
+- **Claude Code CLI** - Required for agents (`claude` command must be available)
+
 ## Install
+
+**From source (recommended for now):**
 
 ```bash
 go install github.com/steveyegge/gastown/cmd/gt@latest
+```
+
+**Package managers (coming soon):**
+
+```bash
+# Homebrew (macOS/Linux)
+brew install gastown
+
+# npm (cross-platform)
+npm install -g @anthropic/gastown
 ```
 
 ## Quick Start

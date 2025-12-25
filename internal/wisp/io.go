@@ -100,11 +100,7 @@ func ListHooks(root string) ([]string, error) {
 
 	var agents []string
 	for _, e := range entries {
-		name := e.Name()
-		if len(name) > len(HookPrefix)+len(HookSuffix) &&
-			name[:len(HookPrefix)] == HookPrefix &&
-			name[len(name)-len(HookSuffix):] == HookSuffix {
-			agent := name[len(HookPrefix) : len(name)-len(HookSuffix)]
+		if agent := AgentFromHookFilename(e.Name()); agent != "" {
 			agents = append(agents, agent)
 		}
 	}

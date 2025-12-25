@@ -10,6 +10,7 @@
 package wisp
 
 import (
+	"strings"
 	"time"
 )
 
@@ -72,6 +73,25 @@ func NewSlungWork(beadID, createdBy string) *SlungWork {
 }
 
 // HookFilename returns the filename for an agent's hook file.
+// Agent identities may contain slashes (e.g., "gastown/crew/max"),
+// which are replaced with underscores to create valid filenames.
 func HookFilename(agent string) string {
-	return HookPrefix + agent + HookSuffix
+	safe := strings.ReplaceAll(agent, "/", "_")
+	return HookPrefix + safe + HookSuffix
+}
+
+// AgentFromHookFilename extracts the agent identity from a hook filename.
+// Reverses the slash-to-underscore transformation done by HookFilename.
+func AgentFromHookFilename(filename string) string {
+	if len(filename) <= len(HookPrefix)+len(HookSuffix) {
+		return ""
+	}
+	if filename[:len(HookPrefix)] != HookPrefix {
+		return ""
+	}
+	if filename[len(filename)-len(HookSuffix):] != HookSuffix {
+		return ""
+	}
+	safe := filename[len(HookPrefix) : len(filename)-len(HookSuffix)]
+	return strings.ReplaceAll(safe, "_", "/")
 }
