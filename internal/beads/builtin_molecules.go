@@ -2,6 +2,9 @@
 package beads
 
 // BuiltinMolecule defines a built-in molecule template.
+// Deprecated: Molecules are now defined as formula files in .beads/formulas/
+// and cooked into proto beads via `bd cook`. This type remains for backward
+// compatibility but is no longer used.
 type BuiltinMolecule struct {
 	ID          string // Well-known ID (e.g., "mol-engineer-in-box")
 	Title       string
@@ -9,70 +12,17 @@ type BuiltinMolecule struct {
 }
 
 // BuiltinMolecules returns all built-in molecule definitions.
-// Molecules are defined in separate files by category:
-//   - molecules_work.go: EngineerInBox, QuickFix, Research, PolecatWork, ReadyWork
-//   - molecules_patrol.go: DeaconPatrol, WitnessPatrol, RefineryPatrol
-//   - molecules_session.go: CrewSession, PolecatSession, Bootstrap, VersionBump, InstallGoBinary
+// Deprecated: Molecules are now defined as formula files (.beads/formulas/*.formula.json)
+// and cooked into proto beads via `bd cook`. This function returns an empty slice.
+// Use `bd cook` to create proto beads from formulas instead.
 func BuiltinMolecules() []BuiltinMolecule {
-	return []BuiltinMolecule{
-		// Work molecules
-		EngineerInBoxMolecule(),
-		QuickFixMolecule(),
-		ResearchMolecule(),
-		PolecatWorkMolecule(),
-		ReadyWorkMolecule(),
-
-		// Patrol molecules
-		DeaconPatrolMolecule(),
-		RefineryPatrolMolecule(),
-		WitnessPatrolMolecule(),
-		PolecatArmMolecule(),
-
-		// Session and utility molecules
-		CrewSessionMolecule(),
-		PolecatSessionMolecule(),
-		BootstrapGasTownMolecule(),
-		VersionBumpMolecule(),
-		InstallGoBinaryMolecule(),
-	}
+	return []BuiltinMolecule{}
 }
 
-// SeedBuiltinMolecules creates all built-in molecules in the beads database.
-// It skips molecules that already exist (by title match).
-// Returns the number of molecules created.
+// SeedBuiltinMolecules is deprecated and does nothing.
+// Molecules are now created by cooking formula files with `bd cook`.
+// This function remains for backward compatibility with existing installations.
 func (b *Beads) SeedBuiltinMolecules() (int, error) {
-	molecules := BuiltinMolecules()
-	created := 0
-
-	// Get existing molecules to avoid duplicates
-	existing, err := b.List(ListOptions{Type: "molecule", Priority: -1})
-	if err != nil {
-		return 0, err
-	}
-
-	// Build map of existing molecule titles
-	existingTitles := make(map[string]bool)
-	for _, issue := range existing {
-		existingTitles[issue.Title] = true
-	}
-
-	// Create each molecule if it doesn't exist
-	for _, mol := range molecules {
-		if existingTitles[mol.Title] {
-			continue // Already exists
-		}
-
-		_, err := b.Create(CreateOptions{
-			Title:       mol.Title,
-			Type:        "molecule",
-			Priority:    2, // Medium priority
-			Description: mol.Description,
-		})
-		if err != nil {
-			return created, err
-		}
-		created++
-	}
-
-	return created, nil
+	// No-op: formulas are cooked on-demand, not seeded at install time
+	return 0, nil
 }

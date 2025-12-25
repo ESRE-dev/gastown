@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
@@ -173,13 +172,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
 			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with gm- prefix)\n")
-
-			// Seed built-in molecules
-			if err := seedBuiltinMolecules(absPath); err != nil {
-				fmt.Printf("   %s Could not seed built-in molecules: %v\n", style.Dim.Render("⚠"), err)
-			} else {
-				fmt.Printf("   ✓ Seeded built-in molecules\n")
-			}
 		}
 	}
 
@@ -253,10 +245,3 @@ func initTownBeads(townPath string) error {
 	return nil
 }
 
-// seedBuiltinMolecules creates built-in molecule definitions in the beads database.
-// These molecules provide standard workflows like engineer-in-box, quick-fix, and research.
-func seedBuiltinMolecules(townPath string) error {
-	b := beads.New(townPath)
-	_, err := b.SeedBuiltinMolecules()
-	return err
-}
