@@ -398,11 +398,11 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// Notify Witness with POLECAT_STARTED message (ephemeral - lifecycle ping)
 	witnessAddr := fmt.Sprintf("%s/witness", rigName)
 	witnessNotification := &mail.Message{
-		To:        witnessAddr,
-		From:      sender,
-		Subject:   fmt.Sprintf("POLECAT_STARTED %s", polecatName),
-		Body:      fmt.Sprintf("Issue: %s\nSession: %s", assignmentID, sessionName),
-		Ephemeral: true,
+		To:      witnessAddr,
+		From:    sender,
+		Subject: fmt.Sprintf("POLECAT_STARTED %s", polecatName),
+		Body:    fmt.Sprintf("Issue: %s\nSession: %s", assignmentID, sessionName),
+		Wisp:    true,
 	}
 
 	if err := townRouter.Send(witnessNotification); err != nil {
@@ -414,11 +414,11 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// Notify Deacon with POLECAT_STARTED message (ephemeral - lifecycle ping)
 	deaconAddr := "deacon/"
 	deaconNotification := &mail.Message{
-		To:        deaconAddr,
-		From:      sender,
-		Subject:   fmt.Sprintf("POLECAT_STARTED %s/%s", rigName, polecatName),
-		Body:      fmt.Sprintf("Issue: %s\nSession: %s", assignmentID, sessionName),
-		Ephemeral: true,
+		To:      deaconAddr,
+		From:    sender,
+		Subject: fmt.Sprintf("POLECAT_STARTED %s/%s", rigName, polecatName),
+		Body:    fmt.Sprintf("Issue: %s\nSession: %s", assignmentID, sessionName),
+		Wisp:    true,
 	}
 
 	if err := townRouter.Send(deaconNotification); err != nil {

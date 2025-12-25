@@ -23,7 +23,6 @@ type Mailbox struct {
 	identity string // beads identity (e.g., "gastown/polecats/Toast")
 	workDir  string // directory to run bd commands in
 	beadsDir string // explicit .beads directory path (set via BEADS_DIR)
-	wispDir  string // .beads-wisp directory for ephemeral messages
 	path     string // for legacy JSONL mode (crew workers)
 	legacy   bool   // true = use JSONL files, false = use beads
 }
@@ -49,26 +48,20 @@ func NewMailboxBeads(identity, workDir string) *Mailbox {
 // NewMailboxFromAddress creates a beads-backed mailbox from a GGT address.
 func NewMailboxFromAddress(address, workDir string) *Mailbox {
 	beadsDir := filepath.Join(workDir, ".beads")
-	// Wisp directory is .beads-wisp/.beads (bd init creates .beads/ subdirectory)
-	wispDir := filepath.Join(workDir, ".beads-wisp", ".beads")
 	return &Mailbox{
 		identity: addressToIdentity(address),
 		workDir:  workDir,
 		beadsDir: beadsDir,
-		wispDir:  wispDir,
 		legacy:   false,
 	}
 }
 
 // NewMailboxWithBeadsDir creates a mailbox with an explicit beads directory.
 func NewMailboxWithBeadsDir(address, workDir, beadsDir string) *Mailbox {
-	// Derive wispDir from beadsDir (.beads-wisp/.beads sibling structure)
-	wispDir := filepath.Join(filepath.Dir(beadsDir), ".beads-wisp", ".beads")
 	return &Mailbox{
 		identity: addressToIdentity(address),
 		workDir:  workDir,
 		beadsDir: beadsDir,
-		wispDir:  wispDir,
 		legacy:   false,
 	}
 }
@@ -92,29 +85,23 @@ func (m *Mailbox) List() ([]*Message, error) {
 }
 
 func (m *Mailbox) listBeads() ([]*Message, error) {
-	// Query persistent beads
-	persistentMsgs, err := m.listFromDir(m.beadsDir, SourcePersistent)
+	// Single query to beads - returns both persistent and wisp messages
+	// Wisps are stored in same DB with wisp=true flag, filtered from JSONL export
+	messages, err := m.listFromDir(m.beadsDir)
 	if err != nil {
 		return nil, err
 	}
 
-	// Query wisp beads (ignore errors for missing dir)
-	var wispMsgs []*Message
-	if m.wispDir != "" {
-		wispMsgs, _ = m.listFromDir(m.wispDir, SourceWisp)
-	}
-
-	// Merge and sort by timestamp (newest first)
-	all := append(persistentMsgs, wispMsgs...)
-	sort.Slice(all, func(i, j int) bool {
-		return all[i].Timestamp.After(all[j].Timestamp)
+	// Sort by timestamp (newest first)
+	sort.Slice(messages, func(i, j int) bool {
+		return messages[i].Timestamp.After(messages[j].Timestamp)
 	})
 
-	return all, nil
+	return messages, nil
 }
 
-// listFromDir queries messages from a specific beads directory.
-func (m *Mailbox) listFromDir(beadsDir string, source MessageSource) ([]*Message, error) {
+// listFromDir queries messages from a beads directory.
+func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 	// bd list --type=message --assignee=<identity> --json --status=open
 	cmd := exec.Command("bd", "list",
 		"--type", "message",
@@ -149,13 +136,10 @@ func (m *Mailbox) listFromDir(beadsDir string, source MessageSource) ([]*Message
 		return nil, err
 	}
 
-	// Convert to GGT messages and set source
+	// Convert to GGT messages - wisp status comes from beads issue.wisp field
 	var messages []*Message
 	for _, bm := range beadsMsgs {
-		msg := bm.ToMessage()
-		msg.Source = source
-		msg.Ephemeral = (source == SourceWisp)
-		messages = append(messages, msg)
+		messages = append(messages, bm.ToMessage())
 	}
 
 	return messages, nil
@@ -226,25 +210,12 @@ func (m *Mailbox) Get(id string) (*Message, error) {
 }
 
 func (m *Mailbox) getBeads(id string) (*Message, error) {
-	// Try persistent first
-	msg, err := m.getFromDir(id, m.beadsDir, SourcePersistent)
-	if err == nil {
-		return msg, nil
-	}
-
-	// Try wisp storage
-	if m.wispDir != "" {
-		msg, err = m.getFromDir(id, m.wispDir, SourceWisp)
-		if err == nil {
-			return msg, nil
-		}
-	}
-
-	return nil, ErrMessageNotFound
+	// Single DB query - wisps and persistent messages in same store
+	return m.getFromDir(id, m.beadsDir)
 }
 
-// getFromDir retrieves a message from a specific beads directory.
-func (m *Mailbox) getFromDir(id, beadsDir string, source MessageSource) (*Message, error) {
+// getFromDir retrieves a message from a beads directory.
+func (m *Mailbox) getFromDir(id, beadsDir string) (*Message, error) {
 	cmd := exec.Command("bd", "show", id, "--json")
 	cmd.Dir = m.workDir
 	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
@@ -273,10 +244,8 @@ func (m *Mailbox) getFromDir(id, beadsDir string, source MessageSource) (*Messag
 		return nil, ErrMessageNotFound
 	}
 
-	msg := bms[0].ToMessage()
-	msg.Source = source
-	msg.Ephemeral = (source == SourceWisp)
-	return msg, nil
+	// Wisp status comes from beads issue.wisp field via ToMessage()
+	return bms[0].ToMessage(), nil
 }
 
 func (m *Mailbox) getLegacy(id string) (*Message, error) {
@@ -301,21 +270,8 @@ func (m *Mailbox) MarkRead(id string) error {
 }
 
 func (m *Mailbox) markReadBeads(id string) error {
-	// Try persistent first
-	err := m.closeInDir(id, m.beadsDir)
-	if err == nil {
-		return nil
-	}
-
-	// Try wisp storage
-	if m.wispDir != "" {
-		err = m.closeInDir(id, m.wispDir)
-		if err == nil {
-			return nil
-		}
-	}
-
-	return ErrMessageNotFound
+	// Single DB - wisps and persistent messages in same store
+	return m.closeInDir(id, m.beadsDir)
 }
 
 // closeInDir closes a message in a specific beads directory.

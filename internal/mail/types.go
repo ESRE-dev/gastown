@@ -28,16 +28,6 @@ const (
 // MessageType indicates the purpose of a message.
 type MessageType string
 
-// MessageSource indicates where a message is stored.
-type MessageSource string
-
-const (
-	// SourcePersistent indicates the message is in permanent .beads storage.
-	SourcePersistent MessageSource = "persistent"
-
-	// SourceWisp indicates the message is in ephemeral .beads-wisp storage.
-	SourceWisp MessageSource = "wisp"
-)
 
 const (
 	// TypeTask indicates a message requiring action from the recipient.
@@ -109,13 +99,9 @@ type Message struct {
 	// Pinned marks the message as pinned (won't be auto-archived).
 	Pinned bool `json:"pinned,omitempty"`
 
-	// Ephemeral marks this as a transient message stored in wisps.
-	// Ephemeral messages auto-cleanup on patrol squash.
-	Ephemeral bool `json:"ephemeral,omitempty"`
-
-	// Source indicates where this message is stored (persistent or wisp).
-	// Set during List(), not serialized.
-	Source MessageSource `json:"-"`
+	// Wisp marks this as a transient message (stored in same DB but filtered from JSONL export).
+	// Wisp messages auto-cleanup on patrol squash.
+	Wisp bool `json:"wisp,omitempty"`
 }
 
 // NewMessage creates a new message with a generated ID and thread ID.
@@ -177,6 +163,7 @@ type BeadsMessage struct {
 	CreatedAt   time.Time `json:"created_at"`
 	Labels      []string  `json:"labels"` // Metadata labels (from:X, thread:X, reply-to:X, msg-type:X)
 	Pinned      bool      `json:"pinned,omitempty"`
+	Wisp        bool      `json:"wisp,omitempty"` // Ephemeral message (filtered from JSONL export)
 
 	// Cached parsed values (populated by ParseLabels)
 	sender   string
@@ -237,6 +224,7 @@ func (bm *BeadsMessage) ToMessage() *Message {
 		Type:      msgType,
 		ThreadID:  bm.threadID,
 		ReplyTo:   bm.replyTo,
+		Wisp:      bm.Wisp,
 	}
 }
 
