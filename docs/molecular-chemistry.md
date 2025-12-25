@@ -4,9 +4,9 @@
 > searching for its purpose."*
 
 Gas Town is a **work composition and execution engine**. This document describes
-the chemical algebra for expressing, instantiating, and executing work at any
-scale - from single tasks to massive polymers that can grind through weekends
-of autonomous operation.
+**MEOW** - the **M**olecular **E**xpression **O**f **W**ork - a chemical algebra
+for expressing, instantiating, and executing work at any scale, from single tasks
+to massive polymers that can grind through weekends of autonomous operation.
 
 **Core insight**: Structure is computation. Content is cognition. They're separate.
 

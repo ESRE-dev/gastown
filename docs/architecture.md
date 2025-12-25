@@ -355,9 +355,12 @@ rig/
 | Process termination | Burn (discard) or squash (save state) |
 | IPC | Mail beads |
 
-## Molecules: Composable Workflow Templates
+## Molecules: Composable Workflow Templates (MEOW)
 
-Molecules are **crystallized, composable, nondeterministic-idempotent workflow templates**. They encode structured workflows that any worker can execute, with full auditability and the ability for any worker to pick up where another left off.
+**MEOW** - **M**olecular **E**xpression **O**f **W**ork. Molecules are **crystallized,
+composable, nondeterministic-idempotent workflow templates**. They encode structured
+workflows that any worker can execute, with full auditability and the ability for
+any worker to pick up where another left off.
 
 ### Core Concepts
 

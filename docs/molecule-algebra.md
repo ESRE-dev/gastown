@@ -1,4 +1,4 @@
-# Molecule Algebra: A Composition Language for Work
+# Molecule Algebra: A Composition Language for Work (MEOW)
 
 > Status: Design Spec v1 - December 2024
 >
@@ -6,10 +6,10 @@
 
 ## Overview
 
-This document defines the **Molecule Algebra** - a declarative language for
-composing, transforming, and executing structured work. The algebra enables
-mechanical composition of workflows without AI, reserving cognition for
-leaf-node execution only.
+This document defines **MEOW** - the **M**olecular **E**xpression **O**f **W**ork -
+a declarative algebra for composing, transforming, and executing structured work.
+The algebra enables mechanical composition of workflows without AI, reserving
+cognition for leaf-node execution only.
 
 **Key insight**: Structure is computation. Content is cognition. They're separate.
 
