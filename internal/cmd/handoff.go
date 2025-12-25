@@ -260,13 +260,23 @@ func buildRestartCommand(sessionName string) (string, error) {
 		return "", err
 	}
 
-	// For respawn-pane, we cd to the right directory then run claude.
+	// Determine GT_ROLE value for this session
+	gtRole := sessionToGTRole(sessionName)
+
+	// For respawn-pane, we:
+	// 1. cd to the right directory (role's canonical home)
+	// 2. export GT_ROLE so role detection works correctly
+	// 3. run claude
 	// The SessionStart hook will run gt prime.
 	// Use exec to ensure clean process replacement.
+	if gtRole != "" {
+		return fmt.Sprintf("cd %s && export GT_ROLE=%s && exec claude --dangerously-skip-permissions", workDir, gtRole), nil
+	}
 	return fmt.Sprintf("cd %s && exec claude --dangerously-skip-permissions", workDir), nil
 }
 
 // sessionWorkDir returns the correct working directory for a session.
+// This is the canonical home for each role type.
 func sessionWorkDir(sessionName, townRoot string) (string, error) {
 	switch {
 	case sessionName == "gt-mayor":
@@ -292,19 +302,50 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 		return "", fmt.Errorf("cannot parse crew session name: %s", sessionName)
 
 	case strings.HasSuffix(sessionName, "-witness"):
-		// gt-<rig>-witness -> <townRoot>/<rig>/witness
+		// gt-<rig>-witness -> <townRoot>/<rig>/witness/rig
 		rig := strings.TrimPrefix(sessionName, "gt-")
 		rig = strings.TrimSuffix(rig, "-witness")
-		return fmt.Sprintf("%s/%s/witness", townRoot, rig), nil
+		return fmt.Sprintf("%s/%s/witness/rig", townRoot, rig), nil
 
 	case strings.HasSuffix(sessionName, "-refinery"):
-		// gt-<rig>-refinery -> <townRoot>/<rig>/refinery
+		// gt-<rig>-refinery -> <townRoot>/<rig>/refinery/rig
 		rig := strings.TrimPrefix(sessionName, "gt-")
 		rig = strings.TrimSuffix(rig, "-refinery")
-		return fmt.Sprintf("%s/%s/refinery", townRoot, rig), nil
+		return fmt.Sprintf("%s/%s/refinery/rig", townRoot, rig), nil
 
 	default:
 		return "", fmt.Errorf("unknown session type: %s (try specifying role explicitly)", sessionName)
+	}
+}
+
+// sessionToGTRole converts a session name to a GT_ROLE value.
+func sessionToGTRole(sessionName string) string {
+	switch {
+	case sessionName == "gt-mayor":
+		return "mayor"
+	case sessionName == "gt-deacon":
+		return "deacon"
+	case strings.Contains(sessionName, "-crew-"):
+		// gt-<rig>-crew-<name> -> <rig>/crew/<name>
+		parts := strings.Split(sessionName, "-")
+		for i, p := range parts {
+			if p == "crew" && i > 1 && i < len(parts)-1 {
+				rig := strings.Join(parts[1:i], "-")
+				name := strings.Join(parts[i+1:], "-")
+				return fmt.Sprintf("%s/crew/%s", rig, name)
+			}
+		}
+		return ""
+	case strings.HasSuffix(sessionName, "-witness"):
+		rig := strings.TrimPrefix(sessionName, "gt-")
+		rig = strings.TrimSuffix(rig, "-witness")
+		return fmt.Sprintf("%s/witness", rig)
+	case strings.HasSuffix(sessionName, "-refinery"):
+		rig := strings.TrimPrefix(sessionName, "gt-")
+		rig = strings.TrimSuffix(rig, "-refinery")
+		return fmt.Sprintf("%s/refinery", rig)
+	default:
+		return ""
 	}
 }
 

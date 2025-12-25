@@ -75,8 +75,35 @@ func runPrime(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace")
 	}
 
-	// Detect role
-	ctx := detectRole(cwd, townRoot)
+	// Get role using env-aware detection
+	roleInfo, err := GetRoleWithContext(cwd, townRoot)
+	if err != nil {
+		return fmt.Errorf("detecting role: %w", err)
+	}
+
+	// Warn prominently if there's a role/cwd mismatch
+	if roleInfo.Mismatch {
+		fmt.Printf("\n%s\n", style.Bold.Render("⚠️  ROLE/LOCATION MISMATCH"))
+		fmt.Printf("You are %s (from $GT_ROLE) but your cwd suggests %s.\n",
+			style.Bold.Render(string(roleInfo.Role)),
+			style.Bold.Render(string(roleInfo.CwdRole)))
+		fmt.Printf("Expected home: %s\n", roleInfo.Home)
+		fmt.Printf("Actual cwd:    %s\n", cwd)
+		fmt.Println()
+		fmt.Println("This can cause commands to misbehave. Either:")
+		fmt.Println("  1. cd to your home directory, OR")
+		fmt.Println("  2. Use absolute paths for gt/bd commands")
+		fmt.Println()
+	}
+
+	// Build RoleContext for compatibility with existing code
+	ctx := RoleContext{
+		Role:     roleInfo.Role,
+		Rig:      roleInfo.Rig,
+		Polecat:  roleInfo.Polecat,
+		TownRoot: townRoot,
+		WorkDir:  cwd,
+	}
 
 	// Check and acquire identity lock for worker roles
 	if err := acquireIdentityLock(ctx); err != nil {
