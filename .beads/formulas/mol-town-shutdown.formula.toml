@@ -1,7 +1,10 @@
 description = """
 Full Gas Town shutdown and restart.
 
-This is the "nuclear" option for clean reboot. Use when you need to:
+This is an idempotent shutdown - it stops Claude sessions but preserves
+polecat sandboxes and hooks. Polecats can resume their work after restart.
+
+Use when you need to:
 - Reset all state for a fresh start
 - Recover from corrupted agent state
 - Prepare for maintenance or upgrades
@@ -11,57 +14,94 @@ Sling to Mayor when ready to reboot:
 """
 formula = "mol-town-shutdown"
 type = "workflow"
-version = 1
+version = 2
+
+[[steps]]
+id = "preflight-check"
+title = "Preflight safety check"
+description = """
+Scan for conditions that might make shutdown inadvisable.
+
+```bash
+gt shutdown preflight
+```
+
+This checks for:
+- **Uncommitted changes**: Polecats with dirty git status
+- **Unpushed commits**: Work that hasn't reached remote
+- **Active merges**: Refinery mid-merge (could corrupt state)
+- **Pending CI**: PRs waiting on GitHub Actions
+
+Output is a report with warnings/blockers:
+
+| Severity | Condition | Action |
+|----------|-----------|--------|
+| BLOCKER | Active merge in progress | Abort shutdown |
+| WARNING | Uncommitted polecat changes | List affected polecats |
+| WARNING | Unpushed commits | List repos needing push |
+| INFO | Pending CI runs | Note for awareness |
+
+If blockers exist, STOP and resolve them first.
+If only warnings, decide whether to proceed (work will be preserved).
+"""
+
+[[steps]]
+id = "stop-sessions"
+title = "Stop Claude sessions (preserve sandboxes)"
+needs = ["preflight-check"]
+description = """
+Kill Claude processes but leave polecat sandboxes intact.
+
+```bash
+# Stop all polecat Claude sessions
+gt stop --all --preserve-sandbox
+
+# Verify sandboxes still exist
+gt polecats --all --status
+```
+
+What this does:
+- Kills tmux sessions running Claude
+- Leaves git clones untouched
+- Leaves hook files (pinned molecules) intact
+- Leaves uncommitted work in place
+
+What this does NOT do:
+- Delete polecat directories
+- Remove hook attachments
+- Lose any git state
+
+After restart, polecats can be respawned and will resume from their hooks.
+
+Note: Crew workers are NOT stopped (they're user-managed).
+"""
 
 [[steps]]
 id = "clear-inboxes"
-title = "Clear all agent inboxes"
+title = "Archive and clear inboxes"
+needs = ["stop-sessions"]
 description = """
 Archive and clear all agent inboxes across all rigs.
 
 ```bash
 # For each rig
 for rig in $(gt rigs --names); do
-  # Clear witness inbox
   gt mail clear $rig/witness --archive
-
-  # Clear refinery inbox
   gt mail clear $rig/refinery --archive
-
-  # Clear crew inboxes
-  for crew in $(gt crew list $rig --names); do
-    gt mail clear $rig/crew/$crew --archive
-  done
 done
 
 # Clear Mayor inbox
-gt mail clear mayor/ --archive
+gt mail clear mayor --archive
 ```
 
 Messages are archived to `.beads/mail-archive/` before deletion.
-"""
-
-[[steps]]
-id = "kill-polecats"
-title = "Kill all active polecats"
-needs = ["clear-inboxes"]
-description = """
-Terminate all polecat sessions across all rigs.
-
-```bash
-gt stop --all --force
-```
-
-This kills all gt-* tmux sessions. Polecats are ephemeral workers
-that will be respawned fresh after restart.
-
-Note: Crew workers are NOT killed (they're persistent).
+Crew inboxes are NOT cleared (user manages those).
 """
 
 [[steps]]
 id = "stop-daemon"
 title = "Stop the daemon"
-needs = ["kill-polecats"]
+needs = ["clear-inboxes"]
 description = """
 Stop the Gas Town daemon gracefully.
 
@@ -88,8 +128,8 @@ Rotate logs to prevent unbounded growth.
 # Rotate daemon logs
 gt daemon rotate-logs
 
-# Archive old session captures
-gt doctor --fix  # Includes session cleanup
+# Clean up old session captures (but not current sandboxes)
+gt doctor --fix
 ```
 
 Old logs are moved to `~/gt/logs/archive/` with timestamps.
@@ -100,19 +140,15 @@ id = "sync-state"
 title = "Sync beads and push"
 needs = ["rotate-logs"]
 description = """
-Ensure all state is persisted before restart.
+Ensure all beads state is persisted.
 
 ```bash
-# Sync beads changes
 bd sync
-
-# Push any uncommitted work
-git add -A
-git commit -m "Town shutdown: state checkpoint" || true
-git push
 ```
 
-This ensures no work is lost during the restart.
+Note: We do NOT force-commit polecat work here. Their sandboxes
+are preserved with whatever state they had. They'll commit their
+own work when they resume.
 """
 
 [[steps]]
@@ -120,27 +156,30 @@ id = "handoff-mayor"
 title = "Send Mayor handoff"
 needs = ["sync-state"]
 description = """
-Record what comes next for the fresh Mayor session.
+Record shutdown context for the fresh Mayor session.
 
 ```bash
-gt mail send mayor/ -s "🤝 HANDOFF: Town restart complete" -m "
-Town shutdown completed. Fresh state ready.
+gt mail send mayor -s "🤝 HANDOFF: Town shutdown complete" -m "
+Town shutdown completed. State preserved.
+
+Polecat sandboxes: PRESERVED (will resume from hooks)
+Inboxes: ARCHIVED and cleared
+Daemon: STOPPED
 
 Next steps:
-- Run gt prime to restore context
-- Check gt status for town health
-- Resume normal operations or start maintenance
+1. gt daemon start
+2. gt prime
+3. gt status (verify health)
+4. Resume operations or respawn polecats
 
 Shutdown reason: {{shutdown_reason}}
 "
 ```
-
-The handoff mail ensures continuity across the restart.
 """
 
 [[steps]]
 id = "restart-daemon"
-title = "Restart daemon fresh"
+title = "Restart daemon"
 needs = ["handoff-mayor"]
 description = """
 Start the daemon with fresh state.
@@ -154,5 +193,6 @@ The daemon will:
 - Watch for pending spawns
 - Resume background coordination
 
-Town is now ready for normal operations.
+Polecats are NOT auto-respawned. Use `gt spawn` or let Witness
+restart them based on their preserved hooks.
 """
