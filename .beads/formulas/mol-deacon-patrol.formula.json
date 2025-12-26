@@ -36,7 +36,7 @@
       "id": "session-gc",
       "title": "Clean dead sessions",
       "needs": ["orphan-check"],
-      "description": "Clean dead sessions.\n\nGarbage collect terminated sessions:\n- Remove stale polecat directories\n- Clean up wisp session artifacts\n- Prune old logs and temp files\n- Archive completed molecule state\n\n```bash\ngt gc --sessions\ngt gc --wisps --age=1h\n```\n\nPreserve audit trail. Only clean sessions confirmed dead."
+      "description": "Clean dead sessions.\n\nGarbage collect terminated sessions:\n- Remove stale polecat directories\n- Clean up orphaned wisps\n- Prune old logs and temp files\n- Archive completed molecule state\n\n```bash\n# Clean wisps older than 1 hour (default threshold)\nbd --no-daemon wisp gc\n\n# Or with custom age threshold\nbd --no-daemon wisp gc --age 2h\n\n# Preview what would be cleaned\nbd --no-daemon wisp gc --dry-run\n```\n\nThe `--no-daemon` flag is required when the bd daemon is running, since wisp gc needs direct database access.\n\nPreserve audit trail. Only clean sessions confirmed dead."
     },
     {
       "id": "context-check",
