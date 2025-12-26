@@ -1050,6 +1050,10 @@ gastown/                           # Rig = container (NOT a git clone)
 ├── config.json                    # Rig identity only (type, name, git_url, beads.prefix)
 ├── .beads/ → mayor/rig/.beads     # Symlink to canonical beads in Mayor
 │
+├── .repo.git/                     # BARE REPO: Single git source of truth
+│                                  # All worktrees share this .git database
+│                                  # No working directory (invisible base)
+│
 ├── settings/                      # Rig behavioral config (git-tracked)
 │   ├── config.json                # Theme, merge_queue, max_workers
 │   └── namepool.json              # Pool settings (style, max)
@@ -1060,23 +1064,23 @@ gastown/                           # Rig = container (NOT a git clone)
 │   └── namepool-state.json        # In-use names, overflow counter
 │
 ├── mayor/                         # Mayor's per-rig presence
-│   ├── rig/                       # CANONICAL clone (beads authority)
+│   ├── rig/                       # Worktree (human workspace)
 │   │   └── .beads/                # Canonical rig beads (prefix: gt-, etc.)
 │   └── state.json
 │
 ├── refinery/                      # Refinery agent (merge queue processor)
-│   ├── rig/                       # Refinery's clone (for merge operations)
+│   ├── rig/                       # Worktree ON MAIN (can see polecat branches)
 │   └── state.json
 │
 ├── witness/                       # Witness agent (per-rig pit boss)
 │   └── state.json                 # No clone needed (monitors polecats)
 │
 ├── crew/                          # Overseer's personal workspaces
-│   └── <name>/                    # Workspace (full git clone)
+│   └── <name>/                    # Worktree or full clone (TBD)
 │
 └── polecats/                      # Worker directories (git worktrees)
-    ├── Nux/                       # Worktree from Mayor's clone
-    └── Toast/                     # Worktree from Mayor's clone
+    ├── Nux/                       # Worktree on polecat/Nux branch
+    └── Toast/                     # Worktree on polecat/Toast branch
 ```
 
 **Configuration tiers:**
@@ -1084,17 +1088,29 @@ gastown/                           # Rig = container (NOT a git clone)
 - **Settings** (`settings/`): Behavioral config - git-tracked, shareable
 - **Runtime** (`.runtime/`): Process state - gitignored, transient
 
+**Git architecture (bare repo pattern):**
+- `.repo.git/` is a **bare clone** (no working directory) - the single source of truth
+- All other directories (mayor, refinery, polecats) are **worktrees** of this bare repo
+- Polecat branches are visible to refinery because they share the same .git database
+- This is the standard git server pattern - not a hack
+
+**Why bare repo?**
+- No working directory to accidentally work in (invisible base)
+- Refinery can see polecat branches immediately (shared refs)
+- Only `main` gets pushed to origin (clean remote)
+- Faster polecat spawn (worktrees are instant)
+
 **Beads architecture:**
-- Mayor's clone holds the canonical `.beads/` for the rig
+- Mayor's worktree holds the canonical `.beads/` for the rig
 - Rig root symlinks `.beads/` → `mayor/rig/.beads`
 - All agents (crew, polecats, refinery) inherit beads via parent lookup
-- Polecats are git worktrees from Mayor's clone (much faster than full clones)
+- Polecats use redirect files pointing to mayor/rig/.beads
 
 **Key points:**
-- The rig root has no `.git/` - it's not a repository
-- All agents use `BEADS_DIR` to point to the rig's `.beads/`
-- Refinery's clone is the authoritative "main branch" view
-- Witness may not need its own clone (just monitors polecat state)
+- The rig root has no `.git/` - it's a container, not a repository
+- `.repo.git/` holds all git data; everything else is a worktree
+- Refinery worktree is on `main` for merge operations
+- Witness doesn't need a worktree (just monitors polecat state)
 
 ```mermaid
 graph TB
