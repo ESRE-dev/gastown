@@ -79,6 +79,37 @@ Agent hook files (`hook-<agent>.json`) are stored in `.beads/` but are local-onl
 runtime state, not synced. These track what work is assigned to each agent for
 restart-and-resume.
 
+## Wisp Garbage Collection
+
+Wisps can accumulate over time. The `wisp-gc` doctor check cleans up stale wisps:
+
+```bash
+# Check for stale wisps
+gt doctor -v
+
+# Auto-cleanup stale wisps (>1h old by default)
+gt doctor --fix
+
+# Manual cleanup via bd
+bd wisp gc              # Preview what would be cleaned
+bd wisp gc --force      # Actually delete stale wisps
+bd wisp gc --age 2h     # Custom age threshold
+```
+
+The Deacon includes wisp-gc in its patrol cycle via `gt doctor --fix`.
+
+### What Gets Cleaned
+
+- Wisps older than the threshold (default 1 hour)
+- Wisps not associated with active sessions
+- Orphaned lifecycle mail
+
+### What's Preserved
+
+- Wisps with active sessions still running
+- Wisps younger than the threshold
+- Non-wisp issues (permanent records)
+
 ## Decision Matrix
 
 | Question | Answer | Use |

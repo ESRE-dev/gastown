@@ -2,7 +2,7 @@
 
 > **Recovery**: Run `gt prime` after compaction, clear, or new session
 
-## Your Role: CREW WORKER (joe in gastown)
+## Your Role: CREW WORKER (max in gastown)
 
 You are a **crew worker** - the overseer's (human's) personal workspace within the
 gastown rig. Unlike polecats which are witness-managed and transient, you are:
@@ -17,7 +17,7 @@ the overseer, not as part of a swarm.
 
 ## Your Identity
 
-**Your mail address:** `gastown/joe`
+**Your mail address:** `gastown/crew/max`
 
 Check your mail with: `gt mail inbox`
 
@@ -29,7 +29,7 @@ Town (/Users/stevey/gt)
 ├── gastown/        ← Your rig
 │   ├── .beads/     ← Issue tracking (you have write access)
 │   ├── crew/
-│   │   └── joe/    ← You are here (your git clone)
+│   │   └── max/    ← You are here (your git clone)
 │   ├── polecats/   ← Ephemeral workers (not you)
 │   ├── refinery/   ← Merge queue processor
 │   └── witness/    ← Polecat lifecycle (doesn't monitor you)
@@ -63,7 +63,7 @@ go test ./...
 
 ### Communication
 - `gt mail send mayor/ -s "Subject" -m "Message"` - To Mayor
-- `gt mail send gastown/crew/joe -s "Subject" -m "Message"` - To yourself (handoff)
+- `gt mail send gastown/crew/max -s "Subject" -m "Message"` - To yourself (handoff)
 
 ## Git Workflow: Work Off Main
 
@@ -119,6 +119,30 @@ Issue prefix: `gt-`
 everything: sends handoff mail, respawns with fresh context, and your work
 continues from where you left off via your pinned molecule.
 
-Crew member: joe
+## Formulas
+
+Formulas are workflow templates stored in `.beads/formulas/`. They support both
+TOML (preferred) and JSON formats:
+
+```bash
+bd formula list              # List available formulas
+bd formula show shiny        # Show formula details
+bd formula convert --all     # Convert JSON to TOML
+bd cook shiny                # Compile formula to proto
+```
+
+TOML is preferred for human-edited formulas (multi-line strings, comments).
+
+## Key Diagnostics
+
+```bash
+gt doctor                    # Run all health checks
+gt doctor --fix              # Auto-fix common issues
+gt doctor -v                 # Verbose output
+gt status                    # Town-wide status
+bd doctor                    # Beads-specific checks
+```
+
+Crew member: max
 Rig: gastown
-Working directory: /Users/stevey/gt/gastown/crew/joe
+Working directory: /Users/stevey/gt/gastown/crew/max

@@ -25,7 +25,7 @@ RIG ────→ COOK ────→ RUN
 | **Cook** | Instantiate artifacts | `cook`, `pour`, `wisp` | Proto, Mol, Wisp |
 | **Run** | Execute steps | (agent execution) | Work done |
 
-**Rig** is authoring time - writing and composing formula YAML files.
+**Rig** is authoring time - writing and composing formula files (TOML preferred, JSON supported).
 **Cook** is compile time - expanding macros, applying aspects, flattening to pure graphs.
 **Run** is execution time - agents provide cognition for each step.
 
@@ -73,10 +73,10 @@ Gas Town has **two** composition operators at different abstraction levels:
 
 | Operator | Level | Inputs | When to Use |
 |----------|-------|--------|-------------|
-| **Rig** | Source | Formula + Formula | Authoring time, in YAML |
+| **Rig** | Source | Formula + Formula | Authoring time, in TOML/JSON |
 | **Bond** | Artifact | Proto/Mol/Wisp + any | Runtime, on cooked artifacts |
 
-**Rig** composes formulas (YAML with `extends`, `compose`).
+**Rig** composes formulas (TOML/JSON with `extends`, `compose`).
 **Bond** composes artifacts (cooked protos, running mols/wisps).
 
 This separation is key: rig for design-time composition, bond for runtime composition.
@@ -102,41 +102,54 @@ In our chemistry:
 ## Formulas: The Source Layer
 
 **Formulas** sit above protos in the artifact hierarchy. They're the source code -
-YAML files that define workflows with composition operators.
+TOML or JSON files that define workflows with composition operators.
 
-```yaml
-# shiny.formula.yaml - a basic workflow
-formula: shiny
-description: The canonical right way
-version: 1
-steps:
-  - id: design
-    description: Think carefully about architecture
-  - id: implement
-    needs: [design]
-  - id: review
-    needs: [implement]
-  - id: test
-    needs: [review]
-  - id: submit
-    needs: [test]
+TOML is preferred for human-edited formulas (multi-line strings, comments):
+
+```toml
+# shiny.formula.toml - a basic workflow
+formula = "shiny"
+description = "The canonical right way"
+version = 1
+
+[[steps]]
+id = "design"
+description = "Think carefully about architecture"
+
+[[steps]]
+id = "implement"
+needs = ["design"]
+
+[[steps]]
+id = "review"
+needs = ["implement"]
+
+[[steps]]
+id = "test"
+needs = ["review"]
+
+[[steps]]
+id = "submit"
+needs = ["test"]
 ```
+
+Convert existing JSON formulas with `bd formula convert --all`.
 
 ### Formula Composition (Rigging)
 
 Formulas compose at the source level using `extends` and `compose`:
 
-```yaml
-# shiny-enterprise.formula.yaml
-formula: shiny-enterprise
-extends: shiny                    # Inherit from base formula
-compose:
-  - expand:
-      target: implement
-      with: rule-of-five          # Apply macro expansion
-  - aspect:
-      pointcut: "implement.*"
-      with: security-audit        # Weave in cross-cutting concern
+```toml
+# shiny-enterprise.formula.toml
+formula = "shiny-enterprise"
+extends = ["shiny"]              # Inherit from base formula
+
+[compose]
+aspects = ["security-audit"]      # Weave in cross-cutting concern
+
+[[compose.expand]]
+target = "implement"
+with = "rule-of-five"            # Apply macro expansion
 ```
 
 ### Cooking: Formula → Proto
@@ -178,7 +191,7 @@ encode reusable work structures. They're the "molds" from which instances are ca
 Protos are stored as beads issues with `labels: ["template"]` and structured step data:
 
 ```yaml
-# Example: shiny.formula.yaml (source) → cooked proto (beads)
+# Example: shiny.formula.toml (source) → cooked proto (beads)
 formula: shiny
 description: The canonical right way
 version: 1

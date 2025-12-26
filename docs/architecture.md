@@ -365,7 +365,7 @@ workflows that any worker can execute, with full auditability and the ability fo
 any worker to pick up where another left off.
 
 Work flows through the **Rig → Cook → Run** lifecycle:
-- **Rig**: Compose workflow formulas (YAML source files with `extends`, `compose`)
+- **Rig**: Compose workflow formulas (TOML/JSON files with `extends`, `compose`)
 - **Cook**: Transform formulas into executable protos (`bd cook` expands macros, applies aspects)
 - **Run**: Agents execute the cooked workflow (pour creates mols, wisp creates ephemeral traces)
 
@@ -375,7 +375,7 @@ See [molecular-chemistry.md](molecular-chemistry.md) for the full lifecycle spec
 
 | Concept | Name | Description |
 |---------|------|-------------|
-| Source | **Formula** | YAML workflow definition with composition rules (.formula.yaml) |
+| Source | **Formula** | TOML/JSON workflow definition with composition rules (.formula.toml preferred) |
 | Template | **Proto Molecule** | Cooked workflow pattern (the "fuel") |
 | Running execution | **Wisp Molecule** | Transient execution trace (the "steam") |
 | Permanent record | **Digest** | Compressed summary of completed work (the "distillate") |
@@ -735,22 +735,25 @@ investigate → document
 ```
 Exploration workflow for understanding problems.
 
-Cook formula files into proto beads:
+Formula files support both TOML (preferred) and JSON formats:
 ```bash
-bd cook <formula-id>
+bd formula list              # List available formulas
+bd formula show shiny        # Show formula details
+bd formula convert --all     # Convert JSON to TOML
+bd cook <formula-id>         # Cook formula into proto bead
 ```
 
 ### Usage
 
 ```bash
-# List available molecules
-gt molecule list
+# List available molecules (cooked protos)
+bd mol list
 
 # Show molecule details
-gt molecule show mol-shiny
+bd mol show mol-shiny
 
-# Instantiate on an issue
-gt molecule instantiate mol-shiny --parent=gt-xyz
+# Bond (instantiate) a molecule
+bd mol bond mol-shiny --var feature_name="auth"
 
 # Spawn polecat with molecule
 gt spawn --issue gt-xyz --molecule mol-shiny

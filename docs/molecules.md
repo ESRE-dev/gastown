@@ -285,9 +285,62 @@ Gas Town work follows the **Rig → Cook → Run** lifecycle:
 ```
 
 **Full lifecycle:**
-- **Formula** (.formula.yaml) = Recipe (source code for workflows)
+- **Formula** (.formula.toml or .formula.json) = Recipe (source code for workflows)
 - **Proto** = Fuel (cooked template, ready to instantiate)
 - **Mol/Wisp** = Steam (active execution)
 - **Digest** = Distillate (crystallized work)
 
 See [molecular-chemistry.md](molecular-chemistry.md) for the complete specification.
+
+## Formula File Formats
+
+Formulas support both TOML (preferred) and JSON formats:
+
+```bash
+# List available formulas
+bd formula list
+
+# Show formula details
+bd formula show shiny
+
+# Convert JSON to TOML (better for human editing)
+bd formula convert shiny           # Single formula
+bd formula convert --all           # All formulas
+bd formula convert shiny --stdout  # Preview
+```
+
+**Why TOML?**
+- Multi-line strings without `\n` escaping
+- Comments allowed
+- Human-readable diffs
+- Same parsing semantics as JSON
+
+The loader tries `.formula.toml` first, falling back to `.formula.json`.
+
+### Example Formula (TOML)
+
+```toml
+formula = "shiny"
+type = "workflow"
+version = 1
+description = """
+Engineer in a Box - design before code, review before ship.
+"""
+
+[vars.feature]
+description = "The feature being implemented"
+required = true
+
+[[steps]]
+id = "design"
+title = "Design {{feature}}"
+description = """
+Think carefully about architecture before writing code.
+Consider edge cases and simpler approaches.
+"""
+
+[[steps]]
+id = "implement"
+title = "Implement {{feature}}"
+needs = ["design"]
+```
