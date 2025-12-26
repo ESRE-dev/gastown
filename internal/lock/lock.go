@@ -124,7 +124,7 @@ func (l *Lock) Check() error {
 
 	// Check if stale
 	if info.IsStale() {
-		// Clean up stale lock
+		// Clean up stale lock (best-effort cleanup)
 		_ = l.Release()
 		return nil
 	}

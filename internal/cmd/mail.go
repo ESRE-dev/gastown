@@ -241,7 +241,7 @@ func init() {
 	mailSendCmd.Flags().BoolVar(&mailWisp, "wisp", true, "Send as wisp (ephemeral, default)")
 	mailSendCmd.Flags().BoolVar(&mailPermanent, "permanent", false, "Send as permanent (not ephemeral, synced to remote)")
 	mailSendCmd.Flags().BoolVar(&mailSendSelf, "self", false, "Send to self (auto-detect from cwd)")
-	_ = mailSendCmd.MarkFlagRequired("subject")
+	_ = mailSendCmd.MarkFlagRequired("subject") // cobra flags: error only at runtime if missing
 
 	// Inbox flags
 	mailInboxCmd.Flags().BoolVar(&mailInboxJSON, "json", false, "Output as JSON")
@@ -949,6 +949,6 @@ func runMailReply(cmd *cobra.Command, args []string) error {
 // generateThreadID creates a random thread ID for new message threads.
 func generateThreadID() string {
 	b := make([]byte, 6)
-	_, _ = rand.Read(b)
+	_, _ = rand.Read(b) // crypto/rand.Read only fails on broken system
 	return "thread-" + hex.EncodeToString(b)
 }

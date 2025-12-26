@@ -140,12 +140,12 @@ func (r *Report) Print(w io.Writer, verbose bool) {
 		r.printCheck(w, check, verbose)
 	}
 
-	// Print summary
+	// Print summary (output errors non-actionable)
 	_, _ = fmt.Fprintln(w)
 	r.printSummary(w)
 }
 
-// printCheck outputs a single check result.
+// printCheck outputs a single check result (output errors non-actionable).
 func (r *Report) printCheck(w io.Writer, check *CheckResult, verbose bool) {
 	var prefix string
 	switch check.Status {
@@ -172,7 +172,7 @@ func (r *Report) printCheck(w io.Writer, check *CheckResult, verbose bool) {
 	}
 }
 
-// printSummary outputs the summary line.
+// printSummary outputs the summary line (output errors non-actionable).
 func (r *Report) printSummary(w io.Writer) {
 	parts := []string{
 		fmt.Sprintf("%d checks", r.Summary.Total),

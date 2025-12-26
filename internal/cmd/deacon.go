@@ -175,11 +175,11 @@ func startDeaconSession(t *tmux.Tmux) error {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
-	// Set environment
+	// Set environment (non-fatal: session works without these)
 	_ = t.SetEnvironment(DeaconSessionName, "GT_ROLE", "deacon")
 	_ = t.SetEnvironment(DeaconSessionName, "BD_ACTOR", "deacon")
 
-	// Apply Deacon theme
+	// Apply Deacon theme (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.DeaconTheme()
 	_ = t.ConfigureGasTownSession(DeaconSessionName, theme, "", "Deacon", "health-check")
 
@@ -208,7 +208,7 @@ func runDeaconStop(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Stopping Deacon session...")
 
-	// Try graceful shutdown first
+	// Try graceful shutdown first (best-effort interrupt)
 	_ = t.SendKeysRaw(DeaconSessionName, "C-c")
 	time.Sleep(100 * time.Millisecond)
 

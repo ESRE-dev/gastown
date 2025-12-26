@@ -247,7 +247,7 @@ func (b *Beads) instantiateFromChildren(mol *Issue, parent *Issue, templates []*
 
 		child, err := b.Create(childOpts)
 		if err != nil {
-			// Attempt to clean up created issues on failure
+			// Attempt to clean up created issues on failure (best-effort cleanup)
 			for _, created := range createdIssues {
 				_ = b.Close(created.ID)
 			}
@@ -340,7 +340,7 @@ func (b *Beads) instantiateFromMarkdown(mol *Issue, parent *Issue, opts Instanti
 
 		child, err := b.Create(childOpts)
 		if err != nil {
-			// Attempt to clean up created issues on failure
+			// Attempt to clean up created issues on failure (best-effort cleanup)
 			for _, created := range createdIssues {
 				_ = b.Close(created.ID)
 			}

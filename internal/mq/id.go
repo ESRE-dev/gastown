@@ -22,7 +22,7 @@ import (
 func GenerateMRID(prefix, branch string) string {
 	// Generate 8 random bytes for additional uniqueness
 	randomBytes := make([]byte, 8)
-	_, _ = rand.Read(randomBytes)
+	_, _ = rand.Read(randomBytes) // crypto/rand.Read only fails on broken system
 
 	return generateMRIDInternal(prefix, branch, time.Now(), randomBytes)
 }

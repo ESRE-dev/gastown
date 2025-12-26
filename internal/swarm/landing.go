@@ -210,7 +210,7 @@ Manual intervention required.`,
 			swarmID, strings.Join(workers, "\n- ")),
 		Priority: mail.PriorityHigh,
 	}
-	_ = router.Send(msg)
+	_ = router.Send(msg) // best-effort notification
 }
 
 // notifyMayorLanded sends a landing report to Mayor.
@@ -233,5 +233,5 @@ Tasks merged: %d`,
 			result.BranchesCleaned,
 			len(swarm.Tasks)),
 	}
-	_ = router.Send(msg)
+	_ = router.Send(msg) // best-effort notification
 }

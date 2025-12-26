@@ -167,7 +167,7 @@ func (r *Router) Send(msg *Message) error {
 		return fmt.Errorf("sending message: %w", err)
 	}
 
-	// Notify recipient if they have an active session
+	// Notify recipient if they have an active session (best-effort notification)
 	// Skip notification for self-mail (handoffs to future-self don't need present-self notified)
 	if !isSelfMail(msg.From, msg.To) {
 		_ = r.notifyRecipient(msg)

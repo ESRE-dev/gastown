@@ -406,7 +406,7 @@ func init() {
 func loadMoleculeCatalog(workDir string) (*beads.MoleculeCatalog, error) {
 	var townRoot, rigPath, projectPath string
 
-	// Try to find town root
+	// Try to find town root (non-fatal: falls back to local formulas)
 	townRoot, _ = workspace.FindFromCwd()
 
 	// Try to find rig path

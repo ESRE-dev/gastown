@@ -269,7 +269,7 @@ func init() {
 	// Reject flags
 	mqRejectCmd.Flags().StringVarP(&mqRejectReason, "reason", "r", "", "Reason for rejection (required)")
 	mqRejectCmd.Flags().BoolVar(&mqRejectNotify, "notify", false, "Send mail notification to worker")
-	_ = mqRejectCmd.MarkFlagRequired("reason")
+	_ = mqRejectCmd.MarkFlagRequired("reason") // cobra flags: error only at runtime if missing
 
 	// Status flags
 	mqStatusCmd.Flags().BoolVar(&mqStatusJSON, "json", false, "Output as JSON")

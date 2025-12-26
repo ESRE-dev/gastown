@@ -193,7 +193,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("creating rig directory: %w", err)
 	}
 
-	// Track cleanup on failure
+	// Track cleanup on failure (best-effort cleanup)
 	cleanup := func() { _ = os.RemoveAll(rigPath) }
 	success := false
 	defer func() {

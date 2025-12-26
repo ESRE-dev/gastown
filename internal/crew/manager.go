@@ -82,11 +82,11 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	if createBranch {
 		branchName = fmt.Sprintf("crew/%s", name)
 		if err := crewGit.CreateBranch(branchName); err != nil {
-			_ = os.RemoveAll(crewPath)
+			_ = os.RemoveAll(crewPath) // best-effort cleanup
 			return nil, fmt.Errorf("creating branch: %w", err)
 		}
 		if err := crewGit.Checkout(branchName); err != nil {
-			_ = os.RemoveAll(crewPath)
+			_ = os.RemoveAll(crewPath) // best-effort cleanup
 			return nil, fmt.Errorf("checking out branch: %w", err)
 		}
 	}
@@ -94,7 +94,7 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	// Create mail directory for mail delivery
 	mailPath := m.mailDir(name)
 	if err := os.MkdirAll(mailPath, 0755); err != nil {
-		_ = os.RemoveAll(crewPath)
+		_ = os.RemoveAll(crewPath) // best-effort cleanup
 		return nil, fmt.Errorf("creating mail dir: %w", err)
 	}
 
@@ -106,7 +106,7 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 
 	// Create CLAUDE.md with crew worker prompting
 	if err := m.createClaudeMD(name, crewPath); err != nil {
-		_ = os.RemoveAll(crewPath)
+		_ = os.RemoveAll(crewPath) // best-effort cleanup
 		return nil, fmt.Errorf("creating CLAUDE.md: %w", err)
 	}
 
@@ -123,7 +123,7 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 
 	// Save state
 	if err := m.saveState(crew); err != nil {
-		_ = os.RemoveAll(crewPath)
+		_ = os.RemoveAll(crewPath) // best-effort cleanup
 		return nil, fmt.Errorf("saving state: %w", err)
 	}
 
@@ -325,7 +325,7 @@ func (m *Manager) Rename(oldName, newName string) error {
 	// Update state file with new name and path
 	crew, err := m.loadState(newName)
 	if err != nil {
-		// Rollback on error
+		// Rollback on error (best-effort)
 		_ = os.Rename(newPath, oldPath)
 		return fmt.Errorf("loading state: %w", err)
 	}
@@ -335,7 +335,7 @@ func (m *Manager) Rename(oldName, newName string) error {
 	crew.UpdatedAt = time.Now()
 
 	if err := m.saveState(crew); err != nil {
-		// Rollback on error
+		// Rollback on error (best-effort)
 		_ = os.Rename(newPath, oldPath)
 		return fmt.Errorf("saving state: %w", err)
 	}

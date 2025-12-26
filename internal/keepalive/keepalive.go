@@ -61,7 +61,7 @@ func TouchInWorkspace(workspaceRoot, command string) {
 	}
 
 	keepalivePath := filepath.Join(runtimeDir, "keepalive.json")
-	_ = os.WriteFile(keepalivePath, data, 0644)
+	_ = os.WriteFile(keepalivePath, data, 0644) // non-fatal: status file for debugging
 }
 
 // Read returns the current keepalive state for the workspace.

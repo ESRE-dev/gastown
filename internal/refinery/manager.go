@@ -110,7 +110,7 @@ func (m *Manager) Status() (*Refinery, error) {
 	// If tmux session is running, refinery is running
 	if sessionRunning {
 		if ref.State != StateRunning {
-			// Update state to match reality
+			// Update state to match reality (non-fatal: state file update)
 			now := time.Now()
 			ref.State = StateRunning
 			if ref.StartedAt == nil {
@@ -127,7 +127,7 @@ func (m *Manager) Status() (*Refinery, error) {
 			// Process is still running (foreground mode without tmux)
 			return ref, nil
 		}
-		// Neither session nor process exists - mark as stopped
+		// Neither session nor process exists - mark as stopped (non-fatal: state file update)
 		ref.State = StateStopped
 		ref.PID = 0
 		_ = m.saveState(ref)
@@ -199,20 +199,20 @@ func (m *Manager) Start(foreground bool) error {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
-	// Set environment variables
+	// Set environment variables (non-fatal: session works without these)
 	bdActor := fmt.Sprintf("%s/refinery", m.rig.Name)
 	_ = t.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
 	_ = t.SetEnvironment(sessionID, "GT_REFINERY", "1")
 	_ = t.SetEnvironment(sessionID, "GT_ROLE", "refinery")
 	_ = t.SetEnvironment(sessionID, "BD_ACTOR", bdActor)
 
-	// Set beads environment - refinery uses rig-level beads
+	// Set beads environment - refinery uses rig-level beads (non-fatal)
 	beadsDir := filepath.Join(m.rig.Path, "mayor", "rig", ".beads")
 	_ = t.SetEnvironment(sessionID, "BEADS_DIR", beadsDir)
 	_ = t.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1")
 	_ = t.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/refinery", m.rig.Name))
 
-	// Apply theme (same as rig polecats)
+	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(m.rig.Name)
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "refinery", "refinery")
 
@@ -222,7 +222,7 @@ func (m *Manager) Start(foreground bool) error {
 	ref.StartedAt = &now
 	ref.PID = 0 // Claude agent doesn't have a PID we track
 	if err := m.saveState(ref); err != nil {
-		_ = t.KillSession(sessionID)
+		_ = t.KillSession(sessionID) // best-effort cleanup on state save failure
 		return fmt.Errorf("saving state: %w", err)
 	}
 
@@ -231,7 +231,7 @@ func (m *Manager) Start(foreground bool) error {
 	// Restarts are handled by daemon via LIFECYCLE mail, not shell loops
 	command := "claude --dangerously-skip-permissions"
 	if err := t.SendKeys(sessionID, command); err != nil {
-		// Clean up the session on failure
+		// Clean up the session on failure (best-effort cleanup)
 		_ = t.KillSession(sessionID)
 		return fmt.Errorf("starting Claude agent: %w", err)
 	}
@@ -256,14 +256,14 @@ func (m *Manager) Stop() error {
 		return ErrNotRunning
 	}
 
-	// Kill tmux session if it exists
+	// Kill tmux session if it exists (best-effort: may already be dead)
 	if sessionRunning {
 		_ = t.KillSession(sessionID)
 	}
 
 	// If we have a PID and it's a different process, try to stop it gracefully
 	if ref.PID > 0 && ref.PID != os.Getpid() && processExists(ref.PID) {
-		// Send SIGTERM
+		// Send SIGTERM (best-effort graceful stop)
 		if proc, err := os.FindProcess(ref.PID); err == nil {
 			_ = proc.Signal(os.Interrupt)
 		}
@@ -430,7 +430,7 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 		return MergeResult{Error: fmt.Sprintf("cannot claim MR: %v", err)}
 	}
 	ref.CurrentMR = mr
-	_ = m.saveState(ref)
+	_ = m.saveState(ref) // non-fatal: state file update
 
 	result := MergeResult{}
 
@@ -448,8 +448,8 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 		return result
 	}
 
-	// Pull latest
-	_ = m.gitRun("pull", "origin", mr.TargetBranch) // Ignore errors
+	// Pull latest (non-fatal: may fail if remote unreachable)
+	_ = m.gitRun("pull", "origin", mr.TargetBranch)
 
 	// 3. Merge
 	err := m.gitRun("merge", "--no-ff", "-m",
@@ -461,7 +461,7 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 		if strings.Contains(errStr, "CONFLICT") || strings.Contains(errStr, "conflict") {
 			result.Conflict = true
 			result.Error = "merge conflict"
-			// Abort the merge
+			// Abort the merge (best-effort cleanup)
 			_ = m.gitRun("merge", "--abort")
 			m.completeMR(mr, "", "merge conflict - polecat must rebase") // Reopen for rebase
 			// Notify worker about conflict
@@ -478,7 +478,7 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 		if err := m.runTests(config.TestCommand); err != nil {
 			result.TestsFailed = true
 			result.Error = fmt.Sprintf("tests failed: %v", err)
-			// Reset to before merge
+			// Reset to before merge (best-effort rollback)
 			_ = m.gitRun("reset", "--hard", "HEAD~1")
 			m.completeMR(mr, "", result.Error) // Reopen for fixes
 			return result
@@ -488,7 +488,7 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 	// 5. Push with retry logic
 	if err := m.pushWithRetry(mr.TargetBranch, config); err != nil {
 		result.Error = fmt.Sprintf("push failed: %v", err)
-		// Reset to before merge
+		// Reset to before merge (best-effort rollback)
 		_ = m.gitRun("reset", "--hard", "HEAD~1")
 		m.completeMR(mr, "", result.Error) // Reopen for retry
 		return result
@@ -508,7 +508,7 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 	// Notify worker of success
 	m.notifyWorkerMerged(mr)
 
-	// Optionally delete the merged branch (local only - branches never go to origin)
+	// Optionally delete the merged branch (non-fatal: cleanup only)
 	if config.DeleteMergedBranches {
 		_ = m.gitRun("branch", "-D", mr.Branch)
 	}
@@ -554,7 +554,7 @@ func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg s
 		ref.Stats.TodayFailed++
 	}
 
-	_ = m.saveState(ref)
+	_ = m.saveState(ref) // non-fatal: state file update
 }
 
 // getTestCommand returns the test command if configured.
@@ -721,7 +721,7 @@ Then the Refinery will retry the merge.`,
 			mr.Branch, mr.TargetBranch, mr.TargetBranch),
 		Priority: mail.PriorityHigh,
 	}
-	_ = router.Send(msg)
+	_ = router.Send(msg) // best-effort notification
 }
 
 // notifyWorkerMerged sends a success notification to a polecat.
@@ -737,7 +737,7 @@ Issue: %s
 Thank you for your contribution!`,
 			mr.Branch, mr.TargetBranch, mr.IssueID),
 	}
-	_ = router.Send(msg)
+	_ = router.Send(msg) // best-effort notification
 }
 
 // Common errors for MR operations
@@ -897,7 +897,7 @@ Please review the feedback and address the issues before resubmitting.`,
 			mr.Branch, mr.IssueID, reason),
 		Priority: mail.PriorityNormal,
 	}
-	_ = router.Send(msg)
+	_ = router.Send(msg) // best-effort notification
 }
 
 // findTownRoot walks up directories to find the town root.

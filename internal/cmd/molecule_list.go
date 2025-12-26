@@ -166,7 +166,7 @@ func runMoleculeShow(cmd *cobra.Command, args []string) error {
 
 	// Parse steps
 	steps, parseErr := beads.ParseMoleculeSteps(mol.Description)
-	_ = source // Used below in output
+	_ = source // silence unused warning; used in output formatting below
 
 	// For JSON, include parsed steps
 	if moleculeJSON {

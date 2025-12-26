@@ -135,7 +135,7 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
-	// Set environment
+	// Set environment (non-fatal: session works without these)
 	_ = t.SetEnvironment(sessionID, "GT_RIG", r.Name)
 	_ = t.SetEnvironment(sessionID, "GT_CREW", name)
 
@@ -224,7 +224,7 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 	t.SetEnvironment(sessionID, "GT_RIG", r.Name)
 	t.SetEnvironment(sessionID, "GT_CREW", name)
 
-	// Apply rig-based theming (uses config if set, falls back to hash)
+	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
 	theme := getThemeForRig(r.Name)
 	_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
 

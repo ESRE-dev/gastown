@@ -35,6 +35,7 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 	var rigName, polecat, crew, issue, role string
 
 	if statusLineSession != "" {
+		// Non-fatal: missing env vars are handled gracefully below
 		rigName, _ = t.GetEnvironment(statusLineSession, "GT_RIG")
 		polecat, _ = t.GetEnvironment(statusLineSession, "GT_POLECAT")
 		crew, _ = t.GetEnvironment(statusLineSession, "GT_CREW")

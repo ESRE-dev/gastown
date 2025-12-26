@@ -66,7 +66,7 @@ func NewManager(r *rig.Rig, g *git.Git) *Manager {
 		// Use defaults
 		pool = NewNamePool(r.Path, r.Name)
 	}
-	_ = pool.Load() // Load existing state, ignore errors for new rigs
+	_ = pool.Load() // non-fatal: state file may not exist for new rigs
 
 	return &Manager{
 		rig:      r,
@@ -230,10 +230,10 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 		}
 	}
 
-	// Prune any stale worktree entries
+	// Prune any stale worktree entries (non-fatal: cleanup only)
 	_ = repoGit.WorktreePrune()
 
-	// Release name back to pool if it's a pooled name
+	// Release name back to pool if it's a pooled name (non-fatal: state file update)
 	m.namePool.Release(name)
 	_ = m.namePool.Save()
 
@@ -263,7 +263,7 @@ func (m *Manager) AllocateName() (string, error) {
 // This is called when a polecat is removed.
 func (m *Manager) ReleaseName(name string) {
 	m.namePool.Release(name)
-	_ = m.namePool.Save()
+	_ = m.namePool.Save() // non-fatal: state file update
 }
 
 // Recreate removes an existing polecat and creates a fresh worktree.
@@ -301,14 +301,14 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 		}
 	}
 
-	// Prune stale worktree entries
+	// Prune stale worktree entries (non-fatal: cleanup only)
 	_ = repoGit.WorktreePrune()
 
-	// Fetch latest from origin to ensure we have fresh commits
+	// Fetch latest from origin to ensure we have fresh commits (non-fatal: may be offline)
 	_ = repoGit.Fetch("origin")
 
 	// Delete the old branch so worktree starts fresh from current HEAD
-	// Ignore error - branch may not exist (first recreate) or may fail to delete
+	// Non-fatal: branch may not exist (first recreate) or may fail to delete
 	_ = repoGit.DeleteBranch(branchName, true)
 
 	// Check if branch still exists (deletion may have failed or branch was protected)
@@ -366,7 +366,7 @@ func (m *Manager) ReconcilePool() {
 	}
 
 	m.namePool.Reconcile(names)
-	_ = m.namePool.Save()
+	_ = m.namePool.Save() // non-fatal: state file update
 }
 
 // PoolStatus returns information about the name pool.

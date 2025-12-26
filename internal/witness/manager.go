@@ -83,7 +83,7 @@ func (m *Manager) Status() (*Witness, error) {
 		if !processExists(w.PID) {
 			w.State = StateStopped
 			w.PID = 0
-			_ = m.saveState(w)
+			_ = m.saveState(w) // non-fatal: state file update
 		}
 	}
 
@@ -127,7 +127,7 @@ func (m *Manager) Stop() error {
 
 	// If we have a PID, try to stop it gracefully
 	if w.PID > 0 && w.PID != os.Getpid() {
-		// Send SIGTERM
+		// Send SIGTERM (best-effort graceful stop)
 		if proc, err := os.FindProcess(w.PID); err == nil {
 			_ = proc.Signal(os.Interrupt)
 		}

@@ -90,20 +90,20 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("creating session: %w", err)
 		}
 
-		// Set environment
+		// Set environment (non-fatal: session works without these)
 		_ = t.SetEnvironment(sessionID, "GT_RIG", r.Name)
 		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
 
-		// Set CLAUDE_CONFIG_DIR for account selection
+		// Set CLAUDE_CONFIG_DIR for account selection (non-fatal)
 		if claudeConfigDir != "" {
 			_ = t.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", claudeConfigDir)
 		}
 
-		// Apply rig-based theming (uses config if set, falls back to hash)
+		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
 		theme := getThemeForRig(r.Name)
 		_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
 
-		// Set up C-b n/p keybindings for crew session cycling
+		// Set up C-b n/p keybindings for crew session cycling (non-fatal)
 		_ = t.SetCrewCycleBindings(sessionID)
 
 		// Wait for shell to be ready after session creation

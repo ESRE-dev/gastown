@@ -141,7 +141,7 @@ func stopSession(t *tmux.Tmux, sessionName string) error {
 		return nil // Already stopped
 	}
 
-	// Try graceful shutdown first (Ctrl-C)
+	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
 	if !downForce {
 		_ = t.SendKeysRaw(sessionName, "C-c")
 		time.Sleep(100 * time.Millisecond)

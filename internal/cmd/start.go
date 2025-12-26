@@ -282,7 +282,7 @@ func ensureRefinerySession(rigName string, r *rig.Rig) (bool, error) {
 	t.SetEnvironment(sessionName, "BEADS_NO_DAEMON", "1")
 	t.SetEnvironment(sessionName, "BEADS_AGENT_NAME", fmt.Sprintf("%s/refinery", rigName))
 
-	// Apply Gas Town theming
+	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(rigName)
 	_ = t.ConfigureGasTownSession(sessionName, theme, rigName, "refinery", "refinery")
 
@@ -399,7 +399,7 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 	fmt.Printf("Phase 1: Sending ESC to %d agent(s)...\n", len(gtSessions))
 	for _, sess := range gtSessions {
 		fmt.Printf("  %s Interrupting %s\n", style.Bold.Render("→"), sess)
-		_ = t.SendKeysRaw(sess, "Escape")
+		_ = t.SendKeysRaw(sess, "Escape") // best-effort interrupt
 	}
 
 	// Phase 2: Send shutdown message asking agents to handoff
@@ -408,7 +408,7 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 	for _, sess := range gtSessions {
 		// Small delay then send the message
 		time.Sleep(500 * time.Millisecond)
-		_ = t.SendKeys(sess, shutdownMsg)
+		_ = t.SendKeys(sess, shutdownMsg) // best-effort notification
 	}
 
 	// Phase 3: Wait for agents to complete handoff
@@ -712,20 +712,20 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("creating session: %w", err)
 		}
 
-		// Set environment
+		// Set environment (non-fatal: session works without these)
 		_ = t.SetEnvironment(sessionID, "GT_RIG", rigName)
 		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
 
-		// Set CLAUDE_CONFIG_DIR for account selection
+		// Set CLAUDE_CONFIG_DIR for account selection (non-fatal)
 		if claudeConfigDir != "" {
 			_ = t.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", claudeConfigDir)
 		}
 
-		// Apply rig-based theming
+		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
 		theme := getThemeForRig(rigName)
 		_ = t.ConfigureGasTownSession(sessionID, theme, rigName, name, "crew")
 
-		// Set up C-b n/p keybindings for crew session cycling
+		// Set up C-b n/p keybindings for crew session cycling (non-fatal)
 		_ = t.SetCrewCycleBindings(sessionID)
 
 		// Wait for shell to be ready after session creation

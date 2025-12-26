@@ -157,8 +157,8 @@ func runWitnessStart(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Update manager state to reflect running session
-	_ = mgr.Start() // Mark as running in state file
+	// Update manager state to reflect running session (non-fatal: state file update)
+	_ = mgr.Start()
 
 	fmt.Printf("%s Witness started for %s\n", style.Bold.Render("✓"), rigName)
 	fmt.Printf("  %s\n", style.Dim.Render("Use 'gt witness attach' to connect"))
@@ -326,7 +326,7 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 	t.SetEnvironment(sessionName, "GT_RIG", rigName)
 	t.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
 
-	// Apply Gas Town theming
+	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(rigName)
 	_ = t.ConfigureGasTownSession(sessionName, theme, rigName, "witness", "witness")
 
@@ -395,7 +395,7 @@ func runWitnessRestart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Update state file to stopped
+	// Update state file to stopped (non-fatal: state file update)
 	_ = mgr.Stop()
 
 	// Start fresh
@@ -405,7 +405,7 @@ func runWitnessRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	if created {
-		_ = mgr.Start() // Mark as running in state file
+		_ = mgr.Start() // non-fatal: state file update
 	}
 
 	fmt.Printf("%s Witness restarted for %s\n", style.Bold.Render("✓"), rigName)

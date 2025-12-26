@@ -94,7 +94,7 @@ func runCrewStatus(cmd *cobra.Command, args []string) error {
 			untracked = gitStatus.Untracked
 		}
 
-		// Mail status
+		// Mail status (non-fatal: display defaults to 0 if count fails)
 		mailDir := filepath.Join(w.ClonePath, "mail")
 		mailTotal, mailUnread := 0, 0
 		if _, err := os.Stat(mailDir); err == nil {

@@ -153,7 +153,7 @@ func (m *Mailbox) listLegacy() ([]*Message, error) {
 		}
 		return nil, err
 	}
-	defer func() { _ = file.Close() }()
+	defer func() { _ = file.Close() }() // non-fatal: OS will close on exit
 
 	var messages []*Message
 	scanner := bufio.NewScanner(file)
@@ -392,7 +392,7 @@ func (m *Mailbox) appendLegacy(msg *Message) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = file.Close() }()
+	defer func() { _ = file.Close() }() // non-fatal: OS will close on exit
 
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -420,15 +420,15 @@ func (m *Mailbox) rewriteLegacy(messages []*Message) error {
 	for _, msg := range messages {
 		data, err := json.Marshal(msg)
 		if err != nil {
-			_ = file.Close()
-			_ = os.Remove(tmpPath)
+			_ = file.Close()         // best-effort cleanup
+			_ = os.Remove(tmpPath)   // best-effort cleanup
 			return err
 		}
-		_, _ = file.WriteString(string(data) + "\n")
+		_, _ = file.WriteString(string(data) + "\n") // non-fatal: partial write is acceptable
 	}
 
 	if err := file.Close(); err != nil {
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // best-effort cleanup
 		return err
 	}
 

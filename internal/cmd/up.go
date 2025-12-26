@@ -200,11 +200,11 @@ func ensureSession(t *tmux.Tmux, sessionName, workDir, role string) error {
 		return err
 	}
 
-	// Set environment
+	// Set environment (non-fatal: session works without these)
 	_ = t.SetEnvironment(sessionName, "GT_ROLE", role)
 	_ = t.SetEnvironment(sessionName, "BD_ACTOR", role)
 
-	// Apply theme based on role
+	// Apply theme based on role (non-fatal: theming failure doesn't affect operation)
 	switch role {
 	case "mayor":
 		theme := tmux.MayorTheme()
@@ -246,13 +246,13 @@ func ensureWitness(t *tmux.Tmux, sessionName, rigPath, rigName string) error {
 		return err
 	}
 
-	// Set environment
+	// Set environment (non-fatal: session works without these)
 	bdActor := fmt.Sprintf("%s/witness", rigName)
 	_ = t.SetEnvironment(sessionName, "GT_ROLE", "witness")
 	_ = t.SetEnvironment(sessionName, "GT_RIG", rigName)
 	_ = t.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
 
-	// Apply theme (use rig-based theme)
+	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(rigName)
 	_ = t.ConfigureGasTownSession(sessionName, theme, "", "Witness", rigName)
 

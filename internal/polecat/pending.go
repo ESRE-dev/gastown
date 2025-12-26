@@ -141,7 +141,7 @@ func CheckInboxForSpawns(townRoot string) ([]*PendingSpawn, error) {
 		pending = append(pending, ps)
 		existing[msg.ID] = true
 
-		// Mark message as read
+		// Mark message as read (non-fatal: message tracking)
 		_ = mailbox.MarkRead(msg.ID)
 	}
 

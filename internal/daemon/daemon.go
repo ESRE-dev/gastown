@@ -61,7 +61,7 @@ func (d *Daemon) Run() error {
 	if err := os.WriteFile(d.config.PidFile, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
 		return fmt.Errorf("writing PID file: %w", err)
 	}
-	defer func() { _ = os.Remove(d.config.PidFile) }()
+	defer func() { _ = os.Remove(d.config.PidFile) }() // best-effort cleanup
 
 	// Update state
 	state := &State{
@@ -219,7 +219,7 @@ func (d *Daemon) ensureDeaconRunning() {
 		return
 	}
 
-	// Set environment
+	// Set environment (non-fatal: session works without these)
 	_ = d.tmux.SetEnvironment(DeaconSessionName, "GT_ROLE", "deacon")
 	_ = d.tmux.SetEnvironment(DeaconSessionName, "BD_ACTOR", "deacon")
 
@@ -361,7 +361,7 @@ func IsRunning(townRoot string) (bool, int, error) {
 	// On Unix, FindProcess always succeeds. Send signal 0 to check if alive.
 	err = process.Signal(syscall.Signal(0))
 	if err != nil {
-		// Process not running, clean up stale PID file
+		// Process not running, clean up stale PID file (best-effort cleanup)
 		_ = os.Remove(pidFile)
 		return false, 0, nil
 	}
@@ -394,11 +394,11 @@ func StopDaemon(townRoot string) error {
 
 	// Check if still running
 	if err := process.Signal(syscall.Signal(0)); err == nil {
-		// Still running, force kill
+		// Still running, force kill (best-effort)
 		_ = process.Signal(syscall.SIGKILL)
 	}
 
-	// Clean up PID file
+	// Clean up PID file (best-effort cleanup)
 	pidFile := filepath.Join(townRoot, "daemon", "daemon.pid")
 	_ = os.Remove(pidFile)
 

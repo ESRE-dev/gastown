@@ -177,7 +177,7 @@ bonded_at: %s
 	opts := beads.InstantiateOptions{Context: ctx}
 	steps, err := b.InstantiateMolecule(proto, child, opts)
 	if err != nil {
-		// Clean up the child container on failure
+		// Clean up the child container on failure (best-effort cleanup)
 		_ = b.Close(child.ID)
 		return fmt.Errorf("instantiating bonded molecule: %w", err)
 	}
@@ -481,7 +481,7 @@ squashed_at: %s
 		return fmt.Errorf("creating digest: %w", err)
 	}
 
-	// Add the digest label
+	// Add the digest label (non-fatal: digest works without label)
 	_ = b.Update(digestIssue.ID, beads.UpdateOptions{
 		AddLabels: []string{"digest"},
 	})

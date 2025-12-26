@@ -136,16 +136,16 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
-	// Set environment
+	// Set environment (non-fatal: session works without these)
 	_ = m.tmux.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
 	_ = m.tmux.SetEnvironment(sessionID, "GT_POLECAT", polecat)
 
-	// Set CLAUDE_CONFIG_DIR for account selection
+	// Set CLAUDE_CONFIG_DIR for account selection (non-fatal)
 	if opts.ClaudeConfigDir != "" {
 		_ = m.tmux.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", opts.ClaudeConfigDir)
 	}
 
-	// CRITICAL: Set beads environment for worktree polecats
+	// CRITICAL: Set beads environment for worktree polecats (non-fatal: session works without)
 	// Polecats share the rig's beads directory (at rig root, not mayor/rig)
 	// BEADS_NO_DAEMON=1 prevents daemon from committing to wrong branch
 	beadsDir := filepath.Join(m.rig.Path, ".beads")
@@ -153,7 +153,7 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1")
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/%s", m.rig.Name, polecat))
 
-	// Apply theme
+	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(m.rig.Name)
 	_ = m.tmux.ConfigureGasTownSession(sessionID, theme, m.rig.Name, polecat, "polecat")
 
@@ -198,9 +198,9 @@ func (m *Manager) Stop(polecat string, force bool) error {
 		}
 	}
 
-	// Try graceful shutdown first (unless forced)
+	// Try graceful shutdown first (unless forced, best-effort interrupt)
 	if !force {
-		_ = m.tmux.SendKeysRaw(sessionID, "C-c") // Ctrl+C
+		_ = m.tmux.SendKeysRaw(sessionID, "C-c")
 		time.Sleep(100 * time.Millisecond)
 	}
 

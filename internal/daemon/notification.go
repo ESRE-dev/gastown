@@ -165,7 +165,7 @@ func (m *NotificationManager) MarkSessionActive(session string) error {
 			ns.Consumed = true
 			ns.ConsumedAt = time.Now()
 			if data, err := json.Marshal(&ns); err == nil {
-				_ = os.WriteFile(path, data, 0644)
+				_ = os.WriteFile(path, data, 0644) // non-fatal: state file update
 			}
 		}
 	}
@@ -198,7 +198,7 @@ func (m *NotificationManager) ClearStaleSlots() error {
 		}
 
 		if time.Since(info.ModTime()) > m.maxAge {
-			_ = os.Remove(path)
+			_ = os.Remove(path) // best-effort cleanup
 		}
 	}
 

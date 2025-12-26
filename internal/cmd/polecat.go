@@ -957,7 +957,7 @@ func getGitState(worktreePath string) (*GitState, error) {
 		// origin/main might not exist - try origin/master
 		logCmd = exec.Command("git", "log", "origin/master..HEAD", "--oneline")
 		logCmd.Dir = worktreePath
-		output, _ = logCmd.Output() // Ignore error - might be a new repo
+		output, _ = logCmd.Output() // non-fatal: might be a new repo without remote tracking
 	}
 	if len(output) > 0 {
 		lines := splitLines(string(output))

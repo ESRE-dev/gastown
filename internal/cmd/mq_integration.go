@@ -106,7 +106,7 @@ func runMqIntegrationCreate(cmd *cobra.Command, args []string) error {
 	// 3. Push to origin
 	fmt.Printf("Pushing to origin...\n")
 	if err := g.Push("origin", branchName, false); err != nil {
-		// Clean up local branch on push failure
+		// Clean up local branch on push failure (best-effort cleanup)
 		_ = g.DeleteBranch(branchName, true)
 		return fmt.Errorf("pushing to origin: %w", err)
 	}
@@ -299,7 +299,7 @@ func runMqIntegrationLand(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Merging %s to main...\n", branchName)
 	mergeMsg := fmt.Sprintf("Merge %s: %s\n\nEpic: %s", branchName, epic.Title, epicID)
 	if err := g.MergeNoFF("origin/"+branchName, mergeMsg); err != nil {
-		// Abort merge on failure
+		// Abort merge on failure (best-effort cleanup)
 		_ = g.AbortMerge()
 		return fmt.Errorf("merge failed: %w", err)
 	}
@@ -313,7 +313,7 @@ func runMqIntegrationLand(cmd *cobra.Command, args []string) error {
 			if err := runTestCommand(r.Path, testCmd); err != nil {
 				// Tests failed - reset main
 				fmt.Printf("  %s Tests failed, resetting main...\n", style.Bold.Render("✗"))
-				_ = g.Checkout("main")
+				_ = g.Checkout("main") // best-effort: need to be on main to reset
 				resetErr := resetHard(g, "HEAD~1")
 				if resetErr != nil {
 					return fmt.Errorf("tests failed and could not reset: %w (test error: %v)", resetErr, err)

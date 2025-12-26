@@ -277,24 +277,24 @@ func (g *Git) CheckConflicts(source, target string) ([]string, error) {
 		// Check if there are unmerged files (indicates conflict)
 		conflicts, err := g.getConflictingFiles()
 		if err == nil && len(conflicts) > 0 {
-			// Abort the test merge
+			// Abort the test merge (best-effort cleanup)
 			_ = g.AbortMerge()
 			return conflicts, nil
 		}
 
 		// Check if it's a conflict error from wrapper
 		if errors.Is(mergeErr, ErrMergeConflict) {
-			_ = g.AbortMerge()
+			_ = g.AbortMerge() // best-effort cleanup
 			return conflicts, nil
 		}
 
-		// Some other merge error
+		// Some other merge error (best-effort cleanup)
 		_ = g.AbortMerge()
 		return nil, mergeErr
 	}
 
 	// Merge succeeded (no conflicts) - abort the test merge
-	// Use reset since --abort won't work on successful merge
+	// Use reset since --abort won't work on successful merge (best-effort cleanup)
 	_, _ = g.run("reset", "--hard", "HEAD")
 	return nil, nil
 }

@@ -118,11 +118,11 @@ func startMayorSession(t *tmux.Tmux) error {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
-	// Set environment
+	// Set environment (non-fatal: session works without these)
 	_ = t.SetEnvironment(MayorSessionName, "GT_ROLE", "mayor")
 	_ = t.SetEnvironment(MayorSessionName, "BD_ACTOR", "mayor")
 
-	// Apply Mayor theme
+	// Apply Mayor theme (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.MayorTheme()
 	_ = t.ConfigureGasTownSession(MayorSessionName, theme, "", "Mayor", "coordinator")
 
@@ -151,7 +151,7 @@ func runMayorStop(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Stopping Mayor session...")
 
-	// Try graceful shutdown first
+	// Try graceful shutdown first (best-effort interrupt)
 	_ = t.SendKeysRaw(MayorSessionName, "C-c")
 	time.Sleep(100 * time.Millisecond)
 
@@ -230,7 +230,7 @@ func runMayorRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	if running {
-		// Stop the current session
+		// Stop the current session (best-effort interrupt before kill)
 		fmt.Println("Stopping Mayor session...")
 		_ = t.SendKeysRaw(MayorSessionName, "C-c")
 		time.Sleep(100 * time.Millisecond)

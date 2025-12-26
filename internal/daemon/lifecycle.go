@@ -260,13 +260,13 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
-	// Set environment
+	// Set environment (non-fatal: session works without these)
 	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", identity)
 	// BD_ACTOR uses slashes instead of dashes for path-like identity
 	bdActor := identityToBDActor(identity)
 	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
 
-	// Apply theme
+	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	if identity == "mayor" {
 		theme := tmux.MayorTheme()
 		_ = d.tmux.ConfigureGasTownSession(sessionName, theme, "", "Mayor", "coordinator")

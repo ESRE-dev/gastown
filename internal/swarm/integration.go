@@ -36,8 +36,8 @@ func (m *Manager) CreateIntegrationBranch(swarmID string) error {
 		return fmt.Errorf("creating branch: %w", err)
 	}
 
-	// Push to origin
-	_ = m.gitRun("push", "-u", "origin", branchName) // Non-fatal - may not have remote
+	// Push to origin (non-fatal: may not have remote)
+	_ = m.gitRun("push", "-u", "origin", branchName)
 
 	return nil
 }
@@ -61,8 +61,8 @@ func (m *Manager) MergeToIntegration(swarmID, workerBranch string) error {
 		}
 	}
 
-	// Fetch the worker branch
-	_ = m.gitRun("fetch", "origin", workerBranch) // May not exist on remote, try local
+	// Fetch the worker branch (non-fatal: may not exist on remote, try local)
+	_ = m.gitRun("fetch", "origin", workerBranch)
 
 	// Attempt merge
 	err = m.gitRun("merge", "--no-ff", "-m",
@@ -97,8 +97,8 @@ func (m *Manager) LandToMain(swarmID string) error {
 		return fmt.Errorf("checking out %s: %w", swarm.TargetBranch, err)
 	}
 
-	// Pull latest
-	_ = m.gitRun("pull", "origin", swarm.TargetBranch) // Ignore errors
+	// Pull latest (non-fatal: may fail if remote unreachable)
+	_ = m.gitRun("pull", "origin", swarm.TargetBranch)
 
 	// Merge integration branch
 	err := m.gitRun("merge", "--no-ff", "-m",
@@ -133,10 +133,10 @@ func (m *Manager) CleanupBranches(swarmID string) error {
 		lastErr = err
 	}
 
-	// Delete integration branch remotely
-	_ = m.gitRun("push", "origin", "--delete", swarm.Integration) // Ignore errors
+	// Delete integration branch remotely (best-effort cleanup)
+	_ = m.gitRun("push", "origin", "--delete", swarm.Integration)
 
-	// Delete worker branches
+	// Delete worker branches (best-effort cleanup)
 	for _, task := range swarm.Tasks {
 		if task.Branch != "" {
 			// Local delete
