@@ -123,6 +123,19 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return handoffRemoteSession(t, targetSession, restartCmd)
 	}
 
+	// Handing off ourselves - print feedback then respawn
+	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), currentSession)
+
+	// Dry run mode - show what would happen (BEFORE any side effects)
+	if handoffDryRun {
+		if handoffSubject != "" || handoffMessage != "" {
+			fmt.Printf("Would send handoff mail: subject=%q\n", handoffSubject)
+		}
+		fmt.Printf("Would execute: tmux clear-history -t %s\n", pane)
+		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", pane, restartCmd)
+		return nil
+	}
+
 	// If subject/message provided, send handoff mail to self first
 	if handoffSubject != "" || handoffMessage != "" {
 		if err := sendHandoffMail(handoffSubject, handoffMessage); err != nil {
@@ -131,16 +144,6 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("%s Sent handoff mail\n", style.Bold.Render("📬"))
 		}
-	}
-
-	// Handing off ourselves - print feedback then respawn
-	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), currentSession)
-
-	// Dry run mode - show what would happen
-	if handoffDryRun {
-		fmt.Printf("Would execute: tmux clear-history -t %s\n", pane)
-		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", pane, restartCmd)
-		return nil
 	}
 
 	// Clear scrollback history before respawn (resets copy-mode from [0/N] to [0/0])
