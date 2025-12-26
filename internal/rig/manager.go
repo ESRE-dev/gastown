@@ -239,9 +239,9 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
 	}
 
-	// Create refinery as worktree from bare repo on main.
-	// Refinery stays on main to merge polecat branches into main.
-	// Uses the same main branch as mayor - they share the working copy.
+	// Create refinery as worktree from bare repo on its own branch.
+	// Refinery can see all polecat branches (shared .repo.git) and merges them to main.
+	// Uses a separate "refinery" branch to avoid conflict with mayor on main.
 	refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
 	if err := os.MkdirAll(filepath.Dir(refineryRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating refinery dir: %w", err)
