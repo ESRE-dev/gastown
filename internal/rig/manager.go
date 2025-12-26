@@ -217,40 +217,38 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("saving rig config: %w", err)
 	}
 
-	// Create shared bare repo as single source of truth for all worktrees.
-	// This architecture allows all worktrees (mayor, refinery, polecats) to share
-	// branch visibility without needing to push to remote.
+	// Create shared bare repo as source of truth for refinery and polecats.
+	// This allows refinery to see polecat branches without pushing to remote.
+	// Mayor remains a separate clone (doesn't need branch visibility).
 	bareRepoPath := filepath.Join(rigPath, ".repo.git")
 	if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
 		return nil, fmt.Errorf("creating bare repo: %w", err)
 	}
 	bareGit := git.NewGitWithDir(bareRepoPath, "")
 
-	// Create mayor as worktree from bare repo on main
+	// Create mayor as regular clone (separate from bare repo).
+	// Mayor doesn't need to see polecat branches - that's refinery's job.
+	// This also allows mayor to stay on main without conflicting with refinery.
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
 	}
-	if err := bareGit.WorktreeAddExisting(mayorRigPath, "main"); err != nil {
-		return nil, fmt.Errorf("creating mayor worktree: %w", err)
+	if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+		return nil, fmt.Errorf("cloning for mayor: %w", err)
 	}
 	// Create mayor CLAUDE.md (overrides any from cloned repo)
 	if err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
 	}
 
-	// Create refinery as worktree from bare repo on its own branch.
-	// Refinery can see all polecat branches (shared .repo.git) and merges them to main.
-	// Uses a separate "refinery" branch to avoid conflict with mayor on main.
+	// Create refinery as worktree from bare repo on main.
+	// Refinery needs to see polecat branches (shared .repo.git) and merges them to main.
+	// Being on main allows direct merge workflow.
 	refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
 	if err := os.MkdirAll(filepath.Dir(refineryRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating refinery dir: %w", err)
 	}
-	// Create a refinery branch from main for the worktree
-	if err := bareGit.CreateBranchFrom("refinery", "main"); err != nil {
-		return nil, fmt.Errorf("creating refinery branch: %w", err)
-	}
-	if err := bareGit.WorktreeAddExisting(refineryRigPath, "refinery"); err != nil {
+	if err := bareGit.WorktreeAddExisting(refineryRigPath, "main"); err != nil {
 		return nil, fmt.Errorf("creating refinery worktree: %w", err)
 	}
 	// Create refinery CLAUDE.md (overrides any from cloned repo)
