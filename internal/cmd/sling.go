@@ -36,6 +36,13 @@ Examples:
   gt sling gt-abc -s "Fix the bug"      # With context subject
   gt sling gt-abc crew                  # Sling bead to crew worker
   gt sling gt-abc gastown/crew/max      # Sling bead to specific agent
+  gt sling gt-abc gastown               # Auto-spawn polecat in rig (light spawn)
+
+Auto-spawning polecats:
+  When target is a rig name (not a specific agent), sling automatically spawns
+  a fresh polecat and slings work to it. This is a light spawn - the polecat
+  starts with just the hook. For full molecule workflow with crash recovery,
+  use 'gt spawn --issue <bead> <rig>' instead.
 
 Standalone formula slinging:
   gt sling mol-town-shutdown mayor/     # Cook + wisp + attach + nudge
@@ -141,10 +148,33 @@ func runSling(cmd *cobra.Command, args []string) error {
 	var err error
 
 	if len(args) > 1 {
-		// Slinging to another agent
-		targetAgent, targetPane, hookRoot, err = resolveTargetAgent(args[1])
-		if err != nil {
-			return fmt.Errorf("resolving target: %w", err)
+		target := args[1]
+
+		// Check if target is a rig name (auto-spawn polecat)
+		if rigName, isRig := IsRigName(target); isRig {
+			if slingDryRun {
+				// Dry run - just indicate what would happen
+				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
+				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
+				targetPane = "<new-pane>"
+				hookRoot = fmt.Sprintf("<polecat-worktree-in-%s>", rigName)
+			} else {
+				// Spawn a fresh polecat in the rig
+				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
+				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, false)
+				if spawnErr != nil {
+					return fmt.Errorf("spawning polecat: %w", spawnErr)
+				}
+				targetAgent = spawnInfo.AgentID()
+				targetPane = spawnInfo.Pane
+				hookRoot = spawnInfo.ClonePath
+			}
+		} else {
+			// Slinging to an existing agent
+			targetAgent, targetPane, hookRoot, err = resolveTargetAgent(target)
+			if err != nil {
+				return fmt.Errorf("resolving target: %w", err)
+			}
 		}
 	} else {
 		// Slinging to self
@@ -380,10 +410,31 @@ func runSlingFormula(args []string) error {
 	var err error
 
 	if target != "" {
-		// Slinging to another agent
-		targetAgent, targetPane, hookRoot, err = resolveTargetAgent(target)
-		if err != nil {
-			return fmt.Errorf("resolving target: %w", err)
+		// Check if target is a rig name (auto-spawn polecat)
+		if rigName, isRig := IsRigName(target); isRig {
+			if slingDryRun {
+				// Dry run - just indicate what would happen
+				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
+				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
+				targetPane = "<new-pane>"
+				hookRoot = fmt.Sprintf("<polecat-worktree-in-%s>", rigName)
+			} else {
+				// Spawn a fresh polecat in the rig
+				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
+				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, false)
+				if spawnErr != nil {
+					return fmt.Errorf("spawning polecat: %w", spawnErr)
+				}
+				targetAgent = spawnInfo.AgentID()
+				targetPane = spawnInfo.Pane
+				hookRoot = spawnInfo.ClonePath
+			}
+		} else {
+			// Slinging to an existing agent
+			targetAgent, targetPane, hookRoot, err = resolveTargetAgent(target)
+			if err != nil {
+				return fmt.Errorf("resolving target: %w", err)
+			}
 		}
 	} else {
 		// Slinging to self
