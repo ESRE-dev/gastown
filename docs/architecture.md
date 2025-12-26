@@ -1089,8 +1089,9 @@ gastown/                           # Rig = container (NOT a git clone)
 - **Runtime** (`.runtime/`): Process state - gitignored, transient
 
 **Git architecture (bare repo pattern):**
-- `.repo.git/` is a **bare clone** (no working directory) - the single source of truth
-- All other directories (mayor, refinery, polecats) are **worktrees** of this bare repo
+- `.repo.git/` is a **bare clone** (no working directory) - shared git database
+- Mayor is a **regular clone** (separate `.git/`) - doesn't need branch visibility
+- Refinery and polecats are **worktrees** of `.repo.git` - share refs
 - Polecat branches are visible to refinery because they share the same .git database
 - This is the standard git server pattern - not a hack
 
@@ -1101,14 +1102,15 @@ gastown/                           # Rig = container (NOT a git clone)
 - Faster polecat spawn (worktrees are instant)
 
 **Beads architecture:**
-- Mayor's worktree holds the canonical `.beads/` for the rig
+- Mayor's clone holds the canonical `.beads/` for the rig
 - Rig root symlinks `.beads/` → `mayor/rig/.beads`
 - All agents (crew, polecats, refinery) inherit beads via parent lookup
 - Polecats use redirect files pointing to mayor/rig/.beads
 
 **Key points:**
 - The rig root has no `.git/` - it's a container, not a repository
-- `.repo.git/` holds all git data; everything else is a worktree
+- `.repo.git/` holds git data for refinery and polecats (worktrees)
+- Mayor is a separate clone (doesn't need to see polecat branches)
 - Refinery worktree is on `main` for merge operations
 - Witness doesn't need a worktree (just monitors polecat state)
 
@@ -1167,18 +1169,19 @@ For reference without mermaid rendering (see [hq.md](hq.md) for creation/setup):
 │
 ├── gastown/                             # RIG (container, NOT a git clone)
 │   ├── config.json                      # Rig configuration
+│   ├── .repo.git/                       # Bare repo (shared git database)
 │   ├── .beads/ → mayor/rig/.beads       # Symlink to Mayor's canonical beads
 │   │
 │   ├── mayor/                           # Mayor's per-rig presence
-│   │   ├── rig/                         # CANONICAL clone (beads + worktree base)
+│   │   ├── rig/                         # Separate clone (canonical beads)
 │   │   │   ├── .git/
 │   │   │   ├── .beads/                  # CANONICAL rig beads (gt-* prefix)
 │   │   │   └── <project files>
 │   │   └── state.json
 │   │
 │   ├── refinery/                        # Refinery agent (merge queue)
-│   │   ├── rig/                         # Refinery's clone (for merges)
-│   │   │   ├── .git/
+│   │   ├── rig/                         # Worktree of .repo.git (on main)
+│   │   │   ├── .git                     # File pointing to ../.repo.git
 │   │   │   └── <project files>
 │   │   └── state.json
 │   │
@@ -1191,9 +1194,9 @@ For reference without mermaid rendering (see [hq.md](hq.md) for creation/setup):
 │   │       └── <project files>
 │   │
 │   ├── polecats/                        # Worker directories (worktrees)
-│   │   ├── Nux/                         # Git worktree from Mayor's clone
+│   │   ├── Nux/                         # Git worktree from .repo.git
 │   │   │   └── <project files>          # (inherits beads from rig)
-│   │   └── Toast/                       # Git worktree from Mayor's clone
+│   │   └── Toast/                       # Git worktree from .repo.git
 │   │
 │   └── molecules.jsonl                  # Optional local molecule catalog
 │
@@ -1209,9 +1212,10 @@ For reference without mermaid rendering (see [hq.md](hq.md) for creation/setup):
 
 **Key changes from earlier design:**
 - Town beads (`gm-*`) hold Mayor mail instead of JSONL files
-- Mayor has per-rig clone that's canonical for beads and worktrees
+- Mayor has per-rig clone that's canonical for beads
+- `.repo.git/` bare repo serves as source for refinery/polecat worktrees
 - Rig `.beads/` symlinks to Mayor's canonical beads
-- Polecats are git worktrees from Mayor's clone (fast)
+- Polecats are git worktrees from `.repo.git` (fast, share refs)
 
 ### Why Decentralized?
 
