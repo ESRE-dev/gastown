@@ -305,6 +305,23 @@ a permanent (but compact) record.`,
 	RunE: runMoleculeSquash,
 }
 
+var moleculeStepCmd = &cobra.Command{
+	Use:   "step",
+	Short: "Molecule step operations",
+	Long: `Commands for working with molecule steps.
+
+A molecule is a DAG of steps. Each step is a beads issue with the molecule root
+as its parent. Steps can have dependencies on other steps.
+
+When a polecat is working on a molecule, it processes one step at a time:
+1. Work on the current step
+2. When done: gt mol step done <step-id>
+3. System auto-continues to next ready step
+
+IMPORTANT: Always use 'gt mol step done' to complete steps. Do not manually
+close steps with 'bd close' - that skips the auto-continuation logic.`,
+}
+
 var moleculeBondCmd = &cobra.Command{
 	Use:   "bond <proto-id>",
 	Short: "Dynamically bond a child molecule to a running parent",
@@ -380,6 +397,10 @@ func init() {
 	moleculeBondCmd.Flags().StringArrayVar(&moleculeBondVars, "var", nil, "Template variable (key=value)")
 	moleculeBondCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 	moleculeBondCmd.MarkFlagRequired("parent")
+
+	// Add step subcommand with its children
+	moleculeStepCmd.AddCommand(moleculeStepDoneCmd)
+	moleculeCmd.AddCommand(moleculeStepCmd)
 
 	// Add subcommands
 	moleculeCmd.AddCommand(moleculeStatusCmd)
