@@ -1,0 +1,158 @@
+description = """
+Full Gas Town shutdown and restart.
+
+This is the "nuclear" option for clean reboot. Use when you need to:
+- Reset all state for a fresh start
+- Recover from corrupted agent state
+- Prepare for maintenance or upgrades
+
+Sling to Mayor when ready to reboot:
+  gt sling mol-town-shutdown mayor
+"""
+formula = "mol-town-shutdown"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "clear-inboxes"
+title = "Clear all agent inboxes"
+description = """
+Archive and clear all agent inboxes across all rigs.
+
+```bash
+# For each rig
+for rig in $(gt rigs --names); do
+  # Clear witness inbox
+  gt mail clear $rig/witness --archive
+
+  # Clear refinery inbox
+  gt mail clear $rig/refinery --archive
+
+  # Clear crew inboxes
+  for crew in $(gt crew list $rig --names); do
+    gt mail clear $rig/crew/$crew --archive
+  done
+done
+
+# Clear Mayor inbox
+gt mail clear mayor/ --archive
+```
+
+Messages are archived to `.beads/mail-archive/` before deletion.
+"""
+
+[[steps]]
+id = "kill-polecats"
+title = "Kill all active polecats"
+needs = ["clear-inboxes"]
+description = """
+Terminate all polecat sessions across all rigs.
+
+```bash
+gt stop --all --force
+```
+
+This kills all gt-* tmux sessions. Polecats are ephemeral workers
+that will be respawned fresh after restart.
+
+Note: Crew workers are NOT killed (they're persistent).
+"""
+
+[[steps]]
+id = "stop-daemon"
+title = "Stop the daemon"
+needs = ["kill-polecats"]
+description = """
+Stop the Gas Town daemon gracefully.
+
+```bash
+gt daemon stop
+```
+
+The daemon handles:
+- Heartbeat monitoring
+- Pending spawn triggers
+- Background coordination
+
+It will be restarted in the final step.
+"""
+
+[[steps]]
+id = "rotate-logs"
+title = "Rotate and archive logs"
+needs = ["stop-daemon"]
+description = """
+Rotate logs to prevent unbounded growth.
+
+```bash
+# Rotate daemon logs
+gt daemon rotate-logs
+
+# Archive old session captures
+gt doctor --fix  # Includes session cleanup
+```
+
+Old logs are moved to `~/gt/logs/archive/` with timestamps.
+"""
+
+[[steps]]
+id = "sync-state"
+title = "Sync beads and push"
+needs = ["rotate-logs"]
+description = """
+Ensure all state is persisted before restart.
+
+```bash
+# Sync beads changes
+bd sync
+
+# Push any uncommitted work
+git add -A
+git commit -m "Town shutdown: state checkpoint" || true
+git push
+```
+
+This ensures no work is lost during the restart.
+"""
+
+[[steps]]
+id = "handoff-mayor"
+title = "Send Mayor handoff"
+needs = ["sync-state"]
+description = """
+Record what comes next for the fresh Mayor session.
+
+```bash
+gt mail send mayor/ -s "🤝 HANDOFF: Town restart complete" -m "
+Town shutdown completed. Fresh state ready.
+
+Next steps:
+- Run gt prime to restore context
+- Check gt status for town health
+- Resume normal operations or start maintenance
+
+Shutdown reason: {{shutdown_reason}}
+"
+```
+
+The handoff mail ensures continuity across the restart.
+"""
+
+[[steps]]
+id = "restart-daemon"
+title = "Restart daemon fresh"
+needs = ["handoff-mayor"]
+description = """
+Start the daemon with fresh state.
+
+```bash
+gt daemon start
+```
+
+The daemon will:
+- Begin heartbeat monitoring
+- Watch for pending spawns
+- Resume background coordination
+
+Town is now ready for normal operations.
+"""
