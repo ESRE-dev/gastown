@@ -337,30 +337,9 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 
 	moleculeID := attachment.AttachedMolecule
 
-	// Close all child step issues before detaching
+	// Recursively close all descendant step issues before detaching
 	// This prevents orphaned step issues from accumulating (gt-psj76.1)
-	childrenClosed := 0
-	children, err := b.List(beads.ListOptions{
-		Parent: moleculeID,
-		Status: "all", // Include both open and in_progress
-	})
-	if err == nil && len(children) > 0 {
-		var idsToClose []string
-		for _, child := range children {
-			if child.Status != "closed" {
-				idsToClose = append(idsToClose, child.ID)
-			}
-		}
-		if len(idsToClose) > 0 {
-			if err := b.Close(idsToClose...); err != nil {
-				// Log but don't fail - best effort cleanup
-				fmt.Printf("%s Warning: could not close all step issues: %v\n",
-					style.Dim.Render("⚠"), err)
-			} else {
-				childrenClosed = len(idsToClose)
-			}
-		}
-	}
+	childrenClosed := closeDescendants(b, moleculeID)
 
 	// Detach the molecule with audit logging (this "burns" it by removing the attachment)
 	_, err = b.DetachMoleculeWithAudit(handoff.ID, beads.DetachOptions{
@@ -462,30 +441,9 @@ func runMoleculeSquash(cmd *cobra.Command, args []string) error {
 
 	moleculeID := attachment.AttachedMolecule
 
-	// Close all child step issues before squashing
+	// Recursively close all descendant step issues before squashing
 	// This prevents orphaned step issues from accumulating (gt-psj76.1)
-	childrenClosed := 0
-	children, err := b.List(beads.ListOptions{
-		Parent: moleculeID,
-		Status: "all", // Include both open and in_progress
-	})
-	if err == nil && len(children) > 0 {
-		var idsToClose []string
-		for _, child := range children {
-			if child.Status != "closed" {
-				idsToClose = append(idsToClose, child.ID)
-			}
-		}
-		if len(idsToClose) > 0 {
-			if err := b.Close(idsToClose...); err != nil {
-				// Log but don't fail - best effort cleanup
-				fmt.Printf("%s Warning: could not close all step issues: %v\n",
-					style.Dim.Render("⚠"), err)
-			} else {
-				childrenClosed = len(idsToClose)
-			}
-		}
-	}
+	childrenClosed := closeDescendants(b, moleculeID)
 
 	// Get progress info for the digest
 	progress, _ := getMoleculeProgressInfo(b, moleculeID)
@@ -568,4 +526,47 @@ squashed_at: %s
 	}
 
 	return nil
+}
+
+// closeDescendants recursively closes all descendant issues of a parent.
+// Returns the count of issues closed. Logs warnings on errors but doesn't fail.
+func closeDescendants(b *beads.Beads, parentID string) int {
+	children, err := b.List(beads.ListOptions{
+		Parent: parentID,
+		Status: "all",
+	})
+	if err != nil {
+		fmt.Printf("%s Warning: could not list children of %s: %v\n",
+			style.Dim.Render("⚠"), parentID, err)
+		return 0
+	}
+
+	if len(children) == 0 {
+		return 0
+	}
+
+	// First, recursively close grandchildren
+	totalClosed := 0
+	for _, child := range children {
+		totalClosed += closeDescendants(b, child.ID)
+	}
+
+	// Then close direct children
+	var idsToClose []string
+	for _, child := range children {
+		if child.Status != "closed" {
+			idsToClose = append(idsToClose, child.ID)
+		}
+	}
+
+	if len(idsToClose) > 0 {
+		if closeErr := b.Close(idsToClose...); closeErr != nil {
+			fmt.Printf("%s Warning: could not close children of %s: %v\n",
+				style.Dim.Render("⚠"), parentID, closeErr)
+		} else {
+			totalClosed += len(idsToClose)
+		}
+	}
+
+	return totalClosed
 }
