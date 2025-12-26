@@ -111,24 +111,18 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("waiting for shell: %w", err)
 		}
 
-		// Start claude with skip permissions (crew workers are trusted like Mayor)
-		if err := t.SendKeys(sessionID, "claude --dangerously-skip-permissions"); err != nil {
+		// Get pane ID for respawn
+		paneID, err := t.GetPaneID(sessionID)
+		if err != nil {
+			return fmt.Errorf("getting pane ID: %w", err)
+		}
+
+		// Use respawn-pane to replace shell with Claude directly
+		// This gives cleaner lifecycle: Claude exits → session ends (no intermediate shell)
+		// Pass "gt prime" as initial prompt so Claude loads context immediately
+		claudeCmd := `claude --dangerously-skip-permissions "gt prime"`
+		if err := t.RespawnPane(paneID, claudeCmd); err != nil {
 			return fmt.Errorf("starting claude: %w", err)
-		}
-
-		// Wait for Claude to start (pane command changes from shell to node)
-		shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
-		if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
-			fmt.Printf("Warning: Timeout waiting for Claude to start: %v\n", err)
-		}
-
-		// Give Claude time to initialize after process starts
-		time.Sleep(500 * time.Millisecond)
-
-		// Send gt prime to initialize context
-		if err := t.SendKeys(sessionID, "gt prime"); err != nil {
-			// Non-fatal: Claude started but priming failed
-			fmt.Printf("Warning: Could not send prime command: %v\n", err)
 		}
 
 		fmt.Printf("%s Created session for %s/%s\n",
@@ -138,27 +132,20 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// Uses both pane command check and UI marker detection to avoid
 		// restarting when user is in a subshell spawned from Claude
 		if !t.IsClaudeRunning(sessionID) {
-			// Claude has exited, restart it
+			// Claude has exited, restart it using respawn-pane
 			fmt.Printf("Claude exited, restarting...\n")
-			if err := t.SendKeys(sessionID, "claude --dangerously-skip-permissions"); err != nil {
+
+			// Get pane ID for respawn
+			paneID, err := t.GetPaneID(sessionID)
+			if err != nil {
+				return fmt.Errorf("getting pane ID: %w", err)
+			}
+
+			// Use respawn-pane to replace shell with Claude directly
+			// Pass "gt prime" as initial prompt so Claude loads context immediately
+			claudeCmd := `claude --dangerously-skip-permissions "gt prime"`
+			if err := t.RespawnPane(paneID, claudeCmd); err != nil {
 				return fmt.Errorf("restarting claude: %w", err)
-			}
-			// Wait for Claude to start, then prime
-			shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
-			if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
-				fmt.Printf("Warning: Timeout waiting for Claude to start: %v\n", err)
-			}
-			// Give Claude time to initialize after process starts
-			time.Sleep(500 * time.Millisecond)
-			if err := t.SendKeys(sessionID, "gt prime"); err != nil {
-				fmt.Printf("Warning: Could not send prime command: %v\n", err)
-			}
-			// Send crew resume prompt after prime completes
-			// Use NudgeSession (the canonical way to message Claude) with longer pre-delay
-			time.Sleep(5 * time.Second)
-			crewPrompt := "Run gt prime. Check your mail and in-progress issues. Act on anything urgent, else await instructions."
-			if err := t.NudgeSession(sessionID, crewPrompt); err != nil {
-				fmt.Printf("Warning: Could not send resume prompt: %v\n", err)
 			}
 		}
 	}

@@ -236,6 +236,20 @@ func (t *Tmux) GetPaneCommand(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// GetPaneID returns the pane identifier for a session's first pane.
+// Returns a pane ID like "%0" that can be used with RespawnPane.
+func (t *Tmux) GetPaneID(session string) (string, error) {
+	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_id}")
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return "", fmt.Errorf("no panes found in session %s", session)
+	}
+	return lines[0], nil
+}
+
 // GetPaneWorkDir returns the current working directory of a pane.
 func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
 	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_current_path}")
