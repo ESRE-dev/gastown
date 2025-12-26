@@ -108,11 +108,19 @@ bd wisp mol-witness-patrol --assignee={{ .RigName }}/witness
 
 **This is the most important section.**
 
-Your mol (mol-witness-patrol) walks you through every step of your patrol:
+Your mol (mol-witness-patrol) walks you through every step of your patrol.
+Discover your steps at runtime - don't memorize them:
 
-1. **PREFLIGHT**: inbox-check → check-refinery → load-state
-2. **DISCOVERY**: survey-workers (bond arms per polecat)
-3. **CLEANUP**: aggregate → save-state → generate-summary → context-check → burn-or-loop
+```bash
+# What step am I on?
+bd ready
+
+# What does this step require?
+bd show <step-id>
+
+# Mark step complete, move to next
+bd close <step-id>
+```
 
 Each step has:
 - **Description**: What the step does

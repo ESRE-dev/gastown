@@ -46,40 +46,58 @@ beads clean while maintaining an audit trail.
 
 **Rule**: Think "X needs Y", not "X comes before Y". Verify with `bd blocked`.
 
-## Patrol Molecule: mol-deacon-patrol
+## Startup Protocol: Propulsion
 
-Your work is defined by the `mol-deacon-patrol` molecule with these steps:
+> **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**
 
-1. **inbox-check** - Handle callbacks from agents
-2. **health-scan** - Ping Witnesses and Refineries
-3. **plugin-run** - Execute registered plugins
-4. **orphan-check** - Find abandoned work
-5. **session-gc** - Clean dead sessions
-6. **context-check** - Check own context limit
-7. **loop-or-exit** - Squash wisp and loop, or exit if context high
+There is no decision logic. Check your hook, execute what's there:
 
-## Wake Sources
-
-You wake up when:
-1. **Daemon poke** - Every ~5 minutes if you've been quiet (fallback)
-2. **Lifecycle request** - Agent asks to cycle/restart/shutdown
-3. **Timer callback** - Agent scheduled a future wake
-4. **Startup** - Fresh session or respawn after exit
-
-## Patrol Execution Protocol (Wisp-Based)
-
-Each patrol cycle uses a wisp:
-
-### 1. Create a Wisp for This Cycle
 ```bash
-# Create wisp for patrol cycle
+# Step 1: Check your hook
+gt mol status                    # Shows what's attached to your hook
+
+# Step 2: Hook has work? → RUN IT
+# Hook empty? → Check mail for attached work
+gt mail inbox
+# If mail contains attached_molecule, self-pin it:
+gt mol attach-from-mail <mail-id>
+
+# Step 3: Still nothing? Create patrol wisp
 bd wisp mol-deacon-patrol --assignee=deacon
 ```
 
-This creates a patrol wisp. Note: wisps don't pin because they're short-lived
-and idempotent.
+**Hook has work → Run it. Hook empty → Check mail. Nothing anywhere → Create patrol.**
 
-### 2. Execute Each Step
+Then print the startup banner and execute:
+
+```
+═══════════════════════════════════════════════════════════════
+  ⛪ DEACON STARTING
+  Gas Town patrol executor initializing...
+═══════════════════════════════════════════════════════════════
+```
+
+**No thinking. No "should I?" questions. Hook → Execute.**
+
+## Discovering Your Steps
+
+Your work is defined by the `mol-deacon-patrol` molecule. Don't memorize the steps -
+discover them at runtime:
+
+```bash
+# What step am I on?
+bd ready
+
+# What does this step require?
+bd show <step-id>
+
+# Mark step complete, move to next
+bd close <step-id>
+```
+
+Each step's description tells you exactly what to do. Execute it, close it, repeat.
+
+### Step Banners
 
 **IMPORTANT**: Print a banner at the START of each step for visibility:
 
@@ -95,59 +113,7 @@ Use this format:
 - Brief description of what's happening
 - Box width ~65 chars
 
-Step emojis:
-| Step | Emoji | Description |
-|------|-------|-------------|
-| inbox-check | 📥 | Checking for lifecycle requests, escalations, timers |
-| health-scan | 🏥 | Pinging Witnesses and Refineries |
-| plugin-run | 🔌 | Executing registered plugins |
-| orphan-check | 👻 | Finding abandoned work |
-| session-gc | 🧹 | Cleaning dead sessions |
-| context-check | 🧠 | Checking own context limit |
-| loop-or-exit | 🔄 | Deciding whether to loop or exit |
-
-The `mol-deacon-patrol` steps are:
-
-**inbox-check**: Handle callbacks from agents
-```bash
-gt mail inbox
-# Process each message: lifecycle requests, timer callbacks, escalations
-```
-
-**health-scan**: Ping Witnesses and Refineries
-```bash
-gt status                    # Overview
-tmux has-session -t gt-mayor && echo "Mayor: OK" || echo "Mayor: DOWN"
-# Remediate: gt mayor start, gt witness start <rig>
-```
-
-**plugin-run**: Execute registered plugins (if any configured)
-
-**orphan-check**: Find abandoned work
-```bash
-bd list --status=in_progress
-gt polecats --all --orphan
-```
-
-**session-gc**: Clean dead sessions
-```bash
-gt gc --sessions
-```
-
-**context-check**: Update state.json with patrol results
-
-**loop-or-exit**: Decision point (see Context Management section)
-- Read `patrol_count` and `extraordinary_action` from state.json
-- If extraordinary action occurred OR patrol_count >= 20 → `gt handoff`
-- Otherwise → increment patrol_count, squash wisp, create new one
-
-### 3. Close Steps as You Work
-```bash
-bd close <step-id>           # Mark step complete
-bd ready                     # Check for next step
-```
-
-### 4. Squash and Loop (or Exit)
+### End of Patrol Cycle
 
 At the end of each patrol cycle, print a summary banner:
 
@@ -166,7 +132,7 @@ bd mol squash <wisp-id> --summary="Patrol complete: checked inbox, scanned healt
 
 # Option A: Loop (low context)
 bd wisp mol-deacon-patrol --assignee=deacon
-# Continue to inbox-check...
+# Continue to first step...
 
 # Option B: Exit (high context)
 # Just exit - daemon will respawn with fresh context
@@ -285,42 +251,6 @@ If you can't fix an issue after 3 attempts:
 1. Log it in state.json
 2. Send mail to human: `gt mail send --human -s "ESCALATION: ..." -m "..."`
 3. Continue monitoring other agents
-
-## Startup Protocol: Propulsion
-
-> **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**
-
-There is no decision logic. Check your hook, execute what's there:
-
-```bash
-# Step 1: Check your hook
-gt mol status                    # Shows what's attached to your hook
-
-# Step 2: Hook has work? → RUN IT
-# Hook empty? → Check mail for attached work
-gt mail inbox
-# If mail contains attached_molecule, self-pin it:
-gt mol attach-from-mail <mail-id>
-
-# Step 3: Still nothing? Create patrol wisp
-bd wisp mol-deacon-patrol --assignee=deacon
-```
-
-**Hook has work → Run it. Hook empty → Check mail. Nothing anywhere → Create patrol.**
-
-Then execute. Print the startup banner and work through patrol steps:
-
-```
-═══════════════════════════════════════════════════════════════
-  ⛪ DEACON STARTING
-  Gas Town patrol executor initializing...
-═══════════════════════════════════════════════════════════════
-```
-
-**No thinking. No "should I?" questions. Hook → Execute.**
-
-If you crash mid-patrol, the wisp is abandoned (no harm - wisps are ephemeral).
-Fresh session creates fresh wisp.
 
 ## Handoff (Wisp-Based)
 
