@@ -217,28 +217,40 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("saving rig config: %w", err)
 	}
 
-	// Clone repository for mayor (must be first - serves as base for worktrees)
+	// Create shared bare repo as single source of truth for all worktrees.
+	// This architecture allows all worktrees (mayor, refinery, polecats) to share
+	// branch visibility without needing to push to remote.
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
+		return nil, fmt.Errorf("creating bare repo: %w", err)
+	}
+	bareGit := git.NewGitWithDir(bareRepoPath, "")
+
+	// Create mayor as worktree from bare repo on main
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
 	}
-	if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
-		return nil, fmt.Errorf("cloning for mayor: %w", err)
+	if err := bareGit.WorktreeAddExisting(mayorRigPath, "main"); err != nil {
+		return nil, fmt.Errorf("creating mayor worktree: %w", err)
 	}
 	// Create mayor CLAUDE.md (overrides any from cloned repo)
 	if err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
 	}
 
-	// Create refinery as a worktree of mayor's clone.
-	// This allows refinery to see polecat branches locally (shared .git).
-	// Refinery uses the "refinery" branch which tracks main.
+	// Create refinery as worktree from bare repo on main.
+	// Refinery stays on main to merge polecat branches into main.
+	// Uses the same main branch as mayor - they share the working copy.
 	refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
 	if err := os.MkdirAll(filepath.Dir(refineryRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating refinery dir: %w", err)
 	}
-	mayorGit := git.NewGit(mayorRigPath)
-	if err := mayorGit.WorktreeAdd(refineryRigPath, "refinery"); err != nil {
+	// Create a refinery branch from main for the worktree
+	if err := bareGit.CreateBranchFrom("refinery", "main"); err != nil {
+		return nil, fmt.Errorf("creating refinery branch: %w", err)
+	}
+	if err := bareGit.WorktreeAddExisting(refineryRigPath, "refinery"); err != nil {
 		return nil, fmt.Errorf("creating refinery worktree: %w", err)
 	}
 	// Create refinery CLAUDE.md (overrides any from cloned repo)

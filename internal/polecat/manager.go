@@ -82,6 +82,25 @@ func (m *Manager) assigneeID(name string) string {
 	return fmt.Sprintf("%s/%s", m.rig.Name, name)
 }
 
+// repoBase returns the git directory and Git object to use for worktree operations.
+// Prefers the shared bare repo (.repo.git) if it exists, otherwise falls back to mayor/rig.
+// The bare repo architecture allows all worktrees (refinery, polecats) to share branch visibility.
+func (m *Manager) repoBase() (*git.Git, error) {
+	// First check for shared bare repo (new architecture)
+	bareRepoPath := filepath.Join(m.rig.Path, ".repo.git")
+	if info, err := os.Stat(bareRepoPath); err == nil && info.IsDir() {
+		// Bare repo exists - use it
+		return git.NewGitWithDir(bareRepoPath, ""), nil
+	}
+
+	// Fall back to mayor/rig (legacy architecture)
+	mayorPath := filepath.Join(m.rig.Path, "mayor", "rig")
+	if _, err := os.Stat(mayorPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("no repo base found (neither .repo.git nor mayor/rig exists)")
+	}
+	return git.NewGit(mayorPath), nil
+}
+
 // polecatDir returns the directory for a polecat.
 func (m *Manager) polecatDir(name string) string {
 	return filepath.Join(m.rig.Path, "polecats", name)
@@ -93,8 +112,9 @@ func (m *Manager) exists(name string) bool {
 	return err == nil
 }
 
-// Add creates a new polecat as a git worktree from the mayor's clone.
-// This is much faster than a full clone and shares objects with the mayor.
+// Add creates a new polecat as a git worktree from the repo base.
+// Uses the shared bare repo (.repo.git) if available, otherwise mayor/rig.
+// This is much faster than a full clone and shares objects with all worktrees.
 // Polecat state is derived from beads assignee field, not state.json.
 func (m *Manager) Add(name string) (*Polecat, error) {
 	if m.exists(name) {
@@ -110,17 +130,14 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 		return nil, fmt.Errorf("creating polecats dir: %w", err)
 	}
 
-	// Use Mayor's clone as the base for worktrees (Mayor is canonical for the rig)
-	mayorPath := filepath.Join(m.rig.Path, "mayor", "rig")
-	mayorGit := git.NewGit(mayorPath)
-
-	// Verify Mayor's clone exists
-	if _, err := os.Stat(mayorPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("mayor clone not found at %s (run 'gt rig add' to set up rig structure)", mayorPath)
+	// Get the repo base (bare repo or mayor/rig)
+	repoGit, err := m.repoBase()
+	if err != nil {
+		return nil, fmt.Errorf("finding repo base: %w", err)
 	}
 
 	// Check if branch already exists (e.g., from previous polecat that wasn't cleaned up)
-	branchExists, err := mayorGit.BranchExists(branchName)
+	branchExists, err := repoGit.BranchExists(branchName)
 	if err != nil {
 		return nil, fmt.Errorf("checking branch existence: %w", err)
 	}
@@ -128,13 +145,13 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 	// Create worktree - reuse existing branch if it exists
 	if branchExists {
 		// Branch exists, create worktree using existing branch
-		if err := mayorGit.WorktreeAddExisting(polecatPath, branchName); err != nil {
+		if err := repoGit.WorktreeAddExisting(polecatPath, branchName); err != nil {
 			return nil, fmt.Errorf("creating worktree with existing branch: %w", err)
 		}
 	} else {
 		// Create new branch with worktree
 		// git worktree add -b polecat/<name> <path>
-		if err := mayorGit.WorktreeAdd(polecatPath, branchName); err != nil {
+		if err := repoGit.WorktreeAdd(polecatPath, branchName); err != nil {
 			return nil, fmt.Errorf("creating worktree: %w", err)
 		}
 	}
@@ -197,12 +214,15 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 		}
 	}
 
-	// Use Mayor's clone to remove the worktree properly
-	mayorPath := filepath.Join(m.rig.Path, "mayor", "rig")
-	mayorGit := git.NewGit(mayorPath)
+	// Get repo base to remove the worktree properly
+	repoGit, err := m.repoBase()
+	if err != nil {
+		// Fall back to direct removal if repo base not found
+		return os.RemoveAll(polecatPath)
+	}
 
 	// Try to remove as a worktree first (use force flag for worktree removal too)
-	if err := mayorGit.WorktreeRemove(polecatPath, force); err != nil {
+	if err := repoGit.WorktreeRemove(polecatPath, force); err != nil {
 		// Fall back to direct removal if worktree removal fails
 		// (e.g., if this is an old-style clone, not a worktree)
 		if removeErr := os.RemoveAll(polecatPath); removeErr != nil {
@@ -211,7 +231,7 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 	}
 
 	// Prune any stale worktree entries
-	_ = mayorGit.WorktreePrune()
+	_ = repoGit.WorktreePrune()
 
 	// Release name back to pool if it's a pooled name
 	m.namePool.Release(name)
@@ -257,9 +277,13 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 
 	polecatPath := m.polecatDir(name)
 	branchName := fmt.Sprintf("polecat/%s", name)
-	mayorPath := filepath.Join(m.rig.Path, "mayor", "rig")
-	mayorGit := git.NewGit(mayorPath)
 	polecatGit := git.NewGit(polecatPath)
+
+	// Get the repo base (bare repo or mayor/rig)
+	repoGit, err := m.repoBase()
+	if err != nil {
+		return nil, fmt.Errorf("finding repo base: %w", err)
+	}
 
 	// Check for uncommitted work unless forced
 	if !force {
@@ -270,7 +294,7 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 	}
 
 	// Remove the worktree (use force for git worktree removal)
-	if err := mayorGit.WorktreeRemove(polecatPath, true); err != nil {
+	if err := repoGit.WorktreeRemove(polecatPath, true); err != nil {
 		// Fall back to direct removal
 		if removeErr := os.RemoveAll(polecatPath); removeErr != nil {
 			return nil, fmt.Errorf("removing polecat dir: %w", removeErr)
@@ -278,14 +302,14 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 	}
 
 	// Prune stale worktree entries
-	_ = mayorGit.WorktreePrune()
+	_ = repoGit.WorktreePrune()
 
 	// Delete the old branch so worktree starts fresh from current HEAD
 	// Ignore error - branch may not exist (first recreate) or may fail to delete
-	_ = mayorGit.DeleteBranch(branchName, true)
+	_ = repoGit.DeleteBranch(branchName, true)
 
 	// Check if branch still exists (deletion may have failed or branch was protected)
-	branchExists, err := mayorGit.BranchExists(branchName)
+	branchExists, err := repoGit.BranchExists(branchName)
 	if err != nil {
 		return nil, fmt.Errorf("checking branch existence: %w", err)
 	}
@@ -294,12 +318,12 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 	if branchExists {
 		// Branch still exists, create worktree using existing branch
 		// This happens if delete failed (e.g., protected branch)
-		if err := mayorGit.WorktreeAddExisting(polecatPath, branchName); err != nil {
+		if err := repoGit.WorktreeAddExisting(polecatPath, branchName); err != nil {
 			return nil, fmt.Errorf("creating worktree with existing branch: %w", err)
 		}
 	} else {
 		// Branch was deleted, create fresh worktree with new branch from HEAD
-		if err := mayorGit.WorktreeAdd(polecatPath, branchName); err != nil {
+		if err := repoGit.WorktreeAdd(polecatPath, branchName); err != nil {
 			return nil, fmt.Errorf("creating fresh worktree: %w", err)
 		}
 	}

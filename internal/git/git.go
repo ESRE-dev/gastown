@@ -20,11 +20,19 @@ var (
 // Git wraps git operations for a working directory.
 type Git struct {
 	workDir string
+	gitDir  string // Optional: explicit git directory (for bare repos)
 }
 
 // NewGit creates a new Git wrapper for the given directory.
 func NewGit(workDir string) *Git {
 	return &Git{workDir: workDir}
+}
+
+// NewGitWithDir creates a Git wrapper with an explicit git directory.
+// This is used for bare repos where gitDir points to the .git directory
+// and workDir may be empty or point to a worktree.
+func NewGitWithDir(gitDir, workDir string) *Git {
+	return &Git{gitDir: gitDir, workDir: workDir}
 }
 
 // WorkDir returns the working directory for this Git instance.
@@ -34,8 +42,15 @@ func (g *Git) WorkDir() string {
 
 // run executes a git command and returns stdout.
 func (g *Git) run(args ...string) (string, error) {
+	// If gitDir is set (bare repo), prepend --git-dir flag
+	if g.gitDir != "" {
+		args = append([]string{"--git-dir=" + g.gitDir}, args...)
+	}
+
 	cmd := exec.Command("git", args...)
-	cmd.Dir = g.workDir
+	if g.workDir != "" {
+		cmd.Dir = g.workDir
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -80,6 +95,18 @@ func (g *Git) Clone(url, dest string) error {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stderr.String(), []string{"clone", url})
+	}
+	return nil
+}
+
+// CloneBare clones a repository as a bare repo (no working directory).
+// This is used for the shared repo architecture where all worktrees share a single git database.
+func (g *Git) CloneBare(url, dest string) error {
+	cmd := exec.Command("git", "clone", "--bare", url, dest)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return g.wrapError(err, stderr.String(), []string{"clone", "--bare", url})
 	}
 	return nil
 }
