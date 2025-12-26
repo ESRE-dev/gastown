@@ -175,6 +175,9 @@ func extractMoleculeIDFromStep(stepID string) string {
 
 	// Check if what's after the dot is a number (step suffix)
 	suffix := stepID[lastDot+1:]
+	if len(suffix) == 0 {
+		return "" // Trailing dot - no suffix
+	}
 	for _, c := range suffix {
 		if c < '0' || c > '9' {
 			return "" // Not a numeric suffix
@@ -187,7 +190,7 @@ func extractMoleculeIDFromStep(stepID string) string {
 // findNextReadyStep finds the next ready step in a molecule.
 // Returns (nextStep, allComplete, error).
 // If all steps are complete, returns (nil, true, nil).
-// If no steps are ready but some are blocked, returns (nil, false, nil).
+// If no steps are ready but some are blocked/in_progress, returns (nil, false, nil).
 func findNextReadyStep(b *beads.Beads, moleculeID string) (*beads.Issue, bool, error) {
 	// Get all children of the molecule
 	children, err := b.List(beads.ListOptions{
@@ -203,20 +206,28 @@ func findNextReadyStep(b *beads.Beads, moleculeID string) (*beads.Issue, bool, e
 		return nil, true, nil // No steps = complete
 	}
 
-	// Build set of closed step IDs
+	// Build set of closed step IDs and collect open steps
+	// Note: "open" means not started. "in_progress" means someone's working on it.
+	// We only consider "open" steps as candidates for the next step.
 	closedIDs := make(map[string]bool)
 	var openSteps []*beads.Issue
+	hasNonClosedSteps := false
 
 	for _, child := range children {
-		if child.Status == "closed" {
+		switch child.Status {
+		case "closed":
 			closedIDs[child.ID] = true
-		} else {
+		case "open":
 			openSteps = append(openSteps, child)
+			hasNonClosedSteps = true
+		default:
+			// in_progress or other status - not closed, not available
+			hasNonClosedSteps = true
 		}
 	}
 
 	// Check if all complete
-	if len(openSteps) == 0 {
+	if !hasNonClosedSteps {
 		return nil, true, nil
 	}
 
@@ -235,7 +246,7 @@ func findNextReadyStep(b *beads.Beads, moleculeID string) (*beads.Issue, bool, e
 		}
 	}
 
-	// No ready steps (all blocked)
+	// No ready steps (all blocked or in_progress)
 	return nil, false, nil
 }
 
