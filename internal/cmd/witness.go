@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/witness"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Witness command flags
@@ -67,7 +68,7 @@ Displays running state, monitored polecats, and statistics.`,
 }
 
 var witnessAttachCmd = &cobra.Command{
-	Use:     "attach <rig>",
+	Use:     "attach [rig]",
 	Aliases: []string{"at"},
 	Short:   "Attach to witness session",
 	Long: `Attach to the Witness tmux session for a rig.
@@ -75,8 +76,13 @@ var witnessAttachCmd = &cobra.Command{
 Attaches the current terminal to the witness's tmux session.
 Detach with Ctrl-B D.
 
-If the witness is not running, this will start it first.`,
-	Args: cobra.ExactArgs(1),
+If the witness is not running, this will start it first.
+If rig is not specified, infers it from the current directory.
+
+Examples:
+  gt witness attach gastown
+  gt witness attach          # infer rig from cwd`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runWitnessAttach,
 }
 
@@ -342,7 +348,22 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 }
 
 func runWitnessAttach(cmd *cobra.Command, args []string) error {
-	rigName := args[0]
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
+
+	// Infer rig from cwd if not provided
+	if rigName == "" {
+		townRoot, err := workspace.FindFromCwdOrError()
+		if err != nil {
+			return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		}
+		rigName, err = inferRigFromCwd(townRoot)
+		if err != nil {
+			return fmt.Errorf("could not determine rig: %w\nUsage: gt witness attach <rig>", err)
+		}
+	}
 
 	// Verify rig exists
 	_, r, err := getWitnessManager(rigName)
