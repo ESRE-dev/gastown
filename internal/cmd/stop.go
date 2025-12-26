@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -140,6 +141,11 @@ func runStop(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  %s [%s] %s: stopped\n",
 					style.Bold.Render("✓"),
 					r.Name, info.Polecat)
+
+				// Log kill event
+				agent := fmt.Sprintf("%s/%s", r.Name, info.Polecat)
+				logger := townlog.NewLogger(townRoot)
+				logger.Log(townlog.EventKill, agent, "gt stop")
 
 				// Log captured output (truncated)
 				if len(output) > 200 {

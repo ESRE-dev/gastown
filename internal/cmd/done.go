@@ -220,5 +220,8 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Witness notified of %s\n", style.Bold.Render("✓"), exitType)
 	}
 
+	// Log done event
+	LogDone(townRoot, sender, issueID)
+
 	return nil
 }

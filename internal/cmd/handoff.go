@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var handoffCmd = &cobra.Command{
@@ -125,6 +126,15 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 
 	// Handing off ourselves - print feedback then respawn
 	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), currentSession)
+
+	// Log handoff event
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		agent := sessionToGTRole(currentSession)
+		if agent == "" {
+			agent = currentSession
+		}
+		LogHandoff(townRoot, agent, handoffSubject)
+	}
 
 	// Dry run mode - show what would happen (BEFORE any side effects)
 	if handoffDryRun {

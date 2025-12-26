@@ -461,6 +461,9 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		style.Bold.Render("✓"),
 		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
 
+	// Log spawn event
+	LogSpawn(townRoot, polecatAddress, assignmentID)
+
 	// NOTE: We do NOT send a nudge here. Claude Code takes 10-20+ seconds to initialize,
 	// and sending keys before the prompt is ready causes them to be mangled.
 	// The Deacon will poll with WaitForClaudeReady and send a trigger when ready.

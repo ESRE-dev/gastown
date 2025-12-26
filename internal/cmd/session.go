@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/suggest"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -240,6 +241,13 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 		style.Bold.Render("✓"),
 		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
 
+	// Log wake event
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		agent := fmt.Sprintf("%s/%s", rigName, polecatName)
+		logger := townlog.NewLogger(townRoot)
+		logger.Log(townlog.EventWake, agent, sessionIssue)
+	}
+
 	return nil
 }
 
@@ -264,6 +272,18 @@ func runSessionStop(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Session stopped.\n", style.Bold.Render("✓"))
+
+	// Log kill event
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		agent := fmt.Sprintf("%s/%s", rigName, polecatName)
+		reason := "gt session stop"
+		if sessionForce {
+			reason = "gt session stop --force"
+		}
+		logger := townlog.NewLogger(townRoot)
+		logger.Log(townlog.EventKill, agent, reason)
+	}
+
 	return nil
 }
 
