@@ -337,6 +337,31 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 
 	moleculeID := attachment.AttachedMolecule
 
+	// Close all child step issues before detaching
+	// This prevents orphaned step issues from accumulating (gt-psj76.1)
+	childrenClosed := 0
+	children, err := b.List(beads.ListOptions{
+		Parent: moleculeID,
+		Status: "all", // Include both open and in_progress
+	})
+	if err == nil && len(children) > 0 {
+		var idsToClose []string
+		for _, child := range children {
+			if child.Status != "closed" {
+				idsToClose = append(idsToClose, child.ID)
+			}
+		}
+		if len(idsToClose) > 0 {
+			if err := b.Close(idsToClose...); err != nil {
+				// Log but don't fail - best effort cleanup
+				fmt.Printf("%s Warning: could not close all step issues: %v\n",
+					style.Dim.Render("⚠"), err)
+			} else {
+				childrenClosed = len(idsToClose)
+			}
+		}
+	}
+
 	// Detach the molecule with audit logging (this "burns" it by removing the attachment)
 	_, err = b.DetachMoleculeWithAudit(handoff.ID, beads.DetachOptions{
 		Operation: "burn",
@@ -349,9 +374,10 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 
 	if moleculeJSON {
 		result := map[string]interface{}{
-			"burned":     moleculeID,
-			"from":       target,
-			"handoff_id": handoff.ID,
+			"burned":          moleculeID,
+			"from":            target,
+			"handoff_id":      handoff.ID,
+			"children_closed": childrenClosed,
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -360,6 +386,9 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Burned molecule %s from %s\n",
 		style.Bold.Render("🔥"), moleculeID, target)
+	if childrenClosed > 0 {
+		fmt.Printf("  Closed %d step issues\n", childrenClosed)
+	}
 
 	return nil
 }
@@ -433,6 +462,31 @@ func runMoleculeSquash(cmd *cobra.Command, args []string) error {
 
 	moleculeID := attachment.AttachedMolecule
 
+	// Close all child step issues before squashing
+	// This prevents orphaned step issues from accumulating (gt-psj76.1)
+	childrenClosed := 0
+	children, err := b.List(beads.ListOptions{
+		Parent: moleculeID,
+		Status: "all", // Include both open and in_progress
+	})
+	if err == nil && len(children) > 0 {
+		var idsToClose []string
+		for _, child := range children {
+			if child.Status != "closed" {
+				idsToClose = append(idsToClose, child.ID)
+			}
+		}
+		if len(idsToClose) > 0 {
+			if err := b.Close(idsToClose...); err != nil {
+				// Log but don't fail - best effort cleanup
+				fmt.Printf("%s Warning: could not close all step issues: %v\n",
+					style.Dim.Render("⚠"), err)
+			} else {
+				childrenClosed = len(idsToClose)
+			}
+		}
+	}
+
 	// Get progress info for the digest
 	progress, _ := getMoleculeProgressInfo(b, moleculeID)
 
@@ -496,10 +550,11 @@ squashed_at: %s
 
 	if moleculeJSON {
 		result := map[string]interface{}{
-			"squashed":   moleculeID,
-			"digest_id":  digestIssue.ID,
-			"from":       target,
-			"handoff_id": handoff.ID,
+			"squashed":        moleculeID,
+			"digest_id":       digestIssue.ID,
+			"from":            target,
+			"handoff_id":      handoff.ID,
+			"children_closed": childrenClosed,
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -508,6 +563,9 @@ squashed_at: %s
 
 	fmt.Printf("%s Squashed molecule %s → digest %s\n",
 		style.Bold.Render("📦"), moleculeID, digestIssue.ID)
+	if childrenClosed > 0 {
+		fmt.Printf("  Closed %d step issues\n", childrenClosed)
+	}
 
 	return nil
 }
