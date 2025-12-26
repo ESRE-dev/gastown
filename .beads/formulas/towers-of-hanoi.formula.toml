@@ -1,0 +1,80 @@
+description = "Solve Towers of Hanoi for {disks} disks. Generates 2^{disks} - 1 steps, each a trivial move operation. Demonstrates mechanical structure generation for arbitrarily long workflows."
+formula = "towers-of-hanoi"
+version = 1
+
+[example_3_disk]
+
+[[example_3_disk.steps]]
+description = "Move disk 1 from A to C"
+id = "move-1"
+
+[[example_3_disk.steps]]
+description = "Move disk 2 from A to B"
+id = "move-2"
+needs = ["move-1"]
+
+[[example_3_disk.steps]]
+description = "Move disk 1 from C to B"
+id = "move-3"
+needs = ["move-2"]
+
+[[example_3_disk.steps]]
+description = "Move disk 3 from A to C"
+id = "move-4"
+needs = ["move-3"]
+
+[[example_3_disk.steps]]
+description = "Move disk 1 from B to A"
+id = "move-5"
+needs = ["move-4"]
+
+[[example_3_disk.steps]]
+description = "Move disk 2 from B to C"
+id = "move-6"
+needs = ["move-5"]
+
+[[example_3_disk.steps]]
+description = "Move disk 1 from A to C"
+id = "move-7"
+needs = ["move-6"]
+
+[generate]
+[generate.for-each]
+range = "1..2^{disks}"
+var = "move_num"
+[generate.step]
+description = "Move {computed_disk} from {computed_source} to {computed_target}. This is move {move_num} of {total_moves}. Simply execute the move - no decision needed."
+id = "move-{move_num}"
+needs = ["move-{move_num - 1}"]
+[generate.step.compute]
+disk = "lowest_set_bit({move_num})"
+source = "peg_for_disk({disk}, {move_num}, 'source')"
+target = "peg_for_disk({disk}, {move_num}, 'target')"
+
+[[steps]]
+description = "Verify initial state: {disks} disks stacked on peg {source_peg}. All disks in order (largest on bottom)."
+id = "setup"
+
+[[steps]]
+description = "Execute all {total_moves} moves to transfer tower from {source_peg} to {target_peg}."
+id = "solve"
+needs = ["setup"]
+
+[[steps]]
+description = "Verify final state: all {disks} disks now on peg {target_peg}. Tower intact, all moves were legal."
+id = "verify"
+needs = ["solve"]
+
+[vars]
+[vars.auxiliary_peg]
+default = "B"
+description = "Helper peg"
+[vars.disks]
+description = "Number of disks to solve"
+required = true
+[vars.source_peg]
+default = "A"
+description = "Starting peg"
+[vars.target_peg]
+default = "C"
+description = "Target peg"

@@ -1,0 +1,145 @@
+description = """
+Single polecat inspection and action cycle.
+
+This molecule is bonded dynamically by mol-witness-patrol's survey-workers step. Each polecat being monitored gets one arm that runs in parallel with other arms.
+
+## Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| polecat_name | Yes | Name of the polecat to inspect |
+| rig | Yes | Rig containing the polecat |
+| nudge_text | No | Text to send when nudging (default: \"How's progress?...\") |"""
+formula = "mol-polecat-arm"
+version = 1
+
+[[steps]]
+description = """
+Capture recent tmux output for {{polecat_name}}.
+
+```bash
+tmux capture-pane -t gt-{{rig}}-{{polecat_name}} -p | tail -50
+```
+
+Record:
+- Last activity timestamp (when was last tool call?)
+- Visible errors or stack traces
+- Completion indicators (\"Done\", \"Finished\", etc.)"""
+id = "capture"
+title = "Capture polecat state"
+
+[[steps]]
+description = """
+Categorize polecat state based on captured output.
+
+States:
+- **working**: Recent tool calls, active processing
+- **idle**: At prompt, no recent activity
+- **error**: Showing errors or stack traces
+- **requesting_shutdown**: Sent LIFECYCLE/Shutdown mail
+- **done**: Showing completion indicators
+
+Calculate: minutes since last activity."""
+id = "assess"
+needs = ["capture"]
+title = "Assess work status"
+
+[[steps]]
+description = """
+Read nudge history for {{polecat_name}} from patrol state.
+
+```
+nudge_count = state.nudges[{{polecat_name}}].count
+last_nudge_time = state.nudges[{{polecat_name}}].timestamp
+```
+
+This data was loaded by the parent patrol's load-state step and passed to the arm via the bonding context."""
+id = "load-history"
+needs = ["assess"]
+title = "Load intervention history"
+
+[[steps]]
+description = """
+Apply the nudge matrix to determine action for {{polecat_name}}.
+
+| State | Idle Time | Nudge Count | Action |
+|-------|-----------|-------------|--------|
+| working | any | any | none |
+| idle | <10min | any | none |
+| idle | 10-15min | 0 | nudge-1 (gentle) |
+| idle | 15-20min | 1 | nudge-2 (direct) |
+| idle | 20+min | 2 | nudge-3 (final) |
+| idle | any | 3 | escalate |
+| error | any | any | assess-severity |
+| requesting_shutdown | any | any | pre-kill-verify |
+| done | any | any | pre-kill-verify |
+
+Nudge text:
+1. \"How's progress? Need any help?\"
+2. \"Please wrap up soon. What's blocking you?\"
+3. \"Final check. Will escalate in 5 min if no response.\"
+
+Record decision and rationale."""
+id = "decide"
+needs = ["load-history"]
+title = "Decide intervention action"
+
+[[steps]]
+description = """
+Take the decided action for {{polecat_name}}.
+
+**nudge-N**:
+```bash
+tmux send-keys -t gt-{{rig}}-{{polecat_name}} \"{{nudge_text}}\" Enter
+```
+
+**pre-kill-verify**:
+```bash
+cd polecats/{{polecat_name}}
+git status                    # Must be clean
+git log origin/main..HEAD     # Check for unpushed
+bd show <assigned-issue>      # Verify closed/deferred
+
+# Verify productive work (for 'done' closures)
+git log --oneline --grep='<issue-id>' | head -1
+```
+
+**Commit verification** (ZFC principle - agent makes the call):
+- If issue closed as 'done' but no commits reference it → flag for review
+- Legitimate exceptions: already fixed elsewhere, duplicate, deferred
+- Agent must provide justification if closing without commits
+
+If clean: kill session, remove worktree, delete branch
+If dirty: record failure, retry next cycle
+
+**escalate**:
+```bash
+gt mail send mayor/ -s \"Escalation: {{polecat_name}} stuck\" -m \"...\"
+```
+
+**none**: No action needed.
+
+Record: action taken, result, updated nudge count.
+
+## Output
+
+The arm completes with:
+- action_taken: none | nudge-1 | nudge-2 | nudge-3 | killed | escalated
+- result: success | failed | pending
+- updated_state: New nudge count and timestamp for {{polecat_name}}
+
+This data feeds back to the parent patrol's aggregate step."""
+id = "execute"
+needs = ["decide"]
+title = "Execute intervention"
+
+[vars]
+[vars.nudge_text]
+default = "How's progress? Need any help?"
+description = "Text to send when nudging the polecat"
+[vars.polecat_name]
+description = "Name of the polecat to inspect"
+required = true
+[vars.rig]
+description = "Rig containing the polecat"
+required = true

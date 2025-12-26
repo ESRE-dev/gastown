@@ -1,0 +1,212 @@
+description = """
+Per-rig worker monitor patrol loop using the Christmas Ornament pattern.
+
+The Witness is the Pit Boss for your rig. You watch polecats, nudge them toward completion, verify clean git state before kills, and escalate stuck workers.
+
+**You do NOT do implementation work.** Your job is oversight, not coding.
+
+This molecule uses dynamic bonding to spawn mol-polecat-arm for each worker, enabling parallel inspection with a fanout gate for aggregation.
+
+## The Christmas Ornament Shape
+
+```
+                     ★ mol-witness-patrol (trunk)
+                    /|\\
+          ┌────────┘ │ └────────┐
+       PREFLIGHT  DISCOVERY  CLEANUP
+          │          │           │
+      inbox-check  survey    aggregate (WaitsFor: all-children)
+      check-refnry   │       save-state
+      load-state     │       generate-summary
+                     ↓       context-check
+             ┌───────┼───────┐  burn-or-loop
+             ●       ●       ●   mol-polecat-arm (dynamic)
+            ace     nux    toast
+```"""
+formula = "mol-witness-patrol"
+version = 1
+
+[[steps]]
+description = """
+Process witness mail: lifecycle requests, help requests.
+
+```bash
+gt mail inbox
+```
+
+Handle by message type:
+- **LIFECYCLE/Shutdown**: Queue for pre-kill verification
+- **Blocked/Help**: Assess if resolvable or escalate
+- **HANDOFF**: Load predecessor state
+- **Work complete**: Verify issue closed, proceed to pre-kill
+
+Record any pending actions for later steps. Mark messages as processed when complete."""
+id = "inbox-check"
+title = "Process witness mail"
+
+[[steps]]
+description = """
+Ensure the refinery is alive and processing merge requests.
+
+**Redundant system**: This check runs in both gt spawn and Witness patrol to ensure the merge queue processor stays operational.
+
+```bash
+# Check if refinery session is running
+gt session status <rig>/refinery
+
+# Check for merge requests in queue
+bd list --type=merge-request --status=open
+```
+
+If merge requests are waiting AND refinery is not running:
+```bash
+gt session start <rig>/refinery
+gt mail send <rig>/refinery -s \"PATROL: Wake up\" -m \"Merge requests in queue. Please process.\"
+```
+
+If refinery is running but queue is non-empty for >30 min, send nudge. This ensures polecats don't wait forever for their branches to merge."""
+id = "check-refinery"
+needs = ["inbox-check"]
+title = "Ensure refinery is alive"
+
+[[steps]]
+description = """
+Read handoff bead and get nudge counts.
+
+Load persistent state from the witness handoff bead:
+- Active workers and their status from last cycle
+- Nudge counts per worker per issue
+- Last nudge timestamps
+- Pending escalations
+
+```bash
+bd show <handoff-bead-id>
+```
+
+If no handoff exists (fresh start), initialize empty state. This state persists across wisp burns and session cycles."""
+id = "load-state"
+needs = ["check-refinery"]
+title = "Load persisted patrol state"
+
+[[steps]]
+description = """
+List polecats and bond mol-polecat-arm for each one.
+
+```bash
+# Get list of polecats
+gt polecat list <rig>
+```
+
+For each polecat discovered, dynamically bond an inspection arm:
+
+```bash
+# Bond mol-polecat-arm for each polecat
+for polecat in $(gt polecat list <rig> --names); do
+  bd mol bond mol-polecat-arm $PATROL_WISP_ID \\
+    --ref arm-$polecat \\
+    --var polecat_name=$polecat \\
+    --var rig=<rig>
+done
+```
+
+This creates child wisps like:
+- patrol-x7k.arm-ace (5 steps)
+- patrol-x7k.arm-nux (5 steps)
+- patrol-x7k.arm-toast (5 steps)
+
+Each arm runs in PARALLEL. The aggregate step will wait for all to complete.
+
+If no polecats are found, this step completes immediately with no children."""
+id = "survey-workers"
+needs = ["load-state"]
+title = "Survey all polecats (fanout)"
+
+[[steps]]
+description = """
+Collect outcomes from all polecat inspection arms.
+
+This is a **fanout gate** - it cannot proceed until ALL dynamically-bonded polecat arms have completed their inspection cycles.
+
+Once all arms complete, collect their outcomes:
+- Actions taken per polecat (nudge, kill, escalate, none)
+- Updated nudge counts
+- Any errors or issues discovered
+
+Build the consolidated state for save-state."""
+id = "aggregate"
+needs = ["survey-workers"]
+title = "Aggregate arm results"
+waits_for = "all-children"
+
+[[steps]]
+description = """
+Update handoff bead with new states.
+
+Persist state to the witness handoff bead:
+- Updated worker statuses from all arms
+- Current nudge counts per worker
+- Nudge timestamps
+- Actions taken this cycle
+- Pending items for next cycle
+
+```bash
+bd update <handoff-bead-id> --description=\"<serialized state>\"
+```
+
+This state survives wisp burns and session cycles."""
+id = "save-state"
+needs = ["aggregate"]
+title = "Persist patrol state"
+
+[[steps]]
+description = """
+Summarize this patrol cycle for digest.
+
+Include:
+- Workers inspected (count, names)
+- Nudges sent (count, to whom)
+- Sessions killed (count, names)
+- Escalations (count, issues)
+- Issues found (brief descriptions)
+- Actions pending for next cycle
+
+This becomes the digest when the patrol wisp is squashed."""
+id = "generate-summary"
+needs = ["save-state"]
+title = "Generate handoff summary"
+
+[[steps]]
+description = """
+Check own context usage.
+
+If context is HIGH (>80%):
+- Ensure state is saved to handoff bead
+- Prepare for burn/respawn
+
+If context is LOW:
+- Can continue patrolling"""
+id = "context-check"
+needs = ["generate-summary"]
+title = "Check own context limit"
+
+[[steps]]
+description = """
+End of patrol cycle decision.
+
+If context is LOW:
+- Burn this wisp (no audit trail needed for patrol cycles)
+- Sleep briefly to avoid tight loop (30-60 seconds)
+- Return to inbox-check step
+
+If context is HIGH:
+- Burn wisp with summary digest
+- Exit cleanly (daemon will respawn fresh Witness)
+
+```bash
+bd mol burn   # Destroy ephemeral wisp
+```
+
+The daemon ensures Witness is always running."""
+id = "burn-or-loop"
+needs = ["context-check"]
+title = "Burn and respawn or loop"

@@ -1,0 +1,241 @@
+description = """
+Mayor's daemon patrol loop.
+
+The Deacon is the Mayor's background process that runs continuously, handling callbacks, monitoring rig health, and performing cleanup. Each patrol cycle runs these steps in sequence, then loops or exits."""
+formula = "mol-deacon-patrol"
+version = 1
+
+[[steps]]
+description = """
+Handle callbacks from agents.
+
+Check the Mayor's inbox for messages from:
+- Witnesses reporting polecat status
+- Refineries reporting merge results
+- Polecats requesting help or escalation
+- External triggers (webhooks, timers)
+
+```bash
+gt mail inbox
+# For each message:
+gt mail read <id>
+# Handle based on message type
+```
+
+Callbacks may spawn new polecats, update issue state, or trigger other actions."""
+id = "inbox-check"
+title = "Handle callbacks from agents"
+
+[[steps]]
+description = """
+Nudge newly spawned polecats that are ready for input.
+
+When polecats are spawned, their Claude session takes 10-20 seconds to initialize. The spawn command returns immediately without waiting. This step finds spawned polecats that are now ready and sends them a trigger to start working.
+
+**ZFC-Compliant Observation** (AI observes AI):
+
+```bash
+# View pending spawns with captured terminal output
+gt deacon pending
+```
+
+For each pending session, analyze the captured output:
+- Look for Claude's prompt indicator \"> \" at the start of a line
+- If prompt is visible, Claude is ready for input
+- Make the judgment call yourself - you're the AI observer
+
+For each ready polecat:
+```bash
+# 1. Trigger the polecat
+gt nudge <session> \"Begin.\"
+
+# 2. Clear from pending list
+gt deacon pending <session>
+```
+
+This triggers the UserPromptSubmit hook, which injects mail so the polecat sees its assignment.
+
+**Bootstrap mode** (daemon-only, no AI available):
+The daemon uses `gt deacon trigger-pending` with regex detection. This ZFC violation is acceptable during cold startup when no AI agent is running yet."""
+id = "trigger-pending-spawns"
+needs = ["inbox-check"]
+title = "Nudge newly spawned polecats"
+
+[[steps]]
+description = """
+Check Witness and Refinery health for each rig.
+
+**ZFC Principle**: You (Claude) make the judgment call about what is \"stuck\" or \"unresponsive\" - there are no hardcoded thresholds in Go. Read the signals, consider context, and decide.
+
+For each rig, run:
+```bash
+gt witness status <rig>
+gt refinery status <rig>
+```
+
+**Signals to assess:**
+
+| Component | Healthy Signals | Concerning Signals |
+|-----------|-----------------|-------------------|
+| Witness | State: running, recent activity | State: not running, no heartbeat |
+| Refinery | State: running, queue processing | Queue stuck, merge failures |
+
+**Tracking unresponsive cycles:**
+
+Maintain in your patrol state (persisted across cycles):
+```
+health_state:
+  <rig>:
+    witness:
+      unresponsive_cycles: 0
+      last_seen_healthy: <timestamp>
+    refinery:
+      unresponsive_cycles: 0
+      last_seen_healthy: <timestamp>
+```
+
+**Decision matrix** (you decide the thresholds based on context):
+
+| Cycles Unresponsive | Suggested Action |
+|---------------------|------------------|
+| 1-2 | Note it, check again next cycle |
+| 3-4 | Attempt restart: gt witness restart <rig> |
+| 5+ | Escalate to Mayor with context |
+
+**Restart commands:**
+```bash
+gt witness restart <rig>
+gt refinery restart <rig>
+```
+
+**Escalation:**
+```bash
+gt mail send mayor/ -s \"Health: <rig> <component> unresponsive\" \\
+  -m \"Component has been unresponsive for N cycles. Restart attempts failed.
+      Last healthy: <timestamp>
+      Error signals: <details>\"
+```
+
+Reset unresponsive_cycles to 0 when component responds normally."""
+id = "health-scan"
+needs = ["trigger-pending-spawns"]
+title = "Check Witness and Refinery health"
+
+[[steps]]
+description = """
+Execute registered plugins.
+
+Scan ~/gt/plugins/ for plugin directories. Each plugin has a plugin.md with YAML frontmatter defining its gate (when to run) and instructions (what to do).
+
+See docs/deacon-plugins.md for full documentation.
+
+Gate types:
+- cooldown: Time since last run (e.g., 24h)
+- cron: Schedule-based (e.g., \"0 9 * * *\")
+- condition: Metric threshold (e.g., wisp count > 50)
+- event: Trigger-based (e.g., startup, heartbeat)
+
+For each plugin:
+1. Read plugin.md frontmatter to check gate
+2. Compare against state.json (last run, etc.)
+3. If gate is open, execute the plugin
+
+Plugins marked parallel: true can run concurrently using Task tool subagents. Sequential plugins run one at a time in directory order.
+
+Skip this step if ~/gt/plugins/ does not exist or is empty."""
+id = "plugin-run"
+needs = ["health-scan"]
+title = "Execute registered plugins"
+
+[[steps]]
+description = """
+Find abandoned work.
+
+Scan for orphaned state:
+- Issues marked in_progress with no active polecat
+- Polecats that stopped responding mid-work
+- Merge queue entries with no polecat owner
+- Wisp sessions that outlived their spawner
+
+```bash
+bd list --status=in_progress
+gt polecats --all --orphan
+```
+
+For each orphan:
+- Check if polecat session still exists
+- If not, mark issue for reassignment or retry
+- File incident beads if data loss occurred"""
+id = "orphan-check"
+needs = ["health-scan"]
+title = "Find abandoned work"
+
+[[steps]]
+description = """
+Clean dead sessions and orphaned state.
+
+Run `gt doctor --fix` to handle all cleanup:
+
+```bash
+# Preview what needs cleaning
+gt doctor -v
+
+# Fix everything
+gt doctor --fix
+```
+
+This handles:
+- **orphan-sessions**: Kill orphaned tmux sessions (gt-* not matching valid patterns)
+- **orphan-processes**: Kill orphaned Claude processes (no tmux parent)
+- **wisp-gc**: Garbage collect abandoned wisps (>1h old)
+
+All cleanup is handled by doctor checks - no need to run separate commands."""
+id = "session-gc"
+needs = ["orphan-check"]
+title = "Clean dead sessions"
+
+[[steps]]
+description = """
+Check own context limit.
+
+The Deacon runs in a Claude session with finite context. Check if approaching the limit:
+
+```bash
+gt context --usage
+```
+
+If context is high (>80%), prepare for handoff:
+- Summarize current state
+- Note any pending work
+- Write handoff to molecule state
+
+This enables the Deacon to burn and respawn cleanly."""
+id = "context-check"
+needs = ["session-gc"]
+title = "Check own context limit"
+
+[[steps]]
+description = """
+Burn and let daemon respawn, or exit if context high.
+
+Decision point at end of patrol cycle:
+
+If context is LOW:
+- Sleep briefly (avoid tight loop)
+- Return to inbox-check step
+
+If context is HIGH:
+- Write state to persistent storage
+- Exit cleanly
+- Let the daemon orchestrator respawn a fresh Deacon
+
+The daemon ensures Deacon is always running:
+```bash
+# Daemon respawns on exit
+gt daemon status
+```
+
+This enables infinite patrol duration via context-aware respawning."""
+id = "loop-or-exit"
+needs = ["context-check"]
+title = "Burn and respawn or loop"

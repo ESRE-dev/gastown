@@ -1,0 +1,62 @@
+description = """
+Full polecat lifecycle from assignment to decommission.
+
+This proto enables nondeterministic idempotence for polecat work. A polecat that crashes after any step can restart, read its molecule state, and continue from the last completed step. No work is lost.
+
+## Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| issue | Yes | The source issue ID being worked on |"""
+formula = "mol-polecat-work"
+version = 1
+
+[[steps]]
+description = """
+Run gt prime and bd prime. Verify issue assignment.
+Check inbox for any relevant messages.
+
+Read the assigned issue ({{issue}}) and understand the requirements.
+Identify any blockers or missing information."""
+id = "load-context"
+title = "Load context"
+
+[[steps]]
+description = """
+Implement the solution for {{issue}}. Follow codebase conventions.
+File discovered work as new issues with bd create.
+
+Make regular commits with clear messages.
+Keep changes focused on the assigned issue."""
+id = "implement"
+needs = ["load-context"]
+title = "Implement"
+
+[[steps]]
+description = """
+Review your own changes. Look for:
+- Bugs and edge cases
+- Style issues
+- Missing error handling
+- Security concerns
+
+Fix any issues found before proceeding."""
+id = "self-review"
+needs = ["implement"]
+title = "Self-review"
+
+[[steps]]
+description = """
+Send shutdown request to Witness.
+Wait for termination.
+
+The polecat is now ready to be cleaned up.
+Do not exit directly - wait for Witness to kill the session."""
+id = "request-shutdown"
+needs = ["self-review"]
+title = "Request shutdown"
+
+[vars]
+[vars.issue]
+description = "The source issue ID being worked on"
+required = true

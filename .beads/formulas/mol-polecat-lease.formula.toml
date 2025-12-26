@@ -1,0 +1,70 @@
+description = """
+Semaphore tracking a single polecat's lifecycle.
+
+Used by Witness to track polecat lifecycle during patrol. The Witness bonds this proto for each active polecat, creating a lease that tracks the polecat from spawn through work to cleanup.
+
+## Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| polecat | Yes | Name of the polecat |
+| issue | Yes | The issue assigned to the polecat |"""
+formula = "mol-polecat-lease"
+version = 1
+
+[[steps]]
+description = """
+Spawned. Verify it starts working.
+
+Check if the polecat is alive and working:
+```bash
+gt peek {{polecat}}
+```
+
+If idle for too long, nudge:
+```bash
+gt nudge {{polecat}} \"Please start working on your assigned issue.\"
+```
+
+Timeout: 60s before escalation to Mayor."""
+id = "boot"
+title = "Boot"
+
+[[steps]]
+description = """
+Actively working. Monitor for stuck.
+
+The polecat is processing its assigned issue ({{issue}}).
+Monitor via peek. Watch for:
+- Progress on commits
+- Status updates in beads
+- SHUTDOWN mail when done
+
+Wait for SHUTDOWN signal from the polecat."""
+id = "working"
+needs = ["boot"]
+title = "Working"
+
+[[steps]]
+description = """
+Exit received. Ready for cleanup.
+
+The polecat has completed its work and sent SHUTDOWN.
+Perform cleanup:
+```bash
+gt session kill {{polecat}}
+gt worktree prune {{polecat}}
+```
+
+Update beads state and close the lease."""
+id = "done"
+needs = ["working"]
+title = "Done"
+
+[vars]
+[vars.issue]
+description = "The issue assigned to the polecat"
+required = true
+[vars.polecat]
+description = "Name of the polecat"
+required = true
