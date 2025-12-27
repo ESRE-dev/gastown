@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -37,22 +38,35 @@ func init() {
 
 // TownStatus represents the overall status of the workspace.
 type TownStatus struct {
-	Name     string      `json:"name"`
-	Location string      `json:"location"`
-	Rigs     []RigStatus `json:"rigs"`
-	Summary  StatusSum   `json:"summary"`
+	Name     string        `json:"name"`
+	Location string        `json:"location"`
+	Agents   []AgentRuntime `json:"agents"`   // Global agents (Mayor, Deacon)
+	Rigs     []RigStatus   `json:"rigs"`
+	Summary  StatusSum     `json:"summary"`
+}
+
+// AgentRuntime represents the runtime state of an agent.
+type AgentRuntime struct {
+	Name      string `json:"name"`       // Display name (e.g., "mayor", "witness")
+	Address   string `json:"address"`    // Full address (e.g., "gastown/witness")
+	Session   string `json:"session"`    // tmux session name
+	Role      string `json:"role"`       // Role type
+	Running   bool   `json:"running"`    // Is tmux session running?
+	HasWork   bool   `json:"has_work"`   // Has pinned work?
+	WorkTitle string `json:"work_title,omitempty"` // Title of pinned work
 }
 
 // RigStatus represents status of a single rig.
 type RigStatus struct {
-	Name         string     `json:"name"`
-	Polecats     []string   `json:"polecats"`
-	PolecatCount int        `json:"polecat_count"`
-	Crews        []string   `json:"crews"`
-	CrewCount    int        `json:"crew_count"`
-	HasWitness   bool       `json:"has_witness"`
-	HasRefinery  bool       `json:"has_refinery"`
+	Name         string          `json:"name"`
+	Polecats     []string        `json:"polecats"`
+	PolecatCount int             `json:"polecat_count"`
+	Crews        []string        `json:"crews"`
+	CrewCount    int             `json:"crew_count"`
+	HasWitness   bool            `json:"has_witness"`
+	HasRefinery  bool            `json:"has_refinery"`
 	Hooks        []AgentHookInfo `json:"hooks,omitempty"`
+	Agents       []AgentRuntime  `json:"agents,omitempty"` // Runtime state of all agents in rig
 }
 
 // AgentHookInfo represents an agent's hook (pinned work) status.
@@ -101,6 +115,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
 
+	// Create tmux instance for runtime checks
+	t := tmux.NewTmux()
+
 	// Discover rigs
 	rigs, err := mgr.DiscoverRigs()
 	if err != nil {
@@ -111,6 +128,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	status := TownStatus{
 		Name:     townConfig.Name,
 		Location: townRoot,
+		Agents:   discoverGlobalAgents(t),
 		Rigs:     make([]RigStatus, 0, len(rigs)),
 	}
 
@@ -140,6 +158,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 				status.Summary.ActiveHooks++
 			}
 		}
+
+		// Discover runtime state for all agents in this rig
+		rs.Agents = discoverRigAgents(t, r, rs.Crews)
 
 		status.Rigs = append(status.Rigs, rs)
 
@@ -173,65 +194,60 @@ func outputStatusText(status TownStatus) error {
 	fmt.Printf("%s %s\n", style.Bold.Render("⚙️  Gas Town:"), status.Name)
 	fmt.Printf("   Location: %s\n\n", style.Dim.Render(status.Location))
 
-	// Summary
-	fmt.Printf("%s\n", style.Bold.Render("Summary"))
-	fmt.Printf("   Rigs:      %d\n", status.Summary.RigCount)
-	fmt.Printf("   Polecats:  %d\n", status.Summary.PolecatCount)
-	fmt.Printf("   Crews:     %d\n", status.Summary.CrewCount)
-	fmt.Printf("   Witnesses: %d\n", status.Summary.WitnessCount)
-	fmt.Printf("   Refineries: %d\n", status.Summary.RefineryCount)
-	fmt.Printf("   Active Hooks: %d\n", status.Summary.ActiveHooks)
+	// Global Agents (Mayor, Deacon)
+	fmt.Printf("%s\n", style.Bold.Render("Agents"))
+	for _, agent := range status.Agents {
+		statusStr := style.Success.Render("✓ running")
+		if !agent.Running {
+			statusStr = style.Error.Render("✗ stopped")
+		}
+		fmt.Printf("   %-14s %s\n", agent.Name, statusStr)
+	}
 
 	if len(status.Rigs) == 0 {
 		fmt.Printf("\n%s\n", style.Dim.Render("No rigs registered. Use 'gt rig add' to add one."))
 		return nil
 	}
 
-	// Rigs detail
+	// Rigs detail with runtime state
 	fmt.Printf("\n%s\n", style.Bold.Render("Rigs"))
 	for _, r := range status.Rigs {
-		// Rig name with indicators
-		indicators := ""
-		if r.HasWitness {
-			indicators += " " + AgentTypeIcons[AgentWitness]
-		}
-		if r.HasRefinery {
-			indicators += " " + AgentTypeIcons[AgentRefinery]
-		}
-		if r.CrewCount > 0 {
-			indicators += " " + AgentTypeIcons[AgentCrew]
-		}
+		fmt.Printf("   %s\n", style.Bold.Render(r.Name))
 
-		fmt.Printf("   %s%s\n", style.Bold.Render(r.Name), indicators)
-
-		if len(r.Polecats) > 0 {
-			fmt.Printf("      Polecats: %v\n", r.Polecats)
-		} else {
-			fmt.Printf("      %s\n", style.Dim.Render("No polecats"))
-		}
-
-		if len(r.Crews) > 0 {
-			fmt.Printf("      Crews: %v\n", r.Crews)
-		}
-
-		// Show active hooks
-		activeHooks := []AgentHookInfo{}
-		for _, h := range r.Hooks {
-			if h.HasWork {
-				activeHooks = append(activeHooks, h)
+		// Show all agents with their runtime state
+		for _, agent := range r.Agents {
+			statusStr := style.Success.Render("✓ running")
+			if !agent.Running {
+				statusStr = style.Error.Render("✗ stopped")
 			}
-		}
-		if len(activeHooks) > 0 {
-			fmt.Printf("      %s\n", style.Bold.Render("Hooks:"))
-			for _, h := range activeHooks {
-				if h.Molecule != "" {
-					fmt.Printf("         %s %s → %s\n", AgentTypeIcons[AgentPolecat], h.Agent, h.Molecule)
-				} else if h.Title != "" {
-					fmt.Printf("         %s %s → %s\n", AgentTypeIcons[AgentPolecat], h.Agent, h.Title)
-				} else {
-					fmt.Printf("         %s %s → (work attached)\n", AgentTypeIcons[AgentPolecat], h.Agent)
+
+			// Find hook info for this agent
+			hookInfo := ""
+			for _, h := range r.Hooks {
+				if h.Agent == agent.Address && h.HasWork {
+					if h.Molecule != "" {
+						hookInfo = fmt.Sprintf(" → %s", h.Molecule)
+					} else if h.Title != "" {
+						hookInfo = fmt.Sprintf(" → %s", h.Title)
+					} else {
+						hookInfo = " → (work attached)"
+					}
+					break
 				}
 			}
+
+			// Format agent name based on role
+			displayName := agent.Name
+			if agent.Role == "crew" {
+				displayName = "crew/" + agent.Name
+			}
+
+			fmt.Printf("      %-14s %s%s\n", displayName, statusStr, hookInfo)
+		}
+
+		// Show polecats if any (these are already in r.Agents if discovered)
+		if len(r.Polecats) == 0 && len(r.Crews) == 0 && !r.HasWitness && !r.HasRefinery {
+			fmt.Printf("      %s\n", style.Dim.Render("No agents"))
 		}
 	}
 
@@ -271,6 +287,92 @@ func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
 	}
 
 	return hooks
+}
+
+// discoverGlobalAgents checks runtime state for town-level agents (Mayor, Deacon).
+func discoverGlobalAgents(t *tmux.Tmux) []AgentRuntime {
+	var agents []AgentRuntime
+
+	// Check Mayor
+	mayorRunning, _ := t.HasSession(MayorSessionName)
+	agents = append(agents, AgentRuntime{
+		Name:    "mayor",
+		Address: "mayor",
+		Session: MayorSessionName,
+		Role:    "coordinator",
+		Running: mayorRunning,
+	})
+
+	// Check Deacon
+	deaconRunning, _ := t.HasSession(DeaconSessionName)
+	agents = append(agents, AgentRuntime{
+		Name:    "deacon",
+		Address: "deacon",
+		Session: DeaconSessionName,
+		Role:    "health-check",
+		Running: deaconRunning,
+	})
+
+	return agents
+}
+
+// discoverRigAgents checks runtime state for all agents in a rig.
+func discoverRigAgents(t *tmux.Tmux, r *rig.Rig, crews []string) []AgentRuntime {
+	var agents []AgentRuntime
+
+	// Check Witness
+	if r.HasWitness {
+		sessionName := witnessSessionName(r.Name)
+		running, _ := t.HasSession(sessionName)
+		agents = append(agents, AgentRuntime{
+			Name:    "witness",
+			Address: r.Name + "/witness",
+			Session: sessionName,
+			Role:    "witness",
+			Running: running,
+		})
+	}
+
+	// Check Refinery
+	if r.HasRefinery {
+		sessionName := fmt.Sprintf("gt-%s-refinery", r.Name)
+		running, _ := t.HasSession(sessionName)
+		agents = append(agents, AgentRuntime{
+			Name:    "refinery",
+			Address: r.Name + "/refinery",
+			Session: sessionName,
+			Role:    "refinery",
+			Running: running,
+		})
+	}
+
+	// Check Polecats
+	for _, name := range r.Polecats {
+		sessionName := fmt.Sprintf("gt-%s-%s", r.Name, name)
+		running, _ := t.HasSession(sessionName)
+		agents = append(agents, AgentRuntime{
+			Name:    name,
+			Address: r.Name + "/" + name,
+			Session: sessionName,
+			Role:    "polecat",
+			Running: running,
+		})
+	}
+
+	// Check Crew
+	for _, name := range crews {
+		sessionName := crewSessionName(r.Name, name)
+		running, _ := t.HasSession(sessionName)
+		agents = append(agents, AgentRuntime{
+			Name:    name,
+			Address: r.Name + "/crew/" + name,
+			Session: sessionName,
+			Role:    "crew",
+			Running: running,
+		})
+	}
+
+	return agents
 }
 
 // getAgentHook retrieves hook status for a specific agent.
