@@ -469,7 +469,7 @@ func resolveSelfTarget() (agentID string, pane string, hookRoot string, err erro
 }
 
 // verifyFormulaExists checks that the formula exists using bd formula show.
-// Formulas can be formula files (.formula.json/.formula.toml).
+// Formulas are TOML files (.formula.toml).
 func verifyFormulaExists(formulaName string) error {
 	// Try bd formula show (handles all formula file formats)
 	cmd := exec.Command("bd", "formula", "show", formulaName)

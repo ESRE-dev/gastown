@@ -162,6 +162,20 @@ This is the opposite of polecat work, which is persistent and auditable.
 | Witness | `gt-<rig>-witness` |
 | Crew | `gt-<rig>-<name>` |
 
+## Inbox Hygiene
+
+**CRITICAL**: Always delete messages after handling them. Messages accumulate if not cleared.
+
+```bash
+gt mail inbox                    # Check inbox
+gt mail read <id>                # Read message
+# ... handle the message ...
+gt mail delete <id>              # ALWAYS delete after handling
+```
+
+**Handoff messages** (`🤝 HANDOFF:`) are context notes from your previous session.
+Read them for situational awareness, then delete immediately.
+
 ## Lifecycle Request Handling
 
 When you receive lifecycle mail:
@@ -183,8 +197,8 @@ gt mail read <id>
 gt mayor stop
 gt mayor start
 
-# Acknowledge
-gt mail ack <id>
+# Delete the message
+gt mail delete <id>
 ```
 
 ## Timer Callbacks
