@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -41,12 +42,14 @@ var (
 	hookSubject string
 	hookMessage string
 	hookDryRun  bool
+	hookForce   bool
 )
 
 func init() {
 	hookCmd.Flags().StringVarP(&hookSubject, "subject", "s", "", "Subject for handoff mail (optional)")
 	hookCmd.Flags().StringVarP(&hookMessage, "message", "m", "", "Message for handoff mail (optional)")
 	hookCmd.Flags().BoolVarP(&hookDryRun, "dry-run", "n", false, "Show what would be done")
+	hookCmd.Flags().BoolVarP(&hookForce, "force", "f", false, "Replace existing incomplete pinned bead")
 	rootCmd.AddCommand(hookCmd)
 }
 
@@ -67,6 +70,63 @@ func runHook(cmd *cobra.Command, args []string) error {
 	agentID, _, _, err := resolveSelfTarget()
 	if err != nil {
 		return fmt.Errorf("detecting agent identity: %w", err)
+	}
+
+	// Find beads directory
+	workDir, err := findLocalBeadsDir()
+	if err != nil {
+		return fmt.Errorf("not in a beads workspace: %w", err)
+	}
+
+	b := beads.New(workDir)
+
+	// Check for existing pinned bead for this agent
+	existingPinned, err := b.List(beads.ListOptions{
+		Status:   beads.StatusPinned,
+		Assignee: agentID,
+		Priority: -1,
+	})
+	if err != nil {
+		return fmt.Errorf("checking existing pinned beads: %w", err)
+	}
+
+	// If there's an existing pinned bead, check if we can auto-replace
+	if len(existingPinned) > 0 {
+		existing := existingPinned[0]
+
+		// Skip if it's the same bead we're trying to pin
+		if existing.ID == beadID {
+			fmt.Printf("%s Already hooked: %s\n", style.Bold.Render("✓"), beadID)
+			return nil
+		}
+
+		// Check if existing bead is complete
+		isComplete := checkPinnedBeadComplete(b, existing)
+
+		if isComplete {
+			// Auto-replace completed bead
+			fmt.Printf("%s Replacing completed bead %s...\n", style.Dim.Render("ℹ"), existing.ID)
+			if !hookDryRun {
+				// Close the old bead
+				if err := b.Close(existing.ID); err != nil {
+					return fmt.Errorf("closing completed bead %s: %w", existing.ID, err)
+				}
+			}
+		} else if hookForce {
+			// Force replace incomplete bead
+			fmt.Printf("%s Force-replacing incomplete bead %s...\n", style.Dim.Render("⚠"), existing.ID)
+			if !hookDryRun {
+				// Unpin by setting status back to open
+				status := "open"
+				if err := b.Update(existing.ID, beads.UpdateOptions{Status: &status}); err != nil {
+					return fmt.Errorf("unpinning bead %s: %w", existing.ID, err)
+				}
+			}
+		} else {
+			// Existing incomplete bead blocks new hook
+			return fmt.Errorf("existing pinned bead %s is incomplete (%s)\n  Use --force to replace, or complete the existing work first",
+				existing.ID, existing.Title)
+		}
 	}
 
 	fmt.Printf("%s Hooking %s...\n", style.Bold.Render("🪝"), beadID)
@@ -94,6 +154,33 @@ func runHook(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Use 'gt mol status' to see hook status\n")
 
 	return nil
+}
+
+// checkPinnedBeadComplete checks if a pinned bead's attached molecule is 100% complete.
+// Returns true if:
+// - No molecule attached (naked bead = complete for hook purposes)
+// - Molecule has all steps closed
+func checkPinnedBeadComplete(b *beads.Beads, issue *beads.Issue) bool {
+	// Check for attached molecule
+	attachment := beads.ParseAttachmentFields(issue)
+	if attachment == nil || attachment.AttachedMolecule == "" {
+		// No molecule attached - consider complete (naked bead)
+		return true
+	}
+
+	// Get progress of attached molecule
+	progress, err := getMoleculeProgressInfo(b, attachment.AttachedMolecule)
+	if err != nil {
+		// Can't determine progress - be conservative, treat as incomplete
+		return false
+	}
+
+	if progress == nil {
+		// No steps found - might be a simple issue, treat as complete
+		return true
+	}
+
+	return progress.Complete
 }
 
 // verifyBeadExists checks that the bead exists using bd show.
