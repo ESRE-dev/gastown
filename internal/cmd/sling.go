@@ -199,6 +199,19 @@ func runSling(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Slinging %s to %s...\n", style.Bold.Render("🎯"), beadID, targetAgent)
 	}
 
+	// Check if bead is already pinned (guard against accidental re-sling)
+	info, err := getBeadInfo(beadID)
+	if err != nil {
+		return fmt.Errorf("checking bead status: %w", err)
+	}
+	if info.Status == "pinned" && !slingForce {
+		assignee := info.Assignee
+		if assignee == "" {
+			assignee = "(unknown)"
+		}
+		return fmt.Errorf("bead %s is already pinned to %s\nUse --force to re-sling", beadID, assignee)
+	}
+
 	if slingDryRun {
 		fmt.Printf("Would run: bd update %s --status=pinned --assignee=%s\n", beadID, targetAgent)
 		if formulaName != "" {
@@ -381,6 +394,30 @@ func verifyBeadExists(beadID string) error {
 		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
 	}
 	return nil
+}
+
+// beadInfo holds status and assignee for a bead.
+type beadInfo struct {
+	Status   string `json:"status"`
+	Assignee string `json:"assignee"`
+}
+
+// getBeadInfo returns status and assignee for a bead.
+func getBeadInfo(beadID string) (*beadInfo, error) {
+	cmd := exec.Command("bd", "show", beadID, "--json")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("bead '%s' not found", beadID)
+	}
+	// bd show --json returns an array (issue + dependents), take first element
+	var infos []beadInfo
+	if err := json.Unmarshal(out, &infos); err != nil {
+		return nil, fmt.Errorf("parsing bead info: %w", err)
+	}
+	if len(infos) == 0 {
+		return nil, fmt.Errorf("bead '%s' not found", beadID)
+	}
+	return &infos[0], nil
 }
 
 // detectCloneRoot finds the root of the current git clone.
