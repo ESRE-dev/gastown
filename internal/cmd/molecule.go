@@ -1,133 +1,40 @@
 package cmd
 
 import (
-	"path/filepath"
-
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Molecule command flags
 var (
-	moleculeJSON        bool
-	moleculeInstParent  string
-	moleculeInstContext []string
-	moleculeCatalogOnly bool // List only catalog templates
-	moleculeDBOnly      bool // List only database molecules
-	moleculeBondParent  string
-	moleculeBondRef     string
-	moleculeBondVars    []string
+	moleculeJSON bool
 )
 
 var moleculeCmd = &cobra.Command{
 	Use:     "mol",
 	Aliases: []string{"molecule"},
 	GroupID: GroupWork,
-	Short:   "Molecule workflow commands",
-	Long: `Manage molecule workflow templates.
+	Short:   "Agent molecule workflow commands",
+	Long: `Agent-specific molecule workflow operations.
 
-Molecules are composable workflow patterns stored as beads issues.
-When instantiated on a parent issue, they create child beads forming a DAG.
+These commands operate on the current agent's hook and attached molecules.
+For beads data operations (listing, showing, creating molecules), use bd:
 
-LIFECYCLE:
-  Proto (template)
-       │
-       ▼ instantiate/bond
-  ┌─────────────────┐
-  │ Mol (durable)   │ ← tracked in .beads/
-  │ Wisp (ephemeral)│ ← tracked in .beads/ with Wisp=true
-  └────────┬────────┘
-           │
-    ┌──────┴──────┐
-    ▼             ▼
-  burn         squash
-  (no record)  (→ digest)
+  bd formula list    List molecule protos (replaces gt mol catalog)
+  bd mol show        Show molecule details (replaces gt mol show)
+  bd mol pour        Instantiate molecule (replaces gt mol instantiate)
+  bd mol bond        Bond molecules together (replaces gt mol bond)
 
-PHASE TRANSITIONS (for pluggable molecules):
-  ┌─────────────┬─────────────┬─────────────┬─────────────────────┐
-  │ Phase       │ Parallelism │ Blocks      │ Purpose             │
-  ├─────────────┼─────────────┼─────────────┼─────────────────────┤
-  │ discovery   │ full        │ (nothing)   │ Inventory, gather   │
-  │ structural  │ sequential  │ discovery   │ Big-picture review  │
-  │ tactical    │ parallel    │ structural  │ Detailed work       │
-  │ synthesis   │ single      │ tactical    │ Aggregate results   │
-  └─────────────┴─────────────┴─────────────┴─────────────────────┘
-
-COMMANDS:
-  catalog      List available molecule protos
-  instantiate  Create steps from a molecule template
-  progress     Show execution progress of an instantiated molecule
-  status       Show what's on an agent's hook
-  burn         Discard molecule without creating a digest
-  squash       Complete molecule and create a digest`,
+AGENT COMMANDS:
+  status       Show what's on current agent's hook
+  current      Show what agent should be working on
+  progress     Show execution progress of attached molecule
+  attach       Attach molecule to agent's hook
+  detach       Detach molecule from agent's hook
+  burn         Burn attached molecule (no record)
+  squash       Squash attached molecule (→ digest)
+  step         Step operations within a molecule`,
 }
 
-var moleculeListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List molecules",
-	Long: `List all molecule definitions.
-
-By default, lists molecules from all sources:
-- Built-in molecules (shipped with gt)
-- Town-level: <town>/.beads/molecules.jsonl
-- Rig-level: <rig>/.beads/molecules.jsonl
-- Project-level: .beads/molecules.jsonl
-- Database: molecules stored as issues
-
-Use --catalog to show only template molecules (not instantiated).
-Use --db to show only database molecules.`,
-	RunE: runMoleculeList,
-}
-
-var moleculeShowCmd = &cobra.Command{
-	Use:   "show <id>",
-	Short: "Show molecule with parsed steps",
-	Long: `Show a molecule definition with its parsed steps.
-
-Displays the molecule's title, description structure, and all defined steps
-with their dependencies.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runMoleculeShow,
-}
-
-var moleculeParseCmd = &cobra.Command{
-	Use:   "parse <id>",
-	Short: "Validate and show parsed structure",
-	Long: `Parse and validate a molecule definition.
-
-This command parses the molecule's step definitions and reports any errors.
-Useful for debugging molecule definitions before instantiation.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runMoleculeParse,
-}
-
-var moleculeInstantiateCmd = &cobra.Command{
-	Use:   "instantiate <mol-id>",
-	Short: "Create steps from molecule template",
-	Long: `Instantiate a molecule on a parent issue.
-
-Creates child issues for each step defined in the molecule, wiring up
-dependencies according to the Needs: declarations.
-
-Template variables ({{variable}}) can be substituted using --context flags.
-
-Examples:
-  gt molecule instantiate mol-xyz --parent=gt-abc
-  gt molecule instantiate mol-xyz --parent=gt-abc --context feature=auth --context file=login.go`,
-	Args: cobra.ExactArgs(1),
-	RunE: runMoleculeInstantiate,
-}
-
-var moleculeInstancesCmd = &cobra.Command{
-	Use:   "instances <mol-id>",
-	Short: "Show all instantiations of a molecule",
-	Long: `Show all parent issues that have instantiated this molecule.
-
-Lists each instantiation with its status and progress.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runMoleculeInstances,
-}
 
 var moleculeProgressCmd = &cobra.Command{
 	Use:   "progress <root-issue-id>",
@@ -256,21 +163,6 @@ Examples:
 	RunE: runMoleculeCurrent,
 }
 
-var moleculeCatalogCmd = &cobra.Command{
-	Use:   "catalog",
-	Short: "List available molecule protos",
-	Long: `List molecule protos available for slinging.
-
-This is a convenience alias for 'gt mol list --catalog' that shows only
-reusable templates, not instantiated molecules.
-
-Protos come from:
-- Built-in molecules (shipped with gt)
-- Town-level: <town>/.beads/molecules.jsonl
-- Rig-level: <rig>/.beads/molecules.jsonl
-- Project-level: .beads/molecules.jsonl`,
-	RunE: runMoleculeCatalog,
-}
 
 var moleculeBurnCmd = &cobra.Command{
 	Use:   "burn [target]",
@@ -322,54 +214,8 @@ IMPORTANT: Always use 'gt mol step done' to complete steps. Do not manually
 close steps with 'bd close' - that skips the auto-continuation logic.`,
 }
 
-var moleculeBondCmd = &cobra.Command{
-	Use:   "bond <proto-id>",
-	Short: "Dynamically bond a child molecule to a running parent",
-	Long: `Bond a child molecule to a running parent molecule/wisp.
-
-This creates a new child molecule instance under the specified parent,
-enabling the Christmas Ornament pattern where a step can dynamically
-spawn children for parallel execution.
-
-Examples:
-  # Bond a polecat inspection arm to current patrol wisp
-  gt mol bond mol-polecat-arm --parent=patrol-x7k --ref=arm-toast \
-    --var polecat_name=toast --var rig=gastown
-
-  # The child will have ID: patrol-x7k.arm-toast
-  # And template variables {{polecat_name}} and {{rig}} expanded
-
-Usage in mol-witness-patrol's survey-workers step:
-  for polecat in $(gt polecat list <rig> --names); do
-    gt mol bond mol-polecat-arm --parent=$PATROL_WISP_ID \
-      --ref=arm-$polecat \
-      --var polecat_name=$polecat \
-      --var rig=<rig>
-  done`,
-	Args: cobra.ExactArgs(1),
-	RunE: runMoleculeBond,
-}
 
 func init() {
-	// List flags
-	moleculeListCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
-	moleculeListCmd.Flags().BoolVar(&moleculeCatalogOnly, "catalog", false, "Show only catalog templates")
-	moleculeListCmd.Flags().BoolVar(&moleculeDBOnly, "db", false, "Show only database molecules")
-
-	// Show flags
-	moleculeShowCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
-
-	// Parse flags
-	moleculeParseCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
-
-	// Instantiate flags
-	moleculeInstantiateCmd.Flags().StringVar(&moleculeInstParent, "parent", "", "Parent issue ID (required)")
-	moleculeInstantiateCmd.Flags().StringArrayVar(&moleculeInstContext, "context", nil, "Context variable (key=value)")
-	moleculeInstantiateCmd.MarkFlagRequired("parent")
-
-	// Instances flags
-	moleculeInstancesCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
-
 	// Progress flags
 	moleculeProgressCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 
@@ -382,64 +228,26 @@ func init() {
 	// Current flags
 	moleculeCurrentCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 
-	// Catalog flags
-	moleculeCatalogCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
-
 	// Burn flags
 	moleculeBurnCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 
 	// Squash flags
 	moleculeSquashCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 
-	// Bond flags
-	moleculeBondCmd.Flags().StringVar(&moleculeBondParent, "parent", "", "Parent molecule/wisp ID (required)")
-	moleculeBondCmd.Flags().StringVar(&moleculeBondRef, "ref", "", "Child reference suffix (e.g., arm-toast)")
-	moleculeBondCmd.Flags().StringArrayVar(&moleculeBondVars, "var", nil, "Template variable (key=value)")
-	moleculeBondCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
-	moleculeBondCmd.MarkFlagRequired("parent")
-
 	// Add step subcommand with its children
 	moleculeStepCmd.AddCommand(moleculeStepDoneCmd)
 	moleculeCmd.AddCommand(moleculeStepCmd)
 
-	// Add subcommands
+	// Add subcommands (agent-specific operations only)
 	moleculeCmd.AddCommand(moleculeStatusCmd)
 	moleculeCmd.AddCommand(moleculeCurrentCmd)
-	moleculeCmd.AddCommand(moleculeCatalogCmd)
 	moleculeCmd.AddCommand(moleculeBurnCmd)
 	moleculeCmd.AddCommand(moleculeSquashCmd)
-	moleculeCmd.AddCommand(moleculeListCmd)
-	moleculeCmd.AddCommand(moleculeShowCmd)
-	moleculeCmd.AddCommand(moleculeParseCmd)
-	moleculeCmd.AddCommand(moleculeInstantiateCmd)
-	moleculeCmd.AddCommand(moleculeInstancesCmd)
 	moleculeCmd.AddCommand(moleculeProgressCmd)
 	moleculeCmd.AddCommand(moleculeAttachCmd)
 	moleculeCmd.AddCommand(moleculeDetachCmd)
 	moleculeCmd.AddCommand(moleculeAttachmentCmd)
 	moleculeCmd.AddCommand(moleculeAttachFromMailCmd)
-	moleculeCmd.AddCommand(moleculeBondCmd)
 
 	rootCmd.AddCommand(moleculeCmd)
-}
-
-// loadMoleculeCatalog loads the molecule catalog with hierarchical sources.
-func loadMoleculeCatalog(workDir string) (*beads.MoleculeCatalog, error) {
-	var townRoot, rigPath, projectPath string
-
-	// Try to find town root (non-fatal: falls back to local formulas)
-	townRoot, _ = workspace.FindFromCwd()
-
-	// Try to find rig path
-	if townRoot != "" {
-		rigName, _, err := findCurrentRig(townRoot)
-		if err == nil && rigName != "" {
-			rigPath = filepath.Join(townRoot, rigName)
-		}
-	}
-
-	// Project path is the work directory
-	projectPath = workDir
-
-	return beads.LoadCatalog(townRoot, rigPath, projectPath)
 }
