@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 )
 
@@ -14,6 +16,8 @@ var (
 	crewDetached bool
 	crewMessage  string
 	crewAccount  string
+	crewAll      bool
+	crewDryRun   bool
 )
 
 var crewCmd = &cobra.Command{
@@ -148,7 +152,7 @@ Examples:
 }
 
 var crewRestartCmd = &cobra.Command{
-	Use:     "restart <name>",
+	Use:     "restart [name]",
 	Aliases: []string{"rs"},
 	Short:   "Kill and restart crew workspace session",
 	Long: `Kill the tmux session and restart fresh with Claude.
@@ -161,10 +165,26 @@ The command will:
 2. Start fresh session with Claude
 3. Run gt prime to reinitialize context
 
+Use --all to restart all running crew sessions across all rigs.
+
 Examples:
   gt crew restart dave            # Restart dave's session
-  gt crew rs emma                 # Same, using alias`,
-	Args: cobra.ExactArgs(1),
+  gt crew rs emma                 # Same, using alias
+  gt crew restart --all           # Restart all running crew sessions
+  gt crew restart --all --rig beads   # Restart all crew in beads rig
+  gt crew restart --all --dry-run     # Preview what would be restarted`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if crewAll {
+			if len(args) > 0 {
+				return fmt.Errorf("cannot specify both --all and a name")
+			}
+			return nil
+		}
+		if len(args) != 1 {
+			return fmt.Errorf("requires exactly 1 argument (or --all)")
+		}
+		return nil
+	},
 	RunE: runCrewRestart,
 }
 
@@ -258,7 +278,9 @@ func init() {
 	crewPristineCmd.Flags().StringVar(&crewRig, "rig", "", "Filter by rig name")
 	crewPristineCmd.Flags().BoolVar(&crewJSON, "json", false, "Output as JSON")
 
-	crewRestartCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
+	crewRestartCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use (filter when using --all)")
+	crewRestartCmd.Flags().BoolVar(&crewAll, "all", false, "Restart all running crew sessions")
+	crewRestartCmd.Flags().BoolVar(&crewDryRun, "dry-run", false, "Show what would be restarted without restarting")
 
 	crewStartCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 	crewStartCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use")

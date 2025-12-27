@@ -177,6 +177,11 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 }
 
 func runCrewRestart(cmd *cobra.Command, args []string) error {
+	// Handle --all flag
+	if crewAll {
+		return runCrewRestartAll()
+	}
+
 	name := args[0]
 	// Parse rig/name format (e.g., "beads/emma" -> rig=beads, name=emma)
 	if rig, crewName, ok := parseRigSlashName(name); ok {
@@ -266,6 +271,161 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Restarted crew workspace: %s/%s\n",
 		style.Bold.Render("✓"), r.Name, name)
 	fmt.Printf("Attach with: %s\n", style.Dim.Render(fmt.Sprintf("gt crew at %s", name)))
+
+	return nil
+}
+
+// runCrewRestartAll restarts all running crew sessions.
+// If crewRig is set, only restarts crew in that rig.
+func runCrewRestartAll() error {
+	// Get all agent sessions (including polecats to find crew)
+	agents, err := getAgentSessions(true)
+	if err != nil {
+		return fmt.Errorf("listing sessions: %w", err)
+	}
+
+	// Filter to crew agents only
+	var targets []*AgentSession
+	for _, agent := range agents {
+		if agent.Type != AgentCrew {
+			continue
+		}
+		// Filter by rig if specified
+		if crewRig != "" && agent.Rig != crewRig {
+			continue
+		}
+		targets = append(targets, agent)
+	}
+
+	if len(targets) == 0 {
+		fmt.Println("No running crew sessions to restart.")
+		if crewRig != "" {
+			fmt.Printf("  (filtered by rig: %s)\n", crewRig)
+		}
+		return nil
+	}
+
+	// Dry run - just show what would be restarted
+	if crewDryRun {
+		fmt.Printf("Would restart %d crew session(s):\n\n", len(targets))
+		for _, agent := range targets {
+			fmt.Printf("  %s %s/crew/%s\n", AgentTypeIcons[AgentCrew], agent.Rig, agent.AgentName)
+		}
+		return nil
+	}
+
+	fmt.Printf("Restarting %d crew session(s)...\n\n", len(targets))
+
+	var succeeded, failed int
+	var failures []string
+
+	for _, agent := range targets {
+		agentName := fmt.Sprintf("%s/crew/%s", agent.Rig, agent.AgentName)
+
+		// Use crewRig temporarily to get the right crew manager
+		savedRig := crewRig
+		crewRig = agent.Rig
+
+		crewMgr, r, err := getCrewManager(crewRig)
+		if err != nil {
+			failed++
+			failures = append(failures, fmt.Sprintf("%s: %v", agentName, err))
+			fmt.Printf("  %s %s\n", style.ErrorPrefix, agentName)
+			crewRig = savedRig
+			continue
+		}
+
+		worker, err := crewMgr.Get(agent.AgentName)
+		if err != nil {
+			failed++
+			failures = append(failures, fmt.Sprintf("%s: %v", agentName, err))
+			fmt.Printf("  %s %s\n", style.ErrorPrefix, agentName)
+			crewRig = savedRig
+			continue
+		}
+
+		// Restart the session
+		if err := restartCrewSession(r.Name, agent.AgentName, worker.ClonePath); err != nil {
+			failed++
+			failures = append(failures, fmt.Sprintf("%s: %v", agentName, err))
+			fmt.Printf("  %s %s\n", style.ErrorPrefix, agentName)
+		} else {
+			succeeded++
+			fmt.Printf("  %s %s\n", style.SuccessPrefix, agentName)
+		}
+
+		crewRig = savedRig
+
+		// Small delay between restarts to avoid overwhelming the system
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	fmt.Println()
+	if failed > 0 {
+		fmt.Printf("%s Restart complete: %d succeeded, %d failed\n",
+			style.WarningPrefix, succeeded, failed)
+		for _, f := range failures {
+			fmt.Printf("  %s\n", style.Dim.Render(f))
+		}
+		return fmt.Errorf("%d restart(s) failed", failed)
+	}
+
+	fmt.Printf("%s Restart complete: %d crew session(s) restarted\n", style.SuccessPrefix, succeeded)
+	return nil
+}
+
+// restartCrewSession handles the core restart logic for a single crew session.
+func restartCrewSession(rigName, crewName, clonePath string) error {
+	t := tmux.NewTmux()
+	sessionID := crewSessionName(rigName, crewName)
+
+	// Kill existing session if running
+	if hasSession, _ := t.HasSession(sessionID); hasSession {
+		if err := t.KillSession(sessionID); err != nil {
+			return fmt.Errorf("killing old session: %w", err)
+		}
+	}
+
+	// Start new session
+	if err := t.NewSession(sessionID, clonePath); err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	// Set environment
+	t.SetEnvironment(sessionID, "GT_ROLE", "crew")
+	t.SetEnvironment(sessionID, "GT_RIG", rigName)
+	t.SetEnvironment(sessionID, "GT_CREW", crewName)
+
+	// Apply rig-based theming
+	theme := getThemeForRig(rigName)
+	_ = t.ConfigureGasTownSession(sessionID, theme, rigName, crewName, "crew")
+
+	// Wait for shell to be ready
+	if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
+		return fmt.Errorf("waiting for shell: %w", err)
+	}
+
+	// Start claude with skip permissions
+	bdActor := fmt.Sprintf("%s/crew/%s", rigName, crewName)
+	claudeCmd := fmt.Sprintf("export GT_ROLE=crew GT_RIG=%s GT_CREW=%s BD_ACTOR=%s && claude --dangerously-skip-permissions", rigName, crewName, bdActor)
+	if err := t.SendKeys(sessionID, claudeCmd); err != nil {
+		return fmt.Errorf("starting claude: %w", err)
+	}
+
+	// Wait for Claude to start, then prime it
+	shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+	if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
+		// Non-fatal warning
+	}
+	time.Sleep(500 * time.Millisecond)
+	if err := t.SendKeys(sessionID, "gt prime"); err != nil {
+		// Non-fatal
+	}
+
+	// Send crew resume prompt after prime completes
+	time.Sleep(5 * time.Second)
+	crewPrompt := "Read your mail, act on anything urgent, else await instructions."
+	_ = t.NudgeSession(sessionID, crewPrompt)
 
 	return nil
 }
