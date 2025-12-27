@@ -101,7 +101,7 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// Fix kills all orphaned sessions.
+// Fix kills all orphaned sessions, except crew sessions which are protected.
 func (c *OrphanSessionCheck) Fix(ctx *CheckContext) error {
 	if len(c.orphanSessions) == 0 {
 		return nil
@@ -111,12 +111,29 @@ func (c *OrphanSessionCheck) Fix(ctx *CheckContext) error {
 	var lastErr error
 
 	for _, session := range c.orphanSessions {
+		// SAFEGUARD: Never auto-kill crew sessions.
+		// Crew workers are human-managed and require explicit action.
+		if isCrewSession(session) {
+			continue
+		}
 		if err := t.KillSession(session); err != nil {
 			lastErr = err
 		}
 	}
 
 	return lastErr
+}
+
+// isCrewSession returns true if the session name matches the crew pattern.
+// Crew sessions are gt-<rig>-crew-<name> and are protected from auto-cleanup.
+func isCrewSession(session string) bool {
+	// Pattern: gt-<rig>-crew-<name>
+	// Example: gt-gastown-crew-joe
+	parts := strings.Split(session, "-")
+	if len(parts) >= 4 && parts[0] == "gt" && parts[2] == "crew" {
+		return true
+	}
+	return false
 }
 
 // getValidRigs returns a list of valid rig names from the workspace.
@@ -294,14 +311,25 @@ func (c *OrphanProcessCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// Fix kills all orphaned processes.
+// Fix kills orphaned processes, with safeguards for crew sessions.
 func (c *OrphanProcessCheck) Fix(ctx *CheckContext) error {
 	if len(c.orphanPIDs) == 0 {
 		return nil
 	}
 
+	// SAFEGUARD: Get crew session pane PIDs to avoid killing crew processes.
+	// Even if a process appears orphaned, if its parent is a crew session pane,
+	// we should not kill it (the detection might be wrong).
+	crewPanePIDs := c.getCrewSessionPanePIDs()
+
 	var lastErr error
 	for _, pid := range c.orphanPIDs {
+		// Check if this process has a crew session ancestor
+		if c.hasCrewAncestor(pid, crewPanePIDs) {
+			// Skip - this process might belong to a crew session
+			continue
+		}
+
 		proc, err := os.FindProcess(pid)
 		if err != nil {
 			lastErr = err
@@ -316,6 +344,70 @@ func (c *OrphanProcessCheck) Fix(ctx *CheckContext) error {
 	}
 
 	return lastErr
+}
+
+// getCrewSessionPanePIDs returns pane PIDs for all crew sessions.
+func (c *OrphanProcessCheck) getCrewSessionPanePIDs() map[int]bool {
+	pids := make(map[int]bool)
+
+	t := tmux.NewTmux()
+	sessions, err := t.ListSessions()
+	if err != nil {
+		return pids
+	}
+
+	for _, session := range sessions {
+		if !isCrewSession(session) {
+			continue
+		}
+		// Get pane PIDs for this crew session
+		out, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_pid}").Output()
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			var pid int
+			if _, err := fmt.Sscanf(line, "%d", &pid); err == nil {
+				pids[pid] = true
+			}
+		}
+	}
+
+	return pids
+}
+
+// hasCrewAncestor checks if a process has a crew session pane as an ancestor.
+func (c *OrphanProcessCheck) hasCrewAncestor(pid int, crewPanePIDs map[int]bool) bool {
+	if len(crewPanePIDs) == 0 {
+		return false
+	}
+
+	// Walk up the process tree
+	currentPID := pid
+	visited := make(map[int]bool)
+
+	for currentPID > 1 && !visited[currentPID] {
+		visited[currentPID] = true
+
+		// Check if this PID is a crew pane
+		if crewPanePIDs[currentPID] {
+			return true
+		}
+
+		// Get parent PID
+		out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", currentPID), "-o", "ppid=").Output()
+		if err != nil {
+			break
+		}
+
+		var ppid int
+		if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &ppid); err != nil {
+			break
+		}
+		currentPID = ppid
+	}
+
+	return false
 }
 
 type processInfo struct {
