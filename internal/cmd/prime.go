@@ -798,508 +798,70 @@ func showMoleculeProgress(b *beads.Beads, rootID string) {
 
 // outputDeaconPatrolContext shows patrol molecule status for the Deacon.
 // Deacon uses wisps (Wisp:true issues in main .beads/) for patrol cycles.
-// bd wisp creates wisp-marked issues that are auto-deleted on squash.
 func outputDeaconPatrolContext(ctx RoleContext) {
-	fmt.Println()
-	fmt.Printf("%s\n\n", style.Bold.Render("## 🔄 Patrol Status (Wisp-based)"))
-
-	// Check for active mol-deacon-patrol molecules in town beads
-	// A patrol is "active" if it has open wisp children (steps to execute)
-	// After squash, the root stays open but has no open children - that's "completed"
-	// Deacon uses town beads (via redirect from ~/gt/deacon/.beads/ to ~/gt/.beads/)
-	beadsDir := ctx.WorkDir
-
-	// First find mol-deacon-patrol molecules (exclude template)
-	cmdList := exec.Command("bd", "list", "--status=open", "--type=epic")
-	cmdList.Dir = beadsDir
-	var stdoutList bytes.Buffer
-	cmdList.Stdout = &stdoutList
-	cmdList.Stderr = nil
-	errList := cmdList.Run()
-
-	// Find a patrol molecule with open children
-	hasPatrol := false
-	var patrolLine string
-	var patrolID string
-	if errList == nil {
-		lines := strings.Split(stdoutList.String(), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "mol-deacon-patrol") && !strings.Contains(line, "[template]") {
-				// Extract the ID (first word)
-				parts := strings.Fields(line)
-				if len(parts) > 0 {
-					molID := parts[0]
-					// Check if this molecule has open children using bd show
-					cmdShow := exec.Command("bd", "show", molID)
-					cmdShow.Dir = beadsDir
-					var stdoutShow bytes.Buffer
-					cmdShow.Stdout = &stdoutShow
-					cmdShow.Stderr = nil
-					if cmdShow.Run() == nil {
-						showOutput := stdoutShow.String()
-						// Check for "- open]" in children section (open child steps)
-						if strings.Contains(showOutput, "- open]") {
-							hasPatrol = true
-							patrolLine = line
-							patrolID = molID
-							break
-						}
-					}
-				}
-			}
-		}
+	cfg := PatrolConfig{
+		RoleName:        "deacon",
+		PatrolMolName:   "mol-deacon-patrol",
+		BeadsDir:        ctx.WorkDir,
+		Assignee:        "deacon",
+		HeaderEmoji:     "🔄",
+		HeaderTitle:     "Patrol Status (Wisp-based)",
+		CheckInProgress: false,
+		WorkLoopSteps: []string{
+			"Check next step: `bd ready`",
+			"Execute the step (heartbeat, mail, health checks, etc.)",
+			"Close step: `bd close <step-id>`",
+			"Check next: `bd ready`",
+			"At cycle end (loop-or-exit step):\n   - Generate summary of patrol cycle\n   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`\n   - Loop back to create new wisp, or exit if context high",
+		},
 	}
-
-	if !hasPatrol {
-		// No active patrol - AUTO-SPAWN one
-		fmt.Println("Status: **No active patrol** - creating mol-deacon-patrol...")
-		fmt.Println()
-
-		// Find the proto ID for mol-deacon-patrol
-		cmdCatalog := exec.Command("bd", "--no-daemon", "mol", "catalog")
-		cmdCatalog.Dir = beadsDir
-		var stdoutCatalog bytes.Buffer
-		cmdCatalog.Stdout = &stdoutCatalog
-		cmdCatalog.Stderr = nil
-
-		if cmdCatalog.Run() != nil {
-			fmt.Println(style.Dim.Render("Failed to list molecule catalog. Run `bd mol catalog` to troubleshoot."))
-			return
-		}
-
-		// Find mol-deacon-patrol in catalog
-		var protoID string
-		catalogLines := strings.Split(stdoutCatalog.String(), "\n")
-		for _, line := range catalogLines {
-			if strings.Contains(line, "mol-deacon-patrol") {
-				parts := strings.Fields(line)
-				if len(parts) > 0 {
-					// Strip trailing colon from ID (catalog format: "gt-xxx: title")
-					protoID = strings.TrimSuffix(parts[0], ":")
-					break
-				}
-			}
-		}
-
-		if protoID == "" {
-			fmt.Println(style.Dim.Render("Proto mol-deacon-patrol not found in catalog. Run `bd mol register` first."))
-			return
-		}
-
-		// Create the patrol wisp (step 1: create)
-		cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", "create", protoID)
-		cmdSpawn.Dir = beadsDir
-		var stdoutSpawn, stderrSpawn bytes.Buffer
-		cmdSpawn.Stdout = &stdoutSpawn
-		cmdSpawn.Stderr = &stderrSpawn
-
-		if err := cmdSpawn.Run(); err != nil {
-			fmt.Printf("Failed to create patrol wisp: %s\n", stderrSpawn.String())
-			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp create " + protoID))
-			return
-		}
-
-		// Parse the created molecule ID from output
-		spawnOutput := stdoutSpawn.String()
-
-		// Extract molecule ID from output (format: "Root issue: wisp-xxxx" or "gt-xxxx")
-		for _, line := range strings.Split(spawnOutput, "\n") {
-			if strings.Contains(line, "Root issue:") || strings.Contains(line, "Created") {
-				parts := strings.Fields(line)
-				for _, p := range parts {
-					if strings.HasPrefix(p, "wisp-") || strings.HasPrefix(p, "gt-") {
-						patrolID = p
-						break
-					}
-				}
-			}
-		}
-
-		if patrolID == "" {
-			fmt.Printf("⚠ Created wisp but could not parse ID from output\n")
-			return
-		}
-
-		// Pin the wisp to deacon (step 2: assign)
-		cmdPin := exec.Command("bd", "--no-daemon", "update", patrolID, "--status=pinned", "--assignee=deacon")
-		cmdPin.Dir = beadsDir
-		if err := cmdPin.Run(); err != nil {
-			fmt.Printf("⚠ Created wisp %s but failed to pin to deacon\n", patrolID)
-		} else {
-			fmt.Printf("✓ Created and pinned patrol wisp: %s\n", patrolID)
-		}
-	} else {
-		// Has active patrol - show status
-		fmt.Println("Status: **Patrol Active**")
-		fmt.Printf("Patrol: %s\n\n", strings.TrimSpace(patrolLine))
-	}
-
-	// Show patrol work loop instructions
-	fmt.Println("**Deacon Patrol Work Loop:**")
-	fmt.Println("1. Check next step: `bd ready`")
-	fmt.Println("2. Execute the step (heartbeat, mail, health checks, etc.)")
-	fmt.Println("3. Close step: `bd close <step-id>`")
-	fmt.Println("4. Check next: `bd ready`")
-	fmt.Println("5. At cycle end (loop-or-exit step):")
-	fmt.Println("   - Generate summary of patrol cycle")
-	fmt.Println("   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`")
-	fmt.Println("   - Loop back to create new wisp, or exit if context high")
-	if patrolID != "" {
-		fmt.Println()
-		fmt.Printf("Current patrol ID: %s\n", patrolID)
-	}
+	outputPatrolContext(cfg)
 }
 
 // outputWitnessPatrolContext shows patrol molecule status for the Witness.
 // Witness AUTO-BONDS its patrol molecule on startup if one isn't already running.
-// This ensures polecat health is always monitored.
 func outputWitnessPatrolContext(ctx RoleContext) {
-	fmt.Println()
-	fmt.Printf("%s\n\n", style.Bold.Render("## 👁 Witness Patrol Status"))
-
-	// Witness works from its own rig clone: <rig>/witness/rig/
-	// Beads are in the current WorkDir
-	witnessBeadsDir := ctx.WorkDir
-
-	// Find mol-witness-patrol molecules (exclude template)
-	// Look for in-progress patrol first (resumable)
-	cmdList := exec.Command("bd", "--no-daemon", "list", "--status=in_progress", "--type=epic")
-	cmdList.Dir = witnessBeadsDir
-	var stdoutList bytes.Buffer
-	cmdList.Stdout = &stdoutList
-	cmdList.Stderr = nil
-	errList := cmdList.Run()
-
-	hasPatrol := false
-	var patrolID string
-	var patrolLine string
-
-	if errList == nil {
-		lines := strings.Split(stdoutList.String(), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "mol-witness-patrol") && !strings.Contains(line, "[template]") {
-				parts := strings.Fields(line)
-				if len(parts) > 0 {
-					patrolID = parts[0]
-					patrolLine = line
-					hasPatrol = true
-					break
-				}
-			}
-		}
+	cfg := PatrolConfig{
+		RoleName:        "witness",
+		PatrolMolName:   "mol-witness-patrol",
+		BeadsDir:        ctx.WorkDir,
+		Assignee:        ctx.Rig + "/witness",
+		HeaderEmoji:     "👁",
+		HeaderTitle:     "Witness Patrol Status",
+		CheckInProgress: true,
+		WorkLoopSteps: []string{
+			"Check inbox: `gt mail inbox`",
+			"Check next step: `bd ready`",
+			"Execute the step (survey polecats, inspect, nudge, etc.)",
+			"Close step: `bd close <step-id>`",
+			"Check next: `bd ready`",
+			"At cycle end (burn-or-loop step):\n   - Generate summary of patrol cycle\n   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`\n   - Loop back to create new wisp, or exit if context high",
+		},
 	}
-
-	// Also check for open patrols with open children (active wisp)
-	if !hasPatrol {
-		cmdOpen := exec.Command("bd", "--no-daemon", "list", "--status=open", "--type=epic")
-		cmdOpen.Dir = witnessBeadsDir
-		var stdoutOpen bytes.Buffer
-		cmdOpen.Stdout = &stdoutOpen
-		cmdOpen.Stderr = nil
-		if cmdOpen.Run() == nil {
-			lines := strings.Split(stdoutOpen.String(), "\n")
-			for _, line := range lines {
-				if strings.Contains(line, "mol-witness-patrol") && !strings.Contains(line, "[template]") {
-					parts := strings.Fields(line)
-					if len(parts) > 0 {
-						molID := parts[0]
-						// Check if this molecule has open children
-						cmdShow := exec.Command("bd", "--no-daemon", "show", molID)
-						cmdShow.Dir = witnessBeadsDir
-						var stdoutShow bytes.Buffer
-						cmdShow.Stdout = &stdoutShow
-						cmdShow.Stderr = nil
-						if cmdShow.Run() == nil {
-							showOutput := stdoutShow.String()
-							if strings.Contains(showOutput, "- open]") || strings.Contains(showOutput, "- in_progress]") {
-								hasPatrol = true
-								patrolID = molID
-								patrolLine = line
-								break
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if !hasPatrol {
-		// No active patrol - AUTO-SPAWN one
-		fmt.Println("Status: **No active patrol** - creating mol-witness-patrol...")
-		fmt.Println()
-
-		// Find the proto ID for mol-witness-patrol
-		cmdCatalog := exec.Command("bd", "--no-daemon", "mol", "catalog")
-		cmdCatalog.Dir = witnessBeadsDir
-		var stdoutCatalog bytes.Buffer
-		cmdCatalog.Stdout = &stdoutCatalog
-		cmdCatalog.Stderr = nil
-
-		if cmdCatalog.Run() != nil {
-			fmt.Println(style.Dim.Render("Failed to list molecule catalog. Run `bd mol catalog` to troubleshoot."))
-			return
-		}
-
-		// Find mol-witness-patrol in catalog
-		var protoID string
-		catalogLines := strings.Split(stdoutCatalog.String(), "\n")
-		for _, line := range catalogLines {
-			if strings.Contains(line, "mol-witness-patrol") {
-				parts := strings.Fields(line)
-				if len(parts) > 0 {
-					// Strip trailing colon from ID (catalog format: "gt-xxx: title")
-					protoID = strings.TrimSuffix(parts[0], ":")
-					break
-				}
-			}
-		}
-
-		if protoID == "" {
-			fmt.Println(style.Dim.Render("Proto mol-witness-patrol not found in catalog. Run `bd mol register` first."))
-			return
-		}
-
-		// Create the patrol wisp (step 1: create)
-		witnessAgent := ctx.Rig + "/witness"
-		cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", "create", protoID)
-		cmdSpawn.Dir = witnessBeadsDir
-		var stdoutSpawn, stderrSpawn bytes.Buffer
-		cmdSpawn.Stdout = &stdoutSpawn
-		cmdSpawn.Stderr = &stderrSpawn
-
-		if err := cmdSpawn.Run(); err != nil {
-			fmt.Printf("Failed to create patrol wisp: %s\n", stderrSpawn.String())
-			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp create " + protoID))
-			return
-		}
-
-		// Parse the created molecule ID from output
-		spawnOutput := stdoutSpawn.String()
-
-		// Extract molecule ID from output (format: "Root issue: wisp-xxxx" or "gt-xxxx")
-		for _, line := range strings.Split(spawnOutput, "\n") {
-			if strings.Contains(line, "Root issue:") || strings.Contains(line, "Created") {
-				parts := strings.Fields(line)
-				for _, p := range parts {
-					if strings.HasPrefix(p, "wisp-") || strings.HasPrefix(p, "gt-") {
-						patrolID = p
-						break
-					}
-				}
-			}
-		}
-
-		if patrolID == "" {
-			fmt.Printf("⚠ Created wisp but could not parse ID from output\n")
-			return
-		}
-
-		// Pin the wisp to witness (step 2: assign)
-		cmdPin := exec.Command("bd", "--no-daemon", "update", patrolID, "--status=pinned", "--assignee="+witnessAgent)
-		cmdPin.Dir = witnessBeadsDir
-		if err := cmdPin.Run(); err != nil {
-			fmt.Printf("⚠ Created wisp %s but failed to pin to witness\n", patrolID)
-		} else {
-			fmt.Printf("✓ Created and pinned patrol wisp: %s\n", patrolID)
-		}
-	} else {
-		// Has active patrol - show status
-		fmt.Println("Status: **Patrol Active**")
-		fmt.Printf("Patrol: %s\n\n", strings.TrimSpace(patrolLine))
-	}
-
-	// Show patrol work loop instructions
-	fmt.Println("**Witness Patrol Work Loop:**")
-	fmt.Println("1. Check inbox: `gt mail inbox`")
-	fmt.Println("2. Check next step: `bd ready`")
-	fmt.Println("3. Execute the step (survey polecats, inspect, nudge, etc.)")
-	fmt.Println("4. Close step: `bd close <step-id>`")
-	fmt.Println("5. Check next: `bd ready`")
-	fmt.Println("6. At cycle end (burn-or-loop step):")
-	fmt.Println("   - Generate summary of patrol cycle")
-	fmt.Println("   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`")
-	fmt.Println("   - Loop back to create new wisp, or exit if context high")
-	if patrolID != "" {
-		fmt.Println()
-		fmt.Printf("Current patrol ID: %s\n", patrolID)
-	}
+	outputPatrolContext(cfg)
 }
 
 // outputRefineryPatrolContext shows patrol molecule status for the Refinery.
-// Unlike other patrol roles, Refinery AUTO-BONDS its patrol molecule on startup
-// if one isn't already running. This ensures the merge queue is always monitored.
+// Refinery AUTO-BONDS its patrol molecule on startup if one isn't already running.
 func outputRefineryPatrolContext(ctx RoleContext) {
-	fmt.Println()
-	fmt.Printf("%s\n\n", style.Bold.Render("## 🔧 Refinery Patrol Status"))
-
-	// Refinery works from its own rig clone: <rig>/refinery/rig/
-	// Beads are in the current WorkDir
-	refineryBeadsDir := ctx.WorkDir
-
-	// Find mol-refinery-patrol molecules (exclude template)
-	// Look for in-progress patrol first (resumable)
-	cmdList := exec.Command("bd", "--no-daemon", "list", "--status=in_progress", "--type=epic")
-	cmdList.Dir = refineryBeadsDir
-	var stdoutList bytes.Buffer
-	cmdList.Stdout = &stdoutList
-	cmdList.Stderr = nil
-	errList := cmdList.Run()
-
-	hasPatrol := false
-	var patrolID string
-	var patrolLine string
-
-	if errList == nil {
-		lines := strings.Split(stdoutList.String(), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "mol-refinery-patrol") && !strings.Contains(line, "[template]") {
-				parts := strings.Fields(line)
-				if len(parts) > 0 {
-					patrolID = parts[0]
-					patrolLine = line
-					hasPatrol = true
-					break
-				}
-			}
-		}
+	cfg := PatrolConfig{
+		RoleName:        "refinery",
+		PatrolMolName:   "mol-refinery-patrol",
+		BeadsDir:        ctx.WorkDir,
+		Assignee:        ctx.Rig + "/refinery",
+		HeaderEmoji:     "🔧",
+		HeaderTitle:     "Refinery Patrol Status",
+		CheckInProgress: true,
+		WorkLoopSteps: []string{
+			"Check inbox: `gt mail inbox`",
+			"Check next step: `bd ready`",
+			"Execute the step (queue scan, process branch, tests, merge)",
+			"Close step: `bd close <step-id>`",
+			"Check next: `bd ready`",
+			"At cycle end (burn-or-loop step):\n   - Generate summary of patrol cycle\n   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`\n   - Loop back to create new wisp, or exit if context high",
+		},
 	}
-
-	// Also check for open patrols with open children (active wisp)
-	if !hasPatrol {
-		cmdOpen := exec.Command("bd", "--no-daemon", "list", "--status=open", "--type=epic")
-		cmdOpen.Dir = refineryBeadsDir
-		var stdoutOpen bytes.Buffer
-		cmdOpen.Stdout = &stdoutOpen
-		cmdOpen.Stderr = nil
-		if cmdOpen.Run() == nil {
-			lines := strings.Split(stdoutOpen.String(), "\n")
-			for _, line := range lines {
-				if strings.Contains(line, "mol-refinery-patrol") && !strings.Contains(line, "[template]") {
-					parts := strings.Fields(line)
-					if len(parts) > 0 {
-						molID := parts[0]
-						// Check if this molecule has open children
-						cmdShow := exec.Command("bd", "--no-daemon", "show", molID)
-						cmdShow.Dir = refineryBeadsDir
-						var stdoutShow bytes.Buffer
-						cmdShow.Stdout = &stdoutShow
-						cmdShow.Stderr = nil
-						if cmdShow.Run() == nil {
-							showOutput := stdoutShow.String()
-							if strings.Contains(showOutput, "- open]") || strings.Contains(showOutput, "- in_progress]") {
-								hasPatrol = true
-								patrolID = molID
-								patrolLine = line
-								break
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if !hasPatrol {
-		// No active patrol - AUTO-SPAWN one
-		fmt.Println("Status: **No active patrol** - creating mol-refinery-patrol...")
-		fmt.Println()
-
-		// Find the proto ID for mol-refinery-patrol
-		cmdCatalog := exec.Command("bd", "--no-daemon", "mol", "catalog")
-		cmdCatalog.Dir = refineryBeadsDir
-		var stdoutCatalog bytes.Buffer
-		cmdCatalog.Stdout = &stdoutCatalog
-		cmdCatalog.Stderr = nil
-
-		if cmdCatalog.Run() != nil {
-			fmt.Println(style.Dim.Render("Failed to list molecule catalog. Run `bd mol catalog` to troubleshoot."))
-			return
-		}
-
-		// Find mol-refinery-patrol in catalog
-		var protoID string
-		catalogLines := strings.Split(stdoutCatalog.String(), "\n")
-		for _, line := range catalogLines {
-			if strings.Contains(line, "mol-refinery-patrol") {
-				parts := strings.Fields(line)
-				if len(parts) > 0 {
-					// Strip trailing colon from ID (catalog format: "gt-xxx: title")
-					protoID = strings.TrimSuffix(parts[0], ":")
-					break
-				}
-			}
-		}
-
-		if protoID == "" {
-			fmt.Println(style.Dim.Render("Proto mol-refinery-patrol not found in catalog. Run `bd mol register` first."))
-			return
-		}
-
-		// Create the patrol wisp (step 1: create)
-		refineryAgent := ctx.Rig + "/refinery"
-		cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", "create", protoID)
-		cmdSpawn.Dir = refineryBeadsDir
-		var stdoutSpawn, stderrSpawn bytes.Buffer
-		cmdSpawn.Stdout = &stdoutSpawn
-		cmdSpawn.Stderr = &stderrSpawn
-
-		if err := cmdSpawn.Run(); err != nil {
-			fmt.Printf("Failed to create patrol wisp: %s\n", stderrSpawn.String())
-			fmt.Println(style.Dim.Render("Run manually: bd --no-daemon wisp create " + protoID))
-			return
-		}
-
-		// Parse the created molecule ID from output
-		spawnOutput := stdoutSpawn.String()
-
-		// Extract molecule ID from output (format: "Root issue: wisp-xxxx" or "gt-xxxx")
-		for _, line := range strings.Split(spawnOutput, "\n") {
-			if strings.Contains(line, "Root issue:") || strings.Contains(line, "Created") {
-				parts := strings.Fields(line)
-				for _, p := range parts {
-					if strings.HasPrefix(p, "wisp-") || strings.HasPrefix(p, "gt-") {
-						patrolID = p
-						break
-					}
-				}
-			}
-		}
-
-		if patrolID == "" {
-			fmt.Printf("⚠ Created wisp but could not parse ID from output\n")
-			return
-		}
-
-		// Pin the wisp to refinery (step 2: assign)
-		cmdPin := exec.Command("bd", "--no-daemon", "update", patrolID, "--status=pinned", "--assignee="+refineryAgent)
-		cmdPin.Dir = refineryBeadsDir
-		if err := cmdPin.Run(); err != nil {
-			fmt.Printf("⚠ Created wisp %s but failed to pin to refinery\n", patrolID)
-		} else {
-			fmt.Printf("✓ Created and pinned patrol wisp: %s\n", patrolID)
-		}
-	} else {
-		// Has active patrol - show status
-		fmt.Println("Status: **Patrol Active**")
-		fmt.Printf("Patrol: %s\n\n", strings.TrimSpace(patrolLine))
-	}
-
-	// Show patrol work loop instructions
-	fmt.Println("**Refinery Patrol Work Loop:**")
-	fmt.Println("1. Check inbox: `gt mail inbox`")
-	fmt.Println("2. Check next step: `bd ready`")
-	fmt.Println("3. Execute the step (queue scan, process branch, tests, merge)")
-	fmt.Println("4. Close step: `bd close <step-id>`")
-	fmt.Println("5. Check next: `bd ready`")
-	fmt.Println("6. At cycle end (burn-or-loop step):")
-	fmt.Println("   - Generate summary of patrol cycle")
-	fmt.Println("   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`")
-	fmt.Println("   - Loop back to create new wisp, or exit if context high")
-	if patrolID != "" {
-		fmt.Println()
-		fmt.Printf("Current patrol ID: %s\n", patrolID)
-	}
+	outputPatrolContext(cfg)
 }
 
 // checkSlungWork checks for pinned work on the agent's hook.
