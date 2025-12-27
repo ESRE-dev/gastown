@@ -102,8 +102,8 @@ func TestRenderRole_Deacon(t *testing.T) {
 	if !strings.Contains(output, "Patrol Executor") {
 		t.Error("output missing role description")
 	}
-	if !strings.Contains(output, "Patrol Execution Protocol") {
-		t.Error("output missing patrol execution section")
+	if !strings.Contains(output, "Startup Protocol: Propulsion") {
+		t.Error("output missing startup protocol section")
 	}
 	if !strings.Contains(output, "mol-deacon-patrol") {
 		t.Error("output missing patrol molecule reference")

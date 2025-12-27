@@ -91,6 +91,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		}
 
 		// Set environment (non-fatal: session works without these)
+		_ = t.SetEnvironment(sessionID, "GT_ROLE", "crew")
 		_ = t.SetEnvironment(sessionID, "GT_RIG", r.Name)
 		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
 
@@ -120,7 +121,9 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// Use respawn-pane to replace shell with Claude directly
 		// This gives cleaner lifecycle: Claude exits → session ends (no intermediate shell)
 		// Pass "gt prime" as initial prompt so Claude loads context immediately
-		claudeCmd := `claude --dangerously-skip-permissions "gt prime"`
+		// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
+		bdActor := fmt.Sprintf("%s/crew/%s", r.Name, name)
+		claudeCmd := fmt.Sprintf(`export GT_ROLE=crew GT_RIG=%s GT_CREW=%s BD_ACTOR=%s && claude --dangerously-skip-permissions "gt prime"`, r.Name, name, bdActor)
 		if err := t.RespawnPane(paneID, claudeCmd); err != nil {
 			return fmt.Errorf("starting claude: %w", err)
 		}
@@ -143,7 +146,9 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 
 			// Use respawn-pane to replace shell with Claude directly
 			// Pass "gt prime" as initial prompt so Claude loads context immediately
-			claudeCmd := `claude --dangerously-skip-permissions "gt prime"`
+			// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
+			bdActor := fmt.Sprintf("%s/crew/%s", r.Name, name)
+			claudeCmd := fmt.Sprintf(`export GT_ROLE=crew GT_RIG=%s GT_CREW=%s BD_ACTOR=%s && claude --dangerously-skip-permissions "gt prime"`, r.Name, name, bdActor)
 			if err := t.RespawnPane(paneID, claudeCmd); err != nil {
 				return fmt.Errorf("restarting claude: %w", err)
 			}
