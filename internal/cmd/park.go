@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/wisp"
 )
 
 // Park command parks work on a gate, allowing agent to exit safely.
@@ -109,12 +110,25 @@ func runPark(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("detecting agent identity: %w", err)
 	}
 
-	// Read current hook state (if any)
+	// Read current pinned bead (if any)
 	var beadID, formula, hookContext string
-	if hook, err := wisp.ReadHook(cloneRoot, agentID); err == nil {
-		beadID = hook.BeadID
-		formula = hook.Formula
-		hookContext = hook.Context
+	workDir, err := findLocalBeadsDir()
+	if err == nil {
+		b := beads.New(workDir)
+		pinnedBeads, err := b.List(beads.ListOptions{
+			Status:   beads.StatusPinned,
+			Assignee: agentID,
+			Priority: -1,
+		})
+		if err == nil && len(pinnedBeads) > 0 {
+			beadID = pinnedBeads[0].ID
+			// Extract molecule from attachment fields
+			if attachment := beads.ParseAttachmentFields(pinnedBeads[0]); attachment != nil {
+				formula = attachment.AttachedMolecule
+			}
+			// Context is part of the bead description, not stored separately
+			hookContext = pinnedBeads[0].Description
+		}
 	}
 
 	// Build context combining hook context and new message
@@ -190,7 +204,7 @@ func runPark(cmd *cobra.Command, args []string) error {
 
 // parkedWorkPath returns the file path for an agent's parked work state.
 func parkedWorkPath(cloneRoot, agentID string) string {
-	return wisp.WispPath(cloneRoot, fmt.Sprintf("parked-%s.json", strings.ReplaceAll(agentID, "/", "_")))
+	return filepath.Join(cloneRoot, ".beads", fmt.Sprintf("parked-%s.json", strings.ReplaceAll(agentID, "/", "_")))
 }
 
 // readParkedWork reads the parked work state for an agent.
