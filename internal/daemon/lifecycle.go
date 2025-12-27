@@ -14,15 +14,20 @@ import (
 
 // BeadsMessage represents a message from gt mail inbox --json.
 type BeadsMessage struct {
-	ID       string `json:"id"`
-	From     string `json:"from"`
-	To       string `json:"to"`
-	Subject  string `json:"subject"`
-	Body     string `json:"body"`
-	Read     bool   `json:"read"`
-	Priority string `json:"priority"`
-	Type     string `json:"type"`
+	ID        string `json:"id"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Subject   string `json:"subject"`
+	Body      string `json:"body"`
+	Timestamp string `json:"timestamp"`
+	Read      bool   `json:"read"`
+	Priority  string `json:"priority"`
+	Type      string `json:"type"`
 }
+
+// MaxLifecycleMessageAge is the maximum age of a lifecycle message before it's ignored.
+// Messages older than this are considered stale and deleted without execution.
+const MaxLifecycleMessageAge = 6 * time.Hour
 
 // ProcessLifecycleRequests checks for and processes lifecycle requests from the deacon inbox.
 func (d *Daemon) ProcessLifecycleRequests() {
@@ -54,6 +59,19 @@ func (d *Daemon) ProcessLifecycleRequests() {
 		request := d.parseLifecycleRequest(&msg)
 		if request == nil {
 			continue // Not a lifecycle request
+		}
+
+		// Check message age - ignore stale lifecycle requests
+		if msgTime, err := time.Parse(time.RFC3339, msg.Timestamp); err == nil {
+			age := time.Since(msgTime)
+			if age > MaxLifecycleMessageAge {
+				d.logger.Printf("Ignoring stale lifecycle request from %s (age: %v, max: %v) - deleting",
+					request.From, age.Round(time.Minute), MaxLifecycleMessageAge)
+				if err := d.closeMessage(msg.ID); err != nil {
+					d.logger.Printf("Warning: failed to delete stale message %s: %v", msg.ID, err)
+				}
+				continue
+			}
 		}
 
 		d.logger.Printf("Processing lifecycle request from %s: %s", request.From, request.Action)
