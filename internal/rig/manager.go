@@ -534,7 +534,6 @@ func (m *Manager) seedPatrolMoleculesManually(rigPath string) error {
 			"--title="+mol.title,
 			"--description="+mol.desc,
 			"--priority=2",
-			"--actor=gt-rig-init",
 		)
 		cmd.Dir = rigPath
 		if err := cmd.Run(); err != nil {
