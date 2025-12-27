@@ -101,15 +101,26 @@ func runHook(cmd *cobra.Command, args []string) error {
 		}
 
 		// Check if existing bead is complete
-		isComplete := checkPinnedBeadComplete(b, existing)
+		isComplete, hasAttachment := checkPinnedBeadComplete(b, existing)
 
 		if isComplete {
 			// Auto-replace completed bead
 			fmt.Printf("%s Replacing completed bead %s...\n", style.Dim.Render("ℹ"), existing.ID)
 			if !hookDryRun {
-				// Close the old bead
-				if err := b.Close(existing.ID); err != nil {
-					return fmt.Errorf("closing completed bead %s: %w", existing.ID, err)
+				if hasAttachment {
+					// Close completed molecule bead (use bd close --force for pinned)
+					closeCmd := exec.Command("bd", "close", existing.ID, "--force",
+						"--reason=Auto-replaced by gt hook (molecule complete)")
+					closeCmd.Stderr = os.Stderr
+					if err := closeCmd.Run(); err != nil {
+						return fmt.Errorf("closing completed bead %s: %w", existing.ID, err)
+					}
+				} else {
+					// Naked bead - just unpin, don't close (might have value)
+					status := "open"
+					if err := b.Update(existing.ID, beads.UpdateOptions{Status: &status}); err != nil {
+						return fmt.Errorf("unpinning bead %s: %w", existing.ID, err)
+					}
 				}
 			}
 		} else if hookForce {
@@ -157,40 +168,30 @@ func runHook(cmd *cobra.Command, args []string) error {
 }
 
 // checkPinnedBeadComplete checks if a pinned bead's attached molecule is 100% complete.
-// Returns true if:
-// - No molecule attached (naked bead = complete for hook purposes)
-// - Molecule has all steps closed
-func checkPinnedBeadComplete(b *beads.Beads, issue *beads.Issue) bool {
+// Returns (isComplete, hasAttachment):
+// - isComplete=true if no molecule attached OR all molecule steps are closed
+// - hasAttachment=true if there's an attached molecule
+func checkPinnedBeadComplete(b *beads.Beads, issue *beads.Issue) (isComplete bool, hasAttachment bool) {
 	// Check for attached molecule
 	attachment := beads.ParseAttachmentFields(issue)
 	if attachment == nil || attachment.AttachedMolecule == "" {
 		// No molecule attached - consider complete (naked bead)
-		return true
+		return true, false
 	}
 
 	// Get progress of attached molecule
 	progress, err := getMoleculeProgressInfo(b, attachment.AttachedMolecule)
 	if err != nil {
 		// Can't determine progress - be conservative, treat as incomplete
-		return false
+		return false, true
 	}
 
 	if progress == nil {
 		// No steps found - might be a simple issue, treat as complete
-		return true
+		return true, true
 	}
 
-	return progress.Complete
+	return progress.Complete, true
 }
 
-// verifyBeadExists checks that the bead exists using bd show.
-// Defined in sling.go but duplicated here for clarity. Will be consolidated
-// when sling.go is removed.
-func verifyBeadExistsForHook(beadID string) error {
-	cmd := exec.Command("bd", "show", beadID, "--json")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
-	}
-	return nil
-}
 
