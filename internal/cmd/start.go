@@ -213,6 +213,37 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Auto-start configured crew for each rig
+	fmt.Println()
+	fmt.Println("Starting configured crew...")
+
+	rigs, err := discoverAllRigs(townRoot)
+	if err != nil {
+		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), err)
+	} else {
+		startedAny := false
+		for _, r := range rigs {
+			crewToStart := getCrewToStart(r)
+			for _, crewName := range crewToStart {
+				sessionID := crewSessionName(r.Name, crewName)
+				if running, _ := t.HasSession(sessionID); running {
+					fmt.Printf("  %s %s/%s already running\n", style.Dim.Render("○"), r.Name, crewName)
+				} else {
+					// Start the crew member using the existing runStartCrew logic
+					if err := startCrewMember(r.Name, crewName, townRoot); err != nil {
+						fmt.Printf("  %s %s/%s failed: %v\n", style.Dim.Render("○"), r.Name, crewName, err)
+					} else {
+						fmt.Printf("  %s %s/%s started\n", style.Bold.Render("✓"), r.Name, crewName)
+						startedAny = true
+					}
+				}
+			}
+		}
+		if !startedAny {
+			fmt.Printf("  %s No crew configured or all already running\n", style.Dim.Render("○"))
+		}
+	}
+
 	fmt.Println()
 	fmt.Printf("%s Gas Town is running\n", style.Bold.Render("✓"))
 	fmt.Println()
@@ -757,5 +788,132 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Attach with: %s\n", style.Dim.Render(fmt.Sprintf("gt crew at %s", name)))
+	return nil
+}
+
+// getCrewToStart reads rig settings and parses the crew.startup field.
+// Returns a list of crew names to start.
+func getCrewToStart(r *rig.Rig) []string {
+	// Load rig settings
+	settingsPath := filepath.Join(r.Path, "settings", "config.json")
+	settings, err := config.LoadRigSettings(settingsPath)
+	if err != nil {
+		return nil
+	}
+
+	if settings.Crew == nil || settings.Crew.Startup == "" || settings.Crew.Startup == "none" {
+		return nil
+	}
+
+	startup := settings.Crew.Startup
+
+	// Handle "all" - list all existing crew
+	if startup == "all" {
+		crewGit := git.NewGit(r.Path)
+		crewMgr := crew.NewManager(r, crewGit)
+		workers, err := crewMgr.List()
+		if err != nil {
+			return nil
+		}
+		var names []string
+		for _, w := range workers {
+			names = append(names, w.Name)
+		}
+		return names
+	}
+
+	// Parse names: "max", "max and joe", "max, joe", "max, joe, emma"
+	// Replace "and" with comma for uniform parsing
+	startup = strings.ReplaceAll(startup, " and ", ", ")
+	parts := strings.Split(startup, ",")
+
+	var names []string
+	for _, part := range parts {
+		name := strings.TrimSpace(part)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+
+	return names
+}
+
+// startCrewMember starts a single crew member, creating if needed.
+// This is a simplified version of runStartCrew that doesn't print output.
+func startCrewMember(rigName, crewName, townRoot string) error {
+	// Load rigs config
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
+	}
+
+	// Get rig
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+	r, err := rigMgr.GetRig(rigName)
+	if err != nil {
+		return fmt.Errorf("rig '%s' not found", rigName)
+	}
+
+	// Create crew manager
+	crewGit := git.NewGit(r.Path)
+	crewMgr := crew.NewManager(r, crewGit)
+
+	// Check if crew exists, create if not
+	worker, err := crewMgr.Get(crewName)
+	if err == crew.ErrCrewNotFound {
+		worker, err = crewMgr.Add(crewName, false)
+		if err != nil {
+			return fmt.Errorf("creating crew workspace: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("getting crew worker: %w", err)
+	}
+
+	// Ensure crew workspace is on main branch
+	ensureMainBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", rigName, crewName))
+
+	// Create tmux session
+	t := tmux.NewTmux()
+	sessionID := crewSessionName(rigName, crewName)
+
+	if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	// Set environment
+	_ = t.SetEnvironment(sessionID, "GT_RIG", rigName)
+	_ = t.SetEnvironment(sessionID, "GT_CREW", crewName)
+
+	// Apply rig-based theming
+	theme := getThemeForRig(rigName)
+	_ = t.ConfigureGasTownSession(sessionID, theme, rigName, crewName, "crew")
+
+	// Set up C-b n/p keybindings for crew session cycling
+	_ = t.SetCrewCycleBindings(sessionID)
+
+	// Wait for shell to be ready
+	if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
+		return fmt.Errorf("waiting for shell: %w", err)
+	}
+
+	// Start claude
+	if err := t.SendKeys(sessionID, "claude --dangerously-skip-permissions"); err != nil {
+		return fmt.Errorf("starting claude: %w", err)
+	}
+
+	// Wait for Claude to start
+	shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+	if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
+		// Non-fatal: Claude might still be starting
+	}
+
+	// Give Claude time to initialize
+	time.Sleep(500 * time.Millisecond)
+
+	// Send gt prime to initialize context
+	_ = t.SendKeys(sessionID, "gt prime")
+
 	return nil
 }
