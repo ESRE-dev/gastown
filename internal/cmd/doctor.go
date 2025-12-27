@@ -29,6 +29,10 @@ Cleanup checks (fixable):
   - orphan-processes         Detect orphaned Claude processes
   - wisp-gc                  Detect and clean abandoned wisps (>1h)
 
+Clone divergence checks:
+  - persistent-role-branches Detect crew/witness/refinery not on main
+  - clone-divergence         Detect clones significantly behind origin/main
+
 Patrol checks:
   - patrol-molecules-exist   Verify patrol molecules exist
   - patrol-hooks-wired       Verify daemon triggers patrols
@@ -75,6 +79,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewWispGCCheck())
 	d.Register(doctor.NewBranchCheck())
 	d.Register(doctor.NewBeadsSyncOrphanCheck())
+	d.Register(doctor.NewCloneDivergenceCheck())
 	d.Register(doctor.NewIdentityCollisionCheck())
 	d.Register(doctor.NewLinkedPaneCheck())
 	d.Register(doctor.NewThemeCheck())
