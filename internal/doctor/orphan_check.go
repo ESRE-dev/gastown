@@ -324,13 +324,15 @@ type processInfo struct {
 	cmd  string
 }
 
-// getTmuxSessionPIDs returns PIDs of all tmux server processes.
+// getTmuxSessionPIDs returns PIDs of all tmux server processes and pane shell PIDs.
 func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) {
 	// Get tmux server PID and all pane PIDs
 	pids := make(map[int]bool)
 
-	// Find tmux server process
-	out, err := exec.Command("pgrep", "-x", "tmux").Output()
+	// Find tmux server processes using ps instead of pgrep.
+	// pgrep -x tmux is unreliable on macOS - it often misses the actual server.
+	// We use ps with awk to find processes where comm is exactly "tmux".
+	out, err := exec.Command("sh", "-c", `ps ax -o pid,comm | awk '$2 == "tmux" || $2 ~ /\/tmux$/ { print $1 }'`).Output()
 	if err != nil {
 		// No tmux server running
 		return pids, nil
@@ -363,7 +365,8 @@ func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) {
 	return pids, nil
 }
 
-// findClaudeProcesses finds all running claude/claude-code processes.
+// findClaudeProcesses finds all running claude/claude-code CLI processes.
+// Excludes Claude.app desktop application and its helpers.
 func (c *OrphanProcessCheck) findClaudeProcesses() ([]processInfo, error) {
 	var procs []processInfo
 
@@ -374,8 +377,12 @@ func (c *OrphanProcessCheck) findClaudeProcesses() ([]processInfo, error) {
 		return nil, err
 	}
 
-	// Regex to match claude processes
-	claudePattern := regexp.MustCompile(`(?i)claude`)
+	// Regex to match claude CLI processes (not Claude.app)
+	// Match: "claude" or paths ending in "/claude"
+	claudePattern := regexp.MustCompile(`(?i)(^claude$|/claude$)`)
+
+	// Pattern to exclude Claude.app and related desktop processes
+	excludePattern := regexp.MustCompile(`(?i)(Claude\.app|claude-native|chrome-native)`)
 
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
@@ -383,8 +390,15 @@ func (c *OrphanProcessCheck) findClaudeProcesses() ([]processInfo, error) {
 			continue
 		}
 
-		// Check if command contains "claude"
+		// Check if command matches claude CLI
 		cmd := strings.Join(fields[2:], " ")
+
+		// Skip desktop app processes
+		if excludePattern.MatchString(cmd) {
+			continue
+		}
+
+		// Only match CLI claude processes
 		if !claudePattern.MatchString(cmd) {
 			continue
 		}
