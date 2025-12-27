@@ -193,6 +193,6 @@ The daemon will:
 - Watch for pending spawns
 - Resume background coordination
 
-Polecats are NOT auto-respawned. Use `gt spawn` or let Witness
+Polecats are NOT auto-respawned. Use `gt sling` or let Witness
 restart them based on their preserved hooks.
 """

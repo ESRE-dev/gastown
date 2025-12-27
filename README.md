@@ -49,8 +49,8 @@ gt install ~/gt
 # Add a project rig
 gt rig add myproject --remote=https://github.com/you/myproject.git
 
-# Spawn a worker on an issue
-gt spawn --issue myproject-123
+# Assign work to a polecat
+gt sling myproject-123 myproject
 ```
 
 ## Architecture
@@ -81,7 +81,7 @@ Some of these are implemented; others are still aspirational. See docs for curre
 ```bash
 gt status             # Town status
 gt rig list           # List rigs
-gt spawn --issue <id> # Start worker
+gt sling <bead> <rig> # Assign work to polecat
 gt mail inbox         # Check messages
 gt peek <worker>      # Check worker health
 gt nudge <worker>     # Wake stuck worker
