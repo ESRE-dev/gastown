@@ -11,7 +11,6 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -279,22 +278,21 @@ func handleStepContinue(cwd, townRoot, workDir string, nextStep *beads.Issue, dr
 		return fmt.Errorf("finding git root: %w", err)
 	}
 
-	// Update the hook to point to the next step
-	sw := wisp.NewSlungWork(nextStep.ID, agentID)
-	sw.Subject = fmt.Sprintf("Step: %s", nextStep.Title)
-	sw.Context = fmt.Sprintf("Continuing molecule from step %s", nextStep.ID)
-
 	if dryRun {
-		fmt.Printf("\n[dry-run] Would update hook to: %s\n", nextStep.ID)
+		fmt.Printf("\n[dry-run] Would pin next step: %s\n", nextStep.ID)
 		fmt.Printf("[dry-run] Would respawn pane\n")
 		return nil
 	}
 
-	if err := wisp.WriteSlungWork(gitRoot, agentID, sw); err != nil {
-		return fmt.Errorf("writing hook: %w", err)
+	// Pin the next step bead
+	pinCmd := exec.Command("bd", "update", nextStep.ID, "--status=pinned", "--assignee="+agentID)
+	pinCmd.Dir = gitRoot
+	pinCmd.Stderr = os.Stderr
+	if err := pinCmd.Run(); err != nil {
+		return fmt.Errorf("pinning next step: %w", err)
 	}
 
-	fmt.Printf("%s Hook updated for next step\n", style.Bold.Render("🪝"))
+	fmt.Printf("%s Next step pinned: %s\n", style.Bold.Render("📌"), nextStep.ID)
 
 	// Respawn the pane
 	if !tmux.IsInsideTmux() {
@@ -359,16 +357,31 @@ func handleMoleculeComplete(cwd, townRoot, moleculeID string, dryRun bool) error
 	}
 
 	if dryRun {
-		fmt.Printf("[dry-run] Would burn hook for %s\n", agentID)
+		fmt.Printf("[dry-run] Would unpin work for %s\n", agentID)
 		fmt.Printf("[dry-run] Would send POLECAT_DONE to witness\n")
 		return nil
 	}
 
-	// Burn the hook
-	if err := wisp.BurnHook(gitRoot, agentID); err != nil {
-		fmt.Printf("%s Warning: could not burn hook: %v\n", style.Dim.Render("⚠"), err)
-	} else {
-		fmt.Printf("%s Hook cleared\n", style.Bold.Render("✓"))
+	// Unpin the molecule bead (set status to open, will be closed by gt done or manually)
+	workDir, err := findLocalBeadsDir()
+	if err == nil {
+		b := beads.New(workDir)
+		pinnedBeads, err := b.List(beads.ListOptions{
+			Status:   beads.StatusPinned,
+			Assignee: agentID,
+			Priority: -1,
+		})
+		if err == nil && len(pinnedBeads) > 0 {
+			// Unpin by setting status to open
+			unpinCmd := exec.Command("bd", "update", pinnedBeads[0].ID, "--status=open")
+			unpinCmd.Dir = gitRoot
+			unpinCmd.Stderr = os.Stderr
+			if err := unpinCmd.Run(); err != nil {
+				fmt.Printf("%s Warning: could not unpin bead: %v\n", style.Dim.Render("⚠"), err)
+			} else {
+				fmt.Printf("%s Work unpinned\n", style.Bold.Render("✓"))
+			}
+		}
 	}
 
 	// For polecats, use gt done to signal completion
