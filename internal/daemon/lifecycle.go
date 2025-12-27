@@ -58,14 +58,18 @@ func (d *Daemon) ProcessLifecycleRequests() {
 
 		d.logger.Printf("Processing lifecycle request from %s: %s", request.From, request.Action)
 
+		// CRITICAL: Delete message FIRST, before executing action.
+		// This prevents stale messages from being reprocessed on every heartbeat.
+		// "Claim then execute" pattern: claim by deleting, then execute.
+		// Even if action fails, the message is gone - sender must re-request.
+		if err := d.closeMessage(msg.ID); err != nil {
+			d.logger.Printf("Warning: failed to delete message %s before execution: %v", msg.ID, err)
+			// Continue anyway - better to attempt action than leave stale message
+		}
+
 		if err := d.executeLifecycleAction(request); err != nil {
 			d.logger.Printf("Error executing lifecycle action: %v", err)
 			continue
-		}
-
-		// Mark message as read (close the issue)
-		if err := d.closeMessage(msg.ID); err != nil {
-			d.logger.Printf("Warning: failed to close message %s: %v", msg.ID, err)
 		}
 	}
 }
@@ -319,7 +323,13 @@ func (d *Daemon) closeMessage(id string) error {
 	// Use gt mail delete to actually remove the message
 	cmd := exec.Command("gt", "mail", "delete", id)
 	cmd.Dir = d.config.TownRoot
-	return cmd.Run()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gt mail delete %s: %v (output: %s)", id, err, string(output))
+	}
+	d.logger.Printf("Deleted lifecycle message: %s", id)
+	return nil
 }
 
 // verifyAgentRequestingState verifies that the agent has set requesting_<action>=true
