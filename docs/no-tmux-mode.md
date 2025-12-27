@@ -34,10 +34,10 @@ gt sling gt-abc --args "patch release"
 
 ```bash
 # Use --naked to skip tmux session creation
-gt spawn gastown/Toast --issue gt-abc --naked
+gt sling gt-abc gastown --naked
 
 # Output tells you how to start the agent manually:
-#   cd ~/gt/gastown/polecats/Toast
+#   cd ~/gt/gastown/polecats/<name>
 #   claude
 ```
 
@@ -99,7 +99,7 @@ ARGS (use these to guide execution):
 | Command | Purpose |
 |---------|---------|
 | `gt sling <bead> --args "..."` | Store args in bead, nudge gracefully |
-| `gt spawn --naked` | Assign work without tmux session |
+| `gt sling <bead> <rig> --naked` | Assign work without tmux session |
 | `gt prime` | Display attached work + args on startup |
 | `gt mol status` | Show current work status including args |
 | `bd show <bead>` | View raw bead with attached_args field |

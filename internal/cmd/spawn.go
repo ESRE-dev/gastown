@@ -46,7 +46,7 @@ var spawnCmd = &cobra.Command{
 	Use:     "spawn [rig/polecat | rig]",
 	Aliases: []string{"sp"},
 	GroupID: GroupWork,
-	Short:   "Spawn a polecat with work assignment",
+	Short:   "[DEPRECATED] Use 'gt sling' instead - spawn a polecat with work",
 	Long: `Spawn a polecat with a work assignment.
 
 Use 'gt spawn pending' to view spawns waiting to be triggered.
@@ -133,6 +133,13 @@ type BeadsIssue struct {
 }
 
 func runSpawn(cmd *cobra.Command, args []string) error {
+	// Deprecation warning - prefer gt sling
+	fmt.Println(style.Warning.Render("DEPRECATED: 'gt spawn' is deprecated. Use 'gt sling' instead:"))
+	fmt.Println(style.Dim.Render("  gt sling <bead> <rig>              # Auto-spawn polecat"))
+	fmt.Println(style.Dim.Render("  gt sling <bead> <rig> --naked      # No-tmux mode"))
+	fmt.Println(style.Dim.Render("  gt sling <bead> <rig> --args '...' # With natural language args"))
+	fmt.Println()
+
 	if spawnIssue == "" && spawnMessage == "" {
 		return fmt.Errorf("must specify --issue or -m/--message")
 	}
@@ -911,10 +918,18 @@ func (s *SpawnedPolecatInfo) AgentID() string {
 	return fmt.Sprintf("%s/polecats/%s", s.RigName, s.PolecatName)
 }
 
-// SpawnPolecatForSling creates a fresh polecat and starts its session.
+// SlingSpawnOptions contains options for spawning a polecat via sling.
+type SlingSpawnOptions struct {
+	Force   bool   // Force spawn even if polecat has uncommitted work
+	Naked   bool   // No-tmux mode: skip session creation
+	Account string // Claude Code account handle to use
+	Create  bool   // Create polecat if it doesn't exist (currently always true for sling)
+}
+
+// SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
 // This is a lightweight spawn for sling - it doesn't assign issues or send mail.
 // The caller (sling) handles hook attachment and nudging.
-func SpawnPolecatForSling(rigName string, force bool) (*SpawnedPolecatInfo, error) {
+func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolecatInfo, error) {
 	// Find workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -951,7 +966,7 @@ func SpawnPolecatForSling(rigName string, force bool) (*SpawnedPolecatInfo, erro
 	if err == nil {
 		// Exists - recreate with fresh worktree
 		// Check for uncommitted work first
-		if !force {
+		if !opts.Force {
 			pGit := git.NewGit(existingPolecat.ClonePath)
 			workStatus, checkErr := pGit.CheckUncommittedWork()
 			if checkErr == nil && !workStatus.Clean() {
@@ -960,7 +975,7 @@ func SpawnPolecatForSling(rigName string, force bool) (*SpawnedPolecatInfo, erro
 			}
 		}
 		fmt.Printf("Recreating polecat %s with fresh worktree...\n", polecatName)
-		if _, err = polecatMgr.Recreate(polecatName, force); err != nil {
+		if _, err = polecatMgr.Recreate(polecatName, opts.Force); err != nil {
 			return nil, fmt.Errorf("recreating polecat: %w", err)
 		}
 	} else if err == polecat.ErrPolecatNotFound {
@@ -979,9 +994,28 @@ func SpawnPolecatForSling(rigName string, force bool) (*SpawnedPolecatInfo, erro
 		return nil, fmt.Errorf("getting polecat after creation: %w", err)
 	}
 
+	// Handle naked mode (no-tmux)
+	if opts.Naked {
+		fmt.Println()
+		fmt.Printf("%s\n", style.Bold.Render("🔧 NO-TMUX MODE (--naked)"))
+		fmt.Printf("Polecat created. Agent must be started manually.\n\n")
+		fmt.Printf("To start the agent:\n")
+		fmt.Printf("  cd %s\n", polecatObj.ClonePath)
+		fmt.Printf("  claude            # Or: claude-code\n\n")
+		fmt.Printf("Agent will discover work via gt prime on startup.\n")
+
+		return &SpawnedPolecatInfo{
+			RigName:     rigName,
+			PolecatName: polecatName,
+			ClonePath:   polecatObj.ClonePath,
+			SessionName: "", // No session in naked mode
+			Pane:        "", // No pane in naked mode
+		}, nil
+	}
+
 	// Resolve account for Claude config
 	accountsPath := constants.MayorAccountsPath(townRoot)
-	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, "")
+	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, opts.Account)
 	if err != nil {
 		return nil, fmt.Errorf("resolving account: %w", err)
 	}

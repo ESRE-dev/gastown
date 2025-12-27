@@ -16,56 +16,43 @@ import (
 var slingCmd = &cobra.Command{
 	Use:     "sling <bead-or-formula> [target]",
 	GroupID: GroupWork,
-	Short:   "Hook work and start immediately (no restart)",
+	Short:   "Assign work to an agent (THE unified work dispatch command)",
 	Long: `Sling work onto an agent's hook and start working immediately.
 
-Unlike 'gt handoff', sling does NOT restart the session. It:
-  1. Attaches the work to the hook (durability)
-  2. Injects a prompt to start working NOW
+This is THE command for assigning work in Gas Town. It handles:
+  - Existing agents (mayor, crew, witness, refinery)
+  - Auto-spawning polecats when target is a rig
+  - Formula instantiation and wisp creation
+  - No-tmux mode for manual agent operation
 
-This preserves current context while kicking off work. Use when:
-  - You've been chatting with an agent and want to kick off a workflow
-  - You want to assign work to another agent that has useful context
-  - You (Overseer) want to start work then attend to another window
+Target Resolution:
+  gt sling gt-abc                       # Self (current agent)
+  gt sling gt-abc crew                  # Crew worker in current rig
+  gt sling gt-abc gastown               # Auto-spawn polecat in rig
+  gt sling gt-abc gastown/Toast         # Specific polecat
+  gt sling gt-abc mayor                 # Mayor
 
-The hook provides durability - the agent can restart, compact, or hand off,
-but until the hook is changed or closed, that agent owns the work.
+Spawning Options (when target is a rig):
+  gt sling gt-abc gastown --molecule mol-review  # Use specific workflow
+  gt sling gt-abc gastown --create               # Create polecat if missing
+  gt sling gt-abc gastown --naked                # No-tmux (manual start)
+  gt sling gt-abc gastown --force                # Ignore unread mail
+  gt sling gt-abc gastown --account work         # Use specific Claude account
 
-Examples:
-  gt sling gt-abc                       # Hook bead and start now
-  gt sling gt-abc -s "Fix the bug"      # With context subject
-  gt sling gt-abc crew                  # Sling bead to crew worker
-  gt sling gt-abc gastown/crew/max      # Sling bead to specific agent
-  gt sling gt-abc gastown               # Auto-spawn polecat in rig (light spawn)
+Natural Language Args:
+  gt sling gt-abc --args "patch release"
+  gt sling code-review --args "focus on security"
 
-Auto-spawning polecats:
-  When target is a rig name (not a specific agent), sling automatically spawns
-  a fresh polecat and slings work to it. This is a light spawn - the polecat
-  starts with just the hook. For full molecule workflow with crash recovery,
-  use 'gt spawn --issue <bead> <rig>' instead.
+The --args string is stored in the bead and shown via gt prime. Since the
+executor is an LLM, it interprets these instructions naturally.
 
-Standalone formula slinging:
-  gt sling mol-town-shutdown mayor/     # Cook + wisp + attach + nudge
-  gt sling towers-of-hanoi --var disks=3  # With formula variables
+Formula Slinging:
+  gt sling mol-release mayor/           # Cook + wisp + attach + nudge
+  gt sling towers-of-hanoi --var disks=3
 
-Natural language args (for LLM executor):
-  gt sling beads-release --args "patch release"
-  gt sling code-review gt-abc --args "focus on security issues"
-
-The --args string is injected into the prompt and shown to the executor.
-Since the executor is an LLM, it interprets these instructions naturally.
-
-When the first argument is a formula (not a bead), sling will:
-  1. Cook the formula (bd cook)
-  2. Create a wisp instance (bd wisp create)
-  3. Pin the wisp to the target (bd update --status=pinned --assignee=<target>)
-  4. Nudge the target to start
-
-Formula-on-bead scaffolding (--on flag):
-  gt sling shiny --on gt-abc            # Apply shiny formula to existing work
-  gt sling mol-review --on gt-abc crew  # Apply review formula, sling to crew
-
-When --on is specified, the formula shapes execution of the target bead.
+Formula-on-Bead (--on flag):
+  gt sling mol-review --on gt-abc       # Apply formula to existing work
+  gt sling shiny --on gt-abc crew       # Apply formula, sling to crew
 
 Compare:
   gt hook <bead>      # Just attach (no action)
@@ -84,6 +71,13 @@ var (
 	slingOnTarget string   // --on flag: target bead when slinging a formula
 	slingVars     []string // --var flag: formula variables (key=value)
 	slingArgs     string   // --args flag: natural language instructions for executor
+
+	// Flags migrated from gt spawn for unified work assignment
+	slingNaked    bool   // --naked: no-tmux mode (skip session creation)
+	slingCreate   bool   // --create: create polecat if it doesn't exist
+	slingMolecule string // --molecule: workflow to instantiate on the bead
+	slingForce    bool   // --force: force spawn even if polecat has unread mail
+	slingAccount  string // --account: Claude Code account handle to use
 )
 
 func init() {
@@ -93,6 +87,14 @@ func init() {
 	slingCmd.Flags().StringVar(&slingOnTarget, "on", "", "Apply formula to existing bead (implies wisp scaffolding)")
 	slingCmd.Flags().StringArrayVar(&slingVars, "var", nil, "Formula variable (key=value), can be repeated")
 	slingCmd.Flags().StringVarP(&slingArgs, "args", "a", "", "Natural language instructions for the executor (e.g., 'patch release')")
+
+	// Flags for polecat spawning (when target is a rig)
+	slingCmd.Flags().BoolVar(&slingNaked, "naked", false, "No-tmux mode: assign work but skip session creation (manual start)")
+	slingCmd.Flags().BoolVar(&slingCreate, "create", false, "Create polecat if it doesn't exist")
+	slingCmd.Flags().StringVar(&slingMolecule, "molecule", "", "Molecule workflow to instantiate on the bead")
+	slingCmd.Flags().BoolVar(&slingForce, "force", false, "Force spawn even if polecat has unread mail")
+	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
+
 	rootCmd.AddCommand(slingCmd)
 }
 
@@ -154,12 +156,21 @@ func runSling(cmd *cobra.Command, args []string) error {
 			if slingDryRun {
 				// Dry run - just indicate what would happen
 				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
+				if slingNaked {
+					fmt.Printf("  --naked: would skip tmux session\n")
+				}
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
 				targetPane = "<new-pane>"
 			} else {
 				// Spawn a fresh polecat in the rig
 				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, false)
+				spawnOpts := SlingSpawnOptions{
+					Force:   slingForce,
+					Naked:   slingNaked,
+					Account: slingAccount,
+					Create:  slingCreate,
+				}
+				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
 					return fmt.Errorf("spawning polecat: %w", spawnErr)
 				}
@@ -460,12 +471,21 @@ func runSlingFormula(args []string) error {
 			if slingDryRun {
 				// Dry run - just indicate what would happen
 				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
+				if slingNaked {
+					fmt.Printf("  --naked: would skip tmux session\n")
+				}
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
 				targetPane = "<new-pane>"
 			} else {
 				// Spawn a fresh polecat in the rig
 				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, false)
+				spawnOpts := SlingSpawnOptions{
+					Force:   slingForce,
+					Naked:   slingNaked,
+					Account: slingAccount,
+					Create:  slingCreate,
+				}
+				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
 					return fmt.Errorf("spawning polecat: %w", spawnErr)
 				}
