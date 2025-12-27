@@ -118,6 +118,37 @@ func (t *Tmux) ListSessions() ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
+// ListSessionIDs returns a map of session name to session ID.
+// Session IDs are in the format "$N" where N is a number.
+func (t *Tmux) ListSessionIDs() (map[string]string, error) {
+	out, err := t.run("list-sessions", "-F", "#{session_name}:#{session_id}")
+	if err != nil {
+		if errors.Is(err, ErrNoServer) {
+			return nil, nil // No server = no sessions
+		}
+		return nil, err
+	}
+
+	if out == "" {
+		return nil, nil
+	}
+
+	result := make(map[string]string)
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		// Parse "name:$id" format
+		idx := strings.Index(line, ":")
+		if idx > 0 && idx < len(line)-1 {
+			name := line[:idx]
+			id := line[idx+1:]
+			result[name] = id
+		}
+	}
+	return result, nil
+}
+
 // SendKeys sends keystrokes to a session and presses Enter.
 // Always sends Enter as a separate command for reliability.
 // Uses a debounce delay between paste and Enter to ensure paste completes.
@@ -621,15 +652,20 @@ func (t *Tmux) SwitchClient(targetSession string) error {
 
 // SetCrewCycleBindings sets up C-b n/p to cycle through crew sessions in the same rig.
 // This allows quick switching between crew members without using the session picker.
+//
+// IMPORTANT: We pass #{session_name} to the command because run-shell doesn't
+// reliably preserve the session context. tmux expands #{session_name} at binding
+// resolution time (when the key is pressed), giving us the correct session.
 func (t *Tmux) SetCrewCycleBindings(session string) error {
 	// C-b n → gt crew next (switch to next crew session)
+	// #{session_name} is expanded by tmux when the key is pressed
 	if _, err := t.run("bind-key", "-T", "prefix", "n",
-		"run-shell", "gt crew next"); err != nil {
+		"run-shell", "gt crew next --session '#{session_name}'"); err != nil {
 		return err
 	}
 	// C-b p → gt crew prev (switch to previous crew session)
 	if _, err := t.run("bind-key", "-T", "prefix", "p",
-		"run-shell", "gt crew prev"); err != nil {
+		"run-shell", "gt crew prev --session '#{session_name}'"); err != nil {
 		return err
 	}
 	return nil

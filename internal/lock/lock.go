@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -241,15 +242,31 @@ func FindAllLocks(root string) (map[string]*LockInfo, error) {
 
 // CleanStaleLocks removes all stale locks in a directory tree.
 // Returns the number of stale locks cleaned.
+// A lock is only truly stale if BOTH the PID is dead AND the tmux session
+// doesn't exist. This prevents killing active workers whose spawning process
+// has exited (which is normal - Claude runs as a child in tmux).
 func CleanStaleLocks(root string) (int, error) {
 	locks, err := FindAllLocks(root)
 	if err != nil {
 		return 0, err
 	}
 
+	// Get active tmux sessions to verify locks
+	activeSessions := getActiveTmuxSessions()
+	sessionSet := make(map[string]bool)
+	for _, s := range activeSessions {
+		sessionSet[s] = true
+	}
+
 	cleaned := 0
 	for workerDir, info := range locks {
 		if info.IsStale() {
+			// PID is dead, but check if session still exists
+			if info.SessionID != "" && sessionSet[info.SessionID] {
+				// Session exists - worker is alive, don't clean
+				continue
+			}
+			// Both PID dead AND no session = truly stale
 			lock := New(workerDir)
 			if err := lock.Release(); err == nil {
 				cleaned++
@@ -258,6 +275,94 @@ func CleanStaleLocks(root string) (int, error) {
 	}
 
 	return cleaned, nil
+}
+
+// getActiveTmuxSessions returns a list of active tmux session identifiers.
+// Returns both session names (gt-foo-bar) and session IDs in various formats
+// (%N, $N) to handle different lock file formats.
+func getActiveTmuxSessions() []string {
+	// Get both session name and ID to handle different lock formats
+	// Format: "session_name:session_id" e.g., "gt-beads-crew-dave:$55"
+	cmd := execCommand("tmux", "list-sessions", "-F", "#{session_name}:#{session_id}")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil // tmux not running or not installed
+	}
+
+	var sessions []string
+	for _, line := range splitLines(string(output)) {
+		if line == "" {
+			continue
+		}
+		// Parse "name:$id" format
+		parts := splitOnColon(line)
+		if len(parts) >= 1 {
+			sessions = append(sessions, parts[0]) // session name
+		}
+		if len(parts) >= 2 {
+			id := parts[1]
+			sessions = append(sessions, id) // $N format
+			// Also add %N format (old tmux style) for compatibility
+			if len(id) > 0 && id[0] == '$' {
+				sessions = append(sessions, "%"+id[1:])
+			}
+		}
+	}
+	return sessions
+}
+
+// splitOnColon splits on the first colon only (session names shouldn't have colons)
+func splitOnColon(s string) []string {
+	idx := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == ':' {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return []string{s}
+	}
+	return []string{s[:idx], s[idx+1:]}
+}
+
+// execCommand is a wrapper for exec.Command to allow testing
+var execCommand = func(name string, args ...string) interface{ Output() ([]byte, error) } {
+	return realExecCommand(name, args...)
+}
+
+func realExecCommand(name string, args ...string) interface{ Output() ([]byte, error) } {
+	return &execCmdWrapper{name: name, args: args}
+}
+
+type execCmdWrapper struct {
+	name string
+	args []string
+}
+
+func (c *execCmdWrapper) Output() ([]byte, error) {
+	cmd := exec.Command(c.name, c.args...)
+	return cmd.Output()
+}
+
+// splitLines splits a string into lines, handling both \n and \r\n
+func splitLines(s string) []string {
+	var lines []string
+	var current []byte
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, string(current))
+			current = nil
+		} else if s[i] == '\r' {
+			// Skip \r
+		} else {
+			current = append(current, s[i])
+		}
+	}
+	if len(current) > 0 {
+		lines = append(lines, string(current))
+	}
+	return lines
 }
 
 // DetectCollisions finds workers with multiple agents claiming the same identity.

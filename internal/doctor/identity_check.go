@@ -48,12 +48,30 @@ func (c *IdentityCollisionCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Get active tmux sessions for cross-reference
+	// Build a set containing both session names AND session IDs
+	// because locks may store either format
 	t := tmux.NewTmux()
-	sessions, _ := t.ListSessions() // Ignore errors - might not have tmux
-
 	sessionSet := make(map[string]bool)
+
+	// Get session names
+	sessions, _ := t.ListSessions() // Returns session names
 	for _, s := range sessions {
 		sessionSet[s] = true
+	}
+
+	// Also get session IDs to handle locks that store ID instead of name
+	// Lock files may contain session_id in formats like "%55" or "$55"
+	sessionIDs, _ := t.ListSessionIDs() // Returns map[name]id
+	for _, id := range sessionIDs {
+		sessionSet[id] = true
+		// Also add alternate formats
+		if len(id) > 0 {
+			if id[0] == '$' {
+				sessionSet["%"+id[1:]] = true // $55 -> %55
+			} else if id[0] == '%' {
+				sessionSet["$"+id[1:]] = true // %55 -> $55
+			}
+		}
 	}
 
 	var staleLocks []string
@@ -61,13 +79,26 @@ func (c *IdentityCollisionCheck) Run(ctx *CheckContext) *CheckResult {
 	var healthyLocks int
 
 	for workerDir, info := range locks {
+		// First check if the session exists in tmux - that's the real indicator
+		// of whether the worker is alive. The PID in the lock is the spawning
+		// process, which may have exited even though Claude is still running.
+		sessionExists := info.SessionID != "" && sessionSet[info.SessionID]
+
 		if info.IsStale() {
+			// PID is dead - but is the session still alive?
+			if sessionExists {
+				// Session exists, so the worker is alive despite dead PID.
+				// This is normal - the spawner exits after launching Claude.
+				healthyLocks++
+				continue
+			}
+			// Both PID dead AND session gone = truly stale
 			staleLocks = append(staleLocks,
 				fmt.Sprintf("%s (dead PID %d)", workerDir, info.PID))
 			continue
 		}
 
-		// Check if session exists
+		// PID is alive - check if session exists
 		if info.SessionID != "" && !sessionSet[info.SessionID] {
 			// Lock has session ID but session doesn't exist
 			// This could be a collision or orphan
