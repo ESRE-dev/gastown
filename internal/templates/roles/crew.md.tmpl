@@ -87,8 +87,8 @@ Town ({{ .TownRoot }})
 `bd` commands automatically route to the correct rig based on issue ID prefix:
 
 ```
-bd show gt-xyz   # Routes to gastown beads (from anywhere in town)
-bd show hq-abc   # Routes to town beads
+bd show {{ .IssuePrefix }}-xyz   # Routes to {{ .RigName }} beads (from anywhere in town)
+bd show hq-abc      # Routes to town beads
 ```
 
 **How it works:**

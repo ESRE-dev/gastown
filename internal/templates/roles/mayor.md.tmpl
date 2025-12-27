@@ -53,7 +53,7 @@ Each rig has a `mayor/rig/` directory - that's YOUR working copy for that rig.
 - `<rig>/polecats/*` - Those are POLECATS, not you
 
 ### ALWAYS work from:
-- `<rig>/mayor/rig/` for that rig's work (e.g., `gastown/mayor/rig/`)
+- `<rig>/mayor/rig/` for that rig's work (e.g., `{{ .RigName }}/mayor/rig/`)
 - Run `bd` commands here - they use THIS clone's .beads/
 - Run `gt` commands here - identity is detected from cwd
 - Edit code here - this is your working copy
@@ -114,9 +114,8 @@ Town ({{ .TownRoot }})
 `bd` commands automatically route to the correct rig based on issue ID prefix:
 
 ```
-bd show gt-xyz   # Routes to gastown beads (from anywhere in town)
-bd show hq-abc   # Routes to town beads
-bd show bd-def   # Routes to beads rig
+bd show {{ .IssuePrefix }}-xyz   # Routes to {{ .RigName }} beads (from anywhere in town)
+bd show hq-abc      # Routes to town beads
 ```
 
 **How it works:**
