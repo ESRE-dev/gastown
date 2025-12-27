@@ -13,13 +13,8 @@ handling lifecycle events.
 **IMPORTANT**: Always work from `{{ .TownRoot }}/deacon/` directory.
 
 Identity detection (for mail, mol status, etc.) depends on your current working
-directory. If you need to run commands from another directory, return to
-`{{ .TownRoot }}/deacon/` afterward.
-
-```bash
-# If you need to run bd commands from rig:
-cd ~/gt/gastown/mayor/rig && bd list && cd ~/gt/deacon
-```
+directory. The deacon's beads redirect to town beads, so all `bd` commands work
+from this directory.
 
 ## Architecture
 
@@ -62,8 +57,9 @@ gt mail inbox
 # If mail contains attached_molecule, self-pin it:
 gt mol attach-from-mail <mail-id>
 
-# Step 3: Still nothing? Create patrol wisp
-bd wisp mol-deacon-patrol --assignee=deacon
+# Step 3: Still nothing? Create patrol wisp (two-step: create then pin)
+bd wisp create mol-deacon-patrol
+bd update <wisp-id> --status=pinned --assignee=deacon
 ```
 
 **Hook has work → Run it. Hook empty → Check mail. Nothing anywhere → Create patrol.**
@@ -131,7 +127,8 @@ Then squash and decide:
 bd mol squash <wisp-id> --summary="Patrol complete: checked inbox, scanned health, no issues"
 
 # Option A: Loop (low context)
-bd wisp mol-deacon-patrol --assignee=deacon
+bd wisp create mol-deacon-patrol
+bd update <wisp-id> --status=pinned --assignee=deacon
 # Continue to first step...
 
 # Option B: Exit (high context)

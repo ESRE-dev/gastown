@@ -803,14 +803,15 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 	fmt.Println()
 	fmt.Printf("%s\n\n", style.Bold.Render("## 🔄 Patrol Status (Wisp-based)"))
 
-	// Check for active mol-deacon-patrol molecules in rig beads
+	// Check for active mol-deacon-patrol molecules in town beads
 	// A patrol is "active" if it has open wisp children (steps to execute)
 	// After squash, the root stays open but has no open children - that's "completed"
-	rigBeadsDir := filepath.Join(ctx.TownRoot, "gastown", "mayor", "rig")
+	// Deacon uses town beads (via redirect from ~/gt/deacon/.beads/ to ~/gt/.beads/)
+	beadsDir := ctx.WorkDir
 
 	// First find mol-deacon-patrol molecules (exclude template)
 	cmdList := exec.Command("bd", "list", "--status=open", "--type=epic")
-	cmdList.Dir = rigBeadsDir
+	cmdList.Dir = beadsDir
 	var stdoutList bytes.Buffer
 	cmdList.Stdout = &stdoutList
 	cmdList.Stderr = nil
@@ -830,7 +831,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 					molID := parts[0]
 					// Check if this molecule has open children using bd show
 					cmdShow := exec.Command("bd", "show", molID)
-					cmdShow.Dir = rigBeadsDir
+					cmdShow.Dir = beadsDir
 					var stdoutShow bytes.Buffer
 					cmdShow.Stdout = &stdoutShow
 					cmdShow.Stderr = nil
@@ -856,7 +857,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 
 		// Find the proto ID for mol-deacon-patrol
 		cmdCatalog := exec.Command("bd", "--no-daemon", "mol", "catalog")
-		cmdCatalog.Dir = rigBeadsDir
+		cmdCatalog.Dir = beadsDir
 		var stdoutCatalog bytes.Buffer
 		cmdCatalog.Stdout = &stdoutCatalog
 		cmdCatalog.Stderr = nil
@@ -887,7 +888,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 
 		// Create the patrol wisp (step 1: create)
 		cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", "create", protoID)
-		cmdSpawn.Dir = rigBeadsDir
+		cmdSpawn.Dir = beadsDir
 		var stdoutSpawn, stderrSpawn bytes.Buffer
 		cmdSpawn.Stdout = &stdoutSpawn
 		cmdSpawn.Stderr = &stderrSpawn
@@ -921,7 +922,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 
 		// Pin the wisp to deacon (step 2: assign)
 		cmdPin := exec.Command("bd", "--no-daemon", "update", patrolID, "--status=pinned", "--assignee=deacon")
-		cmdPin.Dir = rigBeadsDir
+		cmdPin.Dir = beadsDir
 		if err := cmdPin.Run(); err != nil {
 			fmt.Printf("⚠ Created wisp %s but failed to pin to deacon\n", patrolID)
 		} else {
@@ -935,7 +936,6 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 
 	// Show patrol work loop instructions
 	fmt.Println("**Deacon Patrol Work Loop:**")
-	fmt.Println("Run from gastown/mayor/rig/:")
 	fmt.Println("1. Check next step: `bd ready`")
 	fmt.Println("2. Execute the step (heartbeat, mail, health checks, etc.)")
 	fmt.Println("3. Close step: `bd close <step-id>`")
