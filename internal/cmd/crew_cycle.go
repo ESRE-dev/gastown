@@ -8,16 +8,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// crewCycleSession is the --session flag for crew next/prev commands.
+// When run via tmux key binding (run-shell), the session context may not be
+// correct, so we pass the session name explicitly via #{session_name} expansion.
+var crewCycleSession string
+
 // cycleCrewSession switches to the next or previous crew session in the same rig.
 // direction: 1 for next, -1 for previous
-func cycleCrewSession(direction int) error {
-	// Get current session (uses existing function from handoff.go)
-	currentSession, err := getCurrentTmuxSession()
-	if err != nil {
-		return fmt.Errorf("not in a tmux session: %w", err)
-	}
-	if currentSession == "" {
-		return fmt.Errorf("not in a tmux session")
+// sessionOverride: if non-empty, use this instead of detecting current session
+func cycleCrewSession(direction int, sessionOverride string) error {
+	var currentSession string
+	var err error
+
+	if sessionOverride != "" {
+		// Use the provided session name (from tmux key binding)
+		currentSession = sessionOverride
+	} else {
+		// Get current session (uses existing function from handoff.go)
+		currentSession, err = getCurrentTmuxSession()
+		if err != nil {
+			return fmt.Errorf("not in a tmux session: %w", err)
+		}
+		if currentSession == "" {
+			return fmt.Errorf("not in a tmux session")
+		}
 	}
 
 	// Parse rig name from current session
@@ -73,9 +87,9 @@ func cycleCrewSession(direction int) error {
 }
 
 func runCrewNext(cmd *cobra.Command, args []string) error {
-	return cycleCrewSession(1)
+	return cycleCrewSession(1, crewCycleSession)
 }
 
 func runCrewPrev(cmd *cobra.Command, args []string) error {
-	return cycleCrewSession(-1)
+	return cycleCrewSession(-1, crewCycleSession)
 }

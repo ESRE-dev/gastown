@@ -22,6 +22,10 @@ across distributed teams of AI agents working on shared codebases.`,
 		// Build command path: gt status, gt mail send, etc.
 		cmdPath := buildCommandPath(cmd)
 		keepalive.TouchWithArgs(cmdPath, args)
+
+		// Also signal town-level activity for daemon exponential backoff
+		// This resets the backoff when any gt command runs
+		keepalive.TouchTownActivity(cmdPath)
 	},
 }
 

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/keepalive"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -77,11 +78,13 @@ func (d *Daemon) Run() error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
 
-	// Heartbeat ticker
-	ticker := time.NewTicker(d.config.HeartbeatInterval)
-	defer ticker.Stop()
+	// Dynamic heartbeat timer with exponential backoff based on activity
+	// Start with base interval
+	nextInterval := d.config.HeartbeatInterval
+	timer := time.NewTimer(nextInterval)
+	defer timer.Stop()
 
-	d.logger.Printf("Daemon running, heartbeat every %v", d.config.HeartbeatInterval)
+	d.logger.Printf("Daemon running, initial heartbeat interval %v", nextInterval)
 
 	// Initial heartbeat
 	d.heartbeat(state)
@@ -102,9 +105,63 @@ func (d *Daemon) Run() error {
 				return d.shutdown(state)
 			}
 
-		case <-ticker.C:
+		case <-timer.C:
 			d.heartbeat(state)
+
+			// Calculate next interval based on activity
+			nextInterval = d.calculateHeartbeatInterval()
+			timer.Reset(nextInterval)
+			d.logger.Printf("Next heartbeat in %v", nextInterval)
 		}
+	}
+}
+
+// Backoff thresholds for exponential slowdown when idle
+const (
+	// Base interval when there's recent activity
+	baseInterval = 5 * time.Minute
+
+	// Tier thresholds for backoff
+	tier1Threshold = 5 * time.Minute  // 0-5 min idle → 5 min interval
+	tier2Threshold = 15 * time.Minute // 5-15 min idle → 10 min interval
+	tier3Threshold = 45 * time.Minute // 15-45 min idle → 30 min interval
+	// 45+ min idle → 60 min interval (max)
+
+	// Corresponding intervals
+	tier1Interval = 5 * time.Minute
+	tier2Interval = 10 * time.Minute
+	tier3Interval = 30 * time.Minute
+	tier4Interval = 60 * time.Minute // max
+)
+
+// calculateHeartbeatInterval determines the next heartbeat interval based on activity.
+// Reads ~/gt/daemon/activity.json to determine how long since the last gt/bd command.
+// Returns exponentially increasing intervals as idle time grows.
+//
+// | Idle Duration | Next Heartbeat |
+// |---------------|----------------|
+// | 0-5 min       | 5 min (base)   |
+// | 5-15 min      | 10 min         |
+// | 15-45 min     | 30 min         |
+// | 45+ min       | 60 min (max)   |
+func (d *Daemon) calculateHeartbeatInterval() time.Duration {
+	activity := keepalive.ReadTownActivity()
+	if activity == nil {
+		// No activity file - assume recent activity (might be first run)
+		return baseInterval
+	}
+
+	idleDuration := activity.Age()
+
+	switch {
+	case idleDuration < tier1Threshold:
+		return tier1Interval
+	case idleDuration < tier2Threshold:
+		return tier2Interval
+	case idleDuration < tier3Threshold:
+		return tier3Interval
+	default:
+		return tier4Interval
 	}
 }
 
