@@ -121,21 +121,46 @@ persisted to JSONL. They exist only in memory during execution.
 
 ## Molecule Commands
 
+**Principle**: `bd` = beads data operations, `gt` = agent operations.
+
+### Beads Operations (bd)
+
 ```bash
 # Formulas
 bd formula list              # Available formulas
 bd formula show <name>       # Formula details
 bd cook <formula>            # Formula → Proto
 
-# Molecules
+# Molecules (data operations)
 bd mol list                  # Available protos
 bd mol show <id>             # Proto details
 bd mol pour <proto>          # Create mol
 bd mol wisp <proto>          # Create wisp
 bd mol bond <proto> <parent> # Attach to existing mol
-bd mol squash <id>           # Condense to digest
-bd mol burn <id>             # Discard wisp
+bd mol squash <id>           # Condense to digest (explicit ID)
+bd mol burn <id>             # Discard wisp (explicit ID)
 ```
+
+### Agent Operations (gt)
+
+```bash
+# Hook management (operates on current agent's hook)
+gt mol status                # What's on MY hook
+gt mol current               # What should I work on next
+gt mol progress <id>         # Execution progress of molecule
+gt mol attach <bead> <mol>   # Pin molecule to bead
+gt mol detach <bead>         # Unpin molecule from bead
+gt mol attach-from-mail <id> # Attach from mail message
+
+# Agent lifecycle (operates on agent's attached molecule)
+gt mol burn                  # Burn attached molecule (no ID needed)
+gt mol squash                # Squash attached molecule (no ID needed)
+gt mol step done <step>      # Complete a molecule step
+```
+
+**Key distinction**: `bd mol burn/squash <id>` take explicit molecule IDs.
+`gt mol burn/squash` operate on the current agent's attached molecule
+(auto-detected from working directory).
 
 ## Agent Lifecycle
 
