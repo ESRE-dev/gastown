@@ -2,9 +2,13 @@ package doctor
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // BeadsDatabaseCheck verifies that the beads database is properly initialized.
@@ -156,4 +160,67 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 	}
 
 	return nil
+}
+
+// PrefixConflictCheck detects duplicate prefixes across rigs in routes.jsonl.
+// Duplicate prefixes break prefix-based routing.
+type PrefixConflictCheck struct {
+	BaseCheck
+}
+
+// NewPrefixConflictCheck creates a new prefix conflict check.
+func NewPrefixConflictCheck() *PrefixConflictCheck {
+	return &PrefixConflictCheck{
+		BaseCheck: BaseCheck{
+			CheckName:        "prefix-conflict",
+			CheckDescription: "Check for duplicate beads prefixes across rigs",
+		},
+	}
+}
+
+// Run checks for duplicate prefixes in routes.jsonl.
+func (c *PrefixConflictCheck) Run(ctx *CheckContext) *CheckResult {
+	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
+
+	// Check if routes.jsonl exists
+	routesPath := filepath.Join(beadsDir, beads.RoutesFileName)
+	if _, err := os.Stat(routesPath); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No routes.jsonl file (prefix routing not configured)",
+		}
+	}
+
+	// Find conflicts
+	conflicts, err := beads.FindConflictingPrefixes(beadsDir)
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not check routes.jsonl: %v", err),
+		}
+	}
+
+	if len(conflicts) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No prefix conflicts found",
+		}
+	}
+
+	// Build details
+	var details []string
+	for prefix, paths := range conflicts {
+		details = append(details, fmt.Sprintf("Prefix %q used by: %s", prefix, strings.Join(paths, ", ")))
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusError,
+		Message: fmt.Sprintf("%d prefix conflict(s) found in routes.jsonl", len(conflicts)),
+		Details: details,
+		FixHint: "Use 'bd rename-prefix <new-prefix>' in one of the conflicting rigs to resolve",
+	}
 }

@@ -211,6 +211,18 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving rigs config: %w", err)
 	}
 
+	// Add route to town-level routes.jsonl for prefix-based routing
+	if newRig.Config.Prefix != "" {
+		route := beads.Route{
+			Prefix: newRig.Config.Prefix + "-",
+			Path:   name + "/mayor/rig",
+		}
+		if err := beads.AppendRoute(townRoot, route); err != nil {
+			// Non-fatal: routing will still work, just not from town root
+			fmt.Printf("  %s Could not update routes.jsonl: %v\n", style.Warning.Render("!"), err)
+		}
+	}
+
 	elapsed := time.Since(startTime)
 
 	fmt.Printf("\n%s Rig created in %.1fs\n", style.Success.Render("✓"), elapsed.Seconds())

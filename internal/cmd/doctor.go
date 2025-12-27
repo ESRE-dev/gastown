@@ -69,6 +69,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewDaemonCheck())
 	d.Register(doctor.NewBeadsDatabaseCheck())
+	d.Register(doctor.NewPrefixConflictCheck())
 	d.Register(doctor.NewOrphanSessionCheck())
 	d.Register(doctor.NewOrphanProcessCheck())
 	d.Register(doctor.NewWispGCCheck())
