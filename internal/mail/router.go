@@ -144,6 +144,9 @@ func (r *Router) Send(msg *Message) error {
 		args = append(args, "--labels", strings.Join(labels, ","))
 	}
 
+	// Add actor for attribution (sender identity)
+	args = append(args, "--actor", msg.From)
+
 	// Add --wisp flag for ephemeral messages (stored in single DB, filtered from JSONL export)
 	if r.shouldBeWisp(msg) {
 		args = append(args, "--wisp")

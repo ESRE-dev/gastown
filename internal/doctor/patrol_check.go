@@ -118,6 +118,7 @@ func (c *PatrolMoleculesExistCheck) Fix(ctx *CheckContext) error {
 				"--title="+mol,
 				"--description="+desc,
 				"--priority=2",
+				"--actor=gt-doctor",
 			)
 			cmd.Dir = rigPath
 			if err := cmd.Run(); err != nil {

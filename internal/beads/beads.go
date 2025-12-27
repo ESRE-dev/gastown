@@ -30,6 +30,7 @@ type Issue struct {
 	Priority    int      `json:"priority"`
 	Type        string   `json:"issue_type"`
 	CreatedAt   string   `json:"created_at"`
+	CreatedBy   string   `json:"created_by,omitempty"`
 	UpdatedAt   string   `json:"updated_at"`
 	ClosedAt    string   `json:"closed_at,omitempty"`
 	Parent      string   `json:"parent,omitempty"`
@@ -76,6 +77,7 @@ type CreateOptions struct {
 	Priority    int    // 0-4
 	Description string
 	Parent      string
+	Actor       string // Who is creating this issue (populates created_by)
 }
 
 // UpdateOptions specifies options for updating an issue.
@@ -315,6 +317,9 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	if opts.Parent != "" {
 		args = append(args, "--parent="+opts.Parent)
 	}
+	if opts.Actor != "" {
+		args = append(args, "--actor="+opts.Actor)
+	}
 
 	out, err := b.run(args...)
 	if err != nil {
@@ -534,6 +539,7 @@ func (b *Beads) GetOrCreateHandoffBead(role string) (*Issue, error) {
 		Type:        "task",
 		Priority:    2,
 		Description: "", // Empty until first handoff
+		Actor:       role,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating handoff bead: %w", err)

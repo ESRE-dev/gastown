@@ -476,6 +476,7 @@ squashed_at: %s
 		Description: digestDesc,
 		Type:        "task",
 		Priority:    4, // P4 - backlog priority for digests
+		Actor:       target,
 	})
 	if err != nil {
 		return fmt.Errorf("creating digest: %w", err)

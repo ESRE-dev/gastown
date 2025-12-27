@@ -230,6 +230,42 @@ func parseRoleString(s string) (Role, string, string) {
 	}
 }
 
+// ActorString returns the actor identity string for beads attribution.
+// Format matches beads created_by convention:
+//   - Simple roles: "mayor", "deacon"
+//   - Rig-specific: "gastown/witness", "gastown/refinery"
+//   - Workers: "gastown/crew/max", "gastown/polecats/Toast"
+func (info RoleInfo) ActorString() string {
+	switch info.Role {
+	case RoleMayor:
+		return "mayor"
+	case RoleDeacon:
+		return "deacon"
+	case RoleWitness:
+		if info.Rig != "" {
+			return fmt.Sprintf("%s/witness", info.Rig)
+		}
+		return "witness"
+	case RoleRefinery:
+		if info.Rig != "" {
+			return fmt.Sprintf("%s/refinery", info.Rig)
+		}
+		return "refinery"
+	case RolePolecat:
+		if info.Rig != "" && info.Polecat != "" {
+			return fmt.Sprintf("%s/polecats/%s", info.Rig, info.Polecat)
+		}
+		return "polecat"
+	case RoleCrew:
+		if info.Rig != "" && info.Polecat != "" {
+			return fmt.Sprintf("%s/crew/%s", info.Rig, info.Polecat)
+		}
+		return "crew"
+	default:
+		return string(info.Role)
+	}
+}
+
 // getRoleHome returns the canonical home directory for a role.
 func getRoleHome(role Role, rig, polecat, townRoot string) string {
 	switch role {
