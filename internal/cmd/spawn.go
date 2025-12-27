@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,6 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -395,19 +395,14 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		style.Bold.Render("✓"),
 		assignmentID, rigName, polecatName)
 
-	// Write hook file to polecat's worktree so gt mol status can find it
-	// This puts work on the polecat's hook for the propulsion protocol
-	sw := wisp.NewSlungWork(assignmentID, "mayor/")
-	if moleculeCtx != nil {
-		sw.Subject = fmt.Sprintf("Molecule: %s", moleculeCtx.MoleculeID)
-		sw.Context = fmt.Sprintf("Step %d/%d of %s", moleculeCtx.StepNumber, moleculeCtx.TotalSteps, moleculeCtx.MoleculeID)
-	} else if issue != nil {
-		sw.Subject = issue.Title
-	}
-	if err := wisp.WriteSlungWork(polecatObj.ClonePath, polecatAddress, sw); err != nil {
-		fmt.Printf("%s creating hook file: %v\n", style.Dim.Render("Warning:"), err)
+	// Pin the bead in the polecat's worktree for the propulsion protocol
+	pinCmd := exec.Command("bd", "update", assignmentID, "--status=pinned", "--assignee="+polecatAddress)
+	pinCmd.Dir = polecatObj.ClonePath
+	pinCmd.Stderr = os.Stderr
+	if err := pinCmd.Run(); err != nil {
+		fmt.Printf("%s pinning bead: %v\n", style.Dim.Render("Warning:"), err)
 	} else {
-		fmt.Printf("%s Hook file created in polecat worktree\n", style.Bold.Render("✓"))
+		fmt.Printf("%s Bead pinned for polecat\n", style.Bold.Render("✓"))
 	}
 
 	// Sync beads to push assignment changes
