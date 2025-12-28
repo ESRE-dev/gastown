@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var hookCmd = &cobra.Command{
@@ -155,17 +154,8 @@ func runHook(cmd *cobra.Command, args []string) error {
 	}
 
 	// Pin the bead using bd update (discovery-based approach)
-	// For town-level roles (mayor, deacon), run from Town root so the pin
-	// lands in Town beads where these roles naturally operate.
 	pinCmd := exec.Command("bd", "update", beadID, "--status=pinned", "--assignee="+agentID)
 	pinCmd.Stderr = os.Stderr
-	if isTownLevelRole(agentID) {
-		townRoot, err := workspace.FindFromCwd()
-		if err != nil {
-			return fmt.Errorf("finding town root for town-level role: %w", err)
-		}
-		pinCmd.Dir = townRoot
-	}
 	if err := pinCmd.Run(); err != nil {
 		return fmt.Errorf("pinning bead: %w", err)
 	}
