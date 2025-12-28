@@ -82,6 +82,12 @@ func (m *Manager) assigneeID(name string) string {
 	return fmt.Sprintf("%s/%s", m.rig.Name, name)
 }
 
+// agentBeadID returns the agent bead ID for a polecat.
+// Format: "gt-polecat-<rig>-<name>" (e.g., "gt-polecat-gastown-Toast")
+func (m *Manager) agentBeadID(name string) string {
+	return fmt.Sprintf("gt-polecat-%s-%s", m.rig.Name, name)
+}
+
 // repoBase returns the git directory and Git object to use for worktree operations.
 // Prefers the shared bare repo (.repo.git) if it exists, otherwise falls back to mayor/rig.
 // The bare repo architecture allows all worktrees (refinery, polecats) to share branch visibility.
@@ -153,6 +159,19 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 		// Non-fatal - polecat can still work with local beads
 		// Log warning but don't fail the spawn
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Create agent bead for ZFC compliance (self-report state).
+	// State starts as "spawning" - will be updated to "working" when Claude starts.
+	agentID := m.agentBeadID(name)
+	_, err = m.beads.CreateAgentBead(agentID, agentID, &beads.AgentFields{
+		RoleType:   "polecat",
+		Rig:        m.rig.Name,
+		AgentState: "spawning",
+	})
+	if err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not create agent bead: %v\n", err)
 	}
 
 	// Return polecat with derived state (no issue assigned yet = idle)
@@ -228,6 +247,15 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 	m.namePool.Release(name)
 	_ = m.namePool.Save()
 
+	// Delete agent bead (non-fatal: may not exist or beads may not be available)
+	agentID := m.agentBeadID(name)
+	if err := m.beads.DeleteAgentBead(agentID); err != nil {
+		// Only log if not "not found" - it's ok if it doesn't exist
+		if !errors.Is(err, beads.ErrNotFound) {
+			fmt.Printf("Warning: could not delete agent bead %s: %v\n", agentID, err)
+		}
+	}
+
 	return nil
 }
 
@@ -286,6 +314,14 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 		}
 	}
 
+	// Delete old agent bead before recreation (non-fatal)
+	agentID := m.agentBeadID(name)
+	if err := m.beads.DeleteAgentBead(agentID); err != nil {
+		if !errors.Is(err, beads.ErrNotFound) {
+			fmt.Printf("Warning: could not delete old agent bead %s: %v\n", agentID, err)
+		}
+	}
+
 	// Remove the worktree (use force for git worktree removal)
 	if err := repoGit.WorktreeRemove(polecatPath, true); err != nil {
 		// Fall back to direct removal
@@ -311,6 +347,16 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 	// Set up shared beads
 	if err := m.setupSharedBeads(polecatPath); err != nil {
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Create fresh agent bead for ZFC compliance
+	_, err = m.beads.CreateAgentBead(agentID, agentID, &beads.AgentFields{
+		RoleType:   "polecat",
+		Rig:        m.rig.Name,
+		AgentState: "spawning",
+	})
+	if err != nil {
+		fmt.Printf("Warning: could not create agent bead: %v\n", err)
 	}
 
 	// Return fresh polecat

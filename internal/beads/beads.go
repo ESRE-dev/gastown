@@ -510,3 +510,158 @@ func (b *Beads) IsBeadsRepo() bool {
 	_, err := b.run("list", "--limit=1")
 	return err == nil || !errors.Is(err, ErrNotARepo)
 }
+
+// AgentFields holds structured fields for agent beads.
+// These are stored as "key: value" lines in the description.
+type AgentFields struct {
+	RoleType   string // polecat, witness, refinery, deacon, mayor
+	Rig        string // Rig name (empty for global agents like mayor/deacon)
+	AgentState string // spawning, working, done, stuck
+	HookBead   string // Currently pinned work bead ID
+	RoleBead   string // Role definition bead ID
+}
+
+// FormatAgentDescription creates a description string from agent fields.
+func FormatAgentDescription(title string, fields *AgentFields) string {
+	if fields == nil {
+		return title
+	}
+
+	var lines []string
+	lines = append(lines, title)
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("role_type: %s", fields.RoleType))
+
+	if fields.Rig != "" {
+		lines = append(lines, fmt.Sprintf("rig: %s", fields.Rig))
+	} else {
+		lines = append(lines, "rig: null")
+	}
+
+	lines = append(lines, fmt.Sprintf("agent_state: %s", fields.AgentState))
+
+	if fields.HookBead != "" {
+		lines = append(lines, fmt.Sprintf("hook_bead: %s", fields.HookBead))
+	} else {
+		lines = append(lines, "hook_bead: null")
+	}
+
+	if fields.RoleBead != "" {
+		lines = append(lines, fmt.Sprintf("role_bead: %s", fields.RoleBead))
+	} else {
+		lines = append(lines, "role_bead: null")
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// ParseAgentFields extracts agent fields from an issue's description.
+func ParseAgentFields(description string) *AgentFields {
+	fields := &AgentFields{}
+
+	for _, line := range strings.Split(description, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		colonIdx := strings.Index(line, ":")
+		if colonIdx == -1 {
+			continue
+		}
+
+		key := strings.TrimSpace(line[:colonIdx])
+		value := strings.TrimSpace(line[colonIdx+1:])
+		if value == "null" || value == "" {
+			value = ""
+		}
+
+		switch strings.ToLower(key) {
+		case "role_type":
+			fields.RoleType = value
+		case "rig":
+			fields.Rig = value
+		case "agent_state":
+			fields.AgentState = value
+		case "hook_bead":
+			fields.HookBead = value
+		case "role_bead":
+			fields.RoleBead = value
+		}
+	}
+
+	return fields
+}
+
+// CreateAgentBead creates an agent bead for tracking agent lifecycle.
+// The ID format is: <prefix>-<role>-<rig>-<name> (e.g., gt-polecat-gastown-Toast)
+func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, error) {
+	description := FormatAgentDescription(title, fields)
+
+	args := []string{"create", "--json",
+		"--id=" + id,
+		"--type=agent",
+		"--title=" + title,
+		"--description=" + description,
+	}
+
+	out, err := b.run(args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var issue Issue
+	if err := json.Unmarshal(out, &issue); err != nil {
+		return nil, fmt.Errorf("parsing bd create output: %w", err)
+	}
+
+	return &issue, nil
+}
+
+// UpdateAgentState updates the agent_state field in an agent bead.
+// Optionally updates hook_bead if provided.
+func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) error {
+	// First get current issue to preserve other fields
+	issue, err := b.Show(id)
+	if err != nil {
+		return err
+	}
+
+	// Parse existing fields
+	fields := ParseAgentFields(issue.Description)
+	fields.AgentState = state
+	if hookBead != nil {
+		fields.HookBead = *hookBead
+	}
+
+	// Format new description
+	description := FormatAgentDescription(issue.Title, fields)
+
+	return b.Update(id, UpdateOptions{Description: &description})
+}
+
+// DeleteAgentBead permanently deletes an agent bead.
+// Uses --hard --force for immediate permanent deletion (no tombstone).
+func (b *Beads) DeleteAgentBead(id string) error {
+	_, err := b.run("delete", id, "--hard", "--force")
+	return err
+}
+
+// GetAgentBead retrieves an agent bead by ID.
+// Returns nil if not found.
+func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
+	issue, err := b.Show(id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+
+	if issue.Type != "agent" {
+		return nil, nil, fmt.Errorf("issue %s is not an agent bead (type: %s)", id, issue.Type)
+	}
+
+	fields := ParseAgentFields(issue.Description)
+	return issue, fields, nil
+}
