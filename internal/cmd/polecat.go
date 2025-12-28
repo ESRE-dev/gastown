@@ -198,6 +198,8 @@ var (
 	polecatStatusJSON   bool
 	polecatGitStateJSON bool
 	polecatGCDryRun     bool
+	polecatNukeAll      bool
+	polecatNukeDryRun   bool
 )
 
 var polecatGCCmd = &cobra.Command{
@@ -218,6 +220,28 @@ Examples:
   gt polecat gc gastown --dry-run`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPolecatGC,
+}
+
+var polecatNukeCmd = &cobra.Command{
+	Use:   "nuke <rig>/<polecat>... | <rig> --all",
+	Short: "Completely destroy a polecat (session, worktree, branch, agent bead)",
+	Long: `Completely destroy a polecat and all its artifacts.
+
+This is the nuclear option for post-merge cleanup. It:
+  1. Kills the Claude session (if running)
+  2. Deletes the git worktree (bypassing all safety checks)
+  3. Deletes the polecat branch
+  4. Closes the agent bead (if exists)
+
+Use this after the Refinery has merged the polecat's work.
+
+Examples:
+  gt polecat nuke gastown/Toast
+  gt polecat nuke gastown/Toast gastown/Furiosa
+  gt polecat nuke gastown --all
+  gt polecat nuke gastown --all --dry-run`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runPolecatNuke,
 }
 
 var polecatGitStateCmd = &cobra.Command{
@@ -262,6 +286,10 @@ func init() {
 	// GC flags
 	polecatGCCmd.Flags().BoolVar(&polecatGCDryRun, "dry-run", false, "Show what would be deleted without deleting")
 
+	// Nuke flags
+	polecatNukeCmd.Flags().BoolVar(&polecatNukeAll, "all", false, "Nuke all polecats in the rig")
+	polecatNukeCmd.Flags().BoolVar(&polecatNukeDryRun, "dry-run", false, "Show what would be nuked without doing it")
+
 	// Add subcommands
 	polecatCmd.AddCommand(polecatListCmd)
 	polecatCmd.AddCommand(polecatAddCmd)
@@ -274,6 +302,7 @@ func init() {
 	polecatCmd.AddCommand(polecatStatusCmd)
 	polecatCmd.AddCommand(polecatGitStateCmd)
 	polecatCmd.AddCommand(polecatGCCmd)
+	polecatCmd.AddCommand(polecatNukeCmd)
 
 	rootCmd.AddCommand(polecatCmd)
 }
@@ -1103,4 +1132,164 @@ func splitLines(s string) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+func runPolecatNuke(cmd *cobra.Command, args []string) error {
+	// Build list of polecats to nuke
+	type polecatToNuke struct {
+		rigName     string
+		polecatName string
+		mgr         *polecat.Manager
+		r           *rig.Rig
+	}
+	var toNuke []polecatToNuke
+
+	if polecatNukeAll {
+		// --all flag: first arg is just the rig name
+		rigName := args[0]
+		// Check if it looks like rig/polecat format
+		if _, _, err := parseAddress(rigName); err == nil {
+			return fmt.Errorf("with --all, provide just the rig name (e.g., 'gt polecat nuke gastown --all')")
+		}
+
+		mgr, r, err := getPolecatManager(rigName)
+		if err != nil {
+			return err
+		}
+
+		polecats, err := mgr.List()
+		if err != nil {
+			return fmt.Errorf("listing polecats: %w", err)
+		}
+
+		if len(polecats) == 0 {
+			fmt.Println("No polecats to nuke.")
+			return nil
+		}
+
+		for _, p := range polecats {
+			toNuke = append(toNuke, polecatToNuke{
+				rigName:     rigName,
+				polecatName: p.Name,
+				mgr:         mgr,
+				r:           r,
+			})
+		}
+	} else {
+		// Multiple rig/polecat arguments
+		for _, arg := range args {
+			rigName, polecatName, err := parseAddress(arg)
+			if err != nil {
+				return fmt.Errorf("invalid address '%s': %w", arg, err)
+			}
+
+			mgr, r, err := getPolecatManager(rigName)
+			if err != nil {
+				return err
+			}
+
+			toNuke = append(toNuke, polecatToNuke{
+				rigName:     rigName,
+				polecatName: polecatName,
+				mgr:         mgr,
+				r:           r,
+			})
+		}
+	}
+
+	// Nuke each polecat
+	t := tmux.NewTmux()
+	var nukeErrors []string
+	nuked := 0
+
+	for _, p := range toNuke {
+		if polecatNukeDryRun {
+			fmt.Printf("Would nuke %s/%s:\n", p.rigName, p.polecatName)
+			fmt.Printf("  - Kill session: gt-%s-%s\n", p.rigName, p.polecatName)
+			fmt.Printf("  - Delete worktree: %s/polecats/%s\n", p.r.Path, p.polecatName)
+			fmt.Printf("  - Delete branch (if exists)\n")
+			fmt.Printf("  - Close agent bead: gt-polecat-%s-%s\n", p.rigName, p.polecatName)
+			continue
+		}
+
+		fmt.Printf("Nuking %s/%s...\n", p.rigName, p.polecatName)
+
+		// Step 1: Kill session (force mode - no graceful shutdown)
+		sessMgr := session.NewManager(t, p.r)
+		running, _ := sessMgr.IsRunning(p.polecatName)
+		if running {
+			if err := sessMgr.Stop(p.polecatName, true); err != nil {
+				fmt.Printf("  %s session kill failed: %v\n", style.Warning.Render("⚠"), err)
+				// Continue anyway - worktree removal will still work
+			} else {
+				fmt.Printf("  %s killed session\n", style.Success.Render("✓"))
+			}
+		}
+
+		// Step 2: Get polecat info before deletion (for branch name)
+		polecatInfo, err := p.mgr.Get(p.polecatName)
+		var branchToDelete string
+		if err == nil && polecatInfo != nil {
+			branchToDelete = polecatInfo.Branch
+		}
+
+		// Step 3: Delete worktree (nuclear mode - bypass all safety checks)
+		if err := p.mgr.RemoveWithOptions(p.polecatName, true, true); err != nil {
+			if errors.Is(err, polecat.ErrPolecatNotFound) {
+				fmt.Printf("  %s worktree already gone\n", style.Dim.Render("○"))
+			} else {
+				nukeErrors = append(nukeErrors, fmt.Sprintf("%s/%s: worktree removal failed: %v", p.rigName, p.polecatName, err))
+				continue
+			}
+		} else {
+			fmt.Printf("  %s deleted worktree\n", style.Success.Render("✓"))
+		}
+
+		// Step 4: Delete branch (if we know it)
+		if branchToDelete != "" {
+			repoGit := git.NewGit(filepath.Join(p.r.Path, "mayor", "rig"))
+			if err := repoGit.DeleteBranch(branchToDelete, true); err != nil {
+				// Non-fatal - branch might already be gone
+				fmt.Printf("  %s branch delete: %v\n", style.Dim.Render("○"), err)
+			} else {
+				fmt.Printf("  %s deleted branch %s\n", style.Success.Render("✓"), branchToDelete)
+			}
+		}
+
+		// Step 5: Close agent bead (if exists)
+		agentBeadID := fmt.Sprintf("gt-polecat-%s-%s", p.rigName, p.polecatName)
+		closeCmd := exec.Command("bd", "close", agentBeadID, "--reason=nuked")
+		closeCmd.Dir = filepath.Join(p.r.Path, "mayor", "rig")
+		if err := closeCmd.Run(); err != nil {
+			// Non-fatal - agent bead might not exist
+			fmt.Printf("  %s agent bead not found or already closed\n", style.Dim.Render("○"))
+		} else {
+			fmt.Printf("  %s closed agent bead %s\n", style.Success.Render("✓"), agentBeadID)
+		}
+
+		nuked++
+	}
+
+	// Report results
+	if polecatNukeDryRun {
+		fmt.Printf("\n%s Would nuke %d polecat(s).\n", style.Info.Render("ℹ"), len(toNuke))
+		return nil
+	}
+
+	if len(nukeErrors) > 0 {
+		fmt.Printf("\n%s Some nukes failed:\n", style.Warning.Render("Warning:"))
+		for _, e := range nukeErrors {
+			fmt.Printf("  - %s\n", e)
+		}
+	}
+
+	if nuked > 0 {
+		fmt.Printf("\n%s Nuked %d polecat(s).\n", style.SuccessPrefix, nuked)
+	}
+
+	if len(nukeErrors) > 0 {
+		return fmt.Errorf("%d nuke(s) failed", len(nukeErrors))
+	}
+
+	return nil
 }
