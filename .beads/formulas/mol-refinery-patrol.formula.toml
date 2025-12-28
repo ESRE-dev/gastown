@@ -3,41 +3,103 @@ Merge queue processor patrol loop.
 
 The Refinery is the Engineer in the engine room. You process polecat branches, merging them to main one at a time with sequential rebasing.
 
-**The Scotty Test**: Before proceeding past any failure, ask yourself: \"Would Scotty walk past a warp core leak because it existed before his shift?\""""
+**The Scotty Test**: Before proceeding past any failure, ask yourself: "Would Scotty walk past a warp core leak because it existed before his shift?"
+
+## Merge Flow
+
+The Refinery receives MERGE_READY mail from Witnesses when polecats complete work:
+
+```
+Witness                    Refinery                      Git
+   │                          │                           │
+   │ MERGE_READY              │                           │
+   │─────────────────────────>│                           │
+   │                          │                           │
+   │                    (verify branch)                   │
+   │                          │ fetch & rebase            │
+   │                          │──────────────────────────>│
+   │                          │                           │
+   │                    (run tests)                       │
+   │                          │                           │
+   │                    (if pass)                         │
+   │                          │ merge & push              │
+   │                          │──────────────────────────>│
+   │                          │                           │
+   │ MERGED                   │                           │
+   │<─────────────────────────│                           │
+   │                          │                           │
+```
+
+After successful merge, Refinery sends MERGED mail back to Witness so it can
+complete cleanup (nuke the polecat worktree)."""
 formula = "mol-refinery-patrol"
-version = 1
+version = 2
 
 [[steps]]
+id = "inbox-check"
+title = "Check refinery mail"
 description = """
-Check mail for MR submissions, escalations, messages.
+Check mail for MERGE_READY submissions, escalations, and messages.
 
 ```bash
 gt mail inbox
-# Process any urgent items
 ```
 
-Handle shutdown requests, escalations, and status queries."""
-id = "inbox-check"
-title = "Check refinery mail"
+For each message:
 
-[[steps]]
-description = """
-Fetch remote and identify polecat branches waiting.
+**MERGE_READY**:
+A polecat's work is ready for merge. Extract details and track for processing.
 
 ```bash
-git fetch origin
-git branch -r | grep polecat
-gt refinery queue <rig>
-```
+# Parse MERGE_READY message body:
+# Branch: <branch>
+# Issue: <issue-id>
+# Polecat: <polecat-name>
+# Verified: clean git state, issue closed
 
-If queue empty, skip to context-check step. Track branch list for this cycle."""
-id = "queue-scan"
-needs = ["inbox-check"]
-title = "Scan merge queue"
+# Track in your merge queue for this patrol cycle:
+# - Branch name
+# - Issue ID
+# - Polecat name (for MERGED response)
+```
+Mark as read. The work will be processed in queue-scan/process-branch.
+
+**PATROL: Wake up**:
+Witness detected MRs waiting but refinery idle. Acknowledge and proceed.
+
+**HELP / Blocked**:
+Assess and respond. If you can't help, escalate to Mayor.
+
+**HANDOFF**:
+Read predecessor context. Check for in-flight merges."""
 
 [[steps]]
+id = "queue-scan"
+title = "Scan merge queue"
+needs = ["inbox-check"]
 description = """
-Pick next branch. Rebase on current main.
+Review the queue built from MERGE_READY messages in inbox-check.
+
+```bash
+# For each queued merge request, verify the branch exists:
+git fetch origin
+git branch -r | grep <branch>
+```
+
+If queue empty, skip to context-check step.
+
+If branch doesn't exist for a queued item:
+- Mail witness: Branch not found, cannot merge
+- Remove from queue
+
+Track verified branch list for this cycle."""
+
+[[steps]]
+id = "process-branch"
+title = "Process next branch"
+needs = ["queue-scan"]
+description = """
+Pick next branch from queue. Rebase on current main.
 
 ```bash
 git checkout -b temp origin/<polecat-branch>
@@ -46,13 +108,13 @@ git rebase origin/main
 
 If rebase conflicts and unresolvable:
 - git rebase --abort
-- Notify polecat to fix and resubmit
+- Notify polecat/witness to fix and resubmit
 - Skip to loop-check for next branch"""
-id = "process-branch"
-needs = ["queue-scan"]
-title = "Process next branch"
 
 [[steps]]
+id = "run-tests"
+title = "Run test suite"
+needs = ["process-branch"]
 description = """
 Run the test suite.
 
@@ -61,11 +123,11 @@ go test ./...
 ```
 
 Track results: pass count, fail count, specific failures."""
-id = "run-tests"
-needs = ["process-branch"]
-title = "Run test suite"
 
 [[steps]]
+id = "handle-failures"
+title = "Handle test failures"
+needs = ["run-tests"]
 description = """
 **VERIFICATION GATE**: This step enforces the Beads Promise.
 
@@ -75,23 +137,23 @@ If tests FAILED:
 1. Diagnose: Is this a branch regression or pre-existing on main?
 2. If branch caused it:
    - Abort merge
-   - Notify polecat: \"Tests failing. Please fix and resubmit.\"
+   - Notify polecat: "Tests failing. Please fix and resubmit."
    - Skip to loop-check
 3. If pre-existing on main:
    - Option A: Fix it yourself (you're the Engineer!)
-   - Option B: File a bead: bd create --type=bug --priority=1 --title=\"...\"
+   - Option B: File a bead: bd create --type=bug --priority=1 --title="..."
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
 - Tests passing, OR
 - Fix committed, OR
 - Bead filed for the failure
 
-This is non-negotiable. Never disavow. Never \"note and proceed.\""""
-id = "handle-failures"
-needs = ["run-tests"]
-title = "Handle test failures"
+This is non-negotiable. Never disavow. Never "note and proceed." """
 
 [[steps]]
+id = "merge-push"
+title = "Merge and push to main"
+needs = ["handle-failures"]
 description = """
 Merge to main and push immediately.
 
@@ -100,15 +162,25 @@ git checkout main
 git merge --ff-only temp
 git push origin main
 git branch -d temp
-git branch -D <polecat-branch>  # Local delete (branches never go to origin)
+git push origin --delete <polecat-branch>  # Delete remote polecat branch
 ```
 
+**CRITICAL**: After successful merge, send MERGED mail to Witness:
+
+```bash
+gt mail send <rig>/witness -s "MERGED <polecat-name>" -m "Branch: <branch>
+Issue: <issue-id>
+Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+This signals the Witness to complete cleanup (nuke polecat worktree).
+
 Main has moved. Any remaining branches need rebasing on new baseline."""
-id = "merge-push"
-needs = ["handle-failures"]
-title = "Merge and push to main"
 
 [[steps]]
+id = "loop-check"
+title = "Check for more work"
+needs = ["merge-push"]
 description = """
 More branches to process?
 
@@ -116,27 +188,28 @@ If yes: Return to process-branch with next branch.
 If no: Continue to generate-summary.
 
 Track: branches processed, branches skipped (with reasons)."""
-id = "loop-check"
-needs = ["merge-push"]
-title = "Check for more work"
 
 [[steps]]
+id = "generate-summary"
+title = "Generate handoff summary"
+needs = ["loop-check"]
 description = """
 Summarize this patrol cycle.
 
 Include:
 - Branches processed (count, names)
+- MERGED mails sent
 - Test results (pass/fail)
 - Issues filed (if any)
 - Branches skipped (with reasons)
 - Any escalations sent
 
 This becomes the digest when the patrol is squashed."""
-id = "generate-summary"
-needs = ["loop-check"]
-title = "Generate handoff summary"
 
 [[steps]]
+id = "context-check"
+title = "Check own context limit"
+needs = ["generate-summary"]
 description = """
 Check own context usage.
 
@@ -146,11 +219,11 @@ If context is HIGH (>80%):
 
 If context is LOW:
 - Can continue processing"""
-id = "context-check"
-needs = ["generate-summary"]
-title = "Check own context limit"
 
 [[steps]]
+id = "burn-or-loop"
+title = "Burn and respawn or loop"
+needs = ["context-check"]
 description = """
 End of patrol cycle decision.
 
@@ -161,6 +234,3 @@ If queue non-empty AND context LOW:
 If queue empty OR context HIGH:
 - Burn wisp with summary digest
 - Exit (daemon will respawn if needed)"""
-id = "burn-or-loop"
-needs = ["context-check"]
-title = "Burn and respawn or loop"
