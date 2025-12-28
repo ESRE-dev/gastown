@@ -37,7 +37,8 @@ func cycleCrewSession(direction int, sessionOverride string) error {
 	// Parse rig name from current session
 	rigName, _, ok := parseCrewSessionName(currentSession)
 	if !ok {
-		return fmt.Errorf("not in a crew session (expected gt-<rig>-crew-<name>)")
+		// Not a crew session (e.g., Mayor, Witness, Refinery) - no cycling, just stay put
+		return nil
 	}
 
 	// Find all crew sessions for this rig
