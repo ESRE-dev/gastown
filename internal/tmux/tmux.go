@@ -608,6 +608,9 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.SetMailClickBinding(session); err != nil {
 		return fmt.Errorf("setting mail click binding: %w", err)
 	}
+	if err := t.SetFeedBinding(session); err != nil {
+		return fmt.Errorf("setting feed binding: %w", err)
+	}
 	return nil
 }
 
@@ -669,6 +672,17 @@ func (t *Tmux) SetCrewCycleBindings(session string) error {
 		return err
 	}
 	return nil
+}
+
+// SetFeedBinding configures C-b f to jump to the activity feed window.
+// This creates the feed window if it doesn't exist, or switches to it if it does.
+// Uses `gt feed --window` which handles both creation and switching.
+func (t *Tmux) SetFeedBinding(session string) error {
+	// C-b f → gt feed --window (jump to feed window, creating if needed)
+	// The feed command detects the current session from tmux environment
+	_, err := t.run("bind-key", "-T", "prefix", "f",
+		"run-shell", "gt feed --window")
+	return err
 }
 
 // SetPaneDiedHook sets a pane-died hook on a session to detect crashes.
