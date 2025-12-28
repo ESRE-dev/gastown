@@ -549,3 +549,186 @@ func TestLoadAccountsConfigNotFound(t *testing.T) {
 		t.Fatal("expected error for nonexistent file")
 	}
 }
+
+func TestMessagingConfigRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config", "messaging.json")
+
+	original := NewMessagingConfig()
+	original.Lists["oncall"] = []string{"mayor/", "gastown/witness"}
+	original.Lists["cleanup"] = []string{"gastown/witness", "deacon/"}
+	original.Queues["work/gastown"] = QueueConfig{
+		Workers:   []string{"gastown/polecats/*"},
+		MaxClaims: 5,
+	}
+	original.Announces["alerts"] = AnnounceConfig{
+		Readers:     []string{"@town"},
+		RetainCount: 100,
+	}
+
+	if err := SaveMessagingConfig(path, original); err != nil {
+		t.Fatalf("SaveMessagingConfig: %v", err)
+	}
+
+	loaded, err := LoadMessagingConfig(path)
+	if err != nil {
+		t.Fatalf("LoadMessagingConfig: %v", err)
+	}
+
+	if loaded.Version != CurrentMessagingVersion {
+		t.Errorf("Version = %d, want %d", loaded.Version, CurrentMessagingVersion)
+	}
+
+	// Check lists
+	if len(loaded.Lists) != 2 {
+		t.Errorf("Lists count = %d, want 2", len(loaded.Lists))
+	}
+	if oncall, ok := loaded.Lists["oncall"]; !ok || len(oncall) != 2 {
+		t.Error("oncall list not preserved")
+	}
+
+	// Check queues
+	if len(loaded.Queues) != 1 {
+		t.Errorf("Queues count = %d, want 1", len(loaded.Queues))
+	}
+	if q, ok := loaded.Queues["work/gastown"]; !ok || q.MaxClaims != 5 {
+		t.Error("queue not preserved")
+	}
+
+	// Check announces
+	if len(loaded.Announces) != 1 {
+		t.Errorf("Announces count = %d, want 1", len(loaded.Announces))
+	}
+	if a, ok := loaded.Announces["alerts"]; !ok || a.RetainCount != 100 {
+		t.Error("announce not preserved")
+	}
+}
+
+func TestMessagingConfigValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *MessagingConfig
+		wantErr bool
+	}{
+		{
+			name:    "valid empty config",
+			config:  NewMessagingConfig(),
+			wantErr: false,
+		},
+		{
+			name: "valid config with lists",
+			config: &MessagingConfig{
+				Version: 1,
+				Lists: map[string][]string{
+					"oncall": {"mayor/", "gastown/witness"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "list with no recipients",
+			config: &MessagingConfig{
+				Version: 1,
+				Lists: map[string][]string{
+					"empty": {},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "queue with no workers",
+			config: &MessagingConfig{
+				Version: 1,
+				Queues: map[string]QueueConfig{
+					"work": {Workers: []string{}},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "queue with negative max_claims",
+			config: &MessagingConfig{
+				Version: 1,
+				Queues: map[string]QueueConfig{
+					"work": {Workers: []string{"worker/"}, MaxClaims: -1},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "announce with no readers",
+			config: &MessagingConfig{
+				Version: 1,
+				Announces: map[string]AnnounceConfig{
+					"alerts": {Readers: []string{}},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "announce with negative retain_count",
+			config: &MessagingConfig{
+				Version: 1,
+				Announces: map[string]AnnounceConfig{
+					"alerts": {Readers: []string{"@town"}, RetainCount: -1},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateMessagingConfig(tt.config)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateMessagingConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadMessagingConfigNotFound(t *testing.T) {
+	_, err := LoadMessagingConfig("/nonexistent/path.json")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestLoadOrCreateMessagingConfig(t *testing.T) {
+	// Test creating default when not found
+	config, err := LoadOrCreateMessagingConfig("/nonexistent/path.json")
+	if err != nil {
+		t.Fatalf("LoadOrCreateMessagingConfig: %v", err)
+	}
+	if config == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if config.Version != CurrentMessagingVersion {
+		t.Errorf("Version = %d, want %d", config.Version, CurrentMessagingVersion)
+	}
+
+	// Test loading existing
+	dir := t.TempDir()
+	path := filepath.Join(dir, "messaging.json")
+	original := NewMessagingConfig()
+	original.Lists["test"] = []string{"mayor/"}
+	if err := SaveMessagingConfig(path, original); err != nil {
+		t.Fatalf("SaveMessagingConfig: %v", err)
+	}
+
+	loaded, err := LoadOrCreateMessagingConfig(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateMessagingConfig: %v", err)
+	}
+	if _, ok := loaded.Lists["test"]; !ok {
+		t.Error("existing config not loaded")
+	}
+}
+
+func TestMessagingConfigPath(t *testing.T) {
+	path := MessagingConfigPath("/home/user/gt")
+	expected := "/home/user/gt/config/messaging.json"
+	if path != expected {
+		t.Errorf("MessagingConfigPath = %q, want %q", path, expected)
+	}
+}
