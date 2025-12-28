@@ -258,7 +258,8 @@ func DefaultAccountsConfigDir() string {
 // MessagingConfig represents the messaging configuration (config/messaging.json).
 // This defines mailing lists, work queues, and announcement channels.
 type MessagingConfig struct {
-	Version int `json:"version"` // schema version
+	Type    string `json:"type"`    // "messaging"
+	Version int    `json:"version"` // schema version
 
 	// Lists are static mailing lists. Messages are fanned out to all recipients.
 	// Each recipient gets their own copy of the message.
@@ -302,6 +303,7 @@ const CurrentMessagingVersion = 1
 // NewMessagingConfig creates a new MessagingConfig with defaults.
 func NewMessagingConfig() *MessagingConfig {
 	return &MessagingConfig{
+		Type:      "messaging",
 		Version:   CurrentMessagingVersion,
 		Lists:     make(map[string][]string),
 		Queues:    make(map[string]QueueConfig),

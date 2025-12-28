@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -575,6 +576,9 @@ func TestMessagingConfigRoundTrip(t *testing.T) {
 		t.Fatalf("LoadMessagingConfig: %v", err)
 	}
 
+	if loaded.Type != "messaging" {
+		t.Errorf("Type = %q, want 'messaging'", loaded.Type)
+	}
 	if loaded.Version != CurrentMessagingVersion {
 		t.Errorf("Version = %d, want %d", loaded.Version, CurrentMessagingVersion)
 	}
@@ -618,12 +622,29 @@ func TestMessagingConfigValidation(t *testing.T) {
 		{
 			name: "valid config with lists",
 			config: &MessagingConfig{
+				Type:    "messaging",
 				Version: 1,
 				Lists: map[string][]string{
 					"oncall": {"mayor/", "gastown/witness"},
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "wrong type",
+			config: &MessagingConfig{
+				Type:    "wrong",
+				Version: 1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "future version rejected",
+			config: &MessagingConfig{
+				Type:    "messaging",
+				Version: 999,
+			},
+			wantErr: true,
 		},
 		{
 			name: "list with no recipients",
@@ -691,6 +712,21 @@ func TestLoadMessagingConfigNotFound(t *testing.T) {
 	_, err := LoadMessagingConfig("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestLoadMessagingConfigMalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "messaging.json")
+
+	// Write malformed JSON
+	if err := os.WriteFile(path, []byte("{not valid json"), 0644); err != nil {
+		t.Fatalf("writing test file: %v", err)
+	}
+
+	_, err := LoadMessagingConfig(path)
+	if err == nil {
+		t.Fatal("expected error for malformed JSON")
 	}
 }
 

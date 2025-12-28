@@ -612,6 +612,9 @@ func SaveMessagingConfig(path string, config *MessagingConfig) error {
 
 // validateMessagingConfig validates a MessagingConfig.
 func validateMessagingConfig(c *MessagingConfig) error {
+	if c.Type != "messaging" && c.Type != "" {
+		return fmt.Errorf("%w: expected type 'messaging', got '%s'", ErrInvalidType, c.Type)
+	}
 	if c.Version > CurrentMessagingVersion {
 		return fmt.Errorf("%w: got %d, max supported %d", ErrInvalidVersion, c.Version, CurrentMessagingVersion)
 	}
@@ -637,20 +640,20 @@ func validateMessagingConfig(c *MessagingConfig) error {
 	// Validate queues have at least one worker
 	for name, queue := range c.Queues {
 		if len(queue.Workers) == 0 {
-			return fmt.Errorf("%w: queue '%s' has no workers", ErrMissingField, name)
+			return fmt.Errorf("%w: queue '%s' workers", ErrMissingField, name)
 		}
 		if queue.MaxClaims < 0 {
-			return fmt.Errorf("queue '%s': max_claims must be non-negative", name)
+			return fmt.Errorf("%w: queue '%s' max_claims must be non-negative", ErrMissingField, name)
 		}
 	}
 
 	// Validate announces have at least one reader
 	for name, announce := range c.Announces {
 		if len(announce.Readers) == 0 {
-			return fmt.Errorf("%w: announce '%s' has no readers", ErrMissingField, name)
+			return fmt.Errorf("%w: announce '%s' readers", ErrMissingField, name)
 		}
 		if announce.RetainCount < 0 {
-			return fmt.Errorf("announce '%s': retain_count must be non-negative", name)
+			return fmt.Errorf("%w: announce '%s' retain_count must be non-negative", ErrMissingField, name)
 		}
 	}
 
