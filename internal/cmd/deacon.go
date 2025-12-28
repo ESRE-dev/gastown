@@ -169,6 +169,11 @@ func startDeaconSession(t *tmux.Tmux) error {
 		return fmt.Errorf("creating deacon directory: %w", err)
 	}
 
+	// Ensure deacon has patrol hooks (idempotent)
+	if err := ensurePatrolHooks(deaconDir); err != nil {
+		fmt.Printf("%s Warning: Could not create deacon hooks: %v\n", style.Dim.Render("⚠"), err)
+	}
+
 	// Create session in deacon directory
 	fmt.Println("Starting Deacon session...")
 	if err := t.NewSession(DeaconSessionName, deaconDir); err != nil {
@@ -386,5 +391,62 @@ func runDeaconTriggerPending(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// ensurePatrolHooks creates .claude/settings.json with hooks for patrol roles.
+// This is idempotent - if hooks already exist, it does nothing.
+func ensurePatrolHooks(workspacePath string) error {
+	settingsPath := filepath.Join(workspacePath, ".claude", "settings.json")
+
+	// Check if already exists
+	if _, err := os.Stat(settingsPath); err == nil {
+		return nil // Already exists
+	}
+
+	claudeDir := filepath.Join(workspacePath, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		return fmt.Errorf("creating .claude dir: %w", err)
+	}
+
+	// Standard patrol hooks
+	hooksJSON := `{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gt prime && gt mail check --inject"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gt prime"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gt mail check --inject"
+          }
+        ]
+      }
+    ]
+  }
+}
+`
+	return os.WriteFile(settingsPath, []byte(hooksJSON), 0600)
 }
 
