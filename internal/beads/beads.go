@@ -286,7 +286,7 @@ func (b *Beads) Ready() ([]*Issue, error) {
 }
 
 // ReadyWithType returns ready issues filtered by type.
-// Uses bd ready --type flag for server-side filtering (gt-ktf3).
+// Uses bd ready --type flag for server-side filtering.
 func (b *Beads) ReadyWithType(issueType string) ([]*Issue, error) {
 	out, err := b.run("ready", "--json", "--type", issueType, "-n", "100")
 	if err != nil {

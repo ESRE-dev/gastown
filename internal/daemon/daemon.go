@@ -178,10 +178,10 @@ func (d *Daemon) heartbeat(state *State) {
 	// 2. Send heartbeat to Deacon (simple notification, no decision-making)
 	d.pokeDeacon()
 
-	// 3. Ensure Witnesses are running for all rigs (gt-qpoxz)
+	// 3. Ensure Witnesses are running for all rigs
 	d.ensureWitnessesRunning()
 
-	// 4. Send heartbeats to Witnesses (gt-qpoxz)
+	// 4. Send heartbeats to Witnesses
 	d.pokeWitnesses()
 
 	// 5. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
@@ -192,7 +192,7 @@ func (d *Daemon) heartbeat(state *State) {
 	// 6. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 7. Check for stale agents (timeout fallback - gt-2hzl4)
+	// 7. Check for stale agents (timeout fallback)
 	// Agents that report "running" but haven't updated in too long are marked dead
 	d.checkStaleAgents()
 
@@ -246,7 +246,7 @@ func (d *Daemon) nextMOTD() string {
 }
 
 // ensureDeaconRunning ensures the Deacon is running.
-// ZFC-compliant: trusts agent bead state, no tmux inference (gt-psuw7).
+// ZFC-compliant: trusts agent bead state, no tmux inference.
 // The Deacon is the system's heartbeat - it must always be running.
 func (d *Daemon) ensureDeaconRunning() {
 	// Check agent bead state (ZFC: trust what agent reports)
@@ -284,7 +284,7 @@ func (d *Daemon) ensureDeaconRunning() {
 }
 
 // pokeDeacon sends a heartbeat message to the Deacon session.
-// ZFC-compliant: trusts agent bead state, no tmux inference (gt-psuw7).
+// ZFC-compliant: trusts agent bead state, no tmux inference.
 // The Deacon molecule decides what to do with heartbeats.
 func (d *Daemon) pokeDeacon() {
 	// Check agent bead state (ZFC: trust what agent reports)

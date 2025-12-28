@@ -316,7 +316,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		Role:   string(roleCtx.Role),
 	}
 
-	// NEW: Try to find agent bead and read hook slot (gt-lisj6)
+	// Try to find agent bead and read hook slot
 	// This is the preferred method - agent beads have a hook_bead field
 	agentBeadID := buildAgentBeadID(target, roleCtx.Role)
 	var hookBead *beads.Issue
