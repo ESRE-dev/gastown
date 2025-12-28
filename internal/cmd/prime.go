@@ -1052,7 +1052,7 @@ func acquireIdentityLock(ctx RoleContext) error {
 	return nil
 }
 
-// reportAgentState calls bd agent state to report the agent's current state.
+// reportAgentState updates the agent bead to report the agent's current state.
 // This implements ZFC-compliant self-reporting of agent state.
 // Agents call this on startup (running) and shutdown (stopped).
 func reportAgentState(ctx RoleContext, state string) {
@@ -1061,15 +1061,14 @@ func reportAgentState(ctx RoleContext, state string) {
 		return
 	}
 
-	// Call bd agent state <id> <state>
-	// Use --no-daemon to avoid issues when daemon isn't running
-	cmd := exec.Command("bd", "--no-daemon", "agent", "state", agentBeadID, state)
-	cmd.Dir = ctx.WorkDir
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-
-	// Run silently - don't fail prime if state reporting fails
-	_ = cmd.Run()
+	// Use the beads API directly to update agent state
+	// This is more reliable than shelling out to bd
+	bd := beads.New(ctx.WorkDir)
+	if err := bd.UpdateAgentState(agentBeadID, state, nil); err != nil {
+		// Silently ignore errors - don't fail prime if state reporting fails
+		// This can fail if beads isn't set up or agent bead doesn't exist
+		return
+	}
 }
 
 // getAgentBeadID returns the agent bead ID for the current role.

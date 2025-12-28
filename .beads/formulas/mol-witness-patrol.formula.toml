@@ -133,61 +133,71 @@ id = "survey-workers"
 title = "Inspect all active polecats"
 needs = ["check-refinery"]
 description = """
-Survey all polecats and take action on stuck workers.
+Survey all polecats using agent beads (ZFC: trust what agents report).
+
+**Step 1: List polecat agent beads**
 
 ```bash
-gt polecat list <rig>
+bd list --type=agent --json
 ```
 
-**For each polecat, assess:**
+Filter the JSON output for entries where description contains `role_type: polecat`.
+Each polecat agent bead has fields in its description:
+- `role_type: polecat`
+- `rig: <rig-name>`
+- `agent_state: running|idle|stuck|done`
+- `hook_bead: <current-work-id>`
 
-1. **Capture tmux state**:
+**Step 2: For each polecat, check agent_state**
+
+| agent_state | Meaning | Action |
+|-------------|---------|--------|
+| running | Actively working | Check progress (Step 3) |
+| idle | No work assigned | Skip (no action needed) |
+| stuck | Self-reported stuck | Handle stuck protocol |
+| done | Work complete | Verify cleanup triggered |
+
+**Step 3: For running polecats, assess progress**
+
+Check the hook_bead field to see what they're working on:
 ```bash
-tmux capture-pane -t gt-<rig>-<name> -p | tail -50
+bd show <hook_bead>  # See current step/issue
 ```
 
-2. **Determine status** (ZFC - you make the judgment):
-   - **working**: Recent tool calls, active processing
-   - **idle**: At prompt, no recent activity
-   - **error**: Showing errors or stack traces
-   - **done**: Showing completion indicators (should have sent POLECAT_DONE)
-
-3. **Check beads progress**:
+You can also verify they're responsive:
 ```bash
-bd hook --agent <rig>/polecats/<name>   # What step are they on?
+tmux capture-pane -t gt-<rig>-<name> -p | tail -20
 ```
-   - Has their step changed since you last looked?
-   - How long on current step? (Check step timestamps)
 
-4. **Decide action** (fresh judgment each cycle, no counters):
+Look for:
+- Recent tool activity → making progress
+- Idle at prompt → may need nudge
+- Error messages → may need help
+
+**Step 4: Decide action**
 
 | Observation | Action |
 |-------------|--------|
-| Actively working | None |
-| Just started step (<5 min) | None |
-| Idle 5-15 min, same step | Gentle nudge |
-| Idle 15+ min, same step | Direct nudge with deadline |
-| Idle 30+ min despite nudges | Escalate to Mayor |
-| Showing errors | Assess severity, help or escalate |
-| Says "done" but no POLECAT_DONE | Nudge to send completion mail |
+| agent_state=running, recent activity | None |
+| agent_state=running, idle 5-15 min | Gentle nudge |
+| agent_state=running, idle 15+ min | Direct nudge with deadline |
+| agent_state=stuck | Assess and help or escalate |
+| agent_state=done, cleanup pending | Verify cleanup wisp exists |
 
-5. **Execute nudges**:
+**Step 5: Execute nudges**
 ```bash
-gt nudge <rig>/polecats/<name> "How's progress on <step>? Need help?"
+gt nudge <rig>/polecats/<name> "How's progress? Need help?"
 ```
 
-6. **Escalate stuck workers**:
+**Step 6: Escalate if needed**
 ```bash
-gt mail send mayor/ -s "Escalation: <polecat> stuck" \
-  -m "Polecat <name> has been idle on <step> for <duration>.
-      Nudges ineffective. Please intervene."
+gt mail send mayor/ -s "Escalation: <polecat> stuck" \\
+  -m "Polecat <name> reports stuck. Please intervene."
 ```
 
 **Parallelism**: Use Task tool subagents to inspect multiple polecats concurrently.
-Launch one subagent per polecat for capture/assess/decide/act cycle.
 
-**No persistent state**: Each cycle is a fresh observation.
-"Nudge count" is replaced by "how long stuck on same step" which is discoverable from beads timestamps."""
+**ZFC Principle**: Trust agent_state from beads. Don't infer state from PID/tmux."""
 
 [[steps]]
 id = "context-check"
