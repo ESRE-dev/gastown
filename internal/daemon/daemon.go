@@ -239,6 +239,20 @@ func (d *Daemon) nextMOTD() string {
 // If the session doesn't exist, it creates it and starts Claude.
 // The Deacon is the system's heartbeat - it must always be running.
 func (d *Daemon) ensureDeaconRunning() {
+	// Check agent bead state (ZFC: trust what agent reports)
+	// This is the preferred state source per gt-39ttg
+	beadState, beadErr := d.getAgentBeadState("gt-deacon")
+	if beadErr == nil {
+		// Agent bead exists - check its state
+		if beadState == "running" || beadState == "working" {
+			// Agent reports it's running - trust it
+			// (Future: gt-2hzl4 will add timeout fallback for stale state)
+			return
+		}
+		// Agent reports not running - fall through to tmux check
+	}
+	// If agent bead not found, fall through to legacy tmux detection
+
 	sessionExists, err := d.tmux.HasSession(DeaconSessionName)
 	if err != nil {
 		d.logger.Printf("Error checking Deacon session: %v", err)

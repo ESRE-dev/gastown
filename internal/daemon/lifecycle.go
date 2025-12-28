@@ -161,7 +161,15 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 		return fmt.Errorf("state verification failed: %w", err)
 	}
 
-	// Check if session exists
+	// Check agent bead state (ZFC: trust what agent reports) - gt-39ttg
+	agentBeadID := d.identityToAgentBeadID(request.From)
+	if agentBeadID != "" {
+		if beadState, err := d.getAgentBeadState(agentBeadID); err == nil {
+			d.logger.Printf("Agent bead %s reports state: %s", agentBeadID, beadState)
+		}
+	}
+
+	// Check if session exists (legacy tmux detection - to be removed per gt-psuw7)
 	running, err := d.tmux.HasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
@@ -457,6 +465,153 @@ func (d *Daemon) identityToStateFile(identity string) string {
 		// Unknown identity - can't determine state file
 		return ""
 	}
+}
+
+// AgentBeadInfo represents the parsed fields from an agent bead.
+type AgentBeadInfo struct {
+	ID         string `json:"id"`
+	Type       string `json:"issue_type"`
+	State      string // Parsed from description: agent_state
+	HookBead   string // Parsed from description: hook_bead
+	RoleBead   string // Parsed from description: role_bead
+	RoleType   string // Parsed from description: role_type
+	Rig        string // Parsed from description: rig
+	LastUpdate string `json:"updated_at"`
+}
+
+// getAgentBeadState reads agent state from an agent bead.
+// This is the ZFC-compliant way to get agent state: trust what agents report.
+// Returns the agent_state field value (idle|running|stuck|stopped) or empty string if not found.
+func (d *Daemon) getAgentBeadState(agentBeadID string) (string, error) {
+	info, err := d.getAgentBeadInfo(agentBeadID)
+	if err != nil {
+		return "", err
+	}
+	return info.State, nil
+}
+
+// getAgentBeadInfo fetches and parses an agent bead by ID.
+func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
+	cmd := exec.Command("bd", "show", agentBeadID, "--json")
+	cmd.Dir = d.config.TownRoot
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("bd show %s: %w", agentBeadID, err)
+	}
+
+	// bd show --json returns an array with one element
+	var beads []struct {
+		ID          string `json:"id"`
+		Type        string `json:"issue_type"`
+		Description string `json:"description"`
+		UpdatedAt   string `json:"updated_at"`
+	}
+
+	if err := json.Unmarshal(output, &beads); err != nil {
+		return nil, fmt.Errorf("parsing bd show output: %w", err)
+	}
+
+	if len(beads) == 0 {
+		return nil, fmt.Errorf("agent bead not found: %s", agentBeadID)
+	}
+
+	bead := beads[0]
+	if bead.Type != "agent" {
+		return nil, fmt.Errorf("bead %s is not an agent bead (type=%s)", agentBeadID, bead.Type)
+	}
+
+	// Parse agent fields from description (YAML-like format)
+	info := &AgentBeadInfo{
+		ID:         bead.ID,
+		Type:       bead.Type,
+		LastUpdate: bead.UpdatedAt,
+	}
+
+	for _, line := range strings.Split(bead.Description, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		colonIdx := strings.Index(line, ":")
+		if colonIdx == -1 {
+			continue
+		}
+		key := strings.TrimSpace(line[:colonIdx])
+		value := strings.TrimSpace(line[colonIdx+1:])
+		if value == "" || value == "null" {
+			continue
+		}
+
+		switch strings.ToLower(key) {
+		case "agent_state":
+			info.State = value
+		case "hook_bead":
+			info.HookBead = value
+		case "role_bead":
+			info.RoleBead = value
+		case "role_type":
+			info.RoleType = value
+		case "rig":
+			info.Rig = value
+		}
+	}
+
+	return info, nil
+}
+
+// identityToAgentBeadID maps a daemon identity to an agent bead ID.
+// Examples:
+//   - "deacon" → "gt-deacon"
+//   - "mayor" → "gt-mayor"
+//   - "gastown-witness" → "gt-witness-gastown"
+//   - "gastown-refinery" → "gt-refinery-gastown"
+func (d *Daemon) identityToAgentBeadID(identity string) string {
+	switch identity {
+	case "deacon":
+		return "gt-deacon"
+	case "mayor":
+		return "gt-mayor"
+	default:
+		// Pattern: <rig>-witness → gt-witness-<rig>
+		if strings.HasSuffix(identity, "-witness") {
+			rigName := strings.TrimSuffix(identity, "-witness")
+			return "gt-witness-" + rigName
+		}
+		// Pattern: <rig>-refinery → gt-refinery-<rig>
+		if strings.HasSuffix(identity, "-refinery") {
+			rigName := strings.TrimSuffix(identity, "-refinery")
+			return "gt-refinery-" + rigName
+		}
+		// Pattern: <rig>-crew-<name> → gt-crew-<rig>-<name>
+		if strings.Contains(identity, "-crew-") {
+			parts := strings.SplitN(identity, "-crew-", 2)
+			if len(parts) == 2 {
+				return "gt-crew-" + parts[0] + "-" + parts[1]
+			}
+		}
+		// Unknown format
+		return ""
+	}
+}
+
+// isAgentRunningByBead checks if an agent reports itself as running via its agent bead.
+// Returns (running, found) where found indicates if the agent bead exists.
+func (d *Daemon) isAgentRunningByBead(identity string) (bool, bool) {
+	agentBeadID := d.identityToAgentBeadID(identity)
+	if agentBeadID == "" {
+		return false, false
+	}
+
+	state, err := d.getAgentBeadState(agentBeadID)
+	if err != nil {
+		// Agent bead not found or not readable
+		return false, false
+	}
+
+	// Consider "running" or "working" as running states
+	running := state == "running" || state == "working"
+	return running, true
 }
 
 // identityToBDActor converts a daemon identity (with dashes) to BD_ACTOR format (with slashes).
