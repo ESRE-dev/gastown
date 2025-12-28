@@ -182,12 +182,25 @@ func init() {
 }
 
 // parseAddress parses "rig/polecat" format.
+// If no "/" is present, attempts to infer rig from current directory.
 func parseAddress(addr string) (rigName, polecatName string, err error) {
 	parts := strings.SplitN(addr, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("invalid address format: expected 'rig/polecat', got '%s'", addr)
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return parts[0], parts[1], nil
 	}
-	return parts[0], parts[1], nil
+
+	// No slash - try to infer rig from cwd
+	if !strings.Contains(addr, "/") && addr != "" {
+		townRoot, err := workspace.FindFromCwd()
+		if err == nil && townRoot != "" {
+			inferredRig, err := inferRigFromCwd(townRoot)
+			if err == nil && inferredRig != "" {
+				return inferredRig, addr, nil
+			}
+		}
+	}
+
+	return "", "", fmt.Errorf("invalid address format: expected 'rig/polecat', got '%s'", addr)
 }
 
 // getSessionManager creates a session manager for the given rig.
