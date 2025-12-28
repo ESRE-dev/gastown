@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
-	"github.com/steveyegge/gastown/internal/mrqueue"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -132,33 +130,28 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Build title
+	// Build MR bead title and description
 	title := fmt.Sprintf("Merge: %s", issueID)
-
-	// Note: Branch stays local. Refinery sees it via shared .git (worktree).
-	// Only main gets pushed to origin after merge.
-
-	// Submit to MR queue (wisp storage - ephemeral, not synced)
-	rigPath := filepath.Join(townRoot, rigName)
-	queue := mrqueue.New(rigPath)
-
-	mr := &mrqueue.MR{
-		Branch:      branch,
-		Target:      target,
-		SourceIssue: issueID,
-		Worker:      worker,
-		Rig:         rigName,
-		Title:       title,
-		Priority:    priority,
+	description := fmt.Sprintf("branch: %s\ntarget: %s\nsource_issue: %s\nrig: %s",
+		branch, target, issueID, rigName)
+	if worker != "" {
+		description += fmt.Sprintf("\nworker: %s", worker)
 	}
 
-	if err := queue.Submit(mr); err != nil {
-		return fmt.Errorf("submitting to merge queue: %w", err)
+	// Create MR bead (ephemeral wisp - will be cleaned up after merge)
+	mrIssue, err := bd.Create(beads.CreateOptions{
+		Title:       title,
+		Type:        "merge-request",
+		Priority:    priority,
+		Description: description,
+	})
+	if err != nil {
+		return fmt.Errorf("creating merge request bead: %w", err)
 	}
 
 	// Success output
 	fmt.Printf("%s Submitted to merge queue\n", style.Bold.Render("✓"))
-	fmt.Printf("  MR ID: %s\n", style.Bold.Render(mr.ID))
+	fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrIssue.ID))
 	fmt.Printf("  Source: %s\n", branch)
 	fmt.Printf("  Target: %s\n", target)
 	fmt.Printf("  Issue: %s\n", issueID)
