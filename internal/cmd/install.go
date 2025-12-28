@@ -174,6 +174,11 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with gm- prefix)\n")
 		}
+
+		// NOTE: Agent beads (gt-deacon, gt-mayor) are created by gt rig add,
+		// not here. This is because the daemon looks up beads by prefix routing,
+		// and no rig exists yet at install time. The first rig added will get
+		// these global agent beads in its beads database.
 	}
 
 	// Initialize git if requested (--git or --github implies --git)
@@ -245,4 +250,5 @@ func initTownBeads(townPath string) error {
 	}
 	return nil
 }
+
 

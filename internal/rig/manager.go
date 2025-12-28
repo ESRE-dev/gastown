@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/templates"
@@ -291,6 +292,14 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("initializing beads: %w", err)
 	}
 
+	// Create agent beads for this rig (witness, refinery) and
+	// global agents (deacon, mayor) if this is the first rig.
+	isFirstRig := len(m.config.Rigs) == 0
+	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix, isFirstRig); err != nil {
+		// Non-fatal: log warning but continue
+		fmt.Printf("  Warning: Could not create agent beads: %v\n", err)
+	}
+
 	// Seed patrol molecules for this rig
 	if err := m.seedPatrolMolecules(rigPath); err != nil {
 		// Non-fatal: log warning but continue
@@ -373,6 +382,83 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 			return writeErr
 		}
 	}
+	return nil
+}
+
+// initAgentBeads creates agent beads for this rig and optionally global agents.
+// - Always creates: <prefix>-witness-<rig>, <prefix>-refinery-<rig>
+// - First rig only: <prefix>-deacon, <prefix>-mayor
+//
+// Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
+func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig bool) error {
+	// Run bd commands from mayor/rig which has the beads database
+	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
+	bd := beads.New(mayorRigPath)
+
+	// Define agents to create
+	type agentDef struct {
+		id       string
+		roleType string
+		rig      string
+		desc     string
+	}
+
+	var agents []agentDef
+
+	// Always create rig-specific agents
+	agents = append(agents,
+		agentDef{
+			id:       fmt.Sprintf("%s-witness-%s", prefix, rigName),
+			roleType: "witness",
+			rig:      rigName,
+			desc:     fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
+		},
+		agentDef{
+			id:       fmt.Sprintf("%s-refinery-%s", prefix, rigName),
+			roleType: "refinery",
+			rig:      rigName,
+			desc:     fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
+		},
+	)
+
+	// First rig also gets global agents (deacon, mayor)
+	if isFirstRig {
+		agents = append(agents,
+			agentDef{
+				id:       prefix + "-deacon",
+				roleType: "deacon",
+				rig:      "",
+				desc:     "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring.",
+			},
+			agentDef{
+				id:       prefix + "-mayor",
+				roleType: "mayor",
+				rig:      "",
+				desc:     "Mayor - global coordinator, handles cross-rig communication and escalations.",
+			},
+		)
+	}
+
+	for _, agent := range agents {
+		// Check if already exists
+		if _, err := bd.Show(agent.id); err == nil {
+			continue // Already exists
+		}
+
+		fields := &beads.AgentFields{
+			RoleType:   agent.roleType,
+			Rig:        agent.rig,
+			AgentState: "idle",
+			HookBead:   "",
+			RoleBead:   agent.id + "-role",
+		}
+
+		if _, err := bd.CreateAgentBead(agent.id, agent.desc, fields); err != nil {
+			return fmt.Errorf("creating %s: %w", agent.id, err)
+		}
+		fmt.Printf("   ✓ Created agent bead: %s\n", agent.id)
+	}
+
 	return nil
 }
 
