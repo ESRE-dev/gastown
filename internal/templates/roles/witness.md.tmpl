@@ -139,7 +139,8 @@ gt mail inbox
 gt mol attach-from-mail <mail-id>
 
 # Step 4: Still nothing? Create patrol wisp
-bd mol wisp mol-witness-patrol --assignee={{ .RigName }}/witness
+bd mol wisp create mol-witness-patrol
+bd update <wisp-id> --status=pinned --assignee={{ .RigName }}/witness
 ```
 
 **Hook → Execute. No exceptions.**
