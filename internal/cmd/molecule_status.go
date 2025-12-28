@@ -14,67 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-// AgentBeadFields holds parsed fields from an agent bead's description.
-// Agent beads store their state as key: value lines in the description.
-type AgentBeadFields struct {
-	RoleType   string // role_type: mayor, deacon, witness, refinery, polecat
-	Rig        string // rig: gastown (or null)
-	AgentState string // agent_state: idle, working, done
-	HookBead   string // hook_bead: the bead ID on the hook (or null)
-	RoleBead   string // role_bead: the role definition bead
-}
-
-// ParseAgentBeadFields extracts agent bead fields from a bead's description.
-// Returns nil if no agent fields found.
-func ParseAgentBeadFields(description string) *AgentBeadFields {
-	if description == "" {
-		return nil
-	}
-
-	fields := &AgentBeadFields{}
-	hasFields := false
-
-	for _, line := range strings.Split(description, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		colonIdx := strings.Index(line, ":")
-		if colonIdx == -1 {
-			continue
-		}
-
-		key := strings.TrimSpace(line[:colonIdx])
-		value := strings.TrimSpace(line[colonIdx+1:])
-		if value == "" || value == "null" {
-			continue
-		}
-
-		switch strings.ToLower(key) {
-		case "role_type":
-			fields.RoleType = value
-			hasFields = true
-		case "rig":
-			fields.Rig = value
-			hasFields = true
-		case "agent_state":
-			fields.AgentState = value
-			hasFields = true
-		case "hook_bead":
-			fields.HookBead = value
-			hasFields = true
-		case "role_bead":
-			fields.RoleBead = value
-			hasFields = true
-		}
-	}
-
-	if !hasFields {
-		return nil
-	}
-	return fields
-}
+// Note: Agent field parsing is now in internal/beads/fields.go (AgentFields, ParseAgentFieldsFromDescription)
 
 // buildAgentBeadID constructs the agent bead ID from an agent identity.
 // Examples:
@@ -388,7 +328,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			status.AgentBeadID = agentBeadID
 
 			// Parse hook_bead from the agent bead's description
-			agentFields := ParseAgentBeadFields(agentBead.Description)
+			agentFields := beads.ParseAgentFieldsFromDescription(agentBead.Description)
 			if agentFields != nil && agentFields.HookBead != "" {
 				// Fetch the bead on the hook
 				hookBead, err = b.Show(agentFields.HookBead)

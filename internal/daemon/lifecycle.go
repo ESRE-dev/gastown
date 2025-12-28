@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -501,60 +502,41 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 	}
 
 	// bd show --json returns an array with one element
-	var beads []struct {
+	var issues []struct {
 		ID          string `json:"id"`
 		Type        string `json:"issue_type"`
 		Description string `json:"description"`
 		UpdatedAt   string `json:"updated_at"`
 	}
 
-	if err := json.Unmarshal(output, &beads); err != nil {
+	if err := json.Unmarshal(output, &issues); err != nil {
 		return nil, fmt.Errorf("parsing bd show output: %w", err)
 	}
 
-	if len(beads) == 0 {
+	if len(issues) == 0 {
 		return nil, fmt.Errorf("agent bead not found: %s", agentBeadID)
 	}
 
-	bead := beads[0]
-	if bead.Type != "agent" {
-		return nil, fmt.Errorf("bead %s is not an agent bead (type=%s)", agentBeadID, bead.Type)
+	issue := issues[0]
+	if issue.Type != "agent" {
+		return nil, fmt.Errorf("bead %s is not an agent bead (type=%s)", agentBeadID, issue.Type)
 	}
 
-	// Parse agent fields from description (YAML-like format)
+	// Use shared parsing from beads package
+	fields := beads.ParseAgentFieldsFromDescription(issue.Description)
+
 	info := &AgentBeadInfo{
-		ID:         bead.ID,
-		Type:       bead.Type,
-		LastUpdate: bead.UpdatedAt,
+		ID:         issue.ID,
+		Type:       issue.Type,
+		LastUpdate: issue.UpdatedAt,
 	}
 
-	for _, line := range strings.Split(bead.Description, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		colonIdx := strings.Index(line, ":")
-		if colonIdx == -1 {
-			continue
-		}
-		key := strings.TrimSpace(line[:colonIdx])
-		value := strings.TrimSpace(line[colonIdx+1:])
-		if value == "" || value == "null" {
-			continue
-		}
-
-		switch strings.ToLower(key) {
-		case "agent_state":
-			info.State = value
-		case "hook_bead":
-			info.HookBead = value
-		case "role_bead":
-			info.RoleBead = value
-		case "role_type":
-			info.RoleType = value
-		case "rig":
-			info.Rig = value
-		}
+	if fields != nil {
+		info.State = fields.AgentState
+		info.HookBead = fields.HookBead
+		info.RoleBead = fields.RoleBead
+		info.RoleType = fields.RoleType
+		info.Rig = fields.Rig
 	}
 
 	return info, nil
@@ -593,25 +575,6 @@ func (d *Daemon) identityToAgentBeadID(identity string) string {
 		// Unknown format
 		return ""
 	}
-}
-
-// isAgentRunningByBead checks if an agent reports itself as running via its agent bead.
-// Returns (running, found) where found indicates if the agent bead exists.
-func (d *Daemon) isAgentRunningByBead(identity string) (bool, bool) {
-	agentBeadID := d.identityToAgentBeadID(identity)
-	if agentBeadID == "" {
-		return false, false
-	}
-
-	state, err := d.getAgentBeadState(agentBeadID)
-	if err != nil {
-		// Agent bead not found or not readable
-		return false, false
-	}
-
-	// Consider "running" or "working" as running states
-	running := state == "running" || state == "working"
-	return running, true
 }
 
 // identityToBDActor converts a daemon identity (with dashes) to BD_ACTOR format (with slashes).
