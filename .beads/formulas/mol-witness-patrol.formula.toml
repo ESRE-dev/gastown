@@ -21,7 +21,7 @@ inbox-check ─► process-cleanups ─► check-refinery ─► survey-workers
                                                             │
          ┌──────────────────────────────────────────────────┘
          ▼
-  context-check ─► loop-or-exit
+  ping-deacon ─► context-check ─► loop-or-exit
 ```
 
 No dynamic arms. No fanout gates. No persistent nudge counters.
@@ -187,10 +187,8 @@ Each polecat agent bead has fields in its description:
 |-------------|---------|--------|
 | running | Actively working | Check progress (Step 3) |
 | idle | No work assigned | Skip (no action needed) |
-| stuck | Self-reported stuck (via gt done --exit ESCALATED) | Handle stuck protocol |
-| done | Work complete (via gt done) | Verify cleanup triggered (see Step 4a) |
-| dead | Marked dead by daemon (unresponsive) | Clean up and respawn |
-| spawning | Recently created, initializing | Wait for running state |
+| stuck | Self-reported stuck | Handle stuck protocol |
+| done | Work complete | Verify cleanup triggered (see Step 4a) |
 
 **Step 3: For running polecats, assess progress**
 
@@ -218,8 +216,6 @@ Look for:
 | agent_state=running, idle 15+ min | Direct nudge with deadline |
 | agent_state=stuck | Assess and help or escalate |
 | agent_state=done | Verify cleanup triggered (see Step 4a) |
-| agent_state=dead | Create cleanup wisp, mark for respawn if needed |
-| agent_state=spawning | Check if stuck in spawn; if >2 min, investigate |
 
 **Step 4a: Handle agent_state=done**
 
@@ -257,9 +253,46 @@ gt mail send mayor/ -s "Escalation: <polecat> stuck" \\
 **ZFC Principle**: Trust agent_state from beads. Don't infer state from PID/tmux."""
 
 [[steps]]
+id = "ping-deacon"
+title = "Ping Deacon for health check"
+needs = ["survey-workers"]
+description = """
+Send WITNESS_PING to Deacon for second-order monitoring.
+
+The Witness fleet collectively monitors Deacon health - this prevents the
+"who watches the watchers" problem. If Deacon dies, Witnesses detect it.
+
+**Step 1: Send ping**
+```bash
+gt mail send deacon/ -s "WITNESS_PING <rig>" -m "Rig: <rig>
+Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Patrol: <cycle-number>"
+```
+
+**Step 2: Check Deacon health**
+```bash
+# Check Deacon agent bead for last_activity
+bd list --type=agent --json | jq '.[] | select(.description | contains("deacon"))'
+```
+
+Look at the `last_activity` timestamp. If stale (>5 minutes since last update):
+- Deacon may be dead or stuck
+
+**Step 3: Escalate if needed**
+```bash
+# If Deacon appears down
+gt mail send mayor/ -s "ALERT: Deacon appears unresponsive" \
+  -m "No Deacon activity for >5 minutes.
+Last seen: <timestamp>
+Witness: <rig>/witness"
+```
+
+Note: Multiple Witnesses may send this alert. Mayor should handle deduplication."""
+
+[[steps]]
 id = "context-check"
 title = "Check own context limit"
-needs = ["survey-workers"]
+needs = ["ping-deacon"]
 description = """
 Check own context usage.
 
