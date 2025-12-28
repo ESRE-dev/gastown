@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -18,6 +20,7 @@ var (
 	feedType     string
 	feedRig      string
 	feedNoFollow bool
+	feedWindow   bool
 )
 
 func init() {
@@ -30,6 +33,7 @@ func init() {
 	feedCmd.Flags().StringVar(&feedMol, "mol", "", "Filter by molecule/issue ID prefix")
 	feedCmd.Flags().StringVar(&feedType, "type", "", "Filter by event type (create, update, delete, comment)")
 	feedCmd.Flags().StringVar(&feedRig, "rig", "", "Run from specific rig's beads directory")
+	feedCmd.Flags().BoolVarP(&feedWindow, "window", "w", false, "Open in dedicated tmux window (creates 'feed' window)")
 }
 
 var feedCmd = &cobra.Command{
@@ -43,6 +47,11 @@ providing visibility into workflow progress across Gas Town.
 
 By default, streams in follow mode. Use --no-follow to show events once.
 
+Tmux Integration:
+  Use --window to open the feed in a dedicated tmux window named 'feed'.
+  This creates a persistent window you can cycle to with C-b n/p.
+  If the window already exists, switches to it.
+
 Event symbols:
   +  created/bonded  - New issue or molecule created
   →  in_progress     - Work started on an issue
@@ -52,6 +61,8 @@ Event symbols:
 
 Examples:
   gt feed                       # Stream all events (default: --follow)
+  gt feed --window              # Open in dedicated tmux window
+  gt feed -w                    # Short form of --window
   gt feed --no-follow           # Show last 100 events and exit
   gt feed --since 1h            # Events from last hour
   gt feed --mol gt-xyz          # Filter by issue prefix
@@ -60,12 +71,6 @@ Examples:
 }
 
 func runFeed(cmd *cobra.Command, args []string) error {
-	// Find bd binary
-	bdPath, err := exec.LookPath("bd")
-	if err != nil {
-		return fmt.Errorf("bd not found in PATH: %w", err)
-	}
-
 	// Determine working directory
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -99,43 +104,156 @@ func runFeed(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Build bd activity command args
-	bdArgs := []string{"bd", "activity"}
+	// Build bd activity command (without argv[0] for buildFeedCommand)
+	bdArgs := buildFeedArgs()
 
-	// Default to follow mode unless --no-follow or other display flags set
+	// Handle --window mode: open in dedicated tmux window
+	if feedWindow {
+		return runFeedInWindow(workDir, bdArgs)
+	}
+
+	// Standard mode: exec bd activity directly
+	return runFeedDirect(workDir, bdArgs)
+}
+
+// buildFeedArgs builds the bd activity arguments based on flags.
+func buildFeedArgs() []string {
+	var args []string
+
+	// Default to follow mode unless --no-follow set
 	shouldFollow := !feedNoFollow
 	if feedFollow {
 		shouldFollow = true
 	}
 
 	if shouldFollow {
-		bdArgs = append(bdArgs, "--follow")
+		args = append(args, "--follow")
 	}
 
 	if feedLimit != 100 {
-		bdArgs = append(bdArgs, "--limit", fmt.Sprintf("%d", feedLimit))
+		args = append(args, "--limit", fmt.Sprintf("%d", feedLimit))
 	}
 
 	if feedSince != "" {
-		bdArgs = append(bdArgs, "--since", feedSince)
+		args = append(args, "--since", feedSince)
 	}
 
 	if feedMol != "" {
-		bdArgs = append(bdArgs, "--mol", feedMol)
+		args = append(args, "--mol", feedMol)
 	}
 
 	if feedType != "" {
-		bdArgs = append(bdArgs, "--type", feedType)
+		args = append(args, "--type", feedType)
 	}
 
-	// Use exec to replace the current process with bd
-	// This gives clean signal handling and terminal control
-	env := os.Environ()
+	return args
+}
+
+// runFeedDirect runs bd activity in the current terminal.
+func runFeedDirect(workDir string, bdArgs []string) error {
+	bdPath, err := exec.LookPath("bd")
+	if err != nil {
+		return fmt.Errorf("bd not found in PATH: %w", err)
+	}
+
+	// Prepend argv[0] for exec
+	fullArgs := append([]string{"bd", "activity"}, bdArgs...)
 
 	// Change to the target directory before exec
 	if err := os.Chdir(workDir); err != nil {
 		return fmt.Errorf("changing to directory %s: %w", workDir, err)
 	}
 
-	return syscall.Exec(bdPath, bdArgs, env)
+	return syscall.Exec(bdPath, fullArgs, os.Environ())
+}
+
+// runFeedInWindow opens the feed in a dedicated tmux window.
+func runFeedInWindow(workDir string, bdArgs []string) error {
+	// Check if we're in tmux
+	if !tmux.IsInsideTmux() {
+		return fmt.Errorf("--window requires running inside tmux")
+	}
+
+	// Get current session from TMUX env var
+	// Format: /tmp/tmux-501/default,12345,0 -> we need the session name
+	tmuxEnv := os.Getenv("TMUX")
+	if tmuxEnv == "" {
+		return fmt.Errorf("TMUX environment variable not set")
+	}
+
+	t := tmux.NewTmux()
+
+	// Get current session name
+	sessionName, err := getCurrentTmuxSession()
+	if err != nil {
+		return fmt.Errorf("getting current session: %w", err)
+	}
+
+	// Build the command to run in the window
+	// Always use follow mode in window (it's meant to be persistent)
+	feedCmd := fmt.Sprintf("cd %s && bd activity --follow", workDir)
+	if len(bdArgs) > 0 {
+		// Filter out --follow if present (we add it unconditionally)
+		var filteredArgs []string
+		for _, arg := range bdArgs {
+			if arg != "--follow" {
+				filteredArgs = append(filteredArgs, arg)
+			}
+		}
+		if len(filteredArgs) > 0 {
+			feedCmd = fmt.Sprintf("cd %s && bd activity --follow %s", workDir, strings.Join(filteredArgs, " "))
+		}
+	}
+
+	// Check if 'feed' window already exists
+	windowTarget := sessionName + ":feed"
+	exists, err := windowExists(t, sessionName, "feed")
+	if err != nil {
+		return fmt.Errorf("checking for feed window: %w", err)
+	}
+
+	if exists {
+		// Window exists - just switch to it
+		fmt.Printf("Switching to existing feed window...\n")
+		return selectWindow(t, windowTarget)
+	}
+
+	// Create new window named 'feed' with the bd activity command
+	fmt.Printf("Creating feed window in session %s...\n", sessionName)
+	if err := createWindow(t, sessionName, "feed", workDir, feedCmd); err != nil {
+		return fmt.Errorf("creating feed window: %w", err)
+	}
+
+	// Switch to the new window
+	return selectWindow(t, windowTarget)
+}
+
+// windowExists checks if a window with the given name exists in the session.
+// Note: getCurrentTmuxSession is defined in handoff.go
+func windowExists(t *tmux.Tmux, session, windowName string) (bool, error) {
+	cmd := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_name}")
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == windowName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// createWindow creates a new tmux window with the given name and command.
+func createWindow(t *tmux.Tmux, session, windowName, workDir, command string) error {
+	args := []string{"new-window", "-t", session, "-n", windowName, "-c", workDir, command}
+	cmd := exec.Command("tmux", args...)
+	return cmd.Run()
+}
+
+// selectWindow switches to the specified window.
+func selectWindow(t *tmux.Tmux, target string) error {
+	cmd := exec.Command("tmux", "select-window", "-t", target)
+	return cmd.Run()
 }
