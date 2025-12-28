@@ -881,3 +881,89 @@ func TestAttachmentFieldsRoundTrip(t *testing.T) {
 		t.Errorf("round-trip mismatch:\ngot  %+v\nwant %+v", parsed, original)
 	}
 }
+
+// TestResolveBeadsDir tests the redirect following logic.
+func TestResolveBeadsDir(t *testing.T) {
+	// Create temp directory structure
+	tmpDir, err := os.MkdirTemp("", "beads-redirect-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	t.Run("no redirect", func(t *testing.T) {
+		// Create a simple .beads directory without redirect
+		workDir := filepath.Join(tmpDir, "no-redirect")
+		beadsDir := filepath.Join(workDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		got := ResolveBeadsDir(workDir)
+		want := beadsDir
+		if got != want {
+			t.Errorf("ResolveBeadsDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("with redirect", func(t *testing.T) {
+		// Create structure like: crew/max/.beads/redirect -> ../../mayor/rig/.beads
+		workDir := filepath.Join(tmpDir, "crew", "max")
+		localBeadsDir := filepath.Join(workDir, ".beads")
+		targetBeadsDir := filepath.Join(tmpDir, "mayor", "rig", ".beads")
+
+		// Create both directories
+		if err := os.MkdirAll(localBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(targetBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create redirect file
+		redirectPath := filepath.Join(localBeadsDir, "redirect")
+		if err := os.WriteFile(redirectPath, []byte("../../mayor/rig/.beads\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := ResolveBeadsDir(workDir)
+		want := targetBeadsDir
+		if got != want {
+			t.Errorf("ResolveBeadsDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("no beads directory", func(t *testing.T) {
+		// Directory with no .beads at all
+		workDir := filepath.Join(tmpDir, "empty")
+		if err := os.MkdirAll(workDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		got := ResolveBeadsDir(workDir)
+		want := filepath.Join(workDir, ".beads")
+		if got != want {
+			t.Errorf("ResolveBeadsDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("empty redirect file", func(t *testing.T) {
+		// Redirect file exists but is empty - should fall back to local
+		workDir := filepath.Join(tmpDir, "empty-redirect")
+		beadsDir := filepath.Join(workDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		redirectPath := filepath.Join(beadsDir, "redirect")
+		if err := os.WriteFile(redirectPath, []byte("  \n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := ResolveBeadsDir(workDir)
+		want := beadsDir
+		if got != want {
+			t.Errorf("ResolveBeadsDir() = %q, want %q", got, want)
+		}
+	})
+}

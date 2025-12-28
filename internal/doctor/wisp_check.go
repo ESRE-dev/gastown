@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // WispGCCheck detects and cleans orphaned wisps that are older than a threshold.
@@ -87,8 +89,9 @@ func (c *WispGCCheck) Run(ctx *CheckContext) *CheckResult {
 
 // countAbandonedWisps counts wisps older than the threshold in a rig.
 func (c *WispGCCheck) countAbandonedWisps(rigPath string) int {
-	// Check the beads database for wisps
-	issuesPath := filepath.Join(rigPath, ".beads", "issues.jsonl")
+	// Check the beads database for wisps (follows redirect if present)
+	beadsDir := beads.ResolveBeadsDir(rigPath)
+	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
 	file, err := os.Open(issuesPath)
 	if err != nil {
 		return 0 // No issues file

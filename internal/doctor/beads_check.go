@@ -76,8 +76,9 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Also check rig-level beads if a rig is specified
+	// Follows redirect if present (rig root may redirect to mayor/rig/.beads)
 	if ctx.RigName != "" {
-		rigBeadsDir := filepath.Join(ctx.RigPath(), ".beads")
+		rigBeadsDir := beads.ResolveBeadsDir(ctx.RigPath())
 		if _, err := os.Stat(rigBeadsDir); err == nil {
 			rigDB := filepath.Join(rigBeadsDir, "issues.db")
 			rigJSONL := filepath.Join(rigBeadsDir, "issues.jsonl")
@@ -135,9 +136,9 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	// Also fix rig-level if specified
+	// Also fix rig-level if specified (follows redirect if present)
 	if ctx.RigName != "" {
-		rigBeadsDir := filepath.Join(ctx.RigPath(), ".beads")
+		rigBeadsDir := beads.ResolveBeadsDir(ctx.RigPath())
 		rigDB := filepath.Join(rigBeadsDir, "issues.db")
 		rigJSONL := filepath.Join(rigBeadsDir, "issues.jsonl")
 

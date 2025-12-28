@@ -46,28 +46,32 @@ func NewMoleculeCatalog() *MoleculeCatalog {
 //   - projectPath: Path to the project directory. Empty to skip project-level.
 //
 // Molecules are loaded from town, rig, and project levels (no builtin molecules).
+// Each level follows .beads/redirect if present (for shared beads support).
 func LoadCatalog(townRoot, rigPath, projectPath string) (*MoleculeCatalog, error) {
 	catalog := NewMoleculeCatalog()
 
-	// 1. Load town-level molecules
+	// 1. Load town-level molecules (follows redirect if present)
 	if townRoot != "" {
-		townMolsPath := filepath.Join(townRoot, ".beads", "molecules.jsonl")
+		townBeadsDir := ResolveBeadsDir(townRoot)
+		townMolsPath := filepath.Join(townBeadsDir, "molecules.jsonl")
 		if err := catalog.LoadFromFile(townMolsPath, "town"); err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("loading town molecules: %w", err)
 		}
 	}
 
-	// 2. Load rig-level molecules
+	// 2. Load rig-level molecules (follows redirect if present)
 	if rigPath != "" {
-		rigMolsPath := filepath.Join(rigPath, ".beads", "molecules.jsonl")
+		rigBeadsDir := ResolveBeadsDir(rigPath)
+		rigMolsPath := filepath.Join(rigBeadsDir, "molecules.jsonl")
 		if err := catalog.LoadFromFile(rigMolsPath, "rig"); err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("loading rig molecules: %w", err)
 		}
 	}
 
-	// 3. Load project-level molecules
+	// 3. Load project-level molecules (follows redirect if present)
 	if projectPath != "" {
-		projectMolsPath := filepath.Join(projectPath, ".beads", "molecules.jsonl")
+		projectBeadsDir := ResolveBeadsDir(projectPath)
+		projectMolsPath := filepath.Join(projectBeadsDir, "molecules.jsonl")
 		if err := catalog.LoadFromFile(projectMolsPath, "project"); err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("loading project molecules: %w", err)
 		}

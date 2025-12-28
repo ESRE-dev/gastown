@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 )
 
@@ -262,7 +263,10 @@ func (c *PatrolNotStuckCheck) Run(ctx *CheckContext) *CheckResult {
 	var stuckWisps []string
 	for _, rigName := range rigs {
 		// Check main beads database for wisps (issues with Wisp=true)
-		beadsPath := filepath.Join(ctx.TownRoot, rigName, ".beads", "issues.jsonl")
+		// Follows redirect if present (rig root may redirect to mayor/rig/.beads)
+		rigPath := filepath.Join(ctx.TownRoot, rigName)
+		beadsDir := beads.ResolveBeadsDir(rigPath)
+		beadsPath := filepath.Join(beadsDir, "issues.jsonl")
 		stuck := c.checkStuckWisps(beadsPath, rigName)
 		stuckWisps = append(stuckWisps, stuck...)
 	}

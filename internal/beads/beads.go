@@ -21,6 +21,45 @@ var (
 	ErrNotFound     = errors.New("issue not found")
 )
 
+// ResolveBeadsDir returns the actual beads directory, following any redirect.
+// If workDir/.beads/redirect exists, it reads the redirect path and resolves it
+// relative to workDir (not the .beads directory). Otherwise, returns workDir/.beads.
+//
+// This is essential for crew workers and polecats that use shared beads via redirect.
+// The redirect file contains a relative path like "../../mayor/rig/.beads".
+//
+// Example: if we're at crew/max/ and .beads/redirect contains "../../mayor/rig/.beads",
+// the redirect is resolved from crew/max/ (not crew/max/.beads/), giving us
+// mayor/rig/.beads at the rig root level.
+func ResolveBeadsDir(workDir string) string {
+	beadsDir := filepath.Join(workDir, ".beads")
+	redirectPath := filepath.Join(beadsDir, "redirect")
+
+	// Check for redirect file
+	data, err := os.ReadFile(redirectPath)
+	if err != nil {
+		// No redirect, use local .beads
+		return beadsDir
+	}
+
+	// Read and clean the redirect path
+	redirectTarget := strings.TrimSpace(string(data))
+	if redirectTarget == "" {
+		return beadsDir
+	}
+
+	// Resolve relative to workDir (the redirect is written from the perspective
+	// of being inside workDir, not inside workDir/.beads)
+	// e.g., redirect contains "../../mayor/rig/.beads"
+	// from crew/max/, this resolves to mayor/rig/.beads
+	resolved := filepath.Join(workDir, redirectTarget)
+
+	// Clean the path to resolve .. components
+	resolved = filepath.Clean(resolved)
+
+	return resolved
+}
+
 // Issue represents a beads issue.
 type Issue struct {
 	ID          string   `json:"id"`

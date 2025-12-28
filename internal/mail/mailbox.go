@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // Common errors
@@ -46,8 +48,9 @@ func NewMailboxBeads(identity, workDir string) *Mailbox {
 }
 
 // NewMailboxFromAddress creates a beads-backed mailbox from a GGT address.
+// Follows .beads/redirect for crew workers and polecats using shared beads.
 func NewMailboxFromAddress(address, workDir string) *Mailbox {
-	beadsDir := filepath.Join(workDir, ".beads")
+	beadsDir := beads.ResolveBeadsDir(workDir)
 	return &Mailbox{
 		identity: addressToIdentity(address),
 		workDir:  workDir,
