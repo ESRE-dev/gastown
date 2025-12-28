@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/templates"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -254,15 +255,10 @@ func (m *Manager) Get(name string) (*CrewWorker, error) {
 	return m.loadState(name)
 }
 
-// saveState persists crew worker state to disk.
+// saveState persists crew worker state to disk using atomic write.
 func (m *Manager) saveState(crew *CrewWorker) error {
-	data, err := json.MarshalIndent(crew, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling state: %w", err)
-	}
-
 	stateFile := m.stateFile(crew.Name)
-	if err := os.WriteFile(stateFile, data, 0644); err != nil {
+	if err := util.AtomicWriteJSON(stateFile, crew); err != nil {
 		return fmt.Errorf("writing state: %w", err)
 	}
 

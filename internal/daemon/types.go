@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Config holds daemon configuration.
@@ -82,7 +84,7 @@ func LoadState(townRoot string) (*State, error) {
 	return &state, nil
 }
 
-// SaveState saves daemon state to disk.
+// SaveState saves daemon state to disk using atomic write.
 func SaveState(townRoot string, state *State) error {
 	stateFile := StateFile(townRoot)
 
@@ -91,12 +93,7 @@ func SaveState(townRoot string, state *State) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(stateFile, data, 0644)
+	return util.AtomicWriteJSON(stateFile, state)
 }
 
 // LifecycleAction represents a lifecycle request action.

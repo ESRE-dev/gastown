@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -56,19 +57,14 @@ func (m *Manager) loadState() (*Witness, error) {
 	return &w, nil
 }
 
-// saveState persists witness state to disk.
+// saveState persists witness state to disk using atomic write.
 func (m *Manager) saveState(w *Witness) error {
 	dir := filepath.Dir(m.stateFile())
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	data, err := json.MarshalIndent(w, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(m.stateFile(), data, 0644)
+	return util.AtomicWriteJSON(m.stateFile(), w)
 }
 
 // Status returns the current witness status.

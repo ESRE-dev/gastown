@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -175,7 +177,7 @@ func (p *NamePool) Load() error {
 	return nil
 }
 
-// Save persists the pool state to disk.
+// Save persists the pool state to disk using atomic write.
 func (p *NamePool) Save() error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -185,12 +187,7 @@ func (p *NamePool) Save() error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(p, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(p.stateFile, data, 0644)
+	return util.AtomicWriteJSON(p.stateFile, p)
 }
 
 // Allocate returns a name from the pool.

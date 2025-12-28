@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -80,19 +81,14 @@ func (m *Manager) loadState() (*Refinery, error) {
 	return &ref, nil
 }
 
-// saveState persists refinery state to disk.
+// saveState persists refinery state to disk using atomic write.
 func (m *Manager) saveState(ref *Refinery) error {
 	dir := filepath.Dir(m.stateFile())
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	data, err := json.MarshalIndent(ref, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(m.stateFile(), data, 0644)
+	return util.AtomicWriteJSON(m.stateFile(), ref)
 }
 
 // Status returns the current refinery status.
