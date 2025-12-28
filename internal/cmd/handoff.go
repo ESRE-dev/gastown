@@ -236,6 +236,8 @@ func resolveRoleToSession(role string) (string, error) {
 //   - <rig>/crew/<name> -> gt-<rig>-crew-<name>
 //   - <rig>/witness -> gt-<rig>-witness
 //   - <rig>/refinery -> gt-<rig>-refinery
+//   - <rig>/polecats/<name> -> gt-<rig>-<name> (explicit polecat)
+//   - <rig>/<name> -> gt-<rig>-<name> (polecat shorthand, if name isn't a known role)
 func resolvePathToSession(path string) (string, error) {
 	parts := strings.Split(path, "/")
 
@@ -246,11 +248,21 @@ func resolvePathToSession(path string) (string, error) {
 		return fmt.Sprintf("gt-%s-crew-%s", rig, name), nil
 	}
 
-	// Handle <rig>/<role> format (witness, refinery)
+	// Handle <rig>/polecats/<name> format (explicit polecat path)
+	if len(parts) == 3 && parts[1] == "polecats" {
+		rig := parts[0]
+		name := strings.ToLower(parts[2]) // normalize polecat name
+		return fmt.Sprintf("gt-%s-%s", rig, name), nil
+	}
+
+	// Handle <rig>/<role-or-polecat> format
 	if len(parts) == 2 {
 		rig := parts[0]
-		role := strings.ToLower(parts[1])
-		switch role {
+		second := parts[1]
+		secondLower := strings.ToLower(second)
+
+		// Check for known roles first
+		switch secondLower {
 		case "witness":
 			return fmt.Sprintf("gt-%s-witness", rig), nil
 		case "refinery":
@@ -258,10 +270,16 @@ func resolvePathToSession(path string) (string, error) {
 		case "crew":
 			// Just "<rig>/crew" without a name - need more info
 			return "", fmt.Errorf("crew path requires name: %s/crew/<name>", rig)
+		case "polecats":
+			// Just "<rig>/polecats" without a name - need more info
+			return "", fmt.Errorf("polecats path requires name: %s/polecats/<name>", rig)
+		default:
+			// Not a known role - treat as polecat name (e.g., gastown/nux)
+			return fmt.Sprintf("gt-%s-%s", rig, secondLower), nil
 		}
 	}
 
-	return "", fmt.Errorf("cannot parse path '%s' - expected <rig>/crew/<name>, <rig>/witness, or <rig>/refinery", path)
+	return "", fmt.Errorf("cannot parse path '%s' - expected <rig>/<polecat>, <rig>/crew/<name>, <rig>/witness, or <rig>/refinery", path)
 }
 
 // buildRestartCommand creates the command to run when respawning a session's pane.
