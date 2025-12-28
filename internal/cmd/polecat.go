@@ -197,7 +197,28 @@ var (
 	polecatSyncFromMain bool
 	polecatStatusJSON   bool
 	polecatGitStateJSON bool
+	polecatGCDryRun     bool
 )
+
+var polecatGCCmd = &cobra.Command{
+	Use:   "gc <rig>",
+	Short: "Garbage collect stale polecat branches",
+	Long: `Garbage collect stale polecat branches in a rig.
+
+Polecats use unique timestamped branches (polecat/<name>-<timestamp>) to
+prevent drift issues. Over time, these branches accumulate as polecats
+are recreated.
+
+This command removes orphaned branches:
+  - Branches for polecats that no longer exist
+  - Old timestamped branches (keeps only the current one per polecat)
+
+Examples:
+  gt polecat gc gastown
+  gt polecat gc gastown --dry-run`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPolecatGC,
+}
 
 var polecatGitStateCmd = &cobra.Command{
 	Use:   "git-state <rig>/<polecat>",
@@ -238,6 +259,9 @@ func init() {
 	// Git-state flags
 	polecatGitStateCmd.Flags().BoolVar(&polecatGitStateJSON, "json", false, "Output as JSON")
 
+	// GC flags
+	polecatGCCmd.Flags().BoolVar(&polecatGCDryRun, "dry-run", false, "Show what would be deleted without deleting")
+
 	// Add subcommands
 	polecatCmd.AddCommand(polecatListCmd)
 	polecatCmd.AddCommand(polecatAddCmd)
@@ -249,6 +273,7 @@ func init() {
 	polecatCmd.AddCommand(polecatSyncCmd)
 	polecatCmd.AddCommand(polecatStatusCmd)
 	polecatCmd.AddCommand(polecatGitStateCmd)
+	polecatCmd.AddCommand(polecatGCCmd)
 
 	rootCmd.AddCommand(polecatCmd)
 }
@@ -996,6 +1021,72 @@ func getGitState(worktreePath string) (*GitState, error) {
 	}
 
 	return state, nil
+}
+
+func runPolecatGC(cmd *cobra.Command, args []string) error {
+	rigName := args[0]
+
+	mgr, r, err := getPolecatManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Garbage collecting stale polecat branches in %s...\n\n", r.Name)
+
+	if polecatGCDryRun {
+		// Dry run - list branches that would be deleted
+		repoGit := git.NewGit(r.Path)
+
+		// List all polecat branches
+		branches, err := repoGit.ListBranches("polecat/*")
+		if err != nil {
+			return fmt.Errorf("listing branches: %w", err)
+		}
+
+		if len(branches) == 0 {
+			fmt.Println("No polecat branches found.")
+			return nil
+		}
+
+		// Get current branches
+		polecats, err := mgr.List()
+		if err != nil {
+			return fmt.Errorf("listing polecats: %w", err)
+		}
+
+		currentBranches := make(map[string]bool)
+		for _, p := range polecats {
+			currentBranches[p.Branch] = true
+		}
+
+		// Show what would be deleted
+		toDelete := 0
+		for _, branch := range branches {
+			if !currentBranches[branch] {
+				fmt.Printf("  Would delete: %s\n", style.Dim.Render(branch))
+				toDelete++
+			} else {
+				fmt.Printf("  Keep (in use): %s\n", style.Success.Render(branch))
+			}
+		}
+
+		fmt.Printf("\nWould delete %d branch(es), keep %d\n", toDelete, len(branches)-toDelete)
+		return nil
+	}
+
+	// Actually clean up
+	deleted, err := mgr.CleanupStaleBranches()
+	if err != nil {
+		return fmt.Errorf("cleanup failed: %w", err)
+	}
+
+	if deleted == 0 {
+		fmt.Println("No stale branches to clean up.")
+	} else {
+		fmt.Printf("%s Deleted %d stale branch(es).\n", style.SuccessPrefix, deleted)
+	}
+
+	return nil
 }
 
 // splitLines splits a string into non-empty lines.

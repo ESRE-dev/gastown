@@ -116,13 +116,18 @@ func (m *Manager) exists(name string) bool {
 // Uses the shared bare repo (.repo.git) if available, otherwise mayor/rig.
 // This is much faster than a full clone and shares objects with all worktrees.
 // Polecat state is derived from beads assignee field, not state.json.
+//
+// Branch naming: Each polecat run gets a unique branch (polecat/<name>-<timestamp>).
+// This prevents drift issues from stale branches and ensures a clean starting state.
+// Old branches are ephemeral and never pushed to origin.
 func (m *Manager) Add(name string) (*Polecat, error) {
 	if m.exists(name) {
 		return nil, ErrPolecatExists
 	}
 
 	polecatPath := m.polecatDir(name)
-	branchName := fmt.Sprintf("polecat/%s", name)
+	// Unique branch per run - prevents drift from stale branches
+	branchName := fmt.Sprintf("polecat/%s-%d", name, time.Now().UnixMilli())
 
 	// Create polecats directory if needed
 	polecatsDir := filepath.Join(m.rig.Path, "polecats")
@@ -136,24 +141,10 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 		return nil, fmt.Errorf("finding repo base: %w", err)
 	}
 
-	// Check if branch already exists (e.g., from previous polecat that wasn't cleaned up)
-	branchExists, err := repoGit.BranchExists(branchName)
-	if err != nil {
-		return nil, fmt.Errorf("checking branch existence: %w", err)
-	}
-
-	// Create worktree - reuse existing branch if it exists
-	if branchExists {
-		// Branch exists, create worktree using existing branch
-		if err := repoGit.WorktreeAddExisting(polecatPath, branchName); err != nil {
-			return nil, fmt.Errorf("creating worktree with existing branch: %w", err)
-		}
-	} else {
-		// Create new branch with worktree
-		// git worktree add -b polecat/<name> <path>
-		if err := repoGit.WorktreeAdd(polecatPath, branchName); err != nil {
-			return nil, fmt.Errorf("creating worktree: %w", err)
-		}
+	// Always create fresh branch - unique name guarantees no collision
+	// git worktree add -b polecat/<name>-<timestamp> <path>
+	if err := repoGit.WorktreeAdd(polecatPath, branchName); err != nil {
+		return nil, fmt.Errorf("creating worktree: %w", err)
 	}
 
 	// Set up shared beads: polecat uses rig's .beads via redirect file.
@@ -270,13 +261,15 @@ func (m *Manager) ReleaseName(name string) {
 // This ensures the polecat starts with the latest code from the base branch.
 // The name is preserved (not released to pool) since we're recreating immediately.
 // force controls whether to bypass uncommitted changes check.
+//
+// Branch naming: Each recreation gets a unique branch (polecat/<name>-<timestamp>).
+// Old branches are left for garbage collection - they're never pushed to origin.
 func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 	if !m.exists(name) {
 		return nil, ErrPolecatNotFound
 	}
 
 	polecatPath := m.polecatDir(name)
-	branchName := fmt.Sprintf("polecat/%s", name)
 	polecatGit := git.NewGit(polecatPath)
 
 	// Get the repo base (bare repo or mayor/rig)
@@ -307,31 +300,12 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 	// Fetch latest from origin to ensure we have fresh commits (non-fatal: may be offline)
 	_ = repoGit.Fetch("origin")
 
-	// Delete the old branch so worktree starts fresh from current HEAD
-	// Non-fatal: branch may not exist (first recreate) or may fail to delete
-	_ = repoGit.DeleteBranch(branchName, true)
-
-	// Check if branch still exists (deletion may have failed or branch was protected)
-	branchExists, err := repoGit.BranchExists(branchName)
-	if err != nil {
-		return nil, fmt.Errorf("checking branch existence: %w", err)
-	}
-
-	// Create worktree - handle both cases like Add() does
-	if branchExists {
-		// Branch still exists after deletion attempt - force-reset to origin/main
-		// This ensures the polecat starts with fresh code, not stale commits
-		if err := repoGit.ResetBranch(branchName, "origin/main"); err != nil {
-			return nil, fmt.Errorf("resetting stale branch to origin/main: %w", err)
-		}
-		if err := repoGit.WorktreeAddExisting(polecatPath, branchName); err != nil {
-			return nil, fmt.Errorf("creating worktree with reset branch: %w", err)
-		}
-	} else {
-		// Branch was deleted, create fresh worktree with new branch from HEAD
-		if err := repoGit.WorktreeAdd(polecatPath, branchName); err != nil {
-			return nil, fmt.Errorf("creating fresh worktree: %w", err)
-		}
+	// Create fresh worktree with unique branch name
+	// Old branches are left behind - they're ephemeral (never pushed to origin)
+	// and will be cleaned up by garbage collection
+	branchName := fmt.Sprintf("polecat/%s-%d", name, time.Now().UnixMilli())
+	if err := repoGit.WorktreeAdd(polecatPath, branchName); err != nil {
+		return nil, fmt.Errorf("creating fresh worktree: %w", err)
 	}
 
 	// Set up shared beads
@@ -584,12 +558,19 @@ func (m *Manager) Reset(name string) error {
 // We don't interpret issue status (ZFC: Go is transport, not decision-maker).
 func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	polecatPath := m.polecatDir(name)
-	branchName := fmt.Sprintf("polecat/%s", name)
+
+	// Get actual branch from worktree (branches are now timestamped)
+	polecatGit := git.NewGit(polecatPath)
+	branchName, err := polecatGit.CurrentBranch()
+	if err != nil {
+		// Fall back to old format if we can't read the branch
+		branchName = fmt.Sprintf("polecat/%s", name)
+	}
 
 	// Query beads for assigned issue
 	assignee := m.assigneeID(name)
-	issue, err := m.beads.GetAssignedIssue(assignee)
-	if err != nil {
+	issue, beadsErr := m.beads.GetAssignedIssue(assignee)
+	if beadsErr != nil {
 		// If beads query fails, return basic polecat info
 		// This allows the system to work even if beads is not available
 		return &Polecat{
@@ -668,4 +649,55 @@ func (m *Manager) setupSharedBeads(polecatPath string) error {
 	}
 
 	return nil
+}
+
+// CleanupStaleBranches removes orphaned polecat branches that are no longer in use.
+// This includes:
+// - Branches for polecats that no longer exist
+// - Old timestamped branches (keeps only the most recent per polecat name)
+// Returns the number of branches deleted.
+func (m *Manager) CleanupStaleBranches() (int, error) {
+	repoGit, err := m.repoBase()
+	if err != nil {
+		return 0, fmt.Errorf("finding repo base: %w", err)
+	}
+
+	// List all polecat branches
+	branches, err := repoGit.ListBranches("polecat/*")
+	if err != nil {
+		return 0, fmt.Errorf("listing branches: %w", err)
+	}
+
+	if len(branches) == 0 {
+		return 0, nil
+	}
+
+	// Get list of existing polecats
+	polecats, err := m.List()
+	if err != nil {
+		return 0, fmt.Errorf("listing polecats: %w", err)
+	}
+
+	// Build set of current polecat branches (from actual polecat objects)
+	currentBranches := make(map[string]bool)
+	for _, p := range polecats {
+		currentBranches[p.Branch] = true
+	}
+
+	// Delete branches not in current set
+	deleted := 0
+	for _, branch := range branches {
+		if currentBranches[branch] {
+			continue // This branch is in use
+		}
+		// Delete orphaned branch
+		if err := repoGit.DeleteBranch(branch, true); err != nil {
+			// Log but continue - non-fatal
+			fmt.Printf("Warning: could not delete branch %s: %v\n", branch, err)
+			continue
+		}
+		deleted++
+	}
+
+	return deleted, nil
 }

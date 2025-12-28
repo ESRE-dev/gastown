@@ -401,6 +401,24 @@ func (g *Git) DeleteBranch(name string, force bool) error {
 	return err
 }
 
+// ListBranches returns all local branches matching a pattern.
+// Pattern uses git's pattern matching (e.g., "polecat/*" matches all polecat branches).
+// Returns branch names without the refs/heads/ prefix.
+func (g *Git) ListBranches(pattern string) ([]string, error) {
+	args := []string{"branch", "--list", "--format=%(refname:short)"}
+	if pattern != "" {
+		args = append(args, pattern)
+	}
+	out, err := g.run(args...)
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 // ResetBranch force-updates a branch to point to a ref.
 // This is useful for resetting stale polecat branches to main.
 func (g *Git) ResetBranch(name, ref string) error {
