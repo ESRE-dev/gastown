@@ -445,6 +445,9 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig boo
 			continue // Already exists
 		}
 
+		// RoleBead establishes the canonical bead ID for this agent's role definition.
+		// The bead may not exist yet - this declares the naming convention so tooling
+		// (like gt doctor) can check for missing role beads and scaffold them.
 		fields := &beads.AgentFields{
 			RoleType:   agent.roleType,
 			Rig:        agent.rig,

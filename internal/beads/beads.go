@@ -518,7 +518,7 @@ type AgentFields struct {
 	Rig        string // Rig name (empty for global agents like mayor/deacon)
 	AgentState string // spawning, working, done, stuck
 	HookBead   string // Currently pinned work bead ID
-	RoleBead   string // Role definition bead ID
+	RoleBead   string // Role definition bead ID (canonical location; may not exist yet)
 }
 
 // FormatAgentDescription creates a description string from agent fields.
