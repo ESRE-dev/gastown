@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var slingCmd = &cobra.Command{
@@ -231,8 +232,17 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	// Pin the bead using bd update (discovery-based approach)
+	// For town-level roles (mayor, deacon), run from Town root so the pin
+	// lands in Town beads where these roles naturally operate.
 	pinCmd := exec.Command("bd", "update", beadID, "--status=pinned", "--assignee="+targetAgent)
 	pinCmd.Stderr = os.Stderr
+	if isTownLevelRole(targetAgent) {
+		townRoot, err := workspace.FindFromCwd()
+		if err != nil {
+			return fmt.Errorf("finding town root for town-level role: %w", err)
+		}
+		pinCmd.Dir = townRoot
+	}
 	if err := pinCmd.Run(); err != nil {
 		return fmt.Errorf("pinning bead: %w", err)
 	}
@@ -593,8 +603,17 @@ func runSlingFormula(args []string) error {
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispResult.RootID)
 
 	// Step 3: Pin the wisp bead using bd update (discovery-based approach)
+	// For town-level roles (mayor, deacon), run from Town root so the pin
+	// lands in Town beads where these roles naturally operate.
 	pinCmd := exec.Command("bd", "update", wispResult.RootID, "--status=pinned", "--assignee="+targetAgent)
 	pinCmd.Stderr = os.Stderr
+	if isTownLevelRole(targetAgent) {
+		townRoot, err := workspace.FindFromCwd()
+		if err != nil {
+			return fmt.Errorf("finding town root for town-level role: %w", err)
+		}
+		pinCmd.Dir = townRoot
+	}
 	if err := pinCmd.Run(); err != nil {
 		return fmt.Errorf("pinning wisp bead: %w", err)
 	}
@@ -631,4 +650,12 @@ func runSlingFormula(args []string) error {
 	}
 
 	return nil
+}
+
+// isTownLevelRole returns true if the agent ID is a town-level role.
+// Town-level roles (Mayor, Deacon) operate from the town root and their
+// pinned beads should live in Town beads (~/.beads/), not rig beads.
+// This ensures gt mol status finds pinned work when run from ~/gt.
+func isTownLevelRole(agentID string) bool {
+	return agentID == "mayor" || agentID == "deacon"
 }
