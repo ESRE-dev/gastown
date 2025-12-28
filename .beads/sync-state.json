@@ -1,7 +1,0 @@
-{
-  "last_failure": "2025-12-28T11:59:32.678338-08:00",
-  "failure_count": 1,
-  "backoff_until": "2025-12-28T12:00:02.678339-08:00",
-  "needs_manual_sync": false,
-  "failure_reason": "git pull failed in worktree: exit status 1\nConnection closed by 140.82.116.3 port 22\r\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n"
-}
