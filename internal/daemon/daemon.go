@@ -238,54 +238,21 @@ func (d *Daemon) nextMOTD() string {
 	return deaconMOTDMessages[nextIdx]
 }
 
-// ensureDeaconRunning checks if the Deacon session exists and Claude is running.
-// If the session exists but Claude has exited, it restarts Claude.
-// If the session doesn't exist, it creates it and starts Claude.
+// ensureDeaconRunning ensures the Deacon is running.
+// ZFC-compliant: trusts agent bead state, no tmux inference (gt-psuw7).
 // The Deacon is the system's heartbeat - it must always be running.
 func (d *Daemon) ensureDeaconRunning() {
 	// Check agent bead state (ZFC: trust what agent reports)
-	// This is the preferred state source per gt-39ttg
 	beadState, beadErr := d.getAgentBeadState("gt-deacon")
 	if beadErr == nil {
-		// Agent bead exists - check its state
 		if beadState == "running" || beadState == "working" {
 			// Agent reports it's running - trust it
-			// (Future: gt-2hzl4 will add timeout fallback for stale state)
+			// Note: gt-2hzl4 will add timeout fallback for stale state
 			return
 		}
-		// Agent reports not running - fall through to tmux check
 	}
-	// If agent bead not found, fall through to legacy tmux detection
-
-	sessionExists, err := d.tmux.HasSession(DeaconSessionName)
-	if err != nil {
-		d.logger.Printf("Error checking Deacon session: %v", err)
-		return
-	}
-
-	if sessionExists {
-		// Session exists - check if Claude is actually running
-		cmd, err := d.tmux.GetPaneCommand(DeaconSessionName)
-		if err != nil {
-			d.logger.Printf("Error checking Deacon pane command: %v", err)
-			return
-		}
-
-		// If Claude is running (node process), we're good
-		if cmd == "node" {
-			return
-		}
-
-		// Claude has exited (shell is showing) - restart it
-		d.logger.Printf("Deacon session exists but Claude exited (cmd=%s), restarting...", cmd)
-		if err := d.tmux.SendKeys(DeaconSessionName, "export GT_ROLE=deacon BD_ACTOR=deacon && claude --dangerously-skip-permissions"); err != nil {
-			d.logger.Printf("Error restarting Claude in Deacon session: %v", err)
-		}
-		return
-	}
-
-	// Session doesn't exist - create it and start Claude
-	d.logger.Println("Deacon session not running, starting...")
+	// Agent not running (or bead not found) - start it
+	d.logger.Println("Deacon not running per agent bead, starting...")
 
 	// Create session in deacon directory (ensures correct CLAUDE.md is loaded)
 	deaconDir := filepath.Join(d.config.TownRoot, "deacon")
@@ -310,21 +277,17 @@ func (d *Daemon) ensureDeaconRunning() {
 }
 
 // pokeDeacon sends a heartbeat message to the Deacon session.
-// Simple notification - no staleness checking or backoff logic.
+// ZFC-compliant: trusts agent bead state, no tmux inference (gt-psuw7).
 // The Deacon molecule decides what to do with heartbeats.
 func (d *Daemon) pokeDeacon() {
-	running, err := d.tmux.HasSession(DeaconSessionName)
-	if err != nil {
-		d.logger.Printf("Error checking Deacon session: %v", err)
+	// Check agent bead state (ZFC: trust what agent reports)
+	beadState, beadErr := d.getAgentBeadState("gt-deacon")
+	if beadErr != nil || (beadState != "running" && beadState != "working") {
+		// Agent not running per bead - don't poke (ensureDeaconRunning should start it)
 		return
 	}
 
-	if !running {
-		d.logger.Println("Deacon session not running after ensure, skipping poke")
-		return
-	}
-
-	// Send heartbeat message with rotating MOTD
+	// Agent reports running - send heartbeat
 	motd := d.nextMOTD()
 	msg := fmt.Sprintf("HEARTBEAT: %s", motd)
 	if err := d.tmux.SendKeysReplace(DeaconSessionName, msg, 50); err != nil {

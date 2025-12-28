@@ -72,22 +72,15 @@ func (m *Manager) saveState(w *Witness) error {
 }
 
 // Status returns the current witness status.
+// ZFC-compliant: trusts agent-reported state, no PID inference.
+// The daemon reads agent bead state for liveness checks.
 func (m *Manager) Status() (*Witness, error) {
 	w, err := m.loadState()
 	if err != nil {
 		return nil, err
 	}
 
-	// If running, verify process is still alive
-	if w.State == StateRunning && w.PID > 0 {
-		if !processExists(w.PID) {
-			w.State = StateStopped
-			w.PID = 0
-			_ = m.saveState(w) // non-fatal: state file update
-		}
-	}
-
-	// Update monitored polecats list
+	// Update monitored polecats list (still useful for display)
 	w.MonitoredPolecats = m.rig.Polecats
 
 	return w, nil
