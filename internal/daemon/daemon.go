@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -17,8 +18,8 @@ import (
 )
 
 // Daemon is the town-level background service.
-// Its only job is to ensure Deacon is running and send periodic heartbeats.
-// All health checking, nudging, and decision-making belongs in the Deacon molecule.
+// It ensures patrol agents (Deacon, Witnesses) are running and sends periodic heartbeats.
+// All health checking, nudging, and decision-making belongs in the patrol molecules.
 type Daemon struct {
 	config        *Config
 	tmux          *tmux.Tmux
@@ -166,8 +167,8 @@ func (d *Daemon) calculateHeartbeatInterval() time.Duration {
 }
 
 // heartbeat performs one heartbeat cycle.
-// The daemon's job is minimal: ensure Deacon is running and send heartbeats.
-// All health checking and decision-making belongs in the Deacon molecule.
+// The daemon ensures patrol agents are running and sends heartbeats.
+// All health checking and decision-making belongs in the patrol molecules.
 func (d *Daemon) heartbeat(state *State) {
 	d.logger.Println("Heartbeat starting")
 
@@ -177,15 +178,21 @@ func (d *Daemon) heartbeat(state *State) {
 	// 2. Send heartbeat to Deacon (simple notification, no decision-making)
 	d.pokeDeacon()
 
-	// 3. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
+	// 3. Ensure Witnesses are running for all rigs (gt-qpoxz)
+	d.ensureWitnessesRunning()
+
+	// 4. Send heartbeats to Witnesses (gt-qpoxz)
+	d.pokeWitnesses()
+
+	// 5. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
 	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
 	// Uses regex-based WaitForClaudeReady, which is acceptable for daemon bootstrap.
 	d.triggerPendingSpawns()
 
-	// 4. Process lifecycle requests
+	// 6. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 5. Check for stale agents (timeout fallback - gt-2hzl4)
+	// 7. Check for stale agents (timeout fallback - gt-2hzl4)
 	// Agents that report "running" but haven't updated in too long are marked dead
 	d.checkStaleAgents()
 
@@ -298,9 +305,121 @@ func (d *Daemon) pokeDeacon() {
 	d.logger.Println("Poked Deacon")
 }
 
-// NOTE: pokeMayor, pokeWitnesses, and pokeWitness have been removed.
-// The Deacon molecule is responsible for monitoring Mayor and Witnesses.
-// The daemon only ensures Deacon is running and sends it heartbeats.
+// witnessMOTDMessages contains rotating tips for witness heartbeats.
+var witnessMOTDMessages = []string{
+	"Time to patrol! Check your polecats.",
+	"Tip: Survey polecat health via agent beads.",
+	"Tip: Verify git state before killing polecats.",
+	"Your vigilance keeps polecats honest.",
+	"Tip: Escalate stuck workers to Mayor.",
+	"Tip: Send MERGE_READY when work is done.",
+}
+
+// ensureWitnessesRunning ensures witnesses are running for all rigs.
+// Called on each heartbeat to maintain witness patrol loops.
+func (d *Daemon) ensureWitnessesRunning() {
+	rigs := d.getKnownRigs()
+	for _, rigName := range rigs {
+		d.ensureWitnessRunning(rigName)
+	}
+}
+
+// ensureWitnessRunning ensures the witness for a specific rig is running.
+func (d *Daemon) ensureWitnessRunning(rigName string) {
+	agentID := "gt-witness-" + rigName
+	sessionName := "gt-" + rigName + "-witness"
+
+	// Check agent bead state (ZFC: trust what agent reports)
+	beadState, beadErr := d.getAgentBeadState(agentID)
+	if beadErr == nil {
+		if beadState == "running" || beadState == "working" {
+			// Agent reports it's running - trust it
+			return
+		}
+	}
+
+	// Agent not running (or bead not found) - start it
+	d.logger.Printf("Witness for %s not running per agent bead, starting...", rigName)
+
+	// Create session in witness directory
+	witnessDir := filepath.Join(d.config.TownRoot, rigName, "witness")
+	if err := d.tmux.NewSession(sessionName, witnessDir); err != nil {
+		d.logger.Printf("Error creating witness session for %s: %v", rigName, err)
+		return
+	}
+
+	// Set environment
+	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", "witness")
+	_ = d.tmux.SetEnvironment(sessionName, "GT_RIG", rigName)
+	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", rigName+"-witness")
+
+	// Launch Claude
+	envExport := fmt.Sprintf("export GT_ROLE=witness GT_RIG=%s BD_ACTOR=%s-witness && claude --dangerously-skip-permissions", rigName, rigName)
+	if err := d.tmux.SendKeys(sessionName, envExport); err != nil {
+		d.logger.Printf("Error launching Claude in witness session for %s: %v", rigName, err)
+		return
+	}
+
+	d.logger.Printf("Witness session for %s started successfully", rigName)
+}
+
+// pokeWitnesses sends heartbeat messages to all witnesses.
+func (d *Daemon) pokeWitnesses() {
+	rigs := d.getKnownRigs()
+	for _, rigName := range rigs {
+		d.pokeWitness(rigName)
+	}
+}
+
+// pokeWitness sends a heartbeat to a specific rig's witness.
+func (d *Daemon) pokeWitness(rigName string) {
+	agentID := "gt-witness-" + rigName
+	sessionName := "gt-" + rigName + "-witness"
+
+	// Check agent bead state (ZFC: trust what agent reports)
+	beadState, beadErr := d.getAgentBeadState(agentID)
+	if beadErr != nil || (beadState != "running" && beadState != "working") {
+		// Agent not running per bead - don't poke
+		return
+	}
+
+	// Agent reports running - send heartbeat
+	idx := int(time.Now().UnixNano() % int64(len(witnessMOTDMessages)))
+	motd := witnessMOTDMessages[idx]
+	msg := fmt.Sprintf("HEARTBEAT: %s", motd)
+
+	if err := d.tmux.SendKeysReplace(sessionName, msg, 50); err != nil {
+		d.logger.Printf("Error poking witness for %s: %v", rigName, err)
+		return
+	}
+
+	d.logger.Printf("Poked witness for %s", rigName)
+}
+
+// getKnownRigs returns list of registered rig names.
+func (d *Daemon) getKnownRigs() []string {
+	rigsPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
+	data, err := os.ReadFile(rigsPath)
+	if err != nil {
+		return nil
+	}
+
+	// Simple extraction - look for rig names in the JSON
+	// Full parsing would require importing config package
+	var rigs []string
+	// Parse just enough to get rig names
+	type rigsJSON struct {
+		Rigs map[string]interface{} `json:"rigs"`
+	}
+	var parsed rigsJSON
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil
+	}
+	for name := range parsed.Rigs {
+		rigs = append(rigs, name)
+	}
+	return rigs
+}
 
 // triggerPendingSpawns polls pending polecat spawns and triggers those that are ready.
 // This is bootstrap mode - uses regex-based WaitForClaudeReady which is acceptable
