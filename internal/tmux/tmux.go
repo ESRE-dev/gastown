@@ -653,39 +653,42 @@ func (t *Tmux) SwitchClient(targetSession string) error {
 	return err
 }
 
-// SetCrewCycleBindings sets up C-b n/p to cycle through crew sessions in the same rig.
-// This allows quick switching between crew members without using the session picker.
+// SetCrewCycleBindings sets up C-b n/p to cycle through sessions.
+// This is now an alias for SetCycleBindings - the unified command detects
+// session type automatically.
 //
 // IMPORTANT: We pass #{session_name} to the command because run-shell doesn't
 // reliably preserve the session context. tmux expands #{session_name} at binding
 // resolution time (when the key is pressed), giving us the correct session.
 func (t *Tmux) SetCrewCycleBindings(session string) error {
-	// C-b n → gt crew next (switch to next crew session)
-	// #{session_name} is expanded by tmux when the key is pressed
-	if _, err := t.run("bind-key", "-T", "prefix", "n",
-		"run-shell", "gt crew next --session '#{session_name}'"); err != nil {
-		return err
-	}
-	// C-b p → gt crew prev (switch to previous crew session)
-	if _, err := t.run("bind-key", "-T", "prefix", "p",
-		"run-shell", "gt crew prev --session '#{session_name}'"); err != nil {
-		return err
-	}
-	return nil
+	return t.SetCycleBindings(session)
 }
 
-// SetTownCycleBindings sets up C-b n/p to cycle through town-level sessions.
-// Town-level sessions are Mayor and Deacon - the global coordinators.
-// This allows quick switching between them without using the session picker.
+// SetTownCycleBindings sets up C-b n/p to cycle through sessions.
+// This is now an alias for SetCycleBindings - the unified command detects
+// session type automatically.
 func (t *Tmux) SetTownCycleBindings(session string) error {
-	// C-b n → gt town next (switch to next town session)
+	return t.SetCycleBindings(session)
+}
+
+// SetCycleBindings sets up C-b n/p to cycle through related sessions.
+// The gt cycle command automatically detects the session type and cycles
+// within the appropriate group:
+// - Town sessions: Mayor ↔ Deacon
+// - Crew sessions: All crew members in the same rig
+//
+// IMPORTANT: We pass #{session_name} to the command because run-shell doesn't
+// reliably preserve the session context. tmux expands #{session_name} at binding
+// resolution time (when the key is pressed), giving us the correct session.
+func (t *Tmux) SetCycleBindings(session string) error {
+	// C-b n → gt cycle next (auto-detects session type)
 	if _, err := t.run("bind-key", "-T", "prefix", "n",
-		"run-shell", "gt town next --session '#{session_name}'"); err != nil {
+		"run-shell", "gt cycle next --session '#{session_name}'"); err != nil {
 		return err
 	}
-	// C-b p → gt town prev (switch to previous town session)
+	// C-b p → gt cycle prev (auto-detects session type)
 	if _, err := t.run("bind-key", "-T", "prefix", "p",
-		"run-shell", "gt town prev --session '#{session_name}'"); err != nil {
+		"run-shell", "gt cycle prev --session '#{session_name}'"); err != nil {
 		return err
 	}
 	return nil
