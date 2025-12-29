@@ -101,6 +101,10 @@ const (
 	RoleDeacon = "deacon"
 )
 
+// SupportedShells lists shell binaries that Gas Town can detect and work with.
+// Used to identify if a tmux pane is at a shell prompt vs running a command.
+var SupportedShells = []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+
 // Path helpers construct common paths.
 
 // MayorRigsPath returns the path to rigs.json within a town root.

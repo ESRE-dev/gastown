@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // Common errors
@@ -433,7 +435,7 @@ func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout 
 // WaitForShellReady polls until the pane is running a shell command.
 // Useful for waiting until a process has exited and returned to shell.
 func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
-	shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+	shells := constants.SupportedShells
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		cmd, err := t.GetPaneCommand(session)

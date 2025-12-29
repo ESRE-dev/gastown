@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -137,7 +138,7 @@ func detectCrewFromCwd() (*crewDetection, error) {
 
 // isShellCommand checks if the command is a shell (meaning Claude has exited).
 func isShellCommand(cmd string) bool {
-	shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+	shells := constants.SupportedShells
 	for _, shell := range shells {
 		if cmd == shell {
 			return true

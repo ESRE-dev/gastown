@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
@@ -248,7 +249,7 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Wait for Claude to start, then prime it
-	shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+	shells := constants.SupportedShells
 	if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
 		style.PrintWarning("Timeout waiting for Claude to start: %v", err)
 	}
@@ -413,7 +414,7 @@ func restartCrewSession(rigName, crewName, clonePath string) error {
 	}
 
 	// Wait for Claude to start, then prime it
-	shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+	shells := constants.SupportedShells
 	if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
 		// Non-fatal warning
 	}
