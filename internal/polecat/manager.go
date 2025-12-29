@@ -221,6 +221,7 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
+		RoleBead:   "gt-polecat-role",
 	})
 	if err != nil {
 		// Non-fatal - log warning but continue
@@ -427,6 +428,7 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
+		RoleBead:   "gt-polecat-role",
 	})
 	if err != nil {
 		fmt.Printf("Warning: could not create agent bead: %v\n", err)
