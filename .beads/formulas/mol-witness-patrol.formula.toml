@@ -78,14 +78,16 @@ gt mail send mayor/ -s "Escalation: <polecat> needs help" -m "<details>"
 **HANDOFF**:
 Read predecessor context. Continue from where they left off.
 
-**SWARM_START**:
-Mayor initiating batch polecat work. Initialize swarm tracking.
+**SWARM: <epic-id>** (subject pattern):
+Mayor assigning swarm coordination. The epic IS the swarm - beads tracks everything.
 ```bash
-# Parse swarm info from mail body: {"swarm_id": "batch-123", "beads": ["bd-a", "bd-b"]}
-bd create --wisp --title "swarm:<swarm_id>" \
-  --description "Tracking batch: <swarm_id>" \
-  --labels swarm,swarm_id:<swarm_id>,total:<N>,completed:0,start:<timestamp>
+# Parse epic ID from subject: "SWARM: gt-epic-123"
+# Create tracking wisp with epic_id in labels for dispatch step
+bd create --wisp --title "swarm:<epic_id>" \
+  --description "Coordinating swarm for epic: <epic_id>" \
+  --labels swarm,epic_id:<epic_id>,start:<timestamp>
 ```
+The dispatch-swarm-work step will use epic_id to query `bd ready --parent=<epic_id>`.
 Mark mail as read."""
 
 [[steps]]
@@ -267,11 +269,81 @@ gt mail send mayor/ -s "Escalation: <polecat> stuck" \\
 **ZFC Principle**: Trust agent_state from beads. Don't infer state from PID/tmux."""
 
 [[steps]]
-id = "check-swarm-completion"
-title = "Check if active swarm is complete"
+id = "dispatch-swarm-work"
+title = "Dispatch ready swarm tasks to idle polecats"
 needs = ["survey-workers"]
 description = """
-If Mayor started a batch (SWARM_START), check if all polecats have completed.
+If an active swarm exists, dispatch ready tasks to available polecats.
+
+This is the core swarm coordination logic - the Witness keeps the swarm moving
+by matching ready issues with idle workers.
+
+**Step 1: Find active swarm tracking wisps**
+```bash
+bd list --wisp --labels=swarm --status=open
+```
+If no active swarm, skip this step entirely.
+
+**Step 2: For each swarm, get ready tasks**
+
+Extract the epic_id from the swarm wisp (stored in labels or description).
+Then query the ready front:
+```bash
+bd ready --parent=<epic_id>
+```
+This returns issues that have no blockers and are ready to work.
+
+**Step 3: Find idle polecats**
+
+From the survey-workers step, you should have agent beads data.
+Filter for polecats where:
+- agent_state = idle (no work assigned)
+- OR hook_bead is empty/none
+
+```bash
+bd list --type=agent --json | jq '[.[] | select(.description | contains("role_type: polecat") and contains("agent_state: idle"))]'
+```
+
+**Step 4: Dispatch ready tasks to idle polecats**
+
+For each ready task (up to number of idle polecats):
+```bash
+gt sling <task-id> <rig>/<polecat-name>
+```
+
+This will:
+- Attach the task to the polecat's hook
+- Spawn the polecat session if not running
+- Inject work context
+
+Example:
+```bash
+# Ready task: gt-abc.3, Idle polecat: toast
+gt sling gt-abc.3 gastown/toast
+```
+
+**Step 5: Log dispatch activity**
+
+For observability, record what was dispatched:
+```bash
+# Update swarm wisp with dispatch info (optional)
+echo "Dispatched gt-abc.3 -> toast at $(date)"
+```
+
+**Parallelism**: Dispatch calls can be parallelized if multiple idle polecats
+and multiple ready tasks exist.
+
+**Rate limiting**: Don't dispatch more than max_active_polecats (typically 3-5)
+to avoid overwhelming the rig/refinery."""
+
+[[steps]]
+id = "check-swarm-completion"
+title = "Check if active swarm is complete"
+needs = ["dispatch-swarm-work"]
+description = """
+Check if any active swarm has completed (all tasks closed).
+
+**Discovery over tracking**: Don't count - QUERY. The beads state IS the source of truth.
 
 **Step 1: Find active swarm tracking wisps**
 ```bash
@@ -279,22 +351,42 @@ bd list --wisp --labels=swarm --status=open
 ```
 If no active swarm, skip this step.
 
-**Step 2: Count completed polecats for this swarm**
+**Step 2: For each swarm, check completion via beads**
 
-Extract from wisp labels: swarm_id, total, completed, start timestamp.
-Check how many cleanup wisps have been closed for this swarm's polecats.
-
-**Step 3: If all complete, notify Mayor**
+Extract epic_id from wisp labels, then check if all children are closed:
 ```bash
-gt mail send mayor/ -s "SWARM_COMPLETE: <swarm_id>" -m "All <total> polecats merged.
-Duration: <minutes> minutes
-Swarm: <swarm_id>"
-
-# Close the swarm tracking wisp
-bd close <swarm-wisp-id> --reason "All polecats merged"
+# Get swarm status from beads (shows ready/active/blocked/completed)
+bd swarm status <epic_id> --json
 ```
 
-Note: Runs every patrol cycle. Notification sent exactly once when all complete."""
+Swarm is complete when:
+- ready = [] (empty)
+- active = [] (empty)
+- blocked = [] (empty)
+- All children are closed
+
+Alternative direct check:
+```bash
+# If bd ready --parent returns nothing AND no active issues, swarm is done
+bd ready --parent=<epic_id>   # Should return nothing
+bd list --parent=<epic_id> --status=in_progress  # Should return nothing
+```
+
+**Step 3: If complete, notify Mayor and close swarm**
+```bash
+gt mail send mayor/ -s "SWARM_COMPLETE: <epic_id>" -m "Epic: <epic_id>
+All tasks completed and merged.
+Duration: <minutes> minutes"
+
+# Close the swarm tracking wisp
+bd close <swarm-wisp-id> --reason "All tasks completed"
+
+# Optionally close the epic itself (or leave for Mayor to close)
+# bd close <epic_id> --reason "Swarm complete"
+```
+
+**Key insight**: Notification sent exactly once because the wisp gets closed.
+Next patrol cycle finds no open swarm wisps, so this step is skipped."""
 
 [[steps]]
 id = "ping-deacon"
