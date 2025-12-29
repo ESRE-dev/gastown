@@ -227,6 +227,8 @@ func runDone(cmd *cobra.Command, args []string) error {
 //   - COMPLETED → "done"
 //   - ESCALATED → "stuck"
 //   - DEFERRED → "idle"
+//
+// Also self-reports cleanup_status for ZFC compliance (#10).
 func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 	// Get role context
 	roleInfo, err := GetRoleWithContext(cwd, townRoot)
@@ -267,4 +269,37 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 		// Silently ignore - beads might not be configured
 		return
 	}
+
+	// ZFC #10: Self-report cleanup status
+	// Compute git state and report so Witness can decide removal safety
+	cleanupStatus := computeCleanupStatus(cwd)
+	if cleanupStatus != "" {
+		if err := bd.UpdateAgentCleanupStatus(agentBeadID, cleanupStatus); err != nil {
+			// Silently ignore
+			return
+		}
+	}
+}
+
+// computeCleanupStatus checks git state and returns the cleanup status.
+// Returns the most critical issue: has_unpushed > has_stash > has_uncommitted > clean
+func computeCleanupStatus(cwd string) string {
+	g := git.NewGit(cwd)
+	status, err := g.CheckUncommittedWork()
+	if err != nil {
+		// If we can't check, report unknown - Witness should be cautious
+		return "unknown"
+	}
+
+	// Check in priority order (most critical first)
+	if status.UnpushedCommits > 0 {
+		return "has_unpushed"
+	}
+	if status.StashCount > 0 {
+		return "has_stash"
+	}
+	if status.HasUncommittedChanges {
+		return "has_uncommitted"
+	}
+	return "clean"
 }
