@@ -1,0 +1,298 @@
+package feed
+
+import (
+	"time"
+
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// Panel represents which panel has focus
+type Panel int
+
+const (
+	PanelTree Panel = iota
+	PanelFeed
+)
+
+// Event represents an activity event
+type Event struct {
+	Time     time.Time
+	Type     string // create, update, complete, fail, delete
+	Actor    string // who did it (e.g., "gastown/crew/joe")
+	Target   string // what was affected (e.g., "gt-xyz")
+	Message  string // human-readable description
+	Rig      string // which rig
+	Role     string // actor's role
+	Raw      string // raw line for fallback display
+}
+
+// Agent represents an agent in the tree
+type Agent struct {
+	ID         string
+	Name       string
+	Role       string // mayor, witness, refinery, crew, polecat
+	Rig        string
+	Status     string // running, idle, working, dead
+	LastEvent  *Event
+	LastUpdate time.Time
+	Expanded   bool
+}
+
+// Rig represents a rig with its agents
+type Rig struct {
+	Name     string
+	Agents   map[string]*Agent // keyed by role/name
+	Expanded bool
+}
+
+// Model is the main bubbletea model for the feed TUI
+type Model struct {
+	// Dimensions
+	width  int
+	height int
+
+	// Panels
+	focusedPanel Panel
+	treeViewport viewport.Model
+	feedViewport viewport.Model
+
+	// Data
+	rigs   map[string]*Rig
+	events []Event
+
+	// UI state
+	keys         KeyMap
+	help         help.Model
+	showHelp     bool
+	filter       string
+	filterActive bool
+	err          error
+
+	// Event source
+	eventChan <-chan Event
+	done      chan struct{}
+}
+
+// NewModel creates a new feed TUI model
+func NewModel() Model {
+	h := help.New()
+	h.ShowAll = false
+
+	return Model{
+		focusedPanel: PanelTree,
+		treeViewport: viewport.New(0, 0),
+		feedViewport: viewport.New(0, 0),
+		rigs:         make(map[string]*Rig),
+		events:       make([]Event, 0, 1000),
+		keys:         DefaultKeyMap(),
+		help:         h,
+		done:         make(chan struct{}),
+	}
+}
+
+// Init initializes the model
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(
+		m.listenForEvents(),
+		tea.SetWindowTitle("GT Feed"),
+	)
+}
+
+// eventMsg is sent when a new event arrives
+type eventMsg Event
+
+// tickMsg is sent periodically to refresh the view
+type tickMsg time.Time
+
+// listenForEvents returns a command that listens for events
+func (m Model) listenForEvents() tea.Cmd {
+	if m.eventChan == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		select {
+		case event, ok := <-m.eventChan:
+			if !ok {
+				return nil
+			}
+			return eventMsg(event)
+		case <-m.done:
+			return nil
+		}
+	}
+}
+
+// tick returns a command for periodic refresh
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+// Update handles messages
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.updateViewportSizes()
+
+	case eventMsg:
+		m.addEvent(Event(msg))
+		cmds = append(cmds, m.listenForEvents())
+
+	case tickMsg:
+		cmds = append(cmds, tick())
+	}
+
+	// Update viewports
+	var cmd tea.Cmd
+	if m.focusedPanel == PanelTree {
+		m.treeViewport, cmd = m.treeViewport.Update(msg)
+	} else {
+		m.feedViewport, cmd = m.feedViewport.Update(msg)
+	}
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
+}
+
+// handleKey processes key presses
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Quit):
+		close(m.done)
+		return m, tea.Quit
+
+	case key.Matches(msg, m.keys.Help):
+		m.showHelp = !m.showHelp
+		m.help.ShowAll = m.showHelp
+		return m, nil
+
+	case key.Matches(msg, m.keys.Tab):
+		if m.focusedPanel == PanelTree {
+			m.focusedPanel = PanelFeed
+		} else {
+			m.focusedPanel = PanelTree
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.FocusTree):
+		m.focusedPanel = PanelTree
+		return m, nil
+
+	case key.Matches(msg, m.keys.FocusFeed):
+		m.focusedPanel = PanelFeed
+		return m, nil
+
+	case key.Matches(msg, m.keys.Refresh):
+		m.updateViewContent()
+		return m, nil
+	}
+
+	// Pass to focused viewport
+	var cmd tea.Cmd
+	if m.focusedPanel == PanelTree {
+		m.treeViewport, cmd = m.treeViewport.Update(msg)
+	} else {
+		m.feedViewport, cmd = m.feedViewport.Update(msg)
+	}
+	return m, cmd
+}
+
+// updateViewportSizes recalculates viewport dimensions
+func (m *Model) updateViewportSizes() {
+	// Reserve space: header (1) + borders (4) + status bar (1) + help (1-2)
+	headerHeight := 1
+	statusHeight := 1
+	helpHeight := 1
+	if m.showHelp {
+		helpHeight = 3
+	}
+	borderHeight := 4 // top and bottom borders for both panels
+
+	availableHeight := m.height - headerHeight - statusHeight - helpHeight - borderHeight
+	if availableHeight < 4 {
+		availableHeight = 4
+	}
+
+	// Split 40% tree, 60% feed
+	treeHeight := availableHeight * 40 / 100
+	feedHeight := availableHeight - treeHeight
+
+	contentWidth := m.width - 4 // borders and padding
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+
+	m.treeViewport.Width = contentWidth
+	m.treeViewport.Height = treeHeight
+	m.feedViewport.Width = contentWidth
+	m.feedViewport.Height = feedHeight
+
+	m.updateViewContent()
+}
+
+// updateViewContent refreshes the content of both viewports
+func (m *Model) updateViewContent() {
+	m.treeViewport.SetContent(m.renderTree())
+	m.feedViewport.SetContent(m.renderFeed())
+}
+
+// addEvent adds an event and updates the agent tree
+func (m *Model) addEvent(e Event) {
+	m.events = append(m.events, e)
+
+	// Keep max 1000 events
+	if len(m.events) > 1000 {
+		m.events = m.events[len(m.events)-1000:]
+	}
+
+	// Update agent tree
+	if e.Rig != "" {
+		rig, ok := m.rigs[e.Rig]
+		if !ok {
+			rig = &Rig{
+				Name:     e.Rig,
+				Agents:   make(map[string]*Agent),
+				Expanded: true,
+			}
+			m.rigs[e.Rig] = rig
+		}
+
+		if e.Actor != "" {
+			agent, ok := rig.Agents[e.Actor]
+			if !ok {
+				agent = &Agent{
+					ID:   e.Actor,
+					Name: e.Actor,
+					Role: e.Role,
+					Rig:  e.Rig,
+				}
+				rig.Agents[e.Actor] = agent
+			}
+			agent.LastEvent = &e
+			agent.LastUpdate = e.Time
+		}
+	}
+
+	m.updateViewContent()
+}
+
+// SetEventChannel sets the channel to receive events from
+func (m *Model) SetEventChannel(ch <-chan Event) {
+	m.eventChan = ch
+}
+
+// View renders the TUI
+func (m Model) View() string {
+	return m.render()
+}
