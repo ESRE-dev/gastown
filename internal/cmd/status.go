@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -48,15 +49,17 @@ type TownStatus struct {
 
 // AgentRuntime represents the runtime state of an agent.
 type AgentRuntime struct {
-	Name      string `json:"name"`       // Display name (e.g., "mayor", "witness")
-	Address   string `json:"address"`    // Full address (e.g., "gastown/witness")
-	Session   string `json:"session"`    // tmux session name
-	Role      string `json:"role"`       // Role type
-	Running   bool   `json:"running"`    // Is tmux session running?
-	HasWork   bool   `json:"has_work"`   // Has pinned work?
-	WorkTitle string `json:"work_title,omitempty"` // Title of pinned work
-	HookBead  string `json:"hook_bead,omitempty"`  // Pinned bead ID from agent bead
-	State     string `json:"state,omitempty"`      // Agent state from agent bead
+	Name         string `json:"name"`                    // Display name (e.g., "mayor", "witness")
+	Address      string `json:"address"`                 // Full address (e.g., "gastown/witness")
+	Session      string `json:"session"`                 // tmux session name
+	Role         string `json:"role"`                    // Role type
+	Running      bool   `json:"running"`                 // Is tmux session running?
+	HasWork      bool   `json:"has_work"`                // Has pinned work?
+	WorkTitle    string `json:"work_title,omitempty"`    // Title of pinned work
+	HookBead     string `json:"hook_bead,omitempty"`     // Pinned bead ID from agent bead
+	State        string `json:"state,omitempty"`         // Agent state from agent bead
+	UnreadMail   int    `json:"unread_mail"`             // Number of unread messages
+	FirstSubject string `json:"first_subject,omitempty"` // Subject of first unread message
 }
 
 // RigStatus represents status of a single rig.
@@ -131,11 +134,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	gastownBeadsPath := filepath.Join(townRoot, "gastown", "mayor", "rig")
 	agentBeads := beads.New(gastownBeadsPath)
 
+	// Create mail router for inbox lookups
+	mailRouter := mail.NewRouter(townRoot)
+
 	// Build status
 	status := TownStatus{
 		Name:     townConfig.Name,
 		Location: townRoot,
-		Agents:   discoverGlobalAgents(t, agentBeads),
+		Agents:   discoverGlobalAgents(t, agentBeads, mailRouter),
 		Rigs:     make([]RigStatus, 0, len(rigs)),
 	}
 
@@ -167,7 +173,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 
 		// Discover runtime state for all agents in this rig
-		rs.Agents = discoverRigAgents(t, r, rs.Crews, agentBeads)
+		rs.Agents = discoverRigAgents(t, r, rs.Crews, agentBeads, mailRouter)
 
 		status.Rigs = append(status.Rigs, rs)
 
@@ -311,8 +317,12 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 	agentBeadID := "gt-" + agent.Name
 	if agent.Address != "" && agent.Address != agent.Name {
 		// Use address for full path agents like gastown/crew/joe → gt-crew-gastown-joe
-		parts := strings.Split(agent.Address, "/")
-		if len(parts) >= 2 {
+		addr := strings.TrimSuffix(agent.Address, "/") // Remove trailing slash for global agents
+		parts := strings.Split(addr, "/")
+		if len(parts) == 1 {
+			// Global agent: mayor/, deacon/ → gt-mayor, gt-deacon
+			agentBeadID = "gt-" + parts[0]
+		} else if len(parts) >= 2 {
 			if parts[1] == "crew" && len(parts) >= 3 {
 				agentBeadID = fmt.Sprintf("gt-crew-%s-%s", parts[0], parts[2])
 			} else if parts[1] == "witness" || parts[1] == "refinery" {
@@ -354,6 +364,15 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 	}
 
 	fmt.Printf("%s  hook: %s\n", indent, hookStr)
+
+	// Line 3: Mail (if any unread)
+	if agent.UnreadMail > 0 {
+		mailStr := fmt.Sprintf("📬 %d unread", agent.UnreadMail)
+		if agent.FirstSubject != "" {
+			mailStr = fmt.Sprintf("📬 %d unread → %s", agent.UnreadMail, truncateWithEllipsis(agent.FirstSubject, 35))
+		}
+		fmt.Printf("%s  mail: %s\n", indent, mailStr)
+	}
 }
 
 // formatHookInfo formats the hook bead and title for display
@@ -423,14 +442,14 @@ func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
 }
 
 // discoverGlobalAgents checks runtime state for town-level agents (Mayor, Deacon).
-func discoverGlobalAgents(t *tmux.Tmux, agentBeads *beads.Beads) []AgentRuntime {
+func discoverGlobalAgents(t *tmux.Tmux, agentBeads *beads.Beads, mailRouter *mail.Router) []AgentRuntime {
 	var agents []AgentRuntime
 
 	// Check Mayor
 	mayorRunning, _ := t.HasSession(MayorSessionName)
 	mayor := AgentRuntime{
 		Name:    "mayor",
-		Address: "mayor",
+		Address: "mayor/",
 		Session: MayorSessionName,
 		Role:    "coordinator",
 		Running: mayorRunning,
@@ -447,13 +466,15 @@ func discoverGlobalAgents(t *tmux.Tmux, agentBeads *beads.Beads) []AgentRuntime 
 			}
 		}
 	}
+	// Get mail info
+	populateMailInfo(&mayor, mailRouter)
 	agents = append(agents, mayor)
 
 	// Check Deacon
 	deaconRunning, _ := t.HasSession(DeaconSessionName)
 	deacon := AgentRuntime{
 		Name:    "deacon",
-		Address: "deacon",
+		Address: "deacon/",
 		Session: DeaconSessionName,
 		Role:    "health-check",
 		Running: deaconRunning,
@@ -469,13 +490,33 @@ func discoverGlobalAgents(t *tmux.Tmux, agentBeads *beads.Beads) []AgentRuntime 
 			}
 		}
 	}
+	// Get mail info
+	populateMailInfo(&deacon, mailRouter)
 	agents = append(agents, deacon)
 
 	return agents
 }
 
+// populateMailInfo fetches unread mail count and first subject for an agent
+func populateMailInfo(agent *AgentRuntime, router *mail.Router) {
+	if router == nil {
+		return
+	}
+	mailbox, err := router.GetMailbox(agent.Address)
+	if err != nil {
+		return
+	}
+	_, unread, _ := mailbox.Count()
+	agent.UnreadMail = unread
+	if unread > 0 {
+		if messages, err := mailbox.ListUnread(); err == nil && len(messages) > 0 {
+			agent.FirstSubject = messages[0].Subject
+		}
+	}
+}
+
 // discoverRigAgents checks runtime state for all agents in a rig.
-func discoverRigAgents(t *tmux.Tmux, r *rig.Rig, crews []string, agentBeads *beads.Beads) []AgentRuntime {
+func discoverRigAgents(t *tmux.Tmux, r *rig.Rig, crews []string, agentBeads *beads.Beads, mailRouter *mail.Router) []AgentRuntime {
 	var agents []AgentRuntime
 
 	// Check Witness
@@ -501,6 +542,7 @@ func discoverRigAgents(t *tmux.Tmux, r *rig.Rig, crews []string, agentBeads *bea
 				}
 			}
 		}
+		populateMailInfo(&witness, mailRouter)
 		agents = append(agents, witness)
 	}
 
@@ -527,6 +569,7 @@ func discoverRigAgents(t *tmux.Tmux, r *rig.Rig, crews []string, agentBeads *bea
 				}
 			}
 		}
+		populateMailInfo(&refinery, mailRouter)
 		agents = append(agents, refinery)
 	}
 
@@ -553,6 +596,7 @@ func discoverRigAgents(t *tmux.Tmux, r *rig.Rig, crews []string, agentBeads *bea
 				}
 			}
 		}
+		populateMailInfo(&polecat, mailRouter)
 		agents = append(agents, polecat)
 	}
 
@@ -579,6 +623,7 @@ func discoverRigAgents(t *tmux.Tmux, r *rig.Rig, crews []string, agentBeads *bea
 				}
 			}
 		}
+		populateMailInfo(&crewAgent, mailRouter)
 		agents = append(agents, crewAgent)
 	}
 
