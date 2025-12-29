@@ -6,12 +6,17 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
+
+// claudeStartupDelay is how long to wait for Claude to start before nudging.
+// This fixes gt-1dbcp: polecat auto-start doesn't process initial nudge.
+const claudeStartupDelay = 2 * time.Second
 
 var slingCmd = &cobra.Command{
 	Use:     "sling <bead-or-formula> [target]",
@@ -176,6 +181,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 				}
 				targetAgent = spawnInfo.AgentID()
 				targetPane = spawnInfo.Pane
+
+				// Wait for Claude to start up before nudging (fixes gt-1dbcp)
+				if targetPane != "" {
+					fmt.Printf("Waiting for Claude to initialize...\n")
+					time.Sleep(claudeStartupDelay)
+				}
 			}
 		} else {
 			// Slinging to an existing agent
@@ -531,6 +542,12 @@ func runSlingFormula(args []string) error {
 				}
 				targetAgent = spawnInfo.AgentID()
 				targetPane = spawnInfo.Pane
+
+				// Wait for Claude to start up before nudging (fixes gt-1dbcp)
+				if targetPane != "" {
+					fmt.Printf("Waiting for Claude to initialize...\n")
+					time.Sleep(claudeStartupDelay)
+				}
 			}
 		} else {
 			// Slinging to an existing agent
