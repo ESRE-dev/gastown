@@ -397,6 +397,14 @@ func sessionToAgentID(session string) string {
 		rig := strings.TrimPrefix(session, "gt-")
 		rig = strings.TrimSuffix(rig, "-refinery")
 		return fmt.Sprintf("%s/refinery", rig)
+	case strings.HasPrefix(session, "gt-"):
+		// gt-gastown-nux -> gastown/polecats/nux (polecat)
+		parts := strings.Split(strings.TrimPrefix(session, "gt-"), "-")
+		if len(parts) >= 2 {
+			rig := parts[0]
+			name := strings.Join(parts[1:], "-")
+			return fmt.Sprintf("%s/polecats/%s", rig, name)
+		}
 	}
 	return session
 }
