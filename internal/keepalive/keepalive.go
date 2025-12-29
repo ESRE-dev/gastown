@@ -1,4 +1,15 @@
 // Package keepalive provides agent activity signaling via file touch.
+//
+// This package uses a best-effort design: all write operations silently ignore
+// errors. This is intentional because:
+//
+//  1. Keepalive signals are non-critical - the system works without them
+//  2. Failures (disk full, permissions, etc.) should not interrupt gt commands
+//  3. The daemon tolerates missing signals by using timeouts
+//
+// Functions in this package write JSON files to .runtime/ or daemon/ directories.
+// These files are used by the daemon to detect agent activity and implement
+// features like exponential backoff during idle periods.
 package keepalive
 
 import (
