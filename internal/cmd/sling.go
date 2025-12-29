@@ -6,17 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
-
-// claudeStartupDelay is how long to wait for Claude to start before nudging.
-// This fixes gt-1dbcp: polecat auto-start doesn't process initial nudge.
-const claudeStartupDelay = 2 * time.Second
 
 var slingCmd = &cobra.Command{
 	Use:     "sling <bead-or-formula> [target]",
@@ -181,12 +177,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 				}
 				targetAgent = spawnInfo.AgentID()
 				targetPane = spawnInfo.Pane
-
-				// Wait for Claude to start up before nudging (fixes gt-1dbcp)
-				if targetPane != "" {
-					fmt.Printf("Waiting for Claude to initialize...\n")
-					time.Sleep(claudeStartupDelay)
-				}
 			}
 		} else {
 			// Slinging to an existing agent
@@ -257,7 +247,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if slingArgs != "" {
 		if err := storeArgsInBead(beadID, slingArgs); err != nil {
 			// Warn but don't fail - args will still be in the nudge prompt
-			style.PrintWarning("Could not store args in bead: %v", err)
+			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
 		} else {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
 		}
@@ -373,40 +363,14 @@ func resolveTargetAgent(target string) (agentID string, pane string, hookRoot st
 }
 
 // sessionToAgentID converts a session name to agent ID format.
-func sessionToAgentID(session string) string {
-	switch {
-	case session == "gt-mayor":
-		return "mayor"
-	case session == "gt-deacon":
-		return "deacon"
-	case strings.Contains(session, "-crew-"):
-		// gt-gastown-crew-max -> gastown/crew/max
-		parts := strings.Split(session, "-")
-		for i, p := range parts {
-			if p == "crew" && i > 1 && i < len(parts)-1 {
-				rig := strings.Join(parts[1:i], "-")
-				name := strings.Join(parts[i+1:], "-")
-				return fmt.Sprintf("%s/crew/%s", rig, name)
-			}
-		}
-	case strings.HasSuffix(session, "-witness"):
-		rig := strings.TrimPrefix(session, "gt-")
-		rig = strings.TrimSuffix(rig, "-witness")
-		return fmt.Sprintf("%s/witness", rig)
-	case strings.HasSuffix(session, "-refinery"):
-		rig := strings.TrimPrefix(session, "gt-")
-		rig = strings.TrimSuffix(rig, "-refinery")
-		return fmt.Sprintf("%s/refinery", rig)
-	case strings.HasPrefix(session, "gt-"):
-		// gt-gastown-nux -> gastown/polecats/nux (polecat)
-		parts := strings.Split(strings.TrimPrefix(session, "gt-"), "-")
-		if len(parts) >= 2 {
-			rig := parts[0]
-			name := strings.Join(parts[1:], "-")
-			return fmt.Sprintf("%s/polecats/%s", rig, name)
-		}
+// Uses session.ParseSessionName for consistent parsing across the codebase.
+func sessionToAgentID(sessionName string) string {
+	identity, err := session.ParseSessionName(sessionName)
+	if err != nil {
+		// Fallback for unparseable sessions
+		return sessionName
 	}
-	return session
+	return identity.Address()
 }
 
 // verifyBeadExists checks that the bead exists using bd show.
@@ -550,12 +514,6 @@ func runSlingFormula(args []string) error {
 				}
 				targetAgent = spawnInfo.AgentID()
 				targetPane = spawnInfo.Pane
-
-				// Wait for Claude to start up before nudging (fixes gt-1dbcp)
-				if targetPane != "" {
-					fmt.Printf("Waiting for Claude to initialize...\n")
-					time.Sleep(claudeStartupDelay)
-				}
 			}
 		} else {
 			// Slinging to an existing agent
@@ -614,7 +572,7 @@ func runSlingFormula(args []string) error {
 	}
 	if err := json.Unmarshal(wispOut, &wispResult); err != nil {
 		// Fallback: use formula name as identifier, but warn user
-		style.PrintWarning("Could not parse wisp output, using formula name as ID")
+		fmt.Printf("%s Could not parse wisp output, using formula name as ID\n", style.Dim.Render("Warning:"))
 		wispResult.RootID = formulaName
 	}
 
@@ -634,7 +592,7 @@ func runSlingFormula(args []string) error {
 	// Store args in wisp bead if provided (no-tmux mode: beads as data plane)
 	if slingArgs != "" {
 		if err := storeArgsInBead(wispResult.RootID, slingArgs); err != nil {
-			style.PrintWarning("Could not store args in bead: %v", err)
+			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
 		} else {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
 		}

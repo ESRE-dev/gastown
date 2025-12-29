@@ -514,11 +514,12 @@ func (b *Beads) IsBeadsRepo() bool {
 // AgentFields holds structured fields for agent beads.
 // These are stored as "key: value" lines in the description.
 type AgentFields struct {
-	RoleType   string // polecat, witness, refinery, deacon, mayor
-	Rig        string // Rig name (empty for global agents like mayor/deacon)
-	AgentState string // spawning, working, done, stuck
-	HookBead   string // Currently pinned work bead ID
-	RoleBead   string // Role definition bead ID (canonical location; may not exist yet)
+	RoleType      string // polecat, witness, refinery, deacon, mayor
+	Rig           string // Rig name (empty for global agents like mayor/deacon)
+	AgentState    string // spawning, working, done, stuck
+	HookBead      string // Currently pinned work bead ID
+	RoleBead      string // Role definition bead ID (canonical location; may not exist yet)
+	CleanupStatus string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
 }
 
 // FormatAgentDescription creates a description string from agent fields.
@@ -550,6 +551,12 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, fmt.Sprintf("role_bead: %s", fields.RoleBead))
 	} else {
 		lines = append(lines, "role_bead: null")
+	}
+
+	if fields.CleanupStatus != "" {
+		lines = append(lines, fmt.Sprintf("cleanup_status: %s", fields.CleanupStatus))
+	} else {
+		lines = append(lines, "cleanup_status: null")
 	}
 
 	return strings.Join(lines, "\n")
@@ -587,6 +594,8 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.HookBead = value
 		case "role_bead":
 			fields.RoleBead = value
+		case "cleanup_status":
+			fields.CleanupStatus = value
 		}
 	}
 
@@ -633,6 +642,26 @@ func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) erro
 	if hookBead != nil {
 		fields.HookBead = *hookBead
 	}
+
+	// Format new description
+	description := FormatAgentDescription(issue.Title, fields)
+
+	return b.Update(id, UpdateOptions{Description: &description})
+}
+
+// UpdateAgentCleanupStatus updates the cleanup_status field in an agent bead.
+// This is called by the polecat to self-report its git state (ZFC compliance).
+// Valid statuses: clean, has_uncommitted, has_stash, has_unpushed
+func (b *Beads) UpdateAgentCleanupStatus(id string, cleanupStatus string) error {
+	// First get current issue to preserve other fields
+	issue, err := b.Show(id)
+	if err != nil {
+		return err
+	}
+
+	// Parse existing fields
+	fields := ParseAgentFields(issue.Description)
+	fields.CleanupStatus = cleanupStatus
 
 	// Format new description
 	description := FormatAgentDescription(issue.Title, fields)

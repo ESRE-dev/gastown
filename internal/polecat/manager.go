@@ -89,6 +89,53 @@ func (m *Manager) agentBeadID(name string) string {
 	return fmt.Sprintf("gt-polecat-%s-%s", m.rig.Name, name)
 }
 
+// getCleanupStatusFromBead reads the cleanup_status from the polecat's agent bead.
+// Returns empty string if the bead doesn't exist or has no cleanup_status.
+// ZFC #10: This is the ZFC-compliant way to check if removal is safe.
+func (m *Manager) getCleanupStatusFromBead(name string) string {
+	agentID := m.agentBeadID(name)
+	_, fields, err := m.beads.GetAgentBead(agentID)
+	if err != nil || fields == nil {
+		return ""
+	}
+	return fields.CleanupStatus
+}
+
+// checkCleanupStatus validates the cleanup status against removal safety rules.
+// Returns an error if removal should be blocked based on the status.
+// force=true: allow has_uncommitted, block has_stash and has_unpushed
+// force=false: block all non-clean statuses
+func (m *Manager) checkCleanupStatus(name, cleanupStatus string, force bool) error {
+	switch cleanupStatus {
+	case "clean":
+		return nil
+	case "has_uncommitted":
+		if force {
+			return nil // force bypasses uncommitted changes
+		}
+		return &UncommittedWorkError{
+			PolecatName: name,
+			Status:      &git.UncommittedWorkStatus{HasUncommittedChanges: true},
+		}
+	case "has_stash":
+		return &UncommittedWorkError{
+			PolecatName: name,
+			Status:      &git.UncommittedWorkStatus{StashCount: 1},
+		}
+	case "has_unpushed":
+		return &UncommittedWorkError{
+			PolecatName: name,
+			Status:      &git.UncommittedWorkStatus{UnpushedCommits: 1},
+		}
+	default:
+		// Unknown status - be conservative and block
+		return &UncommittedWorkError{
+			PolecatName: name,
+			Status:      &git.UncommittedWorkStatus{HasUncommittedChanges: true},
+		}
+	}
+}
+
 // repoBase returns the git directory and Git object to use for worktree operations.
 // Prefers the shared bare repo (.repo.git) if it exists, otherwise falls back to mayor/rig.
 // The bare repo architecture allows all worktrees (refinery, polecats) to share branch visibility.
@@ -206,26 +253,41 @@ func (m *Manager) Remove(name string, force bool) error {
 // RemoveWithOptions deletes a polecat worktree with explicit control over safety checks.
 // force=true: bypass uncommitted changes check (legacy behavior)
 // nuclear=true: bypass ALL safety checks including stashes and unpushed commits
+//
+// ZFC #10: Uses cleanup_status from agent bead if available (polecat self-report),
+// falls back to git check for backward compatibility.
 func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 	if !m.exists(name) {
 		return ErrPolecatNotFound
 	}
 
 	polecatPath := m.polecatDir(name)
-	polecatGit := git.NewGit(polecatPath)
 
 	// Check for uncommitted work unless bypassed
 	if !nuclear {
-		status, err := polecatGit.CheckUncommittedWork()
-		if err == nil && !status.Clean() {
-			// For backward compatibility: force only bypasses uncommitted changes, not stashes/unpushed
-			if force {
-				// Force mode: allow uncommitted changes but still block on stashes/unpushed
-				if status.StashCount > 0 || status.UnpushedCommits > 0 {
+		// ZFC #10: First try to read cleanup_status from agent bead
+		// This is the ZFC-compliant path - trust what the polecat reported
+		cleanupStatus := m.getCleanupStatusFromBead(name)
+
+		if cleanupStatus != "" && cleanupStatus != "unknown" {
+			// ZFC path: Use polecat's self-reported status
+			if err := m.checkCleanupStatus(name, cleanupStatus, force); err != nil {
+				return err
+			}
+		} else {
+			// Fallback path: Check git directly (for polecats that haven't reported yet)
+			polecatGit := git.NewGit(polecatPath)
+			status, err := polecatGit.CheckUncommittedWork()
+			if err == nil && !status.Clean() {
+				// For backward compatibility: force only bypasses uncommitted changes, not stashes/unpushed
+				if force {
+					// Force mode: allow uncommitted changes but still block on stashes/unpushed
+					if status.StashCount > 0 || status.UnpushedCommits > 0 {
+						return &UncommittedWorkError{PolecatName: name, Status: status}
+					}
+				} else {
 					return &UncommittedWorkError{PolecatName: name, Status: status}
 				}
-			} else {
-				return &UncommittedWorkError{PolecatName: name, Status: status}
 			}
 		}
 	}
