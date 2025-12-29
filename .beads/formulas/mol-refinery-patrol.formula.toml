@@ -55,13 +55,19 @@ A polecat's work is ready for merge. Extract details and track for processing.
 # Branch: <branch>
 # Issue: <issue-id>
 # Polecat: <polecat-name>
+# MR: <mr-bead-id>
 # Verified: clean git state, issue closed
 
 # Track in your merge queue for this patrol cycle:
 # - Branch name
 # - Issue ID
-# - Polecat name (for MERGED response)
+# - Polecat name (REQUIRED for MERGED notification)
+# - MR bead ID (REQUIRED for closing after merge)
 ```
+
+**IMPORTANT**: You MUST track the polecat name and MR bead ID - you will need them
+in merge-push step to send MERGED notification and close the MR bead.
+
 Mark as read. The work will be processed in queue-scan/process-branch.
 
 **PATROL: Wake up**:
@@ -157,6 +163,7 @@ needs = ["handle-failures"]
 description = """
 Merge to main and push immediately.
 
+**Step 1: Merge**
 ```bash
 git checkout main
 git merge --ff-only temp
@@ -165,7 +172,9 @@ git branch -d temp
 git push origin --delete <polecat-branch>  # Delete remote polecat branch
 ```
 
-**CRITICAL**: After successful merge, send MERGED mail to Witness:
+**Step 2: Notify Witness (REQUIRED - DO NOT SKIP)**
+
+After successful merge, you MUST send MERGED mail to Witness:
 
 ```bash
 gt mail send <rig>/witness -s "MERGED <polecat-name>" -m "Branch: <branch>
@@ -173,7 +182,25 @@ Issue: <issue-id>
 Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
-This signals the Witness to complete cleanup (nuke polecat worktree).
+This signals the Witness to nuke the polecat worktree. Without this notification,
+polecat worktrees accumulate indefinitely.
+
+**Step 3: Close MR bead (REQUIRED - DO NOT SKIP)**
+
+Close the merge-request bead that was created when polecat ran `gt done`:
+
+```bash
+bd close <mr-bead-id> --reason "Merged to main at $(git rev-parse --short HEAD)"
+```
+
+The MR bead ID was included in the MERGE_READY message or can be found via:
+```bash
+bd list --type=merge-request --status=open | grep <polecat-name>
+```
+
+**Verification**: Before proceeding, confirm:
+- [ ] MERGED mail sent to witness
+- [ ] MR bead closed
 
 Main has moved. Any remaining branches need rebasing on new baseline."""
 
@@ -196,9 +223,16 @@ needs = ["loop-check"]
 description = """
 Summarize this patrol cycle.
 
-Include:
+**VERIFICATION**: Before generating summary, confirm for each merged branch:
+- [ ] MERGED mail was sent to witness
+- [ ] MR bead was closed
+
+If any MERGED notifications were missed, send them now!
+
+Include in summary:
 - Branches processed (count, names)
-- MERGED mails sent
+- MERGED mails sent (count - should match branches processed)
+- MR beads closed (count - should match branches processed)
 - Test results (pass/fail)
 - Issues filed (if any)
 - Branches skipped (with reasons)
