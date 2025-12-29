@@ -376,18 +376,25 @@ bd ready --parent=<epic_id>   # Should return nothing
 bd list --parent=<epic_id> --status=in_progress  # Should return nothing
 ```
 
-**Step 3: If complete, notify Mayor and close swarm**
-```bash
-gt mail send mayor/ -s "SWARM_COMPLETE: <epic_id>" -m "Epic: <epic_id>
-All tasks completed and merged.
-Duration: <minutes> minutes"
+**Step 3: If complete, close the epic and notify Mayor**
 
-# Close the swarm tracking wisp
+When all children are closed, the swarm is complete. Close everything:
+```bash
+# 1. Close the epic itself (swarm molecule)
+bd close <epic_id> --reason "All swarm tasks completed"
+
+# 2. Close the swarm tracking wisp
 bd close <swarm-wisp-id> --reason "All tasks completed"
 
-# Optionally close the epic itself (or leave for Mayor to close)
-# bd close <epic_id> --reason "Swarm complete"
+# 3. Notify Mayor of completion
+gt mail send mayor/ -s "SWARM_COMPLETE: <epic_id>" -m "Epic: <epic_id>
+All tasks completed and merged.
+Duration: <minutes> minutes
+Closed by: <rig>/witness"
 ```
+
+**Activity Feed**: The `bd close` commands create activity events automatically.
+The SWARM_COMPLETE mail provides a human-readable summary for the Mayor.
 
 **Key insight**: Notification sent exactly once because the wisp gets closed.
 Next patrol cycle finds no open swarm wisps, so this step is skipped."""
