@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -64,24 +65,23 @@ type Model struct {
 	events []Event
 
 	// UI state
-	keys         KeyMap
-	help         help.Model
-	showHelp     bool
-	filter       string
-	filterActive bool
-	err          error
+	keys     KeyMap
+	help     help.Model
+	showHelp bool
+	filter   string
 
 	// Event source
 	eventChan <-chan Event
 	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // NewModel creates a new feed TUI model
-func NewModel() Model {
+func NewModel() *Model {
 	h := help.New()
 	h.ShowAll = false
 
-	return Model{
+	return &Model{
 		focusedPanel: PanelTree,
 		treeViewport: viewport.New(0, 0),
 		feedViewport: viewport.New(0, 0),
@@ -94,7 +94,7 @@ func NewModel() Model {
 }
 
 // Init initializes the model
-func (m Model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.listenForEvents(),
 		tea.SetWindowTitle("GT Feed"),
@@ -108,18 +108,21 @@ type eventMsg Event
 type tickMsg time.Time
 
 // listenForEvents returns a command that listens for events
-func (m Model) listenForEvents() tea.Cmd {
+func (m *Model) listenForEvents() tea.Cmd {
 	if m.eventChan == nil {
 		return nil
 	}
+	// Capture channels to avoid race with Model mutations
+	eventChan := m.eventChan
+	done := m.done
 	return func() tea.Msg {
 		select {
-		case event, ok := <-m.eventChan:
+		case event, ok := <-eventChan:
 			if !ok {
 				return nil
 			}
 			return eventMsg(event)
-		case <-m.done:
+		case <-done:
 			return nil
 		}
 	}
@@ -133,7 +136,7 @@ func tick() tea.Cmd {
 }
 
 // Update handles messages
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -166,10 +169,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleKey processes key presses
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
-		close(m.done)
+		m.closeOnce.Do(func() { close(m.done) })
 		return m, tea.Quit
 
 	case key.Matches(msg, m.keys.Help):
@@ -293,6 +296,6 @@ func (m *Model) SetEventChannel(ch <-chan Event) {
 }
 
 // View renders the TUI
-func (m Model) View() string {
+func (m *Model) View() string {
 	return m.render()
 }

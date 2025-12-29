@@ -123,11 +123,9 @@ func startMayorSession(t *tmux.Tmux) error {
 	_ = t.SetEnvironment(MayorSessionName, "BD_ACTOR", "mayor")
 
 	// Apply Mayor theme (non-fatal: theming failure doesn't affect operation)
+	// Note: ConfigureGasTownSession includes cycle bindings
 	theme := tmux.MayorTheme()
 	_ = t.ConfigureGasTownSession(MayorSessionName, theme, "", "Mayor", "coordinator")
-
-	// Set up C-b n/p keybindings for town session cycling (non-fatal)
-	_ = t.SetTownCycleBindings(MayorSessionName)
 
 	// Launch Claude - the startup hook handles 'gt prime' automatically
 	// Use SendKeysDelayed to allow shell initialization after NewSession

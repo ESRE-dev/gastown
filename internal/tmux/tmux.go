@@ -611,6 +611,9 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.SetFeedBinding(session); err != nil {
 		return fmt.Errorf("setting feed binding: %w", err)
 	}
+	if err := t.SetCycleBindings(session); err != nil {
+		return fmt.Errorf("setting cycle bindings: %w", err)
+	}
 	return nil
 }
 

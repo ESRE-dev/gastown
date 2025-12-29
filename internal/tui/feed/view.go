@@ -10,7 +10,7 @@ import (
 )
 
 // render produces the full TUI output
-func (m Model) render() string {
+func (m *Model) render() string {
 	if m.width == 0 || m.height == 0 {
 		return "Loading..."
 	}
@@ -40,7 +40,7 @@ func (m Model) render() string {
 }
 
 // renderHeader renders the top header bar
-func (m Model) renderHeader() string {
+func (m *Model) renderHeader() string {
 	title := TitleStyle.Render("GT Feed")
 
 	filter := ""
@@ -60,7 +60,7 @@ func (m Model) renderHeader() string {
 }
 
 // renderTreePanel renders the agent tree panel with border
-func (m Model) renderTreePanel() string {
+func (m *Model) renderTreePanel() string {
 	style := TreePanelStyle
 	if m.focusedPanel == PanelTree {
 		style = FocusedBorderStyle
@@ -69,7 +69,7 @@ func (m Model) renderTreePanel() string {
 }
 
 // renderFeedPanel renders the event feed panel with border
-func (m Model) renderFeedPanel() string {
+func (m *Model) renderFeedPanel() string {
 	style := StreamPanelStyle
 	if m.focusedPanel == PanelFeed {
 		style = FocusedBorderStyle
@@ -78,7 +78,7 @@ func (m Model) renderFeedPanel() string {
 }
 
 // renderTree renders the agent tree content
-func (m Model) renderTree() string {
+func (m *Model) renderTree() string {
 	if len(m.rigs) == 0 {
 		return AgentIdleStyle.Render("No agents active")
 	}
@@ -131,7 +131,7 @@ func (m Model) renderTree() string {
 }
 
 // groupAgentsByRole groups agents by their role
-func (m Model) groupAgentsByRole(agents map[string]*Agent) map[string][]*Agent {
+func (m *Model) groupAgentsByRole(agents map[string]*Agent) map[string][]*Agent {
 	result := make(map[string][]*Agent)
 	for _, agent := range agents {
 		role := agent.Role
@@ -152,7 +152,7 @@ func (m Model) groupAgentsByRole(agents map[string]*Agent) map[string][]*Agent {
 }
 
 // renderAgentGroup renders a group of agents (crew or polecats)
-func (m Model) renderAgentGroup(icon, role string, agents []*Agent) string {
+func (m *Model) renderAgentGroup(icon, role string, agents []*Agent) string {
 	var lines []string
 
 	// Group header
@@ -172,10 +172,12 @@ func (m Model) renderAgentGroup(icon, role string, agents []*Agent) string {
 }
 
 // renderAgent renders a single agent line
-func (m Model) renderAgent(icon string, agent *Agent, indent int) string {
+func (m *Model) renderAgent(icon string, agent *Agent, indent int) string {
 	prefix := strings.Repeat(" ", indent)
-	if icon != "" {
+	if icon != "" && indent >= 2 {
 		prefix = strings.Repeat(" ", indent-2) + icon + " "
+	} else if icon != "" {
+		prefix = icon + " "
 	}
 
 	// Name with status indicator
@@ -208,7 +210,7 @@ func (m Model) renderAgent(icon string, agent *Agent, indent int) string {
 }
 
 // renderFeed renders the event feed content
-func (m Model) renderFeed() string {
+func (m *Model) renderFeed() string {
 	if len(m.events) == 0 {
 		return AgentIdleStyle.Render("No events yet")
 	}
@@ -230,7 +232,7 @@ func (m Model) renderFeed() string {
 }
 
 // renderEvent renders a single event line
-func (m Model) renderEvent(e Event) string {
+func (m *Model) renderEvent(e Event) string {
 	// Timestamp
 	ts := TimestampStyle.Render(fmt.Sprintf("[%s]", e.Time.Format("15:04:05")))
 
@@ -282,7 +284,7 @@ func (m Model) renderEvent(e Event) string {
 }
 
 // renderStatusBar renders the bottom status bar
-func (m Model) renderStatusBar() string {
+func (m *Model) renderStatusBar() string {
 	// Panel indicator
 	panelName := "tree"
 	if m.focusedPanel == PanelFeed {
@@ -307,7 +309,7 @@ func (m Model) renderStatusBar() string {
 }
 
 // renderShortHelp renders abbreviated key hints
-func (m Model) renderShortHelp() string {
+func (m *Model) renderShortHelp() string {
 	hints := []string{
 		HelpKeyStyle.Render("j/k") + HelpDescStyle.Render(":scroll"),
 		HelpKeyStyle.Render("tab") + HelpDescStyle.Render(":switch"),

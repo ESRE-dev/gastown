@@ -747,7 +747,7 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("restarting claude: %w", err)
 			}
 			// Wait for Claude to start, then prime
-			shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+			shells := constants.SupportedShells
 			if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
 				style.PrintWarning("Timeout waiting for Claude to start: %v", err)
 			}
@@ -774,11 +774,9 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		}
 
 		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
+		// Note: ConfigureGasTownSession includes cycle bindings
 		theme := getThemeForRig(rigName)
 		_ = t.ConfigureGasTownSession(sessionID, theme, rigName, name, "crew")
-
-		// Set up C-b n/p keybindings for crew session cycling (non-fatal)
-		_ = t.SetCrewCycleBindings(sessionID)
 
 		// Wait for shell to be ready after session creation
 		if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
@@ -791,7 +789,7 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		}
 
 		// Wait for Claude to start
-		shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+		shells := constants.SupportedShells
 		if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
 			style.PrintWarning("Timeout waiting for Claude to start: %v", err)
 		}
@@ -925,7 +923,7 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 	}
 
 	// Wait for Claude to start
-	shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+	shells := constants.SupportedShells
 	if err := t.WaitForCommand(sessionID, shells, 15*time.Second); err != nil {
 		// Non-fatal: Claude might still be starting
 	}

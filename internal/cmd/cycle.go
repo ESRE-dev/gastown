@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"fmt"
+	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -28,6 +31,7 @@ var cycleCmd = &cobra.Command{
 Session groups:
 - Town sessions: Mayor ↔ Deacon
 - Crew sessions: All crew members in the same rig (e.g., gastown/crew/max ↔ gastown/crew/joe)
+- Rig infra sessions: Witness ↔ Refinery (per rig)
 
 The appropriate cycling is detected automatically from the session name.`,
 }
@@ -83,6 +87,89 @@ func cycleToSession(direction int, sessionOverride string) error {
 		return cycleCrewSession(direction, session)
 	}
 
-	// Unknown session type (polecat, witness, refinery) - do nothing
+	// Check if it's a rig infra session (witness or refinery)
+	if rig := parseRigInfraSession(session); rig != "" {
+		return cycleRigInfraSession(direction, session, rig)
+	}
+
+	// Unknown session type (polecat) - do nothing
 	return nil
+}
+
+// parseRigInfraSession extracts rig name if this is a witness or refinery session.
+// Returns empty string if not a rig infra session.
+// Format: gt-<rig>-witness or gt-<rig>-refinery
+func parseRigInfraSession(session string) string {
+	if !strings.HasPrefix(session, "gt-") {
+		return ""
+	}
+	rest := session[3:] // Remove "gt-" prefix
+
+	// Check for -witness or -refinery suffix
+	if strings.HasSuffix(rest, "-witness") {
+		return strings.TrimSuffix(rest, "-witness")
+	}
+	if strings.HasSuffix(rest, "-refinery") {
+		return strings.TrimSuffix(rest, "-refinery")
+	}
+	return ""
+}
+
+// cycleRigInfraSession cycles between witness and refinery sessions for a rig.
+func cycleRigInfraSession(direction int, currentSession, rig string) error {
+	// Find running infra sessions for this rig
+	witnessSession := fmt.Sprintf("gt-%s-witness", rig)
+	refinerySession := fmt.Sprintf("gt-%s-refinery", rig)
+
+	var sessions []string
+	allSessions, err := listTmuxSessions()
+	if err != nil {
+		return err
+	}
+
+	for _, s := range allSessions {
+		if s == witnessSession || s == refinerySession {
+			sessions = append(sessions, s)
+		}
+	}
+
+	if len(sessions) == 0 {
+		return nil // No infra sessions running
+	}
+
+	// Sort for consistent ordering
+	sort.Strings(sessions)
+
+	// Find current position
+	currentIdx := -1
+	for i, s := range sessions {
+		if s == currentSession {
+			currentIdx = i
+			break
+		}
+	}
+
+	if currentIdx == -1 {
+		return nil // Current session not in list
+	}
+
+	// Calculate target index (with wrapping)
+	targetIdx := (currentIdx + direction + len(sessions)) % len(sessions)
+
+	if targetIdx == currentIdx {
+		return nil // Only one session
+	}
+
+	// Switch to target session
+	cmd := exec.Command("tmux", "switch-client", "-t", sessions[targetIdx])
+	return cmd.Run()
+}
+
+// listTmuxSessions returns all tmux session names.
+func listTmuxSessions() ([]string, error) {
+	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+	if err != nil {
+		return nil, err
+	}
+	return splitLines(string(out)), nil
 }
