@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -63,6 +64,22 @@ func runCrewRemove(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Removed crew workspace: %s/%s\n",
 		style.Bold.Render("✓"), r.Name, name)
+
+	// Close the agent bead if it exists
+	// Format: gt-<rig>-crew-<name> (matches session name format)
+	agentBeadID := fmt.Sprintf("gt-%s-crew-%s", r.Name, name)
+	closeCmd := exec.Command("bd", "close", agentBeadID, "--reason=Crew workspace removed")
+	closeCmd.Dir = r.Path // Run from rig directory for proper beads resolution
+	if output, err := closeCmd.CombinedOutput(); err != nil {
+		// Non-fatal: bead might not exist or already be closed
+		if !strings.Contains(string(output), "no issue found") &&
+			!strings.Contains(string(output), "already closed") {
+			style.PrintWarning("could not close agent bead %s: %v", agentBeadID, err)
+		}
+	} else {
+		fmt.Printf("Closed agent bead: %s\n", agentBeadID)
+	}
+
 	return nil
 }
 
