@@ -57,8 +57,12 @@ A branch was merged successfully. Complete the cleanup.
 # Find the cleanup wisp for this polecat
 bd list --wisp --labels=polecat:<name>,state:merge-requested --status=open
 
-# If found, proceed with polecat removal
-gt session kill <rig>/polecats/<name>
+# If found, proceed with full polecat nuke:
+# - Kill Claude session
+# - Delete worktree
+# - Delete branch
+# - Remove agent bead
+gt polecat nuke <name>
 
 # Burn the cleanup wisp
 bd close <wisp-id>
@@ -72,7 +76,17 @@ gt mail send mayor/ -s "Escalation: <polecat> needs help" -m "<details>"
 ```
 
 **HANDOFF**:
-Read predecessor context. Continue from where they left off."""
+Read predecessor context. Continue from where they left off.
+
+**SWARM_START**:
+Mayor initiating batch polecat work. Initialize swarm tracking.
+```bash
+# Parse swarm info from mail body: {"swarm_id": "batch-123", "beads": ["bd-a", "bd-b"]}
+bd create --wisp --title "swarm:<swarm_id>" \
+  --description "Tracking batch: <swarm_id>" \
+  --labels swarm,swarm_id:<swarm_id>,total:<N>,completed:0,start:<timestamp>
+```
+Mark mail as read."""
 
 [[steps]]
 id = "process-cleanups"
