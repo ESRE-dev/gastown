@@ -233,8 +233,8 @@ func (m *Model) renderFeed() string {
 
 // renderEvent renders a single event line
 func (m *Model) renderEvent(e Event) string {
-	// Timestamp
-	ts := TimestampStyle.Render(fmt.Sprintf("[%s]", e.Time.Format("15:04:05")))
+	// Timestamp - compact HH:MM format
+	ts := TimestampStyle.Render(fmt.Sprintf("[%s]", e.Time.Format("15:04")))
 
 	// Symbol based on event type
 	symbol := EventSymbols[e.Type]
