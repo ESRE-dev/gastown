@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -175,52 +177,6 @@ func init() {
 	rootCmd.AddCommand(swarmCmd)
 }
 
-// SwarmStore manages persistent swarm state.
-type SwarmStore struct {
-	path   string
-	Swarms map[string]*swarm.Swarm `json:"swarms"`
-}
-
-// LoadSwarmStore loads swarm state from disk.
-func LoadSwarmStore(rigPath string) (*SwarmStore, error) {
-	storePath := filepath.Join(rigPath, ".runtime", "swarms.json")
-	store := &SwarmStore{
-		path:   storePath,
-		Swarms: make(map[string]*swarm.Swarm),
-	}
-
-	data, err := os.ReadFile(storePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return store, nil
-		}
-		return nil, err
-	}
-
-	if err := json.Unmarshal(data, store); err != nil {
-		return nil, err
-	}
-	store.path = storePath
-
-	return store, nil
-}
-
-// Save persists swarm state to disk.
-func (s *SwarmStore) Save() error {
-	// Ensure directory exists
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(s.path, data, 0644)
-}
-
 // getSwarmRig gets a rig by name.
 func getSwarmRig(rigName string) (*rig.Rig, string, error) {
 	townRoot, err := workspace.FindFromCwdOrError()
@@ -270,57 +226,92 @@ func getAllRigs() ([]*rig.Rig, string, error) {
 func runSwarmCreate(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
-	r, _, err := getSwarmRig(rigName)
+	r, townRoot, err := getSwarmRig(rigName)
 	if err != nil {
 		return err
 	}
 
-	// Load swarm store
-	store, err := LoadSwarmStore(r.Path)
-	if err != nil {
-		return fmt.Errorf("loading swarm store: %w", err)
+	// Use beads to create the swarm molecule
+	// First check if the epic already exists (it may be pre-created)
+	checkCmd := exec.Command("bd", "show", swarmEpic, "--json")
+	checkCmd.Dir = r.Path
+	if err := checkCmd.Run(); err == nil {
+		// Epic exists, update it to be a swarm molecule
+		updateArgs := []string{"update", swarmEpic, "--mol-type=swarm"}
+		updateCmd := exec.Command("bd", updateArgs...)
+		updateCmd.Dir = r.Path
+		if err := updateCmd.Run(); err != nil {
+			return fmt.Errorf("updating epic to swarm molecule: %w", err)
+		}
+	} else {
+		// Create new swarm epic
+		createArgs := []string{
+			"create",
+			"--type=epic",
+			"--mol-type=swarm",
+			"--title", swarmEpic,
+			"--silent",
+		}
+		createCmd := exec.Command("bd", createArgs...)
+		createCmd.Dir = r.Path
+		var stdout bytes.Buffer
+		createCmd.Stdout = &stdout
+		if err := createCmd.Run(); err != nil {
+			return fmt.Errorf("creating swarm epic: %w", err)
+		}
 	}
 
-	// Check if swarm already exists
-	if _, exists := store.Swarms[swarmEpic]; exists {
-		return fmt.Errorf("swarm for epic '%s' already exists", swarmEpic)
+	// Get current git commit as base
+	baseCommit := "unknown"
+	gitCmd := exec.Command("git", "rev-parse", "HEAD")
+	gitCmd.Dir = r.Path
+	if out, err := gitCmd.Output(); err == nil {
+		baseCommit = strings.TrimSpace(string(out))
 	}
 
-	// Create swarm manager to use its Create logic
-	mgr := swarm.NewManager(r)
-	sw, err := mgr.Create(swarmEpic, swarmWorkers, swarmTarget)
-	if err != nil {
-		return fmt.Errorf("creating swarm: %w", err)
+	integration := fmt.Sprintf("swarm/%s", swarmEpic)
+
+	// Output
+	fmt.Printf("%s Created swarm %s\n\n", style.Bold.Render("✓"), swarmEpic)
+	fmt.Printf("  Epic:        %s\n", swarmEpic)
+	fmt.Printf("  Rig:         %s\n", rigName)
+	fmt.Printf("  Base commit: %s\n", truncate(baseCommit, 8))
+	fmt.Printf("  Integration: %s\n", integration)
+	fmt.Printf("  Target:      %s\n", swarmTarget)
+	fmt.Printf("  Workers:     %s\n", strings.Join(swarmWorkers, ", "))
+
+	// If workers specified, assign them to tasks
+	if len(swarmWorkers) > 0 {
+		fmt.Printf("\nNote: Worker assignment to tasks is handled during swarm start\n")
 	}
 
 	// Start if requested
 	if swarmStart {
-		if err := mgr.Start(swarmEpic); err != nil {
-			return fmt.Errorf("starting swarm: %w", err)
+		// Get swarm status to find ready tasks
+		statusCmd := exec.Command("bd", "swarm", "status", swarmEpic, "--json")
+		statusCmd.Dir = r.Path
+		var statusOut bytes.Buffer
+		statusCmd.Stdout = &statusOut
+		if err := statusCmd.Run(); err != nil {
+			return fmt.Errorf("getting swarm status: %w", err)
 		}
-	}
 
-	// Get the updated swarm (just created, error would be surprising)
-	sw, _ = mgr.GetSwarm(swarmEpic)
-
-	// Save to store
-	store.Swarms[swarmEpic] = sw
-	if err := store.Save(); err != nil {
-		return fmt.Errorf("saving swarm store: %w", err)
-	}
-
-	// Output
-	fmt.Printf("%s Created swarm %s\n\n", style.Bold.Render("✓"), sw.ID)
-	fmt.Printf("  Epic:        %s\n", sw.EpicID)
-	fmt.Printf("  Rig:         %s\n", sw.RigName)
-	fmt.Printf("  Base commit: %s\n", truncate(sw.BaseCommit, 8))
-	fmt.Printf("  Integration: %s\n", sw.Integration)
-	fmt.Printf("  Target:      %s\n", sw.TargetBranch)
-	fmt.Printf("  State:       %s\n", sw.State)
-	fmt.Printf("  Workers:     %s\n", strings.Join(sw.Workers, ", "))
-	fmt.Printf("  Tasks:       %d\n", len(sw.Tasks))
-
-	if !swarmStart {
+		// Parse status to dispatch workers
+		var status struct {
+			Ready []struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"ready"`
+		}
+		if err := json.Unmarshal(statusOut.Bytes(), &status); err == nil && len(status.Ready) > 0 {
+			fmt.Printf("\nReady front has %d tasks available\n", len(status.Ready))
+			if len(swarmWorkers) > 0 {
+				// Spawn workers for ready tasks
+				fmt.Printf("Spawning workers...\n")
+				_ = spawnSwarmWorkersFromBeads(r, townRoot, swarmEpic, swarmWorkers, status.Ready)
+			}
+		}
+	} else {
 		fmt.Printf("\n  %s\n", style.Dim.Render("Use --start or 'gt swarm start' to activate"))
 	}
 
@@ -330,60 +321,83 @@ func runSwarmCreate(cmd *cobra.Command, args []string) error {
 func runSwarmStart(cmd *cobra.Command, args []string) error {
 	swarmID := args[0]
 
-	// Find the swarm and its rig
-	rigs, _, err := getAllRigs()
+	// Find the swarm's rig
+	rigs, townRoot, err := getAllRigs()
 	if err != nil {
 		return err
 	}
 
-	var store *SwarmStore
 	var foundRig *rig.Rig
-
 	for _, r := range rigs {
-		s, err := LoadSwarmStore(r.Path)
-		if err != nil {
-			continue
-		}
-
-		if _, exists := s.Swarms[swarmID]; exists {
-			store = s
+		// Check if swarm exists in this rig by querying beads
+		checkCmd := exec.Command("bd", "show", swarmID, "--json")
+		checkCmd.Dir = r.Path
+		if err := checkCmd.Run(); err == nil {
 			foundRig = r
 			break
 		}
 	}
 
-	if store == nil {
+	if foundRig == nil {
 		return fmt.Errorf("swarm '%s' not found", swarmID)
 	}
 
-	sw := store.Swarms[swarmID]
+	// Get swarm status from beads
+	statusCmd := exec.Command("bd", "swarm", "status", swarmID, "--json")
+	statusCmd.Dir = foundRig.Path
+	var stdout bytes.Buffer
+	statusCmd.Stdout = &stdout
 
-	if sw.State != swarm.SwarmCreated {
-		return fmt.Errorf("swarm is not in 'created' state (current: %s)", sw.State)
+	if err := statusCmd.Run(); err != nil {
+		return fmt.Errorf("getting swarm status: %w", err)
 	}
 
-	sw.State = swarm.SwarmActive
-	sw.UpdatedAt = time.Now()
-
-	if err := store.Save(); err != nil {
-		return fmt.Errorf("saving state: %w", err)
+	var status struct {
+		EpicID string `json:"epic_id"`
+		Ready  []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"ready"`
+		Active []struct {
+			ID       string `json:"id"`
+			Assignee string `json:"assignee"`
+		} `json:"active"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		return fmt.Errorf("parsing swarm status: %w", err)
 	}
 
-	fmt.Printf("%s Swarm %s started\n", style.Bold.Render("✓"), swarmID)
+	if len(status.Active) > 0 {
+		fmt.Printf("Swarm already has %d active tasks\n", len(status.Active))
+	}
 
-	// Spawn sessions for workers with tasks
-	if len(sw.Workers) > 0 && len(sw.Tasks) > 0 {
+	if len(status.Ready) == 0 {
+		fmt.Println("No ready tasks to dispatch")
+		return nil
+	}
+
+	fmt.Printf("%s Swarm %s starting with %d ready tasks\n", style.Bold.Render("✓"), swarmID, len(status.Ready))
+
+	// If workers were specified in create, use them; otherwise prompt user
+	if len(swarmWorkers) > 0 {
 		fmt.Printf("\nSpawning workers...\n")
-		if err := spawnSwarmWorkers(foundRig, sw); err != nil {
-			style.PrintWarning("failed to spawn some workers: %v", err)
+		_ = spawnSwarmWorkersFromBeads(foundRig, townRoot, swarmID, swarmWorkers, status.Ready)
+	} else {
+		fmt.Printf("\nReady tasks:\n")
+		for _, task := range status.Ready {
+			fmt.Printf("  ○ %s: %s\n", task.ID, task.Title)
 		}
+		fmt.Printf("\nUse 'gt sling <task-id> <rig>/<worker>' to assign tasks\n")
 	}
 
 	return nil
 }
 
-// spawnSwarmWorkers spawns sessions for swarm workers with task assignments.
-func spawnSwarmWorkers(r *rig.Rig, sw *swarm.Swarm) error {
+// spawnSwarmWorkersFromBeads spawns sessions for swarm workers using beads task list.
+func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, workers []string, tasks []struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}) error {
 	t := tmux.NewTmux()
 	sessMgr := session.NewManager(t, r)
 	polecatGit := git.NewGit(r.Path)
@@ -391,26 +405,25 @@ func spawnSwarmWorkers(r *rig.Rig, sw *swarm.Swarm) error {
 
 	// Pair workers with tasks (round-robin if more tasks than workers)
 	workerIdx := 0
-	for i, task := range sw.Tasks {
-		if task.State != swarm.TaskPending {
-			continue
-		}
-
-		if workerIdx >= len(sw.Workers) {
+	for _, task := range tasks {
+		if workerIdx >= len(workers) {
 			break // No more workers
 		}
 
-		worker := sw.Workers[workerIdx]
+		worker := workers[workerIdx]
 		workerIdx++
 
-		// Assign task to worker in swarm state
-		sw.Tasks[i].Assignee = worker
-		sw.Tasks[i].State = swarm.TaskAssigned
+		// Use gt sling to assign task to worker (this updates beads)
+		slingCmd := exec.Command("gt", "sling", task.ID, fmt.Sprintf("%s/%s", r.Name, worker))
+		slingCmd.Dir = townRoot
+		if err := slingCmd.Run(); err != nil {
+			style.PrintWarning("  couldn't sling %s to %s: %v", task.ID, worker, err)
 
-		// Update polecat state
-		if err := polecatMgr.AssignIssue(worker, task.IssueID); err != nil {
-			style.PrintWarning("  couldn't assign %s to %s: %v", task.IssueID, worker, err)
-			continue
+			// Fallback: update polecat state directly
+			if err := polecatMgr.AssignIssue(worker, task.ID); err != nil {
+				style.PrintWarning("  couldn't assign %s to %s: %v", task.ID, worker, err)
+				continue
+			}
 		}
 
 		// Check if already running
@@ -429,11 +442,11 @@ func spawnSwarmWorkers(r *rig.Rig, sw *swarm.Swarm) error {
 
 		// Inject work assignment
 		context := fmt.Sprintf("[SWARM] You are part of swarm %s.\n\nAssigned task: %s\nTitle: %s\n\nWork on this task. When complete, commit and signal DONE.",
-			sw.ID, task.IssueID, task.Title)
+			swarmID, task.ID, task.Title)
 		if err := sessMgr.Inject(worker, context); err != nil {
 			style.PrintWarning("  couldn't inject to %s: %v", worker, err)
 		} else {
-			fmt.Printf("  %s → %s ✓\n", worker, task.IssueID)
+			fmt.Printf("  %s → %s ✓\n", worker, task.ID)
 		}
 	}
 
@@ -443,87 +456,42 @@ func spawnSwarmWorkers(r *rig.Rig, sw *swarm.Swarm) error {
 func runSwarmStatus(cmd *cobra.Command, args []string) error {
 	swarmID := args[0]
 
-	// Find the swarm across all rigs
+	// Find the swarm's rig by trying to show it in each rig
 	rigs, _, err := getAllRigs()
 	if err != nil {
 		return err
 	}
+	if len(rigs) == 0 {
+		return fmt.Errorf("no rigs found")
+	}
 
-	var foundSwarm *swarm.Swarm
+	// Find which rig has this swarm
 	var foundRig *rig.Rig
-
 	for _, r := range rigs {
-		store, err := LoadSwarmStore(r.Path)
-		if err != nil {
-			continue
-		}
-
-		if sw, exists := store.Swarms[swarmID]; exists {
-			foundSwarm = sw
+		checkCmd := exec.Command("bd", "show", swarmID, "--json")
+		checkCmd.Dir = r.Path
+		if err := checkCmd.Run(); err == nil {
 			foundRig = r
 			break
 		}
 	}
 
-	if foundSwarm == nil {
-		return fmt.Errorf("swarm '%s' not found", swarmID)
+	if foundRig == nil {
+		return fmt.Errorf("swarm '%s' not found in any rig", swarmID)
 	}
 
-	// JSON output
+	// Use bd swarm status to get swarm info from beads
+	bdArgs := []string{"swarm", "status", swarmID}
 	if swarmStatusJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(foundSwarm)
+		bdArgs = append(bdArgs, "--json")
 	}
 
-	// Human-readable output
-	sw := foundSwarm
-	summary := sw.Summary()
+	bdCmd := exec.Command("bd", bdArgs...)
+	bdCmd.Dir = foundRig.Path
+	bdCmd.Stdout = os.Stdout
+	bdCmd.Stderr = os.Stderr
 
-	fmt.Printf("%s %s\n\n", style.Bold.Render("Swarm:"), sw.ID)
-	fmt.Printf("  Rig:         %s\n", foundRig.Name)
-	fmt.Printf("  Epic:        %s\n", sw.EpicID)
-	fmt.Printf("  State:       %s\n", stateStyle(sw.State))
-	fmt.Printf("  Created:     %s\n", sw.CreatedAt.Format(time.RFC3339))
-	fmt.Printf("  Updated:     %s\n", sw.UpdatedAt.Format(time.RFC3339))
-	fmt.Printf("  Base commit: %s\n", truncate(sw.BaseCommit, 8))
-	fmt.Printf("  Integration: %s\n", sw.Integration)
-	fmt.Printf("  Target:      %s\n", sw.TargetBranch)
-
-	fmt.Printf("\n%s\n", style.Bold.Render("Workers:"))
-	if len(sw.Workers) == 0 {
-		fmt.Printf("  %s\n", style.Dim.Render("(none assigned)"))
-	} else {
-		for _, w := range sw.Workers {
-			fmt.Printf("  • %s\n", w)
-		}
-	}
-
-	fmt.Printf("\n%s %d%% (%d/%d tasks merged)\n",
-		style.Bold.Render("Progress:"),
-		sw.Progress(),
-		summary.MergedTasks,
-		summary.TotalTasks)
-
-	fmt.Printf("\n%s\n", style.Bold.Render("Tasks:"))
-	if len(sw.Tasks) == 0 {
-		fmt.Printf("  %s\n", style.Dim.Render("(no tasks loaded)"))
-	} else {
-		for _, task := range sw.Tasks {
-			status := taskStateIcon(task.State)
-			assignee := ""
-			if task.Assignee != "" {
-				assignee = fmt.Sprintf(" [%s]", task.Assignee)
-			}
-			fmt.Printf("  %s %s: %s%s\n", status, task.IssueID, task.Title, assignee)
-		}
-	}
-
-	if sw.Error != "" {
-		fmt.Printf("\n%s %s\n", style.Bold.Render("Error:"), sw.Error)
-	}
-
-	return nil
+	return bdCmd.Run()
 }
 
 func runSwarmList(cmd *cobra.Command, args []string) error {
@@ -547,27 +515,69 @@ func runSwarmList(cmd *cobra.Command, args []string) error {
 		rigs = filtered
 	}
 
-	// Collect all swarms
-	type swarmEntry struct {
-		Swarm *swarm.Swarm
-		Rig   string
+	if len(rigs) == 0 {
+		fmt.Println("No rigs found.")
+		return nil
 	}
-	var allSwarms []swarmEntry
+
+	// Use bd list --mol-type=swarm to find swarm molecules
+	bdArgs := []string{"list", "--mol-type=swarm", "--type=epic"}
+	if swarmListJSON {
+		bdArgs = append(bdArgs, "--json")
+	}
+
+	// Collect swarms from all rigs
+	type swarmListEntry struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Status string `json:"status"`
+		Rig    string `json:"rig"`
+	}
+	var allSwarms []swarmListEntry
 
 	for _, r := range rigs {
-		store, err := LoadSwarmStore(r.Path)
-		if err != nil {
+		bdCmd := exec.Command("bd", bdArgs...)
+		bdCmd.Dir = r.Path
+		var stdout bytes.Buffer
+		bdCmd.Stdout = &stdout
+
+		if err := bdCmd.Run(); err != nil {
 			continue
 		}
 
-		for _, sw := range store.Swarms {
-			// Filter by status if specified
-			if swarmListStatus != "" {
-				if !matchesStatus(sw.State, swarmListStatus) {
-					continue
+		if swarmListJSON {
+			// Parse JSON output
+			var issues []struct {
+				ID     string `json:"id"`
+				Title  string `json:"title"`
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &issues); err == nil {
+				for _, issue := range issues {
+					allSwarms = append(allSwarms, swarmListEntry{
+						ID:     issue.ID,
+						Title:  issue.Title,
+						Status: issue.Status,
+						Rig:    r.Name,
+					})
 				}
 			}
-			allSwarms = append(allSwarms, swarmEntry{Swarm: sw, Rig: r.Name})
+		} else {
+			// Parse line output - each line is an issue
+			lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+			for _, line := range lines {
+				if line == "" {
+					continue
+				}
+				// Filter by status if specified
+				if swarmListStatus != "" && !strings.Contains(strings.ToLower(line), swarmListStatus) {
+					continue
+				}
+				allSwarms = append(allSwarms, swarmListEntry{
+					ID:  line,
+					Rig: r.Name,
+				})
+			}
 		}
 	}
 
@@ -581,23 +591,15 @@ func runSwarmList(cmd *cobra.Command, args []string) error {
 	// Human-readable output
 	if len(allSwarms) == 0 {
 		fmt.Println("No swarms found.")
+		fmt.Println("Create a swarm with: gt swarm create <rig> --epic <epic-id>")
 		return nil
 	}
 
 	fmt.Printf("%s\n\n", style.Bold.Render("Swarms"))
 	for _, entry := range allSwarms {
-		sw := entry.Swarm
-		summary := sw.Summary()
-		fmt.Printf("  %s %s [%s]\n",
-			stateStyle(sw.State),
-			sw.ID,
-			entry.Rig)
-		fmt.Printf("    %d workers, %d/%d tasks merged (%d%%)\n",
-			summary.WorkerCount,
-			summary.MergedTasks,
-			summary.TotalTasks,
-			sw.Progress())
+		fmt.Printf("  %s [%s]\n", entry.ID, entry.Rig)
 	}
+	fmt.Printf("\nUse 'gt swarm status <id>' for detailed status.\n")
 
 	return nil
 }
@@ -605,24 +607,18 @@ func runSwarmList(cmd *cobra.Command, args []string) error {
 func runSwarmLand(cmd *cobra.Command, args []string) error {
 	swarmID := args[0]
 
-	// Find the swarm
+	// Find the swarm's rig
 	rigs, townRoot, err := getAllRigs()
 	if err != nil {
 		return err
 	}
 
 	var foundRig *rig.Rig
-	var store *SwarmStore
-
 	for _, r := range rigs {
-		s, err := LoadSwarmStore(r.Path)
-		if err != nil {
-			continue
-		}
-
-		if _, exists := s.Swarms[swarmID]; exists {
+		checkCmd := exec.Command("bd", "show", swarmID, "--json")
+		checkCmd.Dir = r.Path
+		if err := checkCmd.Run(); err == nil {
 			foundRig = r
-			store = s
 			break
 		}
 	}
@@ -631,27 +627,48 @@ func runSwarmLand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("swarm '%s' not found", swarmID)
 	}
 
-	sw := store.Swarms[swarmID]
+	// Check swarm status - all children should be closed
+	statusCmd := exec.Command("bd", "swarm", "status", swarmID, "--json")
+	statusCmd.Dir = foundRig.Path
+	var stdout bytes.Buffer
+	statusCmd.Stdout = &stdout
 
-	// Check state - allow merging or active
-	if sw.State != swarm.SwarmMerging && sw.State != swarm.SwarmActive {
-		return fmt.Errorf("swarm must be in 'active' or 'merging' state to land (current: %s)", sw.State)
+	if err := statusCmd.Run(); err != nil {
+		return fmt.Errorf("getting swarm status: %w", err)
 	}
 
-	// Create manager and land
+	var status struct {
+		Ready       []struct{ ID string } `json:"ready"`
+		Active      []struct{ ID string } `json:"active"`
+		Blocked     []struct{ ID string } `json:"blocked"`
+		Completed   []struct{ ID string } `json:"completed"`
+		TotalIssues int                   `json:"total_issues"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		return fmt.Errorf("parsing swarm status: %w", err)
+	}
+
+	// Check if all tasks are complete
+	if len(status.Ready) > 0 || len(status.Active) > 0 || len(status.Blocked) > 0 {
+		return fmt.Errorf("swarm has incomplete tasks: %d ready, %d active, %d blocked",
+			len(status.Ready), len(status.Active), len(status.Blocked))
+	}
+
+	fmt.Printf("Landing swarm %s to main...\n", swarmID)
+
+	// Use swarm manager for the actual landing (git operations)
 	mgr := swarm.NewManager(foundRig)
-	// Reload swarm into manager (recreates from store, errors non-fatal)
-	_, _ = mgr.Create(sw.EpicID, sw.Workers, sw.TargetBranch)
-	_ = mgr.UpdateState(sw.ID, sw.State)
+	sw, err := mgr.Create(swarmID, nil, "main")
+	if err != nil {
+		return fmt.Errorf("loading swarm for landing: %w", err)
+	}
 
-	fmt.Printf("Landing swarm %s to %s...\n", swarmID, sw.TargetBranch)
-
-	// First, merge integration branch to main
+	// Execute landing to main
 	if err := mgr.LandToMain(swarmID); err != nil {
 		return fmt.Errorf("landing swarm: %w", err)
 	}
 
-	// Execute full landing protocol (stop sessions, audit, cleanup)
+	// Execute full landing protocol
 	config := swarm.LandingConfig{
 		TownRoot: townRoot,
 	}
@@ -664,14 +681,14 @@ func runSwarmLand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("landing failed: %s", result.Error)
 	}
 
-	// Update store
-	sw.State = swarm.SwarmLanded
-	sw.UpdatedAt = time.Now()
-	if err := store.Save(); err != nil {
-		return fmt.Errorf("saving state: %w", err)
+	// Close the swarm epic in beads
+	closeCmd := exec.Command("bd", "close", swarmID, "--reason", "Swarm landed to main")
+	closeCmd.Dir = foundRig.Path
+	if err := closeCmd.Run(); err != nil {
+		style.PrintWarning("couldn't close swarm epic in beads: %v", err)
 	}
 
-	fmt.Printf("%s Swarm %s landed to %s\n", style.Bold.Render("✓"), swarmID, sw.TargetBranch)
+	fmt.Printf("%s Swarm %s landed to main\n", style.Bold.Render("✓"), sw.ID)
 	fmt.Printf("  Sessions stopped: %d\n", result.SessionsStopped)
 	fmt.Printf("  Branches cleaned: %d\n", result.BranchesCleaned)
 	return nil
@@ -680,41 +697,49 @@ func runSwarmLand(cmd *cobra.Command, args []string) error {
 func runSwarmCancel(cmd *cobra.Command, args []string) error {
 	swarmID := args[0]
 
-	// Find the swarm
+	// Find the swarm's rig
 	rigs, _, err := getAllRigs()
 	if err != nil {
 		return err
 	}
 
-	var store *SwarmStore
-
+	var foundRig *rig.Rig
 	for _, r := range rigs {
-		s, err := LoadSwarmStore(r.Path)
-		if err != nil {
-			continue
-		}
-
-		if _, exists := s.Swarms[swarmID]; exists {
-			store = s
+		checkCmd := exec.Command("bd", "show", swarmID, "--json")
+		checkCmd.Dir = r.Path
+		if err := checkCmd.Run(); err == nil {
+			foundRig = r
 			break
 		}
 	}
 
-	if store == nil {
+	if foundRig == nil {
 		return fmt.Errorf("swarm '%s' not found", swarmID)
 	}
 
-	sw := store.Swarms[swarmID]
-
-	if sw.State.IsTerminal() {
-		return fmt.Errorf("swarm already in terminal state: %s", sw.State)
+	// Check if swarm is already closed
+	checkCmd := exec.Command("bd", "show", swarmID, "--json")
+	checkCmd.Dir = foundRig.Path
+	var stdout bytes.Buffer
+	checkCmd.Stdout = &stdout
+	if err := checkCmd.Run(); err != nil {
+		return fmt.Errorf("checking swarm status: %w", err)
 	}
 
-	sw.State = swarm.SwarmCancelled
-	sw.UpdatedAt = time.Now()
+	var issue struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issue); err == nil {
+		if issue.Status == "closed" {
+			return fmt.Errorf("swarm already closed")
+		}
+	}
 
-	if err := store.Save(); err != nil {
-		return fmt.Errorf("saving state: %w", err)
+	// Close the swarm epic in beads with cancelled reason
+	closeCmd := exec.Command("bd", "close", swarmID, "--reason", "Swarm cancelled")
+	closeCmd.Dir = foundRig.Path
+	if err := closeCmd.Run(); err != nil {
+		return fmt.Errorf("closing swarm: %w", err)
 	}
 
 	fmt.Printf("%s Swarm %s cancelled\n", style.Bold.Render("✓"), swarmID)
@@ -728,60 +753,4 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
-}
-
-func stateStyle(state swarm.SwarmState) string {
-	switch state {
-	case swarm.SwarmCreated:
-		return style.Dim.Render("○ created")
-	case swarm.SwarmActive:
-		return style.Bold.Render("● active")
-	case swarm.SwarmMerging:
-		return style.Bold.Render("⟳ merging")
-	case swarm.SwarmLanded:
-		return style.Bold.Render("✓ landed")
-	case swarm.SwarmFailed:
-		return style.Dim.Render("✗ failed")
-	case swarm.SwarmCancelled:
-		return style.Dim.Render("⊘ cancelled")
-	default:
-		return string(state)
-	}
-}
-
-func taskStateIcon(state swarm.TaskState) string {
-	switch state {
-	case swarm.TaskPending:
-		return style.Dim.Render("○")
-	case swarm.TaskAssigned:
-		return style.Dim.Render("◐")
-	case swarm.TaskInProgress:
-		return style.Bold.Render("●")
-	case swarm.TaskReview:
-		return style.Bold.Render("◉")
-	case swarm.TaskMerged:
-		return style.Bold.Render("✓")
-	case swarm.TaskFailed:
-		return style.Dim.Render("✗")
-	default:
-		return "?"
-	}
-}
-
-func matchesStatus(state swarm.SwarmState, filter string) bool {
-	filter = strings.ToLower(filter)
-	switch filter {
-	case "active":
-		return state.IsActive()
-	case "landed":
-		return state == swarm.SwarmLanded
-	case "cancelled":
-		return state == swarm.SwarmCancelled
-	case "failed":
-		return state == swarm.SwarmFailed
-	case "terminal":
-		return state.IsTerminal()
-	default:
-		return string(state) == filter
-	}
 }
