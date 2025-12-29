@@ -753,11 +753,9 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		}
 
 		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
+		// Note: ConfigureGasTownSession includes cycle bindings
 		theme := getThemeForRig(rigName)
 		_ = t.ConfigureGasTownSession(sessionID, theme, rigName, name, "crew")
-
-		// Set up C-b n/p keybindings for crew session cycling (non-fatal)
-		_ = t.SetCrewCycleBindings(sessionID)
 
 		// Wait for shell to be ready after session creation
 		if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
@@ -887,11 +885,9 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 	_ = t.SetEnvironment(sessionID, "GT_CREW", crewName)
 
 	// Apply rig-based theming
+	// Note: ConfigureGasTownSession includes cycle bindings
 	theme := getThemeForRig(rigName)
 	_ = t.ConfigureGasTownSession(sessionID, theme, rigName, crewName, "crew")
-
-	// Set up C-b n/p keybindings for crew session cycling
-	_ = t.SetCrewCycleBindings(sessionID)
 
 	// Wait for shell to be ready
 	if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {

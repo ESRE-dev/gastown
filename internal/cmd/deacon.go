@@ -185,11 +185,9 @@ func startDeaconSession(t *tmux.Tmux) error {
 	_ = t.SetEnvironment(DeaconSessionName, "BD_ACTOR", "deacon")
 
 	// Apply Deacon theme (non-fatal: theming failure doesn't affect operation)
+	// Note: ConfigureGasTownSession includes cycle bindings
 	theme := tmux.DeaconTheme()
 	_ = t.ConfigureGasTownSession(DeaconSessionName, theme, "", "Deacon", "health-check")
-
-	// Set up C-b n/p keybindings for town session cycling (non-fatal)
-	_ = t.SetTownCycleBindings(DeaconSessionName)
 
 	// Launch Claude directly (no shell respawn loop)
 	// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat
