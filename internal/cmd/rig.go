@@ -93,6 +93,24 @@ Examples:
 	RunE: runRigReset,
 }
 
+var rigBootCmd = &cobra.Command{
+	Use:   "boot <rig>",
+	Short: "Start witness and refinery for a rig",
+	Long: `Start the witness and refinery agents for a rig.
+
+This is the inverse of 'gt rig shutdown'. It starts:
+- The witness (if not already running)
+- The refinery (if not already running)
+
+Polecats are NOT started by this command - they are spawned
+on demand when work is assigned.
+
+Examples:
+  gt rig boot gastown`,
+	Args: cobra.ExactArgs(1),
+	RunE: runRigBoot,
+}
+
 var rigShutdownCmd = &cobra.Command{
 	Use:   "shutdown <rig>",
 	Short: "Gracefully stop all rig agents",
@@ -135,6 +153,7 @@ var (
 func init() {
 	rootCmd.AddCommand(rigCmd)
 	rigCmd.AddCommand(rigAddCmd)
+	rigCmd.AddCommand(rigBootCmd)
 	rigCmd.AddCommand(rigListCmd)
 	rigCmd.AddCommand(rigRemoveCmd)
 	rigCmd.AddCommand(rigResetCmd)
@@ -531,6 +550,83 @@ func assigneeToSessionName(assignee string) (sessionName string, isPersistent bo
 func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func runRigBoot(cmd *cobra.Command, args []string) error {
+	rigName := args[0]
+
+	// Find workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load rigs config and get rig
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+	r, err := rigMgr.GetRig(rigName)
+	if err != nil {
+		return fmt.Errorf("rig '%s' not found", rigName)
+	}
+
+	fmt.Printf("Booting rig %s...\n", style.Bold.Render(rigName))
+
+	var started []string
+	var skipped []string
+
+	t := tmux.NewTmux()
+
+	// 1. Start the witness
+	// Check actual tmux session, not state file (may be stale)
+	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
+	witnessRunning, _ := t.HasSession(witnessSession)
+	if witnessRunning {
+		skipped = append(skipped, "witness (already running)")
+	} else {
+		fmt.Printf("  Starting witness...\n")
+		// Use ensureWitnessSession to create tmux session (same as gt witness start)
+		created, err := ensureWitnessSession(rigName, r)
+		if err != nil {
+			return fmt.Errorf("starting witness: %w", err)
+		}
+		if created {
+			// Update manager state to reflect running session
+			witMgr := witness.NewManager(r)
+			_ = witMgr.Start() // non-fatal: state file update
+			started = append(started, "witness")
+		}
+	}
+
+	// 2. Start the refinery
+	// Check actual tmux session, not state file (may be stale)
+	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
+	refineryRunning, _ := t.HasSession(refinerySession)
+	if refineryRunning {
+		skipped = append(skipped, "refinery (already running)")
+	} else {
+		fmt.Printf("  Starting refinery...\n")
+		refMgr := refinery.NewManager(r)
+		if err := refMgr.Start(false); err != nil { // false = background mode
+			return fmt.Errorf("starting refinery: %w", err)
+		}
+		started = append(started, "refinery")
+	}
+
+	// Report results
+	if len(started) > 0 {
+		fmt.Printf("%s Started: %s\n", style.Success.Render("✓"), strings.Join(started, ", "))
+	}
+	if len(skipped) > 0 {
+		fmt.Printf("%s Skipped: %s\n", style.Dim.Render("•"), strings.Join(skipped, ", "))
+	}
+
+	return nil
 }
 
 func runRigShutdown(cmd *cobra.Command, args []string) error {
