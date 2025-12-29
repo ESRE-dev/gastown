@@ -674,6 +674,23 @@ func (t *Tmux) SetCrewCycleBindings(session string) error {
 	return nil
 }
 
+// SetTownCycleBindings sets up C-b n/p to cycle through town-level sessions.
+// Town-level sessions are Mayor and Deacon - the global coordinators.
+// This allows quick switching between them without using the session picker.
+func (t *Tmux) SetTownCycleBindings(session string) error {
+	// C-b n → gt town next (switch to next town session)
+	if _, err := t.run("bind-key", "-T", "prefix", "n",
+		"run-shell", "gt town next --session '#{session_name}'"); err != nil {
+		return err
+	}
+	// C-b p → gt town prev (switch to previous town session)
+	if _, err := t.run("bind-key", "-T", "prefix", "p",
+		"run-shell", "gt town prev --session '#{session_name}'"); err != nil {
+		return err
+	}
+	return nil
+}
+
 // SetFeedBinding configures C-b a to jump to the activity feed window.
 // This creates the feed window if it doesn't exist, or switches to it if it does.
 // Uses `gt feed --window` which handles both creation and switching.
