@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -371,34 +372,13 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 }
 
 // sessionToGTRole converts a session name to a GT_ROLE value.
+// Uses session.ParseSessionName for consistent parsing across the codebase.
 func sessionToGTRole(sessionName string) string {
-	switch {
-	case sessionName == "gt-mayor":
-		return "mayor"
-	case sessionName == "gt-deacon":
-		return "deacon"
-	case strings.Contains(sessionName, "-crew-"):
-		// gt-<rig>-crew-<name> -> <rig>/crew/<name>
-		parts := strings.Split(sessionName, "-")
-		for i, p := range parts {
-			if p == "crew" && i > 1 && i < len(parts)-1 {
-				rig := strings.Join(parts[1:i], "-")
-				name := strings.Join(parts[i+1:], "-")
-				return fmt.Sprintf("%s/crew/%s", rig, name)
-			}
-		}
-		return ""
-	case strings.HasSuffix(sessionName, "-witness"):
-		rig := strings.TrimPrefix(sessionName, "gt-")
-		rig = strings.TrimSuffix(rig, "-witness")
-		return fmt.Sprintf("%s/witness", rig)
-	case strings.HasSuffix(sessionName, "-refinery"):
-		rig := strings.TrimPrefix(sessionName, "gt-")
-		rig = strings.TrimSuffix(rig, "-refinery")
-		return fmt.Sprintf("%s/refinery", rig)
-	default:
+	identity, err := session.ParseSessionName(sessionName)
+	if err != nil {
 		return ""
 	}
+	return identity.GTRole()
 }
 
 // detectTownRootFromCwd walks up from the current directory to find the town root.
