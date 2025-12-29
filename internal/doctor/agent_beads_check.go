@@ -16,10 +16,7 @@ import (
 // - Crew workers - stored in each rig's beads
 //
 // Agent beads are created by gt rig add (see gt-h3hak, gt-pinkq) and gt crew add.
-//
-// NOTE: Currently, the beads library validates that agent IDs must start
-// with 'gt-'. Rigs with different prefixes (like 'bd-') cannot have agent
-// beads created until that validation is fixed in the beads repo.
+// Each rig uses its configured prefix (e.g., "gt-" for gastown, "bd-" for beads).
 type AgentBeadsCheck struct {
 	FixableCheck
 }
@@ -86,22 +83,14 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Check each rig for its agents
-	var skipped []string
 	for prefix, rigName := range prefixToRig {
-		// Skip non-gt prefixes - beads library currently requires gt- prefix for agents
-		// TODO: Remove this once beads validation is fixed to accept any prefix
-		if prefix != "gt" {
-			skipped = append(skipped, fmt.Sprintf("%s (%s-*)", rigName, prefix))
-			continue
-		}
-
 		// Get beads client for this rig
 		rigBeadsPath := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig")
 		bd := beads.New(rigBeadsPath)
 
 		// Check rig-specific agents (using canonical naming: prefix-rig-role-name)
-		witnessID := beads.WitnessBeadID(rigName)
-		refineryID := beads.RefineryBeadID(rigName)
+		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
+		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
 
 		if _, err := bd.Show(witnessID); err != nil {
 			missing = append(missing, witnessID)
@@ -116,7 +105,7 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		// Check crew worker agents
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
-			crewID := beads.CrewBeadID(rigName, workerName)
+			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
 			if _, err := bd.Show(crewID); err != nil {
 				missing = append(missing, crewID)
 			}
@@ -141,31 +130,18 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	if len(missing) == 0 {
-		msg := fmt.Sprintf("All %d agent beads exist", checked)
-		var details []string
-		if len(skipped) > 0 {
-			details = append(details, fmt.Sprintf("Skipped %d rig(s) with non-gt prefix (beads library limitation): %s",
-				len(skipped), strings.Join(skipped, ", ")))
-		}
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: msg,
-			Details: details,
+			Message: fmt.Sprintf("All %d agent beads exist", checked),
 		}
-	}
-
-	details := missing
-	if len(skipped) > 0 {
-		details = append(details, fmt.Sprintf("Skipped %d rig(s) with non-gt prefix: %s",
-			len(skipped), strings.Join(skipped, ", ")))
 	}
 
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusError,
 		Message: fmt.Sprintf("%d agent bead(s) missing", len(missing)),
-		Details: details,
+		Details: missing,
 		FixHint: "Run 'gt doctor --fix' to create missing agent beads",
 	}
 }
@@ -207,16 +183,11 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 
 	// Create missing agents for each rig
 	for prefix, rigName := range prefixToRig {
-		// Skip non-gt prefixes - beads library currently requires gt- prefix for agents
-		if prefix != "gt" {
-			continue
-		}
-
 		rigBeadsPath := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig")
 		bd := beads.New(rigBeadsPath)
 
 		// Create rig-specific agents if missing (using canonical naming: prefix-rig-role-name)
-		witnessID := beads.WitnessBeadID(rigName)
+		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
 		if _, err := bd.Show(witnessID); err != nil {
 			fields := &beads.AgentFields{
 				RoleType:   "witness",
@@ -230,7 +201,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			}
 		}
 
-		refineryID := beads.RefineryBeadID(rigName)
+		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
 		if _, err := bd.Show(refineryID); err != nil {
 			fields := &beads.AgentFields{
 				RoleType:   "refinery",
@@ -247,7 +218,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		// Create crew worker agents if missing
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
-			crewID := beads.CrewBeadID(rigName, workerName)
+			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
 			if _, err := bd.Show(crewID); err != nil {
 				fields := &beads.AgentFields{
 					RoleType:   "crew",

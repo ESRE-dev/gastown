@@ -719,21 +719,28 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 //   - gt-gastown-crew-max (rig-level named agent)
 //   - gt-gastown-polecat-Toast (rig-level named agent)
 
-// AgentBeadID generates the canonical agent bead ID.
+// AgentBeadIDWithPrefix generates an agent bead ID using the specified prefix.
+// The prefix should NOT include the hyphen (e.g., "gt", "bd", not "gt-", "bd-").
 // For town-level agents (mayor, deacon), pass empty rig and name.
 // For rig-level singletons (witness, refinery), pass empty name.
 // For named agents (crew, polecat), pass all three.
-func AgentBeadID(rig, role, name string) string {
+func AgentBeadIDWithPrefix(prefix, rig, role, name string) string {
 	if rig == "" {
-		// Town-level agent: gt-mayor, gt-deacon
-		return "gt-" + role
+		// Town-level agent: prefix-mayor, prefix-deacon
+		return prefix + "-" + role
 	}
 	if name == "" {
-		// Rig-level singleton: gt-gastown-witness, gt-gastown-refinery
-		return "gt-" + rig + "-" + role
+		// Rig-level singleton: prefix-rig-witness, prefix-rig-refinery
+		return prefix + "-" + rig + "-" + role
 	}
-	// Rig-level named agent: gt-gastown-crew-max, gt-gastown-polecat-Toast
-	return "gt-" + rig + "-" + role + "-" + name
+	// Rig-level named agent: prefix-rig-role-name
+	return prefix + "-" + rig + "-" + role + "-" + name
+}
+
+// AgentBeadID generates the canonical agent bead ID using "gt" prefix.
+// For non-gastown rigs, use AgentBeadIDWithPrefix with the rig's configured prefix.
+func AgentBeadID(rig, role, name string) string {
+	return AgentBeadIDWithPrefix("gt", rig, role, name)
 }
 
 // MayorBeadID returns the Mayor agent bead ID.
@@ -746,24 +753,44 @@ func DeaconBeadID() string {
 	return "gt-deacon"
 }
 
-// WitnessBeadID returns the Witness agent bead ID for a rig.
+// WitnessBeadIDWithPrefix returns the Witness agent bead ID for a rig using the specified prefix.
+func WitnessBeadIDWithPrefix(prefix, rig string) string {
+	return AgentBeadIDWithPrefix(prefix, rig, "witness", "")
+}
+
+// WitnessBeadID returns the Witness agent bead ID for a rig using "gt" prefix.
 func WitnessBeadID(rig string) string {
-	return AgentBeadID(rig, "witness", "")
+	return WitnessBeadIDWithPrefix("gt", rig)
 }
 
-// RefineryBeadID returns the Refinery agent bead ID for a rig.
+// RefineryBeadIDWithPrefix returns the Refinery agent bead ID for a rig using the specified prefix.
+func RefineryBeadIDWithPrefix(prefix, rig string) string {
+	return AgentBeadIDWithPrefix(prefix, rig, "refinery", "")
+}
+
+// RefineryBeadID returns the Refinery agent bead ID for a rig using "gt" prefix.
 func RefineryBeadID(rig string) string {
-	return AgentBeadID(rig, "refinery", "")
+	return RefineryBeadIDWithPrefix("gt", rig)
 }
 
-// CrewBeadID returns a Crew worker agent bead ID.
+// CrewBeadIDWithPrefix returns a Crew worker agent bead ID using the specified prefix.
+func CrewBeadIDWithPrefix(prefix, rig, name string) string {
+	return AgentBeadIDWithPrefix(prefix, rig, "crew", name)
+}
+
+// CrewBeadID returns a Crew worker agent bead ID using "gt" prefix.
 func CrewBeadID(rig, name string) string {
-	return AgentBeadID(rig, "crew", name)
+	return CrewBeadIDWithPrefix("gt", rig, name)
 }
 
-// PolecatBeadID returns a Polecat agent bead ID.
+// PolecatBeadIDWithPrefix returns a Polecat agent bead ID using the specified prefix.
+func PolecatBeadIDWithPrefix(prefix, rig, name string) string {
+	return AgentBeadIDWithPrefix(prefix, rig, "polecat", name)
+}
+
+// PolecatBeadID returns a Polecat agent bead ID using "gt" prefix.
 func PolecatBeadID(rig, name string) string {
-	return AgentBeadID(rig, "polecat", name)
+	return PolecatBeadIDWithPrefix("gt", rig, name)
 }
 
 // ParseAgentBeadID parses an agent bead ID into its components.

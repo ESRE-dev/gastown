@@ -417,13 +417,13 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig boo
 	// Always create rig-specific agents (using canonical naming: prefix-rig-role-name)
 	agents = append(agents,
 		agentDef{
-			id:       beads.WitnessBeadID(rigName),
+			id:       beads.WitnessBeadIDWithPrefix(prefix, rigName),
 			roleType: "witness",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
 		},
 		agentDef{
-			id:       beads.RefineryBeadID(rigName),
+			id:       beads.RefineryBeadIDWithPrefix(prefix, rigName),
 			roleType: "refinery",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
