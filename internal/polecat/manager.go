@@ -724,17 +724,38 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 // Template variables {{rig}} and {{name}} are substituted with actual values.
 // This provides polecats with context about their role and available commands.
 func (m *Manager) installCLAUDETemplate(polecatPath, name string) error {
-	// Read template from mayor/rig/templates directory
-	// Templates live in the mayor's clone, not at rig root
-	templatePath := filepath.Join(m.rig.Path, "mayor", "rig", "templates", "polecat-CLAUDE.md")
-	content, err := os.ReadFile(templatePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Template doesn't exist - warn and skip (this is a setup issue)
-			fmt.Printf("Warning: polecat template not found at %s\n", templatePath)
-			return nil
+	// Try multiple template locations in order of precedence:
+	// 1. Rig-specific template: <rig>/mayor/rig/templates/polecat-CLAUDE.md
+	// 2. Gastown (canonical) template: <town>/gastown/mayor/rig/templates/polecat-CLAUDE.md
+	templatePaths := []string{
+		filepath.Join(m.rig.Path, "mayor", "rig", "templates", "polecat-CLAUDE.md"),
+	}
+
+	// Add gastown fallback if we can find the town root
+	if townRoot, err := findTownRoot(m.rig.Path); err == nil && townRoot != "" {
+		gasTownTemplate := filepath.Join(townRoot, "gastown", "mayor", "rig", "templates", "polecat-CLAUDE.md")
+		// Only add fallback if different from rig-specific path
+		if gasTownTemplate != templatePaths[0] {
+			templatePaths = append(templatePaths, gasTownTemplate)
 		}
-		return fmt.Errorf("reading template: %w", err)
+	}
+
+	var content []byte
+	for _, templatePath := range templatePaths {
+		var err error
+		content, err = os.ReadFile(templatePath)
+		if err == nil {
+			break // Found a template
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("reading template %s: %w", templatePath, err)
+		}
+	}
+
+	if content == nil {
+		// No template found in any location - warn and skip
+		fmt.Printf("Warning: polecat template not found (checked %d locations)\n", len(templatePaths))
+		return nil
 	}
 
 	// Substitute template variables
@@ -749,6 +770,27 @@ func (m *Manager) installCLAUDETemplate(polecatPath, name string) error {
 	}
 
 	return nil
+}
+
+// findTownRoot locates the Gas Town root directory by walking up from startDir.
+func findTownRoot(startDir string) (string, error) {
+	absDir, err := filepath.Abs(startDir)
+	if err != nil {
+		return "", err
+	}
+
+	current := absDir
+	for {
+		// Check for primary marker (mayor/town.json)
+		if _, err := os.Stat(filepath.Join(current, "mayor", "town.json")); err == nil {
+			return current, nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("town root not found")
+		}
+		current = parent
+	}
 }
 
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.

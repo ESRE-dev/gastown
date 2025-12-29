@@ -197,104 +197,273 @@ func outputStatusJSON(status TownStatus) error {
 
 func outputStatusText(status TownStatus) error {
 	// Header
-	fmt.Printf("%s %s\n", style.Bold.Render("⚙️  Gas Town:"), status.Name)
-	fmt.Printf("   Location: %s\n\n", style.Dim.Render(status.Location))
+	fmt.Printf("%s %s\n", style.Bold.Render("Town:"), status.Name)
+	fmt.Printf("%s\n\n", style.Dim.Render(status.Location))
 
-	// Global Agents (Mayor, Deacon)
-	fmt.Printf("%s\n", style.Bold.Render("Agents"))
-	for _, agent := range status.Agents {
-		statusStr := style.Success.Render("✓ running")
-		if !agent.Running {
-			statusStr = style.Error.Render("✗ stopped")
+	// Tree characters
+	const (
+		treeBranch = "├── "
+		treeLast   = "└── "
+		treeVert   = "│   "
+		treeSpace  = "    "
+	)
+
+	// Role icons
+	roleIcons := map[string]string{
+		"mayor":    "🎩",
+		"deacon":   "🔔",
+		"witness":  "👁",
+		"refinery": "🏭",
+		"crew":     "👷",
+		"polecat":  "😺",
+	}
+
+	// Global Agents (Mayor, Deacon) - these are town-level roles
+	hasRigs := len(status.Rigs) > 0
+	for i, agent := range status.Agents {
+		isLast := i == len(status.Agents)-1 && !hasRigs
+		prefix := treeBranch
+		if isLast {
+			prefix = treeLast
 		}
 
-		// Show hook bead and state from agent bead
-		hookInfo := ""
-		if agent.HookBead != "" {
-			hookInfo = fmt.Sprintf(" → %s", agent.HookBead)
-			if agent.WorkTitle != "" {
-				// Truncate title if too long
-				title := agent.WorkTitle
-				if len(title) > 30 {
-					title = title[:27] + "..."
+		icon := roleIcons[agent.Role]
+		if icon == "" {
+			icon = roleIcons[agent.Name] // fallback to name
+		}
+
+		roleLabel := style.Bold.Render(fmt.Sprintf("%s %s", icon, capitalizeFirst(agent.Name)))
+		fmt.Printf("%s%s\n", prefix, roleLabel)
+
+		// Show agent instance under role
+		childPrefix := treeVert
+		if isLast {
+			childPrefix = treeSpace
+		}
+
+		statusStr := style.Success.Render("running")
+		if !agent.Running {
+			statusStr = style.Error.Render("stopped")
+		}
+
+		hookInfo := formatHookInfo(agent.HookBead, agent.WorkTitle, 35)
+		stateInfo := ""
+		if agent.State != "" && agent.State != "idle" {
+			stateInfo = style.Dim.Render(fmt.Sprintf(" [%s]", agent.State))
+		}
+
+		fmt.Printf("%s%s%s %s%s%s\n", childPrefix, treeLast,
+			style.Dim.Render("gt-"+agent.Name), statusStr, hookInfo, stateInfo)
+	}
+
+	if !hasRigs {
+		fmt.Printf("\n%s\n", style.Dim.Render("No rigs registered. Use 'gt rig add' to add one."))
+		return nil
+	}
+
+	// Rigs section
+	fmt.Printf("%s%s\n", treeLast, style.Bold.Render("Rigs"))
+
+	for ri, r := range status.Rigs {
+		isLastRig := ri == len(status.Rigs)-1
+		rigPrefix := treeVert
+		if isLastRig {
+			rigPrefix = treeSpace
+		}
+
+		rigBranch := treeBranch
+		if isLastRig {
+			rigBranch = treeLast
+		}
+
+		fmt.Printf("%s%s%s\n", treeSpace, rigBranch, style.Bold.Render(r.Name+"/"))
+
+		// Group agents by role
+		var witnesses, refineries, crews, polecats []AgentRuntime
+		for _, agent := range r.Agents {
+			switch agent.Role {
+			case "witness":
+				witnesses = append(witnesses, agent)
+			case "refinery":
+				refineries = append(refineries, agent)
+			case "crew":
+				crews = append(crews, agent)
+			case "polecat":
+				polecats = append(polecats, agent)
+			}
+		}
+
+		// Count non-empty role groups
+		roleGroups := 0
+		if len(witnesses) > 0 {
+			roleGroups++
+		}
+		if len(refineries) > 0 {
+			roleGroups++
+		}
+		if len(crews) > 0 {
+			roleGroups++
+		}
+		if len(polecats) > 0 {
+			roleGroups++
+		}
+
+		groupsRendered := 0
+		baseIndent := treeSpace + rigPrefix
+
+		// Witness
+		if len(witnesses) > 0 {
+			groupsRendered++
+			isLastGroup := groupsRendered == roleGroups
+			groupBranch := treeBranch
+			if isLastGroup {
+				groupBranch = treeLast
+			}
+			fmt.Printf("%s%s%s %s\n", baseIndent, groupBranch,
+				roleIcons["witness"], style.Bold.Render("Witness"))
+
+			groupIndent := baseIndent + treeVert
+			if isLastGroup {
+				groupIndent = baseIndent + treeSpace
+			}
+			renderAgentList(witnesses, groupIndent, r.Hooks)
+		}
+
+		// Refinery
+		if len(refineries) > 0 {
+			groupsRendered++
+			isLastGroup := groupsRendered == roleGroups
+			groupBranch := treeBranch
+			if isLastGroup {
+				groupBranch = treeLast
+			}
+			fmt.Printf("%s%s%s %s\n", baseIndent, groupBranch,
+				roleIcons["refinery"], style.Bold.Render("Refinery"))
+
+			groupIndent := baseIndent + treeVert
+			if isLastGroup {
+				groupIndent = baseIndent + treeSpace
+			}
+			renderAgentList(refineries, groupIndent, r.Hooks)
+		}
+
+		// Crew
+		if len(crews) > 0 {
+			groupsRendered++
+			isLastGroup := groupsRendered == roleGroups
+			groupBranch := treeBranch
+			if isLastGroup {
+				groupBranch = treeLast
+			}
+			fmt.Printf("%s%s%s %s\n", baseIndent, groupBranch,
+				roleIcons["crew"], style.Bold.Render("Crew"))
+
+			groupIndent := baseIndent + treeVert
+			if isLastGroup {
+				groupIndent = baseIndent + treeSpace
+			}
+			renderAgentList(crews, groupIndent, r.Hooks)
+		}
+
+		// Polecats
+		if len(polecats) > 0 {
+			groupsRendered++
+			isLastGroup := groupsRendered == roleGroups
+			groupBranch := treeBranch
+			if isLastGroup {
+				groupBranch = treeLast
+			}
+			fmt.Printf("%s%s%s %s\n", baseIndent, groupBranch,
+				roleIcons["polecat"], style.Bold.Render("Polecats"))
+
+			groupIndent := baseIndent + treeVert
+			if isLastGroup {
+				groupIndent = baseIndent + treeSpace
+			}
+			renderAgentList(polecats, groupIndent, r.Hooks)
+		}
+
+		// No agents at all
+		if roleGroups == 0 {
+			fmt.Printf("%s%s%s\n", baseIndent, treeLast, style.Dim.Render("(no agents)"))
+		}
+	}
+
+	return nil
+}
+
+// renderAgentList renders a list of agents under a role group
+func renderAgentList(agents []AgentRuntime, indent string, hooks []AgentHookInfo) {
+	const (
+		treeBranch = "├── "
+		treeLast   = "└── "
+	)
+
+	for i, agent := range agents {
+		isLast := i == len(agents)-1
+		branch := treeBranch
+		if isLast {
+			branch = treeLast
+		}
+
+		statusStr := style.Success.Render("running")
+		if !agent.Running {
+			statusStr = style.Error.Render("stopped")
+		}
+
+		hookInfo := formatHookInfo(agent.HookBead, agent.WorkTitle, 30)
+		if hookInfo == "" {
+			// Fall back to legacy Hooks array
+			for _, h := range hooks {
+				if h.Agent == agent.Address && h.HasWork {
+					if h.Molecule != "" {
+						hookInfo = fmt.Sprintf(" → %s", h.Molecule)
+					} else if h.Title != "" {
+						hookInfo = fmt.Sprintf(" → %s", truncateWithEllipsis(h.Title, 30))
+					}
+					break
 				}
-				hookInfo = fmt.Sprintf(" → %s (%s)", agent.HookBead, title)
 			}
 		}
 
 		stateInfo := ""
 		if agent.State != "" && agent.State != "idle" {
-			stateInfo = fmt.Sprintf(" [%s]", agent.State)
+			stateInfo = style.Dim.Render(fmt.Sprintf(" [%s]", agent.State))
 		}
 
-		fmt.Printf("   %-14s %s%s%s\n", agent.Name, statusStr, hookInfo, stateInfo)
+		fmt.Printf("%s%s%s %s%s%s\n", indent, branch, agent.Name, statusStr, hookInfo, stateInfo)
 	}
+}
 
-	if len(status.Rigs) == 0 {
-		fmt.Printf("\n%s\n", style.Dim.Render("No rigs registered. Use 'gt rig add' to add one."))
-		return nil
+// formatHookInfo formats the hook bead and title for display
+func formatHookInfo(hookBead, title string, maxLen int) string {
+	if hookBead == "" {
+		return ""
 	}
-
-	// Rigs detail with runtime state
-	fmt.Printf("\n%s\n", style.Bold.Render("Rigs"))
-	for _, r := range status.Rigs {
-		fmt.Printf("   %s\n", style.Bold.Render(r.Name))
-
-		// Show all agents with their runtime state
-		for _, agent := range r.Agents {
-			statusStr := style.Success.Render("✓ running")
-			if !agent.Running {
-				statusStr = style.Error.Render("✗ stopped")
-			}
-
-			// Show hook bead from agent bead (preferred), fall back to Hooks array
-			hookInfo := ""
-			if agent.HookBead != "" {
-				hookInfo = fmt.Sprintf(" → %s", agent.HookBead)
-				if agent.WorkTitle != "" {
-					title := agent.WorkTitle
-					if len(title) > 25 {
-						title = title[:22] + "..."
-					}
-					hookInfo = fmt.Sprintf(" → %s (%s)", agent.HookBead, title)
-				}
-			} else {
-				// Fall back to legacy Hooks array
-				for _, h := range r.Hooks {
-					if h.Agent == agent.Address && h.HasWork {
-						if h.Molecule != "" {
-							hookInfo = fmt.Sprintf(" → %s", h.Molecule)
-						} else if h.Title != "" {
-							hookInfo = fmt.Sprintf(" → %s", h.Title)
-						} else {
-							hookInfo = " → (work attached)"
-						}
-						break
-					}
-				}
-			}
-
-			stateInfo := ""
-			if agent.State != "" && agent.State != "idle" {
-				stateInfo = fmt.Sprintf(" [%s]", agent.State)
-			}
-
-			// Format agent name based on role
-			displayName := agent.Name
-			if agent.Role == "crew" {
-				displayName = "crew/" + agent.Name
-			}
-
-			fmt.Printf("      %-14s %s%s%s\n", displayName, statusStr, hookInfo, stateInfo)
-		}
-
-		// Show polecats if any (these are already in r.Agents if discovered)
-		if len(r.Polecats) == 0 && len(r.Crews) == 0 && !r.HasWitness && !r.HasRefinery {
-			fmt.Printf("      %s\n", style.Dim.Render("No agents"))
-		}
+	if title == "" {
+		return fmt.Sprintf(" → %s", hookBead)
 	}
+	title = truncateWithEllipsis(title, maxLen)
+	return fmt.Sprintf(" → %s", title)
+}
 
-	return nil
+// truncateWithEllipsis shortens a string to maxLen, adding "..." if truncated
+func truncateWithEllipsis(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen < 4 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
+
+// capitalizeFirst capitalizes the first letter of a string
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return string(s[0]-32) + s[1:]
 }
 
 // discoverRigHooks finds all hook attachments for agents in a rig.
