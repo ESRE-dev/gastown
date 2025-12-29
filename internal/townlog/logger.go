@@ -2,7 +2,6 @@
 package townlog
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -270,12 +269,6 @@ func splitLines(s string) []string {
 		lines = append(lines, s[start:])
 	}
 	return lines
-}
-
-// LogEventJSON writes an event in JSON format for machine parsing.
-// Returns the JSON representation.
-func (e Event) JSON() ([]byte, error) {
-	return json.Marshal(e)
 }
 
 // TailEvents returns the last n events from the log.

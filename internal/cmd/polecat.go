@@ -1205,20 +1205,9 @@ func runPolecatRecycle(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// splitLines splits a string into non-empty lines.
+// splitLines splits a string into lines.
 func splitLines(s string) []string {
-	var lines []string
-	for _, line := range filepath.SplitList(s) {
-		if line != "" {
-			lines = append(lines, line)
-		}
-	}
-	// filepath.SplitList doesn't work for newlines, use strings.Split instead
-	lines = nil
-	for _, line := range strings.Split(s, "\n") {
-		lines = append(lines, line)
-	}
-	return lines
+	return strings.Split(s, "\n")
 }
 
 func runPolecatNuke(cmd *cobra.Command, args []string) error {

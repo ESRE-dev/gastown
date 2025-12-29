@@ -519,20 +519,6 @@ func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg s
 	_ = m.saveState(ref) // non-fatal: state file update
 }
 
-// getTestCommand returns the test command if configured.
-func (m *Manager) getTestCommand() string {
-	// Check settings/config.json for test_command
-	settingsPath := filepath.Join(m.rig.Path, "settings", "config.json")
-	settings, err := config.LoadRigSettings(settingsPath)
-	if err != nil {
-		return ""
-	}
-	if settings.MergeQueue != nil && settings.MergeQueue.TestCommand != "" {
-		return settings.MergeQueue.TestCommand
-	}
-	return ""
-}
-
 // runTests executes the test command.
 func (m *Manager) runTests(testCmd string) error {
 	parts := strings.Fields(testCmd)

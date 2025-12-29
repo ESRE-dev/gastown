@@ -22,10 +22,9 @@ import (
 
 // Common errors
 var (
-	ErrLocked       = errors.New("worker is locked by another agent")
-	ErrNotLocked    = errors.New("worker is not locked")
-	ErrStaleLock    = errors.New("stale lock detected")
-	ErrInvalidLock  = errors.New("invalid lock file")
+	ErrLocked      = errors.New("worker is locked by another agent")
+	ErrNotLocked   = errors.New("worker is not locked")
+	ErrInvalidLock = errors.New("invalid lock file")
 )
 
 // LockInfo contains information about who holds a lock.
