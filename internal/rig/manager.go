@@ -454,15 +454,14 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig boo
 			continue // Already exists
 		}
 
-		// RoleBead establishes the canonical bead ID for this agent's role definition.
-		// The bead may not exist yet - this declares the naming convention so tooling
-		// (like gt doctor) can check for missing role beads and scaffold them.
+		// RoleBead points to the shared role definition bead for this agent type.
+		// Role beads are shared: gt-witness-role, gt-refinery-role, etc.
 		fields := &beads.AgentFields{
 			RoleType:   agent.roleType,
 			Rig:        agent.rig,
 			AgentState: "idle",
 			HookBead:   "",
-			RoleBead:   agent.id + "-role",
+			RoleBead:   "gt-" + agent.roleType + "-role",
 		}
 
 		if _, err := bd.CreateAgentBead(agent.id, agent.desc, fields); err != nil {

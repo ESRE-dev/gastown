@@ -1096,14 +1096,14 @@ func getAgentFields(ctx RoleContext, state string) *beads.AgentFields {
 			RoleType:   "crew",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   fmt.Sprintf("gt-crew-%s-%s-role", ctx.Rig, ctx.Polecat),
+			RoleBead:   "gt-crew-role",
 		}
 	case RolePolecat:
 		return &beads.AgentFields{
 			RoleType:   "polecat",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   fmt.Sprintf("gt-polecat-%s-%s-role", ctx.Rig, ctx.Polecat),
+			RoleBead:   "gt-polecat-role",
 		}
 	case RoleMayor:
 		return &beads.AgentFields{
@@ -1122,14 +1122,14 @@ func getAgentFields(ctx RoleContext, state string) *beads.AgentFields {
 			RoleType:   "witness",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   fmt.Sprintf("gt-witness-%s-role", ctx.Rig),
+			RoleBead:   "gt-witness-role",
 		}
 	case RoleRefinery:
 		return &beads.AgentFields{
 			RoleType:   "refinery",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   fmt.Sprintf("gt-refinery-%s-role", ctx.Rig),
+			RoleBead:   "gt-refinery-role",
 		}
 	default:
 		return nil
