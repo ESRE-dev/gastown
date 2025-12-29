@@ -21,7 +21,7 @@ inbox-check ─► process-cleanups ─► check-refinery ─► survey-workers
                                                             │
          ┌──────────────────────────────────────────────────┘
          ▼
-  ping-deacon ─► context-check ─► loop-or-exit
+  check-swarm ─► ping-deacon ─► context-check ─► loop-or-exit
 ```
 
 No dynamic arms. No fanout gates. No persistent nudge counters.
@@ -267,9 +267,39 @@ gt mail send mayor/ -s "Escalation: <polecat> stuck" \\
 **ZFC Principle**: Trust agent_state from beads. Don't infer state from PID/tmux."""
 
 [[steps]]
+id = "check-swarm-completion"
+title = "Check if active swarm is complete"
+needs = ["survey-workers"]
+description = """
+If Mayor started a batch (SWARM_START), check if all polecats have completed.
+
+**Step 1: Find active swarm tracking wisps**
+```bash
+bd list --wisp --labels=swarm --status=open
+```
+If no active swarm, skip this step.
+
+**Step 2: Count completed polecats for this swarm**
+
+Extract from wisp labels: swarm_id, total, completed, start timestamp.
+Check how many cleanup wisps have been closed for this swarm's polecats.
+
+**Step 3: If all complete, notify Mayor**
+```bash
+gt mail send mayor/ -s "SWARM_COMPLETE: <swarm_id>" -m "All <total> polecats merged.
+Duration: <minutes> minutes
+Swarm: <swarm_id>"
+
+# Close the swarm tracking wisp
+bd close <swarm-wisp-id> --reason "All polecats merged"
+```
+
+Note: Runs every patrol cycle. Notification sent exactly once when all complete."""
+
+[[steps]]
 id = "ping-deacon"
 title = "Ping Deacon for health check"
-needs = ["survey-workers"]
+needs = ["check-swarm-completion"]
 description = """
 Send WITNESS_PING to Deacon for second-order monitoring.
 
