@@ -177,6 +177,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 				}
 				targetAgent = spawnInfo.AgentID()
 				targetPane = spawnInfo.Pane
+
+				// Wake witness and refinery to monitor the new polecat
+				wakeRigAgents(rigName)
 			}
 		} else {
 			// Slinging to an existing agent
@@ -214,7 +217,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	if slingDryRun {
-		fmt.Printf("Would run: bd update %s --status=pinned --assignee=%s\n", beadID, targetAgent)
+		fmt.Printf("Would run: bd update %s --status=hooked --assignee=%s\n", beadID, targetAgent)
 		if formulaName != "" {
 			fmt.Printf("  formula: %s\n", formulaName)
 		}
@@ -231,14 +234,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Pin the bead using bd update (discovery-based approach)
-	pinCmd := exec.Command("bd", "update", beadID, "--status=pinned", "--assignee="+targetAgent)
-	pinCmd.Stderr = os.Stderr
-	if err := pinCmd.Run(); err != nil {
-		return fmt.Errorf("pinning bead: %w", err)
+	// Hook the bead using bd update (discovery-based approach)
+	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+	hookCmd.Stderr = os.Stderr
+	if err := hookCmd.Run(); err != nil {
+		return fmt.Errorf("hooking bead: %w", err)
 	}
 
-	fmt.Printf("%s Work attached to hook (pinned bead)\n", style.Bold.Render("✓"))
+	fmt.Printf("%s Work attached to hook (status=hooked)\n", style.Bold.Render("✓"))
 
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	updateAgentHookBead(targetAgent, beadID)
@@ -514,6 +517,9 @@ func runSlingFormula(args []string) error {
 				}
 				targetAgent = spawnInfo.AgentID()
 				targetPane = spawnInfo.Pane
+
+				// Wake witness and refinery to monitor the new polecat
+				wakeRigAgents(rigName)
 			}
 		} else {
 			// Slinging to an existing agent
@@ -578,13 +584,13 @@ func runSlingFormula(args []string) error {
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispResult.RootID)
 
-	// Step 3: Pin the wisp bead using bd update (discovery-based approach)
-	pinCmd := exec.Command("bd", "update", wispResult.RootID, "--status=pinned", "--assignee="+targetAgent)
-	pinCmd.Stderr = os.Stderr
-	if err := pinCmd.Run(); err != nil {
-		return fmt.Errorf("pinning wisp bead: %w", err)
+	// Step 3: Hook the wisp bead using bd update (discovery-based approach)
+	hookCmd := exec.Command("bd", "update", wispResult.RootID, "--status=hooked", "--assignee="+targetAgent)
+	hookCmd.Stderr = os.Stderr
+	if err := hookCmd.Run(); err != nil {
+		return fmt.Errorf("hooking wisp bead: %w", err)
 	}
-	fmt.Printf("%s Attached to hook (pinned bead)\n", style.Bold.Render("✓"))
+	fmt.Printf("%s Attached to hook (status=hooked)\n", style.Bold.Render("✓"))
 
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	updateAgentHookBead(targetAgent, wispResult.RootID)
@@ -647,6 +653,23 @@ func updateAgentHookBead(agentID, beadID string) {
 		// Silently ignore - agent bead might not exist yet
 		return
 	}
+}
+
+// wakeRigAgents wakes the witness and refinery for a rig after polecat dispatch.
+// This ensures the patrol agents are ready to monitor and merge.
+func wakeRigAgents(rigName string) {
+	// Boot the rig (idempotent - no-op if already running)
+	bootCmd := exec.Command("gt", "rig", "boot", rigName)
+	_ = bootCmd.Run() // Ignore errors - rig might already be running
+
+	// Nudge witness and refinery to clear any backoff
+	t := tmux.NewTmux()
+	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
+	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
+
+	// Silent nudges - sessions might not exist yet
+	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
+	_ = t.NudgeSession(refinerySession, "Polecat dispatched - check for merge requests")
 }
 
 // agentIDToBeadID converts an agent ID to its corresponding agent bead ID.
