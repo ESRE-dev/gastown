@@ -113,7 +113,7 @@ func (m *Manager) Start(foreground bool) error {
 	if foreground {
 		// In foreground mode, we're likely running inside the tmux session
 		// that background mode created. Only check PID to avoid self-detection.
-		if ref.State == StateRunning && ref.PID > 0 && processExists(ref.PID) {
+		if ref.State == StateRunning && ref.PID > 0 && util.ProcessExists(ref.PID) {
 			return ErrAlreadyRunning
 		}
 
@@ -138,7 +138,7 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	// Also check via PID for backwards compatibility
-	if ref.State == StateRunning && ref.PID > 0 && processExists(ref.PID) {
+	if ref.State == StateRunning && ref.PID > 0 && util.ProcessExists(ref.PID) {
 		return ErrAlreadyRunning
 	}
 
@@ -224,7 +224,7 @@ func (m *Manager) Stop() error {
 	}
 
 	// If we have a PID and it's a different process, try to stop it gracefully
-	if ref.PID > 0 && ref.PID != os.Getpid() && processExists(ref.PID) {
+	if ref.PID > 0 && ref.PID != os.Getpid() && util.ProcessExists(ref.PID) {
 		// Send SIGTERM (best-effort graceful stop)
 		if proc, err := os.FindProcess(ref.PID); err == nil {
 			_ = proc.Signal(os.Interrupt)
@@ -638,16 +638,6 @@ func (m *Manager) pushWithRetry(targetBranch string, config MergeConfig) error {
 	return fmt.Errorf("push failed after %d retries: %v", config.PushRetryCount, lastErr)
 }
 
-// processExists checks if a process with the given PID exists.
-func processExists(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// On Unix, FindProcess always succeeds; signal 0 tests existence
-	err = proc.Signal(nil)
-	return err == nil
-}
 
 // formatAge formats a duration since the given time.
 func formatAge(t time.Time) string {

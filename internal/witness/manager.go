@@ -90,7 +90,7 @@ func (m *Manager) Start() error {
 		return err
 	}
 
-	if w.State == StateRunning && w.PID > 0 && processExists(w.PID) {
+	if w.State == StateRunning && w.PID > 0 && util.ProcessExists(w.PID) {
 		return ErrAlreadyRunning
 	}
 
@@ -128,13 +128,3 @@ func (m *Manager) Stop() error {
 	return m.saveState(w)
 }
 
-// processExists checks if a process with the given PID exists.
-func processExists(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// On Unix, FindProcess always succeeds; signal 0 tests existence
-	err = proc.Signal(nil)
-	return err == nil
-}
