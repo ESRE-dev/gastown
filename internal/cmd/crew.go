@@ -233,7 +233,7 @@ var crewPrevCmd = &cobra.Command{
 }
 
 var crewStartCmd = &cobra.Command{
-	Use:   "start <name>",
+	Use:   "start [name]",
 	Short: "Start a crew workspace (creates if needed)",
 	Long: `Start a crew workspace, creating it if it doesn't exist.
 
@@ -243,11 +243,17 @@ The crew session starts in the background with Claude running and ready.
 The name can include the rig in slash format (e.g., gastown/joe).
 If not specified, the rig is inferred from the current directory.
 
+Role Discovery:
+  If no name is provided, attempts to detect the crew workspace from the
+  current directory. If you're in <rig>/crew/<name>/, it will start that
+  workspace automatically.
+
 Examples:
   gt crew start joe                    # Start joe in current rig
   gt crew start gastown/joe            # Start joe in gastown rig
-  gt crew start joe --rig beads        # Start joe in beads rig`,
-	Args: cobra.ExactArgs(1),
+  gt crew start joe --rig beads        # Start joe in beads rig
+  gt crew start                        # Auto-detect from cwd`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runCrewStart,
 }
 

@@ -158,16 +158,31 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 }
 
 // runCrewStart is an alias for runStartCrew, handling multiple input formats.
-// It supports: "name", "rig/name", and "rig/crew/name" formats.
+// It supports: "name", "rig/name", "rig/crew/name" formats, or auto-detection from cwd.
 func runCrewStart(cmd *cobra.Command, args []string) error {
-	name := args[0]
+	var name string
 
-	// Handle rig/crew/name format (e.g., "gastown/crew/joe" -> "gastown/joe")
-	if strings.Contains(name, "/crew/") {
-		parts := strings.SplitN(name, "/crew/", 2)
-		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			name = parts[0] + "/" + parts[1]
+	// Determine crew name: from arg, or auto-detect from cwd
+	if len(args) > 0 {
+		name = args[0]
+		// Handle rig/crew/name format (e.g., "gastown/crew/joe" -> "gastown/joe")
+		if strings.Contains(name, "/crew/") {
+			parts := strings.SplitN(name, "/crew/", 2)
+			if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+				name = parts[0] + "/" + parts[1]
+			}
 		}
+	} else {
+		// Try to detect from current directory
+		detected, err := detectCrewFromCwd()
+		if err != nil {
+			return fmt.Errorf("could not detect crew workspace from current directory: %w\n\nUsage: gt crew start <name>", err)
+		}
+		name = detected.crewName
+		if crewRig == "" {
+			crewRig = detected.rigName
+		}
+		fmt.Printf("Detected crew workspace: %s/%s\n", detected.rigName, name)
 	}
 
 	// Set the start.go flags from crew.go flags before calling
