@@ -255,6 +255,14 @@ func (m *Model) renderEvent(e Event) string {
 		symbolStyle = EventFailStyle
 	case "delete":
 		symbolStyle = EventDeleteStyle
+	case "merge_started":
+		symbolStyle = EventMergeStartedStyle
+	case "merged":
+		symbolStyle = EventMergedStyle
+	case "merge_failed":
+		symbolStyle = EventMergeFailedStyle
+	case "merge_skipped":
+		symbolStyle = EventMergeSkippedStyle
 	default:
 		symbolStyle = EventUpdateStyle
 	}

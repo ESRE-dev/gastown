@@ -65,6 +65,12 @@ Event symbols:
   ✗  failed          - Step or issue failed
   ⊘  deleted         - Issue removed
 
+MQ (Merge Queue) event symbols:
+  ⚙  merge_started   - Refinery began processing an MR
+  ✓  merged          - MR successfully merged (green)
+  ✗  merge_failed    - Merge failed (conflict, tests, etc.) (red)
+  ⊘  merge_skipped   - MR skipped (already merged, etc.)
+
 Examples:
   gt feed                       # Launch TUI dashboard
   gt feed --plain               # Plain text output (bd activity)
@@ -181,16 +187,28 @@ func runFeedDirect(workDir string, bdArgs []string) error {
 
 // runFeedTUI runs the interactive TUI feed.
 func runFeedTUI(workDir string) error {
+	var sources []feed.EventSource
+
 	// Create event source from bd activity
-	source, err := feed.NewBdActivitySource(workDir)
+	bdSource, err := feed.NewBdActivitySource(workDir)
 	if err != nil {
-		return fmt.Errorf("creating event source: %w", err)
+		return fmt.Errorf("creating bd activity source: %w", err)
 	}
-	defer source.Close()
+	sources = append(sources, bdSource)
+
+	// Create MQ event source (optional - don't fail if not available)
+	mqSource, err := feed.NewMQEventSourceFromWorkDir(workDir)
+	if err == nil {
+		sources = append(sources, mqSource)
+	}
+
+	// Combine all sources
+	multiSource := feed.NewMultiSource(sources...)
+	defer multiSource.Close()
 
 	// Create model and connect event source
 	m := feed.NewModel()
-	m.SetEventChannel(source.Events())
+	m.SetEventChannel(multiSource.Events())
 
 	// Run the TUI
 	p := tea.NewProgram(m, tea.WithAltScreen())

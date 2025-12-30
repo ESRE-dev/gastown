@@ -106,13 +106,32 @@ var (
 		"deacon":   "🔔",
 	}
 
+	// MQ event styles
+	EventMergeStartedStyle = lipgloss.NewStyle().
+				Foreground(colorPrimary)
+
+	EventMergedStyle = lipgloss.NewStyle().
+				Foreground(colorSuccess).
+				Bold(true)
+
+	EventMergeFailedStyle = lipgloss.NewStyle().
+				Foreground(colorError).
+				Bold(true)
+
+	EventMergeSkippedStyle = lipgloss.NewStyle().
+				Foreground(colorWarning)
+
 	// Event symbols
 	EventSymbols = map[string]string{
-		"create":   "+",
-		"update":   "→",
-		"complete": "✓",
-		"fail":     "✗",
-		"delete":   "⊘",
-		"pin":      "📌",
+		"create":        "+",
+		"update":        "→",
+		"complete":      "✓",
+		"fail":          "✗",
+		"delete":        "⊘",
+		"pin":           "📌",
+		"merge_started": "⚙",
+		"merged":        "✓",
+		"merge_failed":  "✗",
+		"merge_skipped": "⊘",
 	}
 )
