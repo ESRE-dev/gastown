@@ -7,12 +7,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// safeIDPattern validates that an ID only contains safe characters for SQL queries.
+// Issue IDs should only contain alphanumeric characters, hyphens, and underscores.
+var safeIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // Convoy command flags
 var (
@@ -433,9 +438,15 @@ type trackedIssueInfo struct {
 // getTrackedIssues queries SQLite directly to get issues tracked by a convoy.
 // This is needed because bd dep list doesn't properly show cross-rig external dependencies.
 func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
+	// Validate convoyID to prevent SQL injection
+	if !safeIDPattern.MatchString(convoyID) {
+		return nil
+	}
+
 	dbPath := filepath.Join(townBeads, "beads.db")
 
 	// Query tracked dependencies from SQLite
+	// Note: convoyID is validated above to only contain safe characters
 	queryCmd := exec.Command("sqlite3", "-json", dbPath,
 		fmt.Sprintf(`SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, convoyID))
 
