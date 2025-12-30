@@ -225,15 +225,16 @@ func (m *Manager) loadTasksFromBeads(epicID string) ([]SwarmTask, error) {
 
 	// Parse JSON output - bd show returns an array
 	var issues []struct {
-		ID           string `json:"id"`
-		Title        string `json:"title"`
-		Status       string `json:"status"`
-		Dependencies []struct {
+		ID         string `json:"id"`
+		Title      string `json:"title"`
+		Status     string `json:"status"`
+		Dependents []struct {
 			ID             string `json:"id"`
 			Title          string `json:"title"`
 			Status         string `json:"status"`
+			Assignee       string `json:"assignee"`
 			DependencyType string `json:"dependency_type"`
-		} `json:"dependencies"`
+		} `json:"dependents"`
 	}
 
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
@@ -244,26 +245,27 @@ func (m *Manager) loadTasksFromBeads(epicID string) ([]SwarmTask, error) {
 		return nil, fmt.Errorf("epic not found: %s", epicID)
 	}
 
-	// Extract dependencies as tasks (issues that depend on/are blocked by this epic)
+	// Extract dependents as tasks (issues that depend on/are blocked by this epic)
 	// Accept both "parent-child" and "blocks" relationships
 	var tasks []SwarmTask
-	for _, dep := range issues[0].Dependencies {
+	for _, dep := range issues[0].Dependents {
 		if dep.DependencyType != "parent-child" && dep.DependencyType != "blocks" {
 			continue
 		}
 
 		state := TaskPending
 		switch dep.Status {
-		case "in_progress":
+		case "in_progress", "hooked":
 			state = TaskInProgress
 		case "closed":
 			state = TaskMerged
 		}
 
 		tasks = append(tasks, SwarmTask{
-			IssueID: dep.ID,
-			Title:   dep.Title,
-			State:   state,
+			IssueID:  dep.ID,
+			Title:    dep.Title,
+			State:    state,
+			Assignee: dep.Assignee,
 		})
 	}
 
