@@ -429,12 +429,16 @@ func runBdPrime(workDir string) {
 	cmd := exec.Command("bd", "prime")
 	cmd.Dir = workDir
 
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = nil // Ignore stderr
+	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		// Silently skip if bd prime fails (beads might not be available)
+		// Skip if bd prime fails (beads might not be available)
+		// But log stderr if present for debugging
+		if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
+			fmt.Fprintf(os.Stderr, "bd prime: %s\n", errMsg)
+		}
 		return
 	}
 
@@ -521,12 +525,15 @@ func runMailCheckInject(workDir string) {
 	cmd := exec.Command("gt", "mail", "check", "--inject")
 	cmd.Dir = workDir
 
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = nil // Ignore stderr
+	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		// Silently skip if mail check fails
+		// Skip if mail check fails, but log stderr for debugging
+		if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
+			fmt.Fprintf(os.Stderr, "gt mail check: %s\n", errMsg)
+		}
 		return
 	}
 
@@ -947,10 +954,16 @@ func checkSlungWork(ctx RoleContext) bool {
 	// Show bead preview using bd show
 	fmt.Println("**Bead details:**")
 	cmd := exec.Command("bd", "show", hookedBead.ID)
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = nil
-	if cmd.Run() == nil {
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
+			fmt.Fprintf(os.Stderr, "  bd show %s: %s\n", hookedBead.ID, errMsg)
+		} else {
+			fmt.Fprintf(os.Stderr, "  bd show %s: %v\n", hookedBead.ID, err)
+		}
+	} else {
 		lines := strings.Split(stdout.String(), "\n")
 		maxLines := 15
 		if len(lines) > maxLines {

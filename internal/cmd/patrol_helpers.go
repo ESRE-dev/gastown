@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -28,11 +29,15 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 	if cfg.CheckInProgress {
 		cmdList := exec.Command("bd", "--no-daemon", "list", "--status=in_progress", "--type=epic")
 		cmdList.Dir = cfg.BeadsDir
-		var stdoutList bytes.Buffer
+		var stdoutList, stderrList bytes.Buffer
 		cmdList.Stdout = &stdoutList
-		cmdList.Stderr = nil
+		cmdList.Stderr = &stderrList
 
-		if cmdList.Run() == nil {
+		if err := cmdList.Run(); err != nil {
+			if errMsg := strings.TrimSpace(stderrList.String()); errMsg != "" {
+				fmt.Fprintf(os.Stderr, "bd list: %s\n", errMsg)
+			}
+		} else {
 			lines := strings.Split(stdoutList.String(), "\n")
 			for _, line := range lines {
 				if strings.Contains(line, cfg.PatrolMolName) && !strings.Contains(line, "[template]") {
@@ -48,11 +53,15 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 	// Check for open patrols with open children (active wisp)
 	cmdOpen := exec.Command("bd", "--no-daemon", "list", "--status=open", "--type=epic")
 	cmdOpen.Dir = cfg.BeadsDir
-	var stdoutOpen bytes.Buffer
+	var stdoutOpen, stderrOpen bytes.Buffer
 	cmdOpen.Stdout = &stdoutOpen
-	cmdOpen.Stderr = nil
+	cmdOpen.Stderr = &stderrOpen
 
-	if cmdOpen.Run() == nil {
+	if err := cmdOpen.Run(); err != nil {
+		if errMsg := strings.TrimSpace(stderrOpen.String()); errMsg != "" {
+			fmt.Fprintf(os.Stderr, "bd list: %s\n", errMsg)
+		}
+	} else {
 		lines := strings.Split(stdoutOpen.String(), "\n")
 		for _, line := range lines {
 			if strings.Contains(line, cfg.PatrolMolName) && !strings.Contains(line, "[template]") {
@@ -62,10 +71,14 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 					// Check if this molecule has open children
 					cmdShow := exec.Command("bd", "--no-daemon", "show", molID)
 					cmdShow.Dir = cfg.BeadsDir
-					var stdoutShow bytes.Buffer
+					var stdoutShow, stderrShow bytes.Buffer
 					cmdShow.Stdout = &stdoutShow
-					cmdShow.Stderr = nil
-					if cmdShow.Run() == nil {
+					cmdShow.Stderr = &stderrShow
+					if err := cmdShow.Run(); err != nil {
+						if errMsg := strings.TrimSpace(stderrShow.String()); errMsg != "" {
+							fmt.Fprintf(os.Stderr, "bd show: %s\n", errMsg)
+						}
+					} else {
 						showOutput := stdoutShow.String()
 						// Deacon only checks "- open]", witness/refinery also check "- in_progress]"
 						hasOpenChildren := strings.Contains(showOutput, "- open]")
@@ -90,12 +103,16 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	// Find the proto ID for the patrol molecule
 	cmdCatalog := exec.Command("bd", "--no-daemon", "mol", "catalog")
 	cmdCatalog.Dir = cfg.BeadsDir
-	var stdoutCatalog bytes.Buffer
+	var stdoutCatalog, stderrCatalog bytes.Buffer
 	cmdCatalog.Stdout = &stdoutCatalog
-	cmdCatalog.Stderr = nil
+	cmdCatalog.Stderr = &stderrCatalog
 
 	if err := cmdCatalog.Run(); err != nil {
-		return "", fmt.Errorf("failed to list molecule catalog")
+		errMsg := strings.TrimSpace(stderrCatalog.String())
+		if errMsg != "" {
+			return "", fmt.Errorf("failed to list molecule catalog: %s", errMsg)
+		}
+		return "", fmt.Errorf("failed to list molecule catalog: %w", err)
 	}
 
 	// Find patrol molecule in catalog

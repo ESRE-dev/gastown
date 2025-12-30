@@ -196,6 +196,7 @@ func ensureDaemon(townRoot string) error {
 
 	cmd := exec.Command(gtPath, "daemon", "run")
 	cmd.Dir = townRoot
+	// Detach from parent I/O for background daemon (uses its own logging)
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil

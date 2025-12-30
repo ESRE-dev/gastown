@@ -124,14 +124,19 @@ func findOrphanCommits(repoPath string) ([]OrphanCommit, error) {
 	fsckCmd := exec.Command("git", "fsck", "--unreachable", "--no-reflogs")
 	fsckCmd.Dir = repoPath
 
-	var fsckOut bytes.Buffer
+	var fsckOut, fsckErr bytes.Buffer
 	fsckCmd.Stdout = &fsckOut
-	fsckCmd.Stderr = nil // Ignore warnings
+	fsckCmd.Stderr = &fsckErr
 
 	if err := fsckCmd.Run(); err != nil {
 		// git fsck returns non-zero if there are issues, but we still get output
 		// Only fail if we got no output at all
 		if fsckOut.Len() == 0 {
+			// Include stderr in error message for debugging
+			errMsg := strings.TrimSpace(fsckErr.String())
+			if errMsg != "" {
+				return nil, fmt.Errorf("git fsck failed: %w (%s)", err, errMsg)
+			}
 			return nil, fmt.Errorf("git fsck failed: %w", err)
 		}
 	}

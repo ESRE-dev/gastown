@@ -73,7 +73,7 @@ func (c *DaemonCheck) Fix(ctx *CheckContext) error {
 		return err
 	}
 
-	// Start daemon in background
+	// Start daemon in background (detach from parent I/O - daemon uses its own logging)
 	cmd := exec.Command(gtPath, "daemon", "run")
 	cmd.Dir = ctx.TownRoot
 	cmd.Stdin = nil
