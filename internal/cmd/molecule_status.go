@@ -568,12 +568,17 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 		return nil
 	}
 
-	// Show pinned bead info
+	// Show hooked bead info
 	if status.PinnedBead == nil {
 		fmt.Printf("%s\n", style.Dim.Render("Work indicated but no bead found"))
 		return nil
 	}
-	fmt.Printf("%s %s: %s\n", style.Bold.Render("📌 Pinned:"), status.PinnedBead.ID, status.PinnedBead.Title)
+
+	// AUTONOMOUS MODE banner - hooked work triggers autonomous execution
+	fmt.Println(style.Bold.Render("🚀 AUTONOMOUS MODE - Work on hook triggers immediate execution"))
+	fmt.Println()
+
+	fmt.Printf("%s %s: %s\n", style.Bold.Render("🪝 Hooked:"), status.PinnedBead.ID, status.PinnedBead.Title)
 
 	// Show attached molecule
 	if status.AttachedMolecule != "" {
@@ -589,7 +594,7 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 			fmt.Printf("   %s %s\n", style.Bold.Render("Args:"), status.AttachedArgs)
 		}
 	} else {
-		fmt.Printf("%s\n", style.Dim.Render("No molecule attached"))
+		fmt.Printf("%s\n", style.Dim.Render("No molecule attached (hooked bead still triggers autonomous work)"))
 	}
 
 	// Show progress if available
