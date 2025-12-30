@@ -15,6 +15,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/feed"
 	"github.com/steveyegge/gastown/internal/keepalive"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -25,11 +26,12 @@ import (
 // This is recovery-focused: normal wake is handled by feed subscription (bd activity --follow).
 // The daemon is the safety net for dead sessions, GUPP violations, and orphaned work.
 type Daemon struct {
-	config *Config
-	tmux   *tmux.Tmux
-	logger *log.Logger
-	ctx    context.Context
-	cancel context.CancelFunc
+	config  *Config
+	tmux    *tmux.Tmux
+	logger  *log.Logger
+	ctx     context.Context
+	cancel  context.CancelFunc
+	curator *feed.Curator
 }
 
 // New creates a new daemon instance.
@@ -89,6 +91,14 @@ func (d *Daemon) Run() error {
 	defer timer.Stop()
 
 	d.logger.Printf("Daemon running, initial heartbeat interval %v", nextInterval)
+
+	// Start feed curator goroutine
+	d.curator = feed.NewCurator(d.config.TownRoot)
+	if err := d.curator.Start(); err != nil {
+		d.logger.Printf("Warning: failed to start feed curator: %v", err)
+	} else {
+		d.logger.Println("Feed curator started")
+	}
 
 	// Initial heartbeat
 	d.heartbeat(state)
@@ -391,6 +401,12 @@ func (d *Daemon) processLifecycleRequests() {
 // shutdown performs graceful shutdown.
 func (d *Daemon) shutdown(state *State) error {
 	d.logger.Println("Daemon shutting down")
+
+	// Stop feed curator
+	if d.curator != nil {
+		d.curator.Stop()
+		d.logger.Println("Feed curator stopped")
+	}
 
 	state.Running = false
 	if err := SaveState(d.config.TownRoot, state); err != nil {
