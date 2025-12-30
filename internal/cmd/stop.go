@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -146,6 +147,9 @@ func runStop(cmd *cobra.Command, args []string) error {
 				agent := fmt.Sprintf("%s/%s", r.Name, info.Polecat)
 				logger := townlog.NewLogger(townRoot)
 				logger.Log(townlog.EventKill, agent, "gt stop")
+
+				// Log kill event to activity feed
+				_ = events.LogFeed(events.TypeKill, "gt", events.KillPayload(r.Name, info.Polecat, "gt stop"))
 
 				// Log captured output (truncated)
 				if len(output) > 200 {

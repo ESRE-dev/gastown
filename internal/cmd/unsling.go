@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -140,6 +141,9 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 	if err := b.Update(pinned.ID, beads.UpdateOptions{Status: &status}); err != nil {
 		return fmt.Errorf("unpinning bead %s: %w", pinned.ID, err)
 	}
+
+	// Log unhook event
+	_ = events.LogFeed(events.TypeUnhook, agentID, events.UnhookPayload(pinned.ID))
 
 	fmt.Printf("%s Work removed from hook\n", style.Bold.Render("✓"))
 	fmt.Printf("  Bead %s is now status=open\n", pinned.ID)

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -92,6 +93,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
 			LogNudge(townRoot, "deacon", message)
 		}
+		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload("", "deacon", message))
 		return nil
 	}
 
@@ -130,6 +132,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
 			LogNudge(townRoot, target, message)
 		}
+		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload(rigName, target, message))
 	} else {
 		// Raw session name (legacy)
 		exists, err := t.HasSession(target)
@@ -150,6 +153,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
 			LogNudge(townRoot, target, message)
 		}
+		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload("", target, message))
 	}
 
 	return nil

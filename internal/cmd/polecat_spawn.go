@@ -8,6 +8,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -160,6 +161,9 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	}
 
 	fmt.Printf("%s Polecat %s spawned\n", style.Bold.Render("✓"), polecatName)
+
+	// Log spawn event to activity feed
+	_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
 
 	return &SpawnedPolecatInfo{
 		RigName:     rigName,

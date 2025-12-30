@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/daemon"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -112,6 +113,15 @@ func runDown(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	if allOK {
 		fmt.Printf("%s All services stopped\n", style.Bold.Render("✓"))
+		// Log halt event with stopped services
+		stoppedServices := []string{"daemon", "deacon", "mayor"}
+		for _, rigName := range rigs {
+			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/witness", rigName))
+		}
+		if downAll {
+			stoppedServices = append(stoppedServices, "tmux-server")
+		}
+		_ = events.LogFeed(events.TypeHalt, "gt", events.HaltPayload(stoppedServices))
 	} else {
 		fmt.Printf("%s Some services failed to stop\n", style.Bold.Render("✗"))
 		return fmt.Errorf("not all services stopped")

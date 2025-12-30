@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/daemon"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -159,6 +160,13 @@ func runUp(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	if allOK {
 		fmt.Printf("%s All services running\n", style.Bold.Render("✓"))
+		// Log boot event with started services
+		startedServices := []string{"daemon", "deacon", "mayor"}
+		for _, rigName := range rigs {
+			startedServices = append(startedServices, fmt.Sprintf("%s/witness", rigName))
+			startedServices = append(startedServices, fmt.Sprintf("%s/refinery", rigName))
+		}
+		_ = events.LogFeed(events.TypeBoot, "gt", events.BootPayload("town", startedServices))
 	} else {
 		fmt.Printf("%s Some services failed to start\n", style.Bold.Render("✗"))
 		return fmt.Errorf("not all services started")

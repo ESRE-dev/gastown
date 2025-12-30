@@ -246,3 +246,26 @@ func EscalationPayload(rig, target, to, reason string) map[string]interface{} {
 		"reason": reason,
 	}
 }
+
+// UnhookPayload creates a payload for unhook events.
+func UnhookPayload(beadID string) map[string]interface{} {
+	return map[string]interface{}{
+		"bead": beadID,
+	}
+}
+
+// KillPayload creates a payload for kill events.
+func KillPayload(rig, target, reason string) map[string]interface{} {
+	return map[string]interface{}{
+		"rig":    rig,
+		"target": target,
+		"reason": reason,
+	}
+}
+
+// HaltPayload creates a payload for halt events.
+func HaltPayload(services []string) map[string]interface{} {
+	return map[string]interface{}{
+		"services": services,
+	}
+}
