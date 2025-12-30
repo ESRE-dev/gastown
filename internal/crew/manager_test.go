@@ -69,10 +69,8 @@ func TestManagerAddAndGet(t *testing.T) {
 		t.Error("mail directory was not created")
 	}
 
-	claudeMD := filepath.Join(crewDir, "CLAUDE.md")
-	if _, err := os.Stat(claudeMD); os.IsNotExist(err) {
-		t.Error("CLAUDE.md was not created")
-	}
+	// NOTE: CLAUDE.md is NOT created by Add() - it's injected via SessionStart hook
+	// See manager.go line 107-110 for why we skip CLAUDE.md creation
 
 	stateFile := filepath.Join(crewDir, "state.json")
 	if _, err := os.Stat(stateFile); os.IsNotExist(err) {
