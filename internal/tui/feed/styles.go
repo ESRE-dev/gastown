@@ -123,15 +123,34 @@ var (
 
 	// Event symbols
 	EventSymbols = map[string]string{
-		"create":        "+",
-		"update":        "→",
-		"complete":      "✓",
-		"fail":          "✗",
-		"delete":        "⊘",
-		"pin":           "📌",
+		"create":   "+",
+		"update":   "→",
+		"complete": "✓",
+		"fail":     "✗",
+		"delete":   "⊘",
+		"pin":      "📌",
+		// Witness patrol events
+		"patrol_started":  "👁",
+		"patrol_complete": "✓",
+		"polecat_checked": "·",
+		"polecat_nudged":  "⚡",
+		"escalation_sent": "⬆",
+		// Merge events
 		"merge_started": "⚙",
 		"merged":        "✓",
 		"merge_failed":  "✗",
 		"merge_skipped": "⊘",
+		// General gt events
+		"sling":   "🎯",
+		"hook":    "🪝",
+		"unhook":  "↩",
+		"handoff": "🤝",
+		"done":    "✓",
+		"mail":    "✉",
+		"spawn":   "🚀",
+		"kill":    "💀",
+		"nudge":   "⚡",
+		"boot":    "🔌",
+		"halt":    "⏹",
 	}
 )

@@ -249,20 +249,24 @@ func (m *Model) renderEvent(e Event) string {
 		symbolStyle = EventCreateStyle
 	case "update":
 		symbolStyle = EventUpdateStyle
-	case "complete":
+	case "complete", "patrol_complete", "merged", "done":
 		symbolStyle = EventCompleteStyle
-	case "fail":
+	case "fail", "merge_failed":
 		symbolStyle = EventFailStyle
 	case "delete":
 		symbolStyle = EventDeleteStyle
 	case "merge_started":
 		symbolStyle = EventMergeStartedStyle
-	case "merged":
-		symbolStyle = EventMergedStyle
-	case "merge_failed":
-		symbolStyle = EventMergeFailedStyle
 	case "merge_skipped":
 		symbolStyle = EventMergeSkippedStyle
+	case "patrol_started", "polecat_checked":
+		symbolStyle = EventUpdateStyle
+	case "polecat_nudged", "escalation_sent", "nudge":
+		symbolStyle = EventFailStyle // Use red/warning style for nudges and escalations
+	case "sling", "hook", "spawn", "boot":
+		symbolStyle = EventCreateStyle
+	case "handoff", "mail":
+		symbolStyle = EventUpdateStyle
 	default:
 		symbolStyle = EventUpdateStyle
 	}

@@ -44,26 +44,34 @@ func init() {
 var feedCmd = &cobra.Command{
 	Use:     "feed",
 	GroupID: GroupDiag,
-	Short:   "Show real-time activity feed from beads",
-	Long: `Display a real-time feed of issue and molecule state changes.
+	Short:   "Show real-time activity feed from beads and gt events",
+	Long: `Display a real-time feed of issue changes and agent activity.
 
 By default, launches an interactive TUI dashboard with:
   - Agent tree (top): Shows all agents organized by role with latest activity
   - Event stream (bottom): Chronological feed you can scroll through
   - Vim-style navigation: j/k to scroll, tab to switch panels, q to quit
 
-Use --plain for simple text output (wraps bd activity).
+The feed combines two event sources:
+  - Beads activity: Issue creates, updates, completions (from bd activity)
+  - GT events: Agent activity like patrol, sling, handoff (from .events.jsonl)
+
+Use --plain for simple text output (wraps bd activity only).
 
 Tmux Integration:
   Use --window to open the feed in a dedicated tmux window named 'feed'.
   This creates a persistent window you can cycle to with C-b n/p.
 
 Event symbols:
-  +  created/bonded  - New issue or molecule created
-  →  in_progress     - Work started on an issue
-  ✓  completed       - Issue closed or step completed
-  ✗  failed          - Step or issue failed
-  ⊘  deleted         - Issue removed
+  +  created/bonded    - New issue or molecule created
+  →  in_progress       - Work started on an issue
+  ✓  completed         - Issue closed or step completed
+  ✗  failed            - Step or issue failed
+  ⊘  deleted           - Issue removed
+  👁  patrol_started   - Witness began patrol cycle
+  ⚡  polecat_nudged   - Worker was nudged
+  🎯  sling            - Work was slung to worker
+  🤝  handoff          - Session handed off
 
 MQ (Merge Queue) event symbols:
   ⚙  merge_started   - Refinery began processing an MR
@@ -187,6 +195,12 @@ func runFeedDirect(workDir string, bdArgs []string) error {
 
 // runFeedTUI runs the interactive TUI feed.
 func runFeedTUI(workDir string) error {
+	// Must be in a Gas Town workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
 	var sources []feed.EventSource
 
 	// Create event source from bd activity
@@ -200,6 +214,12 @@ func runFeedTUI(workDir string) error {
 	mqSource, err := feed.NewMQEventSourceFromWorkDir(workDir)
 	if err == nil {
 		sources = append(sources, mqSource)
+	}
+
+	// Create GT events source (optional - don't fail if not available)
+	gtSource, err := feed.NewGtEventsSource(townRoot)
+	if err == nil {
+		sources = append(sources, gtSource)
 	}
 
 	// Combine all sources

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -211,34 +212,34 @@ func parseBeadContext(beadID string) (actor, rig, role string) {
 	return
 }
 
-// JSONLSource reads events from a JSONL file (like .events.jsonl)
-type JSONLSource struct {
-	file    *os.File
-	events  chan Event
-	cancel  context.CancelFunc
+// GtEventsSource reads events from ~/gt/.events.jsonl (gt activity log)
+type GtEventsSource struct {
+	file   *os.File
+	events chan Event
+	cancel context.CancelFunc
 }
 
-// JSONLEvent is the structure of events in .events.jsonl
-type JSONLEvent struct {
-	Timestamp string `json:"timestamp"`
-	Type      string `json:"type"`
-	Actor     string `json:"actor"`
-	Target    string `json:"target"`
-	Message   string `json:"message"`
-	Rig       string `json:"rig"`
-	Role      string `json:"role"`
+// GtEvent is the structure of events in .events.jsonl
+type GtEvent struct {
+	Timestamp  string                 `json:"ts"`
+	Source     string                 `json:"source"`
+	Type       string                 `json:"type"`
+	Actor      string                 `json:"actor"`
+	Payload    map[string]interface{} `json:"payload"`
+	Visibility string                 `json:"visibility"`
 }
 
-// NewJSONLSource creates a source that tails a JSONL file
-func NewJSONLSource(filePath string) (*JSONLSource, error) {
-	file, err := os.Open(filePath)
+// NewGtEventsSource creates a source that tails ~/gt/.events.jsonl
+func NewGtEventsSource(townRoot string) (*GtEventsSource, error) {
+	eventsPath := filepath.Join(townRoot, ".events.jsonl")
+	file, err := os.Open(eventsPath)
 	if err != nil {
 		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	source := &JSONLSource{
+	source := &GtEventsSource{
 		file:   file,
 		events: make(chan Event, 100),
 		cancel: cancel,
@@ -250,7 +251,7 @@ func NewJSONLSource(filePath string) (*JSONLSource, error) {
 }
 
 // tail follows the file and sends events
-func (s *JSONLSource) tail(ctx context.Context) {
+func (s *GtEventsSource) tail(ctx context.Context) {
 	defer close(s.events)
 
 	// Seek to end for live tailing
@@ -267,7 +268,7 @@ func (s *JSONLSource) tail(ctx context.Context) {
 		case <-ticker.C:
 			for scanner.Scan() {
 				line := scanner.Text()
-				if event := parseJSONLLine(line); event != nil {
+				if event := parseGtEventLine(line); event != nil {
 					select {
 					case s.events <- *event:
 					default:
@@ -279,42 +280,290 @@ func (s *JSONLSource) tail(ctx context.Context) {
 }
 
 // Events returns the event channel
-func (s *JSONLSource) Events() <-chan Event {
+func (s *GtEventsSource) Events() <-chan Event {
 	return s.events
 }
 
 // Close stops the source
-func (s *JSONLSource) Close() error {
+func (s *GtEventsSource) Close() error {
 	s.cancel()
 	return s.file.Close()
 }
 
-// parseJSONLLine parses a JSONL event line
-func parseJSONLLine(line string) *Event {
+// parseGtEventLine parses a line from .events.jsonl
+func parseGtEventLine(line string) *Event {
 	if strings.TrimSpace(line) == "" {
 		return nil
 	}
 
-	var je JSONLEvent
-	if err := json.Unmarshal([]byte(line), &je); err != nil {
+	var ge GtEvent
+	if err := json.Unmarshal([]byte(line), &ge); err != nil {
 		return nil
 	}
 
-	t, err := time.Parse(time.RFC3339, je.Timestamp)
+	// Only show feed-visible events
+	if ge.Visibility != "feed" && ge.Visibility != "both" {
+		return nil
+	}
+
+	t, err := time.Parse(time.RFC3339, ge.Timestamp)
 	if err != nil {
 		t = time.Now()
 	}
 
+	// Extract rig from payload or actor
+	rig := ""
+	if ge.Payload != nil {
+		if r, ok := ge.Payload["rig"].(string); ok {
+			rig = r
+		}
+	}
+	if rig == "" && ge.Actor != "" {
+		// Extract rig from actor like "gastown/witness"
+		parts := strings.Split(ge.Actor, "/")
+		if len(parts) > 0 && parts[0] != "mayor" && parts[0] != "deacon" {
+			rig = parts[0]
+		}
+	}
+
+	// Extract role from actor
+	role := ""
+	if ge.Actor != "" {
+		parts := strings.Split(ge.Actor, "/")
+		if len(parts) >= 2 {
+			role = parts[len(parts)-1]
+			// Check for known roles
+			switch parts[len(parts)-1] {
+			case "witness", "refinery":
+				role = parts[len(parts)-1]
+			default:
+				// Could be polecat name - check second-to-last part
+				if len(parts) >= 2 {
+					switch parts[len(parts)-2] {
+					case "polecats":
+						role = "polecat"
+					case "crew":
+						role = "crew"
+					}
+				}
+			}
+		} else if len(parts) == 1 {
+			role = parts[0]
+		}
+	}
+
+	// Build message from event type and payload
+	message := buildEventMessage(ge.Type, ge.Payload)
+
 	return &Event{
 		Time:    t,
-		Type:    je.Type,
-		Actor:   je.Actor,
-		Target:  je.Target,
-		Message: je.Message,
-		Rig:     je.Rig,
-		Role:    je.Role,
+		Type:    ge.Type,
+		Actor:   ge.Actor,
+		Target:  getPayloadString(ge.Payload, "bead"),
+		Message: message,
+		Rig:     rig,
+		Role:    role,
 		Raw:     line,
 	}
+}
+
+// buildEventMessage creates a human-readable message from event type and payload
+func buildEventMessage(eventType string, payload map[string]interface{}) string {
+	switch eventType {
+	case "patrol_started":
+		count := getPayloadInt(payload, "polecat_count")
+		if msg := getPayloadString(payload, "message"); msg != "" {
+			return msg
+		}
+		if count > 0 {
+			return fmt.Sprintf("patrol started (%d polecats)", count)
+		}
+		return "patrol started"
+
+	case "patrol_complete":
+		count := getPayloadInt(payload, "polecat_count")
+		if msg := getPayloadString(payload, "message"); msg != "" {
+			return msg
+		}
+		if count > 0 {
+			return fmt.Sprintf("patrol complete (%d polecats)", count)
+		}
+		return "patrol complete"
+
+	case "polecat_checked":
+		polecat := getPayloadString(payload, "polecat")
+		status := getPayloadString(payload, "status")
+		if polecat != "" {
+			if status != "" {
+				return fmt.Sprintf("checked %s (%s)", polecat, status)
+			}
+			return fmt.Sprintf("checked %s", polecat)
+		}
+		return "polecat checked"
+
+	case "polecat_nudged":
+		polecat := getPayloadString(payload, "polecat")
+		reason := getPayloadString(payload, "reason")
+		if polecat != "" {
+			if reason != "" {
+				return fmt.Sprintf("nudged %s: %s", polecat, reason)
+			}
+			return fmt.Sprintf("nudged %s", polecat)
+		}
+		return "polecat nudged"
+
+	case "escalation_sent":
+		target := getPayloadString(payload, "target")
+		to := getPayloadString(payload, "to")
+		reason := getPayloadString(payload, "reason")
+		if target != "" && to != "" {
+			if reason != "" {
+				return fmt.Sprintf("escalated %s to %s: %s", target, to, reason)
+			}
+			return fmt.Sprintf("escalated %s to %s", target, to)
+		}
+		return "escalation sent"
+
+	case "sling":
+		bead := getPayloadString(payload, "bead")
+		target := getPayloadString(payload, "target")
+		if bead != "" && target != "" {
+			return fmt.Sprintf("slung %s to %s", bead, target)
+		}
+		return "work slung"
+
+	case "hook":
+		bead := getPayloadString(payload, "bead")
+		if bead != "" {
+			return fmt.Sprintf("hooked %s", bead)
+		}
+		return "bead hooked"
+
+	case "handoff":
+		subject := getPayloadString(payload, "subject")
+		if subject != "" {
+			return fmt.Sprintf("handoff: %s", subject)
+		}
+		return "session handoff"
+
+	case "done":
+		bead := getPayloadString(payload, "bead")
+		if bead != "" {
+			return fmt.Sprintf("done: %s", bead)
+		}
+		return "work done"
+
+	case "mail":
+		subject := getPayloadString(payload, "subject")
+		to := getPayloadString(payload, "to")
+		if subject != "" {
+			if to != "" {
+				return fmt.Sprintf("→ %s: %s", to, subject)
+			}
+			return subject
+		}
+		return "mail sent"
+
+	case "merged":
+		worker := getPayloadString(payload, "worker")
+		if worker != "" {
+			return fmt.Sprintf("merged work from %s", worker)
+		}
+		return "merged"
+
+	case "merge_failed":
+		reason := getPayloadString(payload, "reason")
+		if reason != "" {
+			return fmt.Sprintf("merge failed: %s", reason)
+		}
+		return "merge failed"
+
+	default:
+		if msg := getPayloadString(payload, "message"); msg != "" {
+			return msg
+		}
+		return eventType
+	}
+}
+
+// getPayloadString extracts a string from payload
+func getPayloadString(payload map[string]interface{}, key string) string {
+	if payload == nil {
+		return ""
+	}
+	if v, ok := payload[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// getPayloadInt extracts an int from payload
+func getPayloadInt(payload map[string]interface{}, key string) int {
+	if payload == nil {
+		return 0
+	}
+	if v, ok := payload[key].(float64); ok {
+		return int(v)
+	}
+	return 0
+}
+
+// CombinedSource merges events from multiple sources
+type CombinedSource struct {
+	sources []EventSource
+	events  chan Event
+	cancel  context.CancelFunc
+}
+
+// NewCombinedSource creates a source that merges multiple event sources
+func NewCombinedSource(sources ...EventSource) *CombinedSource {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	combined := &CombinedSource{
+		sources: sources,
+		events:  make(chan Event, 100),
+		cancel:  cancel,
+	}
+
+	// Fan-in from all sources
+	for _, src := range sources {
+		go func(s EventSource) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case event, ok := <-s.Events():
+					if !ok {
+						return
+					}
+					select {
+					case combined.events <- event:
+					default:
+						// Drop if full
+					}
+				}
+			}
+		}(src)
+	}
+
+	return combined
+}
+
+// Events returns the combined event channel
+func (c *CombinedSource) Events() <-chan Event {
+	return c.events
+}
+
+// Close stops all sources
+func (c *CombinedSource) Close() error {
+	c.cancel()
+	var lastErr error
+	for _, src := range c.sources {
+		if err := src.Close(); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
 }
 
 // FindBeadsDir finds the beads directory for the given working directory
