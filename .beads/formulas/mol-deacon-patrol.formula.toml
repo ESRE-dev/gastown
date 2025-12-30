@@ -12,7 +12,7 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 2
+version = 3
 
 [[steps]]
 id = "inbox-check"
@@ -35,16 +35,30 @@ gt mail read <id>
 
 **WITNESS_PING**:
 Witnesses periodically ping to verify Deacon is alive. Simply acknowledge
-and mark as read - the fact that you're processing mail proves you're running.
+and archive - the fact that you're processing mail proves you're running.
 Your agent bead last_activity is updated automatically during patrol.
+```bash
+gt mail archive <message-id>
+```
 
 **HELP / Escalation**:
 Assess and handle or forward to Mayor.
+Archive after handling:
+```bash
+gt mail archive <message-id>
+```
 
 **LIFECYCLE messages**:
 Polecats reporting completion, refineries reporting merge results.
+Archive after processing:
+```bash
+gt mail archive <message-id>
+```
 
-Callbacks may spawn new polecats, update issue state, or trigger other actions."""
+Callbacks may spawn new polecats, update issue state, or trigger other actions.
+
+**Hygiene principle**: Archive messages after they're fully processed.
+Keep inbox near-empty - only unprocessed items should remain."""
 
 [[steps]]
 id = "trigger-pending-spawns"
@@ -351,9 +365,85 @@ This handles:
 All cleanup is handled by doctor checks - no need to run separate commands."""
 
 [[steps]]
+id = "log-maintenance"
+title = "Rotate logs and prune state"
+needs = ["session-gc"]
+description = """
+Maintain daemon logs and state files.
+
+**Step 1: Check daemon.log size**
+```bash
+# Get log file size
+ls -la ~/.beads/daemon*.log 2>/dev/null || ls -la ~/gt/.beads/daemon*.log 2>/dev/null
+```
+
+If daemon.log exceeds 10MB:
+```bash
+# Rotate with date suffix and gzip
+LOGFILE="$HOME/gt/.beads/daemon.log"
+if [ -f "$LOGFILE" ] && [ $(stat -f%z "$LOGFILE" 2>/dev/null || stat -c%s "$LOGFILE") -gt 10485760 ]; then
+    DATE=$(date +%Y-%m-%dT%H-%M-%S)
+    mv "$LOGFILE" "${LOGFILE%.log}-${DATE}.log"
+    gzip "${LOGFILE%.log}-${DATE}.log"
+fi
+```
+
+**Step 2: Archive old daemon logs**
+
+Clean up daemon logs older than 7 days:
+```bash
+find ~/gt/.beads/ -name "daemon-*.log.gz" -mtime +7 -delete
+```
+
+**Step 3: Prune state.json of dead sessions**
+
+The state.json tracks active sessions. Prune entries for sessions that no longer exist:
+```bash
+# Check for stale session entries
+gt daemon status --json 2>/dev/null
+```
+
+If state.json references sessions not in tmux:
+- Remove the stale entries
+- The daemon's internal cleanup should handle this, but verify
+
+**Note**: Log rotation prevents disk bloat from long-running daemons.
+State pruning keeps runtime state accurate."""
+
+[[steps]]
+id = "patrol-cleanup"
+title = "End-of-cycle inbox hygiene"
+needs = ["log-maintenance"]
+description = """
+Verify inbox hygiene before ending patrol cycle.
+
+**Step 1: Check inbox state**
+```bash
+gt mail inbox
+```
+
+Inbox should be EMPTY or contain only just-arrived unprocessed messages.
+
+**Step 2: Archive any remaining processed messages**
+
+All message types should have been archived during inbox-check processing:
+- WITNESS_PING → archived after acknowledging
+- HELP/Escalation → archived after handling
+- LIFECYCLE → archived after processing
+
+If any were missed:
+```bash
+# For each stale message found:
+gt mail archive <message-id>
+```
+
+**Goal**: Inbox should have ≤2 active messages at end of cycle.
+Deacon mail should flow through quickly - no accumulation."""
+
+[[steps]]
 id = "context-check"
 title = "Check own context limit"
-needs = ["session-gc"]
+needs = ["patrol-cleanup"]
 description = """
 Check own context limit.
 

@@ -33,7 +33,7 @@ Witness                    Refinery                      Git
 After successful merge, Refinery sends MERGED mail back to Witness so it can
 complete cleanup (nuke the polecat worktree)."""
 formula = "mol-refinery-patrol"
-version = 2
+version = 3
 
 [[steps]]
 id = "inbox-check"
@@ -65,19 +65,34 @@ A polecat's work is ready for merge. Extract details and track for processing.
 # - MR bead ID (REQUIRED for closing after merge)
 ```
 
-**IMPORTANT**: You MUST track the polecat name and MR bead ID - you will need them
-in merge-push step to send MERGED notification and close the MR bead.
+**IMPORTANT**: You MUST track the polecat name, MR bead ID, AND message ID - you will need them
+in merge-push step to send MERGED notification, close the MR bead, and archive the mail.
 
 Mark as read. The work will be processed in queue-scan/process-branch.
+**Do NOT archive yet** - archive after merge/reject decision in merge-push step.
 
 **PATROL: Wake up**:
-Witness detected MRs waiting but refinery idle. Acknowledge and proceed.
+Witness detected MRs waiting but refinery idle. Acknowledge and archive:
+```bash
+gt mail archive <message-id>
+```
 
 **HELP / Blocked**:
 Assess and respond. If you can't help, escalate to Mayor.
+Archive after handling:
+```bash
+gt mail archive <message-id>
+```
 
 **HANDOFF**:
-Read predecessor context. Check for in-flight merges."""
+Read predecessor context. Check for in-flight merges.
+Archive after absorbing context:
+```bash
+gt mail archive <message-id>
+```
+
+**Hygiene principle**: Archive messages after they're fully processed.
+Keep only: pending MRs in queue. Inbox should be near-empty."""
 
 [[steps]]
 id = "queue-scan"
@@ -196,7 +211,13 @@ The MR bead ID was in the MERGE_READY message or find via:
 bd list --type=merge-request --status=open | grep <polecat-name>
 ```
 
-**Step 4: Cleanup (only after Steps 2-3 confirmed)**
+**Step 4: Archive the MERGE_READY mail (REQUIRED)**
+```bash
+gt mail archive <merge-ready-message-id>
+```
+The message ID was tracked when you processed inbox-check.
+
+**Step 5: Cleanup (only after Steps 2-4 confirmed)**
 ```bash
 git branch -d temp
 git push origin --delete <polecat-branch>
@@ -205,8 +226,9 @@ git push origin --delete <polecat-branch>
 **VERIFICATION GATE**: You CANNOT proceed to loop-check without:
 - [x] MERGED mail sent to witness
 - [x] MR bead closed
+- [x] MERGE_READY mail archived
 
-If you skipped notifications, GO BACK AND SEND THEM NOW.
+If you skipped notifications or archiving, GO BACK AND DO THEM NOW.
 
 Main has moved. Any remaining branches need rebasing on new baseline."""
 
@@ -232,13 +254,15 @@ Summarize this patrol cycle.
 **VERIFICATION**: Before generating summary, confirm for each merged branch:
 - [ ] MERGED mail was sent to witness
 - [ ] MR bead was closed
+- [ ] MERGE_READY mail archived
 
-If any MERGED notifications were missed, send them now!
+If any notifications or archiving were missed, do them now!
 
 Include in summary:
 - Branches processed (count, names)
 - MERGED mails sent (count - should match branches processed)
 - MR beads closed (count - should match branches processed)
+- MERGE_READY mails archived (count - should match branches processed)
 - Test results (pass/fail)
 - Issues filed (if any)
 - Branches skipped (with reasons)
@@ -261,9 +285,40 @@ If context is LOW:
 - Can continue processing"""
 
 [[steps]]
+id = "patrol-cleanup"
+title = "End-of-cycle inbox hygiene"
+needs = ["context-check"]
+description = """
+Verify inbox hygiene before ending patrol cycle.
+
+**Step 1: Check inbox state**
+```bash
+gt mail inbox
+```
+
+Inbox should contain ONLY:
+- Unprocessed MERGE_READY messages (will process next cycle)
+- Active work items
+
+**Step 2: Archive any stale messages**
+
+Look for messages that were processed but not archived:
+- PATROL: Wake up that was acknowledged → archive
+- HELP/Blocked that was handled → archive
+- MERGE_READY where merge completed but archive was missed → archive
+
+```bash
+# For each stale message found:
+gt mail archive <message-id>
+```
+
+**Goal**: Inbox should have ≤3 active messages at end of cycle.
+Keep only: pending MRs in queue."""
+
+[[steps]]
 id = "burn-or-loop"
 title = "Burn and respawn or loop"
-needs = ["context-check"]
+needs = ["patrol-cleanup"]
 description = """
 End of patrol cycle decision.
 
