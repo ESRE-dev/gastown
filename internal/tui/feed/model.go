@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // Panel represents which panel has focus
@@ -252,14 +253,7 @@ func (m *Model) updateViewContent() {
 
 // addEvent adds an event and updates the agent tree
 func (m *Model) addEvent(e Event) {
-	m.events = append(m.events, e)
-
-	// Keep max 1000 events
-	if len(m.events) > 1000 {
-		m.events = m.events[len(m.events)-1000:]
-	}
-
-	// Update agent tree
+	// Update agent tree first (always do this for status tracking)
 	if e.Rig != "" {
 		rig, ok := m.rigs[e.Rig]
 		if !ok {
@@ -285,6 +279,26 @@ func (m *Model) addEvent(e Event) {
 			agent.LastEvent = &e
 			agent.LastUpdate = e.Time
 		}
+	}
+
+	// Filter out noisy agent session updates from the event feed.
+	// Agent session molecules (like gt-gastown-crew-joe) update frequently
+	// for status tracking. These updates are visible in the agent tree,
+	// so we don't need to clutter the event feed with them.
+	// We still show create/complete/fail/delete events for agent sessions.
+	if e.Type == "update" && beads.IsAgentSessionBead(e.Target) {
+		// Skip adding to event feed, but still refresh the view
+		// (agent tree was updated above)
+		m.updateViewContent()
+		return
+	}
+
+	// Add to event feed
+	m.events = append(m.events, e)
+
+	// Keep max 1000 events
+	if len(m.events) > 1000 {
+		m.events = m.events[len(m.events)-1000:]
 	}
 
 	m.updateViewContent()

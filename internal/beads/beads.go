@@ -822,3 +822,20 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 		return "", "", "", false
 	}
 }
+
+// IsAgentSessionBead returns true if the bead ID represents an agent session molecule.
+// Agent session beads follow patterns like gt-mayor, gt-gastown-witness, gt-gastown-crew-joe.
+// These are used to track agent state and update frequently, which can create noise.
+func IsAgentSessionBead(beadID string) bool {
+	_, role, _, ok := ParseAgentBeadID(beadID)
+	if !ok {
+		return false
+	}
+	// Known agent roles
+	switch role {
+	case "mayor", "deacon", "witness", "refinery", "crew", "polecat":
+		return true
+	default:
+		return false
+	}
+}

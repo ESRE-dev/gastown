@@ -967,3 +967,81 @@ func TestResolveBeadsDir(t *testing.T) {
 		}
 	})
 }
+
+func TestParseAgentBeadID(t *testing.T) {
+	tests := []struct {
+		input    string
+		wantRig  string
+		wantRole string
+		wantName string
+		wantOK   bool
+	}{
+		// Town-level agents
+		{"gt-mayor", "", "mayor", "", true},
+		{"gt-deacon", "", "deacon", "", true},
+		// Rig-level singletons
+		{"gt-gastown-witness", "gastown", "witness", "", true},
+		{"gt-gastown-refinery", "gastown", "refinery", "", true},
+		// Rig-level named agents
+		{"gt-gastown-crew-joe", "gastown", "crew", "joe", true},
+		{"gt-gastown-crew-max", "gastown", "crew", "max", true},
+		{"gt-gastown-polecat-capable", "gastown", "polecat", "capable", true},
+		// Names with hyphens
+		{"gt-gastown-polecat-my-agent", "gastown", "polecat", "my-agent", true},
+		// Parseable but not valid agent roles (IsAgentSessionBead will reject)
+		{"gt-abc123", "", "abc123", "", true}, // Parses as town-level but not valid role
+		// Truly invalid patterns
+		{"bd-gastown-crew-joe", "", "", "", false}, // Wrong prefix
+		{"", "", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			rig, role, name, ok := ParseAgentBeadID(tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("ParseAgentBeadID(%q) ok = %v, want %v", tt.input, ok, tt.wantOK)
+				return
+			}
+			if rig != tt.wantRig {
+				t.Errorf("ParseAgentBeadID(%q) rig = %q, want %q", tt.input, rig, tt.wantRig)
+			}
+			if role != tt.wantRole {
+				t.Errorf("ParseAgentBeadID(%q) role = %q, want %q", tt.input, role, tt.wantRole)
+			}
+			if name != tt.wantName {
+				t.Errorf("ParseAgentBeadID(%q) name = %q, want %q", tt.input, name, tt.wantName)
+			}
+		})
+	}
+}
+
+func TestIsAgentSessionBead(t *testing.T) {
+	tests := []struct {
+		beadID string
+		want   bool
+	}{
+		// Agent session beads (should return true)
+		{"gt-mayor", true},
+		{"gt-deacon", true},
+		{"gt-gastown-witness", true},
+		{"gt-gastown-refinery", true},
+		{"gt-gastown-crew-joe", true},
+		{"gt-gastown-polecat-capable", true},
+		// Regular work beads (should return false)
+		{"gt-abc123", false},
+		{"gt-sb6m4", false},
+		{"gt-u7dxq", false},
+		// Invalid beads
+		{"bd-abc123", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.beadID, func(t *testing.T) {
+			got := IsAgentSessionBead(tt.beadID)
+			if got != tt.want {
+				t.Errorf("IsAgentSessionBead(%q) = %v, want %v", tt.beadID, got, tt.want)
+			}
+		})
+	}
+}
