@@ -233,13 +233,15 @@ func runSwarmCreate(cmd *cobra.Command, args []string) error {
 
 	// Use beads to create the swarm molecule
 	// First check if the epic already exists (it may be pre-created)
+	// Use BeadsPath() to ensure we read from git-synced beads location
+	beadsPath := r.BeadsPath()
 	checkCmd := exec.Command("bd", "show", swarmEpic, "--json")
-	checkCmd.Dir = r.Path
+	checkCmd.Dir = beadsPath
 	if err := checkCmd.Run(); err == nil {
 		// Epic exists, update it to be a swarm molecule
 		updateArgs := []string{"update", swarmEpic, "--mol-type=swarm"}
 		updateCmd := exec.Command("bd", updateArgs...)
-		updateCmd.Dir = r.Path
+		updateCmd.Dir = beadsPath
 		if err := updateCmd.Run(); err != nil {
 			return fmt.Errorf("updating epic to swarm molecule: %w", err)
 		}
@@ -253,7 +255,7 @@ func runSwarmCreate(cmd *cobra.Command, args []string) error {
 			"--silent",
 		}
 		createCmd := exec.Command("bd", createArgs...)
-		createCmd.Dir = r.Path
+		createCmd.Dir = beadsPath
 		var stdout bytes.Buffer
 		createCmd.Stdout = &stdout
 		if err := createCmd.Run(); err != nil {
@@ -289,7 +291,7 @@ func runSwarmCreate(cmd *cobra.Command, args []string) error {
 	if swarmStart {
 		// Get swarm status to find ready tasks
 		statusCmd := exec.Command("bd", "swarm", "status", swarmEpic, "--json")
-		statusCmd.Dir = r.Path
+		statusCmd.Dir = beadsPath
 		var statusOut bytes.Buffer
 		statusCmd.Stdout = &statusOut
 		if err := statusCmd.Run(); err != nil {
@@ -330,8 +332,9 @@ func runSwarmStart(cmd *cobra.Command, args []string) error {
 	var foundRig *rig.Rig
 	for _, r := range rigs {
 		// Check if swarm exists in this rig by querying beads
+		// Use BeadsPath() to ensure we read from git-synced location
 		checkCmd := exec.Command("bd", "show", swarmID, "--json")
-		checkCmd.Dir = r.Path
+		checkCmd.Dir = r.BeadsPath()
 		if err := checkCmd.Run(); err == nil {
 			foundRig = r
 			break
@@ -344,7 +347,7 @@ func runSwarmStart(cmd *cobra.Command, args []string) error {
 
 	// Get swarm status from beads
 	statusCmd := exec.Command("bd", "swarm", "status", swarmID, "--json")
-	statusCmd.Dir = foundRig.Path
+	statusCmd.Dir = foundRig.BeadsPath()
 	var stdout bytes.Buffer
 	statusCmd.Stdout = &stdout
 
@@ -468,8 +471,9 @@ func runSwarmStatus(cmd *cobra.Command, args []string) error {
 	// Find which rig has this swarm
 	var foundRig *rig.Rig
 	for _, r := range rigs {
+		// Use BeadsPath() to ensure we read from git-synced location
 		checkCmd := exec.Command("bd", "show", swarmID, "--json")
-		checkCmd.Dir = r.Path
+		checkCmd.Dir = r.BeadsPath()
 		if err := checkCmd.Run(); err == nil {
 			foundRig = r
 			break
@@ -487,7 +491,7 @@ func runSwarmStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	bdCmd := exec.Command("bd", bdArgs...)
-	bdCmd.Dir = foundRig.Path
+	bdCmd.Dir = foundRig.BeadsPath()
 	bdCmd.Stdout = os.Stdout
 	bdCmd.Stderr = os.Stderr
 
@@ -537,7 +541,7 @@ func runSwarmList(cmd *cobra.Command, args []string) error {
 
 	for _, r := range rigs {
 		bdCmd := exec.Command("bd", bdArgs...)
-		bdCmd.Dir = r.Path
+		bdCmd.Dir = r.BeadsPath() // Use BeadsPath() for git-synced beads
 		var stdout bytes.Buffer
 		bdCmd.Stdout = &stdout
 
@@ -615,8 +619,9 @@ func runSwarmLand(cmd *cobra.Command, args []string) error {
 
 	var foundRig *rig.Rig
 	for _, r := range rigs {
+		// Use BeadsPath() for git-synced beads
 		checkCmd := exec.Command("bd", "show", swarmID, "--json")
-		checkCmd.Dir = r.Path
+		checkCmd.Dir = r.BeadsPath()
 		if err := checkCmd.Run(); err == nil {
 			foundRig = r
 			break
@@ -629,7 +634,7 @@ func runSwarmLand(cmd *cobra.Command, args []string) error {
 
 	// Check swarm status - all children should be closed
 	statusCmd := exec.Command("bd", "swarm", "status", swarmID, "--json")
-	statusCmd.Dir = foundRig.Path
+	statusCmd.Dir = foundRig.BeadsPath()
 	var stdout bytes.Buffer
 	statusCmd.Stdout = &stdout
 
@@ -678,7 +683,7 @@ func runSwarmLand(cmd *cobra.Command, args []string) error {
 
 	// Close the swarm epic in beads
 	closeCmd := exec.Command("bd", "close", swarmID, "--reason", "Swarm landed to main")
-	closeCmd.Dir = foundRig.Path
+	closeCmd.Dir = foundRig.BeadsPath()
 	if err := closeCmd.Run(); err != nil {
 		style.PrintWarning("couldn't close swarm epic in beads: %v", err)
 	}
@@ -700,8 +705,9 @@ func runSwarmCancel(cmd *cobra.Command, args []string) error {
 
 	var foundRig *rig.Rig
 	for _, r := range rigs {
+		// Use BeadsPath() for git-synced beads
 		checkCmd := exec.Command("bd", "show", swarmID, "--json")
-		checkCmd.Dir = r.Path
+		checkCmd.Dir = r.BeadsPath()
 		if err := checkCmd.Run(); err == nil {
 			foundRig = r
 			break
@@ -714,7 +720,7 @@ func runSwarmCancel(cmd *cobra.Command, args []string) error {
 
 	// Check if swarm is already closed
 	checkCmd := exec.Command("bd", "show", swarmID, "--json")
-	checkCmd.Dir = foundRig.Path
+	checkCmd.Dir = foundRig.BeadsPath()
 	var stdout bytes.Buffer
 	checkCmd.Stdout = &stdout
 	if err := checkCmd.Run(); err != nil {
@@ -732,7 +738,7 @@ func runSwarmCancel(cmd *cobra.Command, args []string) error {
 
 	// Close the swarm epic in beads with cancelled reason
 	closeCmd := exec.Command("bd", "close", swarmID, "--reason", "Swarm cancelled")
-	closeCmd.Dir = foundRig.Path
+	closeCmd.Dir = foundRig.BeadsPath()
 	if err := closeCmd.Run(); err != nil {
 		return fmt.Errorf("closing swarm: %w", err)
 	}

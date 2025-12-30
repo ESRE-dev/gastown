@@ -172,7 +172,7 @@ func (m *Manager) branchExists(branch string) bool {
 // getCurrentBranch returns the current branch name.
 func (m *Manager) getCurrentBranch() (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = m.workDir
+	cmd.Dir = m.gitDir
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -187,7 +187,7 @@ func (m *Manager) getCurrentBranch() (string, error) {
 // gitRun executes a git command.
 func (m *Manager) gitRun(args ...string) error {
 	cmd := exec.Command("git", args...)
-	cmd.Dir = m.workDir
+	cmd.Dir = m.gitDir
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

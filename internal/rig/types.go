@@ -65,3 +65,14 @@ func (r *Rig) Summary() RigSummary {
 		HasRefinery:  r.HasRefinery,
 	}
 }
+
+// BeadsPath returns the path to use for beads operations.
+// Returns the mayor/rig clone path if available (has proper sync-branch config),
+// otherwise falls back to the rig root path.
+// This ensures beads commands read from a location with git-synced beads data.
+func (r *Rig) BeadsPath() string {
+	if r.HasMayor {
+		return r.Path + "/mayor/rig"
+	}
+	return r.Path
+}

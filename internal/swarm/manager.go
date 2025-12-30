@@ -23,15 +23,17 @@ var (
 // Manager handles swarm lifecycle operations.
 // Manager is stateless - all swarm state is discovered from beads.
 type Manager struct {
-	rig     *rig.Rig
-	workDir string
+	rig       *rig.Rig
+	beadsDir  string // Path for beads operations (git-synced)
+	gitDir    string // Path for git operations (rig root)
 }
 
 // NewManager creates a new swarm manager for a rig.
 func NewManager(r *rig.Rig) *Manager {
 	return &Manager{
-		rig:     r,
-		workDir: r.Path,
+		rig:      r,
+		beadsDir: r.BeadsPath(), // Use BeadsPath() for git-synced beads operations
+		gitDir:   r.Path,        // Use rig root for git operations
 	}
 }
 
@@ -40,7 +42,7 @@ func NewManager(r *rig.Rig) *Manager {
 func (m *Manager) LoadSwarm(epicID string) (*Swarm, error) {
 	// Query beads for the epic
 	cmd := exec.Command("bd", "show", epicID, "--json")
-	cmd.Dir = m.workDir
+	cmd.Dir = m.beadsDir
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -126,7 +128,7 @@ func (m *Manager) GetSwarm(id string) (*Swarm, error) {
 func (m *Manager) GetReadyTasks(swarmID string) ([]SwarmTask, error) {
 	// Use bd swarm status to get ready front
 	cmd := exec.Command("bd", "swarm", "status", swarmID, "--json")
-	cmd.Dir = m.workDir
+	cmd.Dir = m.beadsDir
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -163,7 +165,7 @@ func (m *Manager) GetReadyTasks(swarmID string) ([]SwarmTask, error) {
 // IsComplete checks if all tasks are closed by querying beads.
 func (m *Manager) IsComplete(swarmID string) (bool, error) {
 	cmd := exec.Command("bd", "swarm", "status", swarmID, "--json")
-	cmd.Dir = m.workDir
+	cmd.Dir = m.beadsDir
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -213,7 +215,7 @@ func isValidTransition(from, to SwarmState) bool {
 func (m *Manager) loadTasksFromBeads(epicID string) ([]SwarmTask, error) {
 	// Run: bd show <epicID> --json to get epic with children
 	cmd := exec.Command("bd", "show", epicID, "--json")
-	cmd.Dir = m.workDir
+	cmd.Dir = m.beadsDir
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -275,7 +277,7 @@ func (m *Manager) loadTasksFromBeads(epicID string) ([]SwarmTask, error) {
 // getGitHead returns the current HEAD commit.
 func (m *Manager) getGitHead() (string, error) {
 	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = m.workDir
+	cmd.Dir = m.gitDir
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
