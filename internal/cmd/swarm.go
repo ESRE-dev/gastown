@@ -151,6 +151,23 @@ Transitions the swarm from 'created' to 'active' state.`,
 	RunE: runSwarmStart,
 }
 
+var swarmDispatchCmd = &cobra.Command{
+	Use:   "dispatch <epic-id>",
+	Short: "Assign next ready task to an idle worker",
+	Long: `Dispatch the next ready task from an epic to an available worker.
+
+Finds the first unassigned task in the epic's ready front and slings it
+to an idle polecat in the rig.
+
+Examples:
+  gt swarm dispatch gt-abc         # Dispatch next task from epic gt-abc
+  gt swarm dispatch gt-abc --rig gastown  # Dispatch in specific rig`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSwarmDispatch,
+}
+
+var swarmDispatchRig string
+
 func init() {
 	// Create flags
 	swarmCreateCmd.Flags().StringVar(&swarmEpic, "epic", "", "Beads epic ID for this swarm (required)")
@@ -166,6 +183,9 @@ func init() {
 	swarmListCmd.Flags().StringVar(&swarmListStatus, "status", "", "Filter by status (active, landed, cancelled, failed)")
 	swarmListCmd.Flags().BoolVar(&swarmListJSON, "json", false, "Output as JSON")
 
+	// Dispatch flags
+	swarmDispatchCmd.Flags().StringVar(&swarmDispatchRig, "rig", "", "Rig to dispatch in (auto-detected from epic if not specified)")
+
 	// Add subcommands
 	swarmCmd.AddCommand(swarmCreateCmd)
 	swarmCmd.AddCommand(swarmStartCmd)
@@ -173,6 +193,7 @@ func init() {
 	swarmCmd.AddCommand(swarmListCmd)
 	swarmCmd.AddCommand(swarmLandCmd)
 	swarmCmd.AddCommand(swarmCancelCmd)
+	swarmCmd.AddCommand(swarmDispatchCmd)
 
 	rootCmd.AddCommand(swarmCmd)
 }
@@ -391,6 +412,141 @@ func runSwarmStart(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  ○ %s: %s\n", task.ID, task.Title)
 		}
 		fmt.Printf("\nUse 'gt sling <task-id> <rig>/<worker>' to assign tasks\n")
+	}
+
+	return nil
+}
+
+func runSwarmDispatch(cmd *cobra.Command, args []string) error {
+	epicID := args[0]
+
+	// Find the epic's rig by trying to show it in each rig
+	rigs, townRoot, err := getAllRigs()
+	if err != nil {
+		return err
+	}
+
+	var foundRig *rig.Rig
+	for _, r := range rigs {
+		// If --rig specified, only check that rig
+		if swarmDispatchRig != "" && r.Name != swarmDispatchRig {
+			continue
+		}
+		// Use BeadsPath() to ensure we read from git-synced location
+		checkCmd := exec.Command("bd", "show", epicID, "--json")
+		checkCmd.Dir = r.BeadsPath()
+		if err := checkCmd.Run(); err == nil {
+			foundRig = r
+			break
+		}
+	}
+
+	if foundRig == nil {
+		if swarmDispatchRig != "" {
+			return fmt.Errorf("epic '%s' not found in rig '%s'", epicID, swarmDispatchRig)
+		}
+		return fmt.Errorf("epic '%s' not found in any rig", epicID)
+	}
+
+	// Get swarm/epic status to find ready tasks
+	statusCmd := exec.Command("bd", "swarm", "status", epicID, "--json")
+	statusCmd.Dir = foundRig.BeadsPath()
+	var stdout bytes.Buffer
+	statusCmd.Stdout = &stdout
+
+	if err := statusCmd.Run(); err != nil {
+		return fmt.Errorf("getting epic status: %w", err)
+	}
+
+	var status struct {
+		Ready []struct {
+			ID       string `json:"id"`
+			Title    string `json:"title"`
+			Assignee string `json:"assignee"`
+		} `json:"ready"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		return fmt.Errorf("parsing epic status: %w", err)
+	}
+
+	// Filter to unassigned ready tasks
+	var unassigned []struct {
+		ID    string
+		Title string
+	}
+	for _, task := range status.Ready {
+		if task.Assignee == "" {
+			unassigned = append(unassigned, struct {
+				ID    string
+				Title string
+			}{task.ID, task.Title})
+		}
+	}
+
+	if len(unassigned) == 0 {
+		fmt.Println("No unassigned ready tasks to dispatch")
+		return nil
+	}
+
+	// Find idle polecats (no hooked work)
+	polecatGit := git.NewGit(foundRig.Path)
+	polecatMgr := polecat.NewManager(foundRig, polecatGit)
+	polecats, err := polecatMgr.List()
+	if err != nil {
+		return fmt.Errorf("listing polecats: %w", err)
+	}
+
+	// Check which polecats have no hooked work
+	var idlePolecats []string
+	for _, p := range polecats {
+		// Check if polecat has hooked work by querying beads
+		hookCheckCmd := exec.Command("bd", "list", "--status=hooked", "--assignee", fmt.Sprintf("%s/polecats/%s", foundRig.Name, p.Name), "--json")
+		hookCheckCmd.Dir = foundRig.BeadsPath()
+		var hookOut bytes.Buffer
+		hookCheckCmd.Stdout = &hookOut
+		if err := hookCheckCmd.Run(); err == nil {
+			var hooked []interface{}
+			if err := json.Unmarshal(hookOut.Bytes(), &hooked); err == nil && len(hooked) == 0 {
+				idlePolecats = append(idlePolecats, p.Name)
+			}
+		}
+	}
+
+	if len(idlePolecats) == 0 {
+		fmt.Println("No idle polecats available")
+		fmt.Printf("\nUnassigned ready tasks:\n")
+		for _, task := range unassigned {
+			fmt.Printf("  ○ %s: %s\n", task.ID, task.Title)
+		}
+		fmt.Printf("\nCreate a new polecat or wait for one to become idle.\n")
+		return nil
+	}
+
+	// Dispatch first unassigned task to first idle polecat
+	task := unassigned[0]
+	worker := idlePolecats[0]
+	target := fmt.Sprintf("%s/%s", foundRig.Name, worker)
+
+	fmt.Printf("Dispatching %s to %s...\n", task.ID, target)
+
+	// Use gt sling to assign the task
+	slingCmd := exec.Command("gt", "sling", task.ID, target)
+	slingCmd.Dir = townRoot
+	slingCmd.Stdout = os.Stdout
+	slingCmd.Stderr = os.Stderr
+
+	if err := slingCmd.Run(); err != nil {
+		return fmt.Errorf("slinging task: %w", err)
+	}
+
+	fmt.Printf("%s Dispatched %s: %s → %s\n", style.Bold.Render("✓"), task.ID, task.Title, target)
+
+	// Show remaining tasks and workers
+	if len(unassigned) > 1 {
+		fmt.Printf("\n%d more ready tasks available\n", len(unassigned)-1)
+	}
+	if len(idlePolecats) > 1 {
+		fmt.Printf("%d more idle polecats available\n", len(idlePolecats)-1)
 	}
 
 	return nil
