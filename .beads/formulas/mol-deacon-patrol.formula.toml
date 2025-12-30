@@ -111,9 +111,116 @@ After closing a gate, the Waiters field contains mail addresses to notify.
 Send a brief notification to each waiter that the gate has cleared."""
 
 [[steps]]
+id = "check-convoy-completion"
+title = "Check convoy completion"
+needs = ["inbox-check"]
+description = """
+Check convoy completion status.
+
+Convoys are coordination beads that track multiple issues across rigs. When all tracked issues close, the convoy auto-closes.
+
+**Step 1: Find open convoys**
+```bash
+bd list --type=convoy --status=open
+```
+
+**Step 2: For each open convoy, check tracked issues**
+```bash
+bd show <convoy-id>
+# Look for 'tracks' or 'dependencies' field listing tracked issues
+```
+
+**Step 3: If all tracked issues are closed, close the convoy**
+```bash
+# Check each tracked issue
+for issue in tracked_issues:
+    bd show <issue-id>
+    # If status is open/in_progress, convoy stays open
+    # If all are closed (completed, wontfix, etc.), convoy is complete
+
+# Close convoy when all tracked issues are done
+bd close <convoy-id> --reason "All tracked issues completed"
+```
+
+**Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues). Use full IDs when checking."""
+
+[[steps]]
+id = "resolve-external-deps"
+title = "Resolve external dependencies"
+needs = ["check-convoy-completion"]
+description = """
+Resolve external dependencies across rigs.
+
+When an issue in one rig closes, any dependencies in other rigs should be notified. This enables cross-rig coordination without tight coupling.
+
+**Step 1: Check recent closures from feed**
+```bash
+gt feed --since 10m --plain | grep "✓"
+# Look for recently closed issues
+```
+
+**Step 2: For each closed issue, check cross-rig dependents**
+```bash
+bd show <closed-issue>
+# Look at 'blocks' field - these are issues that were waiting on this one
+# If any blocked issue is in a different rig/prefix, it may now be unblocked
+```
+
+**Step 3: Update blocked status**
+For blocked issues in other rigs, the closure should automatically unblock them (beads handles this). But verify:
+```bash
+bd blocked
+# Should no longer show the previously-blocked issue if dependency is met
+```
+
+**Cross-rig scenarios:**
+- bd-xxx closes → gt-yyy that depended on it is unblocked
+- External issue closes → internal convoy step can proceed
+- Rig A issue closes → Rig B issue waiting on it proceeds
+
+No manual intervention needed if dependencies are properly tracked - this step just validates the propagation occurred."""
+
+[[steps]]
+id = "fire-notifications"
+title = "Fire notifications"
+needs = ["resolve-external-deps"]
+description = """
+Fire notifications for convoy and cross-rig events.
+
+After convoy completion or cross-rig dependency resolution, notify relevant parties.
+
+**Convoy completion notifications:**
+When a convoy closes (all tracked issues done), notify the Overseer:
+```bash
+# Convoy gt-convoy-xxx just completed
+gt mail send mayor/ -s "Convoy complete: <convoy-title>" \\
+  -m "Convoy <id> has completed. All tracked issues closed.
+      Duration: <start to end>
+      Issues: <count>
+
+      Summary: <brief description of what was accomplished>"
+```
+
+**Cross-rig resolution notifications:**
+When a cross-rig dependency resolves, notify the affected rig:
+```bash
+# Issue bd-xxx closed, unblocking gt-yyy
+gt mail send gastown/witness -s "Dependency resolved: <bd-xxx>" \\
+  -m "External dependency bd-xxx has closed.
+      Unblocked: gt-yyy (<title>)
+      This issue may now proceed."
+```
+
+**Notification targets:**
+- Convoy complete → mayor/ (for strategic visibility)
+- Cross-rig dep resolved → <rig>/witness (for operational awareness)
+
+Keep notifications brief and actionable. The recipient can run bd show for details."""
+
+[[steps]]
 id = "health-scan"
 title = "Check Witness and Refinery health"
-needs = ["trigger-pending-spawns", "gate-evaluation"]
+needs = ["trigger-pending-spawns", "gate-evaluation", "fire-notifications"]
 description = """
 Check Witness and Refinery health for each rig.
 
