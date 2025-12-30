@@ -292,6 +292,42 @@ func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// FindSessionByWorkDir finds tmux sessions where the pane's current working directory
+// matches or is under the target directory. Returns session names that match.
+// If checkClaude is true, only returns sessions that have Claude (node) running.
+func (t *Tmux) FindSessionByWorkDir(targetDir string, checkClaude bool) ([]string, error) {
+	sessions, err := t.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	var matches []string
+	for _, session := range sessions {
+		if session == "" {
+			continue
+		}
+
+		workDir, err := t.GetPaneWorkDir(session)
+		if err != nil {
+			continue // Skip sessions we can't query
+		}
+
+		// Check if workdir matches target (exact match or subdir)
+		if workDir == targetDir || strings.HasPrefix(workDir, targetDir+"/") {
+			if checkClaude {
+				// Only include if Claude is running
+				if t.IsClaudeRunning(session) {
+					matches = append(matches, session)
+				}
+			} else {
+				matches = append(matches, session)
+			}
+		}
+	}
+
+	return matches, nil
+}
+
 // CapturePane captures the visible content of a pane.
 func (t *Tmux) CapturePane(session string, lines int) (string, error) {
 	return t.run("capture-pane", "-p", "-t", session, "-S", fmt.Sprintf("-%d", lines))

@@ -83,6 +83,37 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("checking session: %w", err)
 	}
 
+	// Before creating a new session, check if there's already a Claude session
+	// running in this crew's directory (might have been started manually or via
+	// a different mechanism)
+	if !hasSession {
+		existingSessions, err := t.FindSessionByWorkDir(worker.ClonePath, true)
+		if err == nil && len(existingSessions) > 0 {
+			// Found an existing session with Claude running in this directory
+			existingSession := existingSessions[0]
+			fmt.Printf("%s Found existing Claude session '%s' in crew directory\n",
+				style.Warning.Render("⚠"),
+				existingSession)
+			fmt.Printf("  Attaching to existing session instead of creating a new one\n")
+
+			// If inside tmux (but different session), inform user
+			if tmux.IsInsideTmux() {
+				fmt.Printf("Use C-b s to switch to '%s'\n", existingSession)
+				return nil
+			}
+
+			// Outside tmux: attach unless --detached flag is set
+			if crewDetached {
+				fmt.Printf("Existing session: '%s'. Run 'tmux attach -t %s' to attach.\n",
+					existingSession, existingSession)
+				return nil
+			}
+
+			// Attach to existing session
+			return attachToTmuxSession(existingSession)
+		}
+	}
+
 	if !hasSession {
 		// Create new session
 		if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
