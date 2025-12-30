@@ -176,12 +176,28 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 
 // runCrewStart is an alias for runStartCrew, handling multiple input formats.
 // It supports: "name", "rig/name", "rig/crew/name" formats, or auto-detection from cwd.
+// Multiple names can be provided to start multiple crew members at once.
 func runCrewStart(cmd *cobra.Command, args []string) error {
-	var name string
+	// If no args, try to detect from current directory
+	if len(args) == 0 {
+		detected, err := detectCrewFromCwd()
+		if err != nil {
+			return fmt.Errorf("could not detect crew workspace from current directory: %w\n\nUsage: gt crew start <name>", err)
+		}
+		name := detected.crewName
+		if crewRig == "" {
+			crewRig = detected.rigName
+		}
+		fmt.Printf("Detected crew workspace: %s/%s\n", detected.rigName, name)
 
-	// Determine crew name: from arg, or auto-detect from cwd
-	if len(args) > 0 {
-		name = args[0]
+		startCrewRig = crewRig
+		startCrewAccount = crewAccount
+		return runStartCrew(cmd, []string{name})
+	}
+
+	// Process each name
+	var lastErr error
+	for _, name := range args {
 		// Handle rig/crew/name format (e.g., "gastown/crew/joe" -> "gastown/joe")
 		if strings.Contains(name, "/crew/") {
 			parts := strings.SplitN(name, "/crew/", 2)
@@ -189,24 +205,18 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 				name = parts[0] + "/" + parts[1]
 			}
 		}
-	} else {
-		// Try to detect from current directory
-		detected, err := detectCrewFromCwd()
-		if err != nil {
-			return fmt.Errorf("could not detect crew workspace from current directory: %w\n\nUsage: gt crew start <name>", err)
+
+		// Set the start.go flags from crew.go flags before calling
+		startCrewRig = crewRig
+		startCrewAccount = crewAccount
+
+		if err := runStartCrew(cmd, []string{name}); err != nil {
+			fmt.Printf("Error starting %s: %v\n", name, err)
+			lastErr = err
 		}
-		name = detected.crewName
-		if crewRig == "" {
-			crewRig = detected.rigName
-		}
-		fmt.Printf("Detected crew workspace: %s/%s\n", detected.rigName, name)
 	}
 
-	// Set the start.go flags from crew.go flags before calling
-	startCrewRig = crewRig
-	startCrewAccount = crewAccount
-
-	return runStartCrew(cmd, []string{name})
+	return lastErr
 }
 
 func runCrewRestart(cmd *cobra.Command, args []string) error {

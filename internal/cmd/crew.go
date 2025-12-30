@@ -233,9 +233,9 @@ var crewPrevCmd = &cobra.Command{
 }
 
 var crewStartCmd = &cobra.Command{
-	Use:   "start [name]",
-	Short: "Start a crew workspace (creates if needed)",
-	Long: `Start a crew workspace, creating it if it doesn't exist.
+	Use:   "start [name...]",
+	Short: "Start crew workspace(s) (creates if needed)",
+	Long: `Start one or more crew workspaces, creating them if they don't exist.
 
 This is an alias for 'gt start crew'. It combines 'gt crew add' and 'gt crew at --detached'.
 The crew session starts in the background with Claude running and ready.
@@ -249,11 +249,11 @@ Role Discovery:
   workspace automatically.
 
 Examples:
-  gt crew start joe                    # Start joe in current rig
-  gt crew start gastown/joe            # Start joe in gastown rig
-  gt crew start joe --rig beads        # Start joe in beads rig
-  gt crew start                        # Auto-detect from cwd`,
-	Args: cobra.MaximumNArgs(1),
+  gt crew start joe                         # Start joe in current rig
+  gt crew start gastown/joe                 # Start joe in gastown rig
+  gt crew start beads/grip beads/fang       # Start multiple crew members
+  gt crew start joe --rig beads             # Start joe in beads rig
+  gt crew start                             # Auto-detect from cwd`,
 	RunE: runCrewStart,
 }
 
