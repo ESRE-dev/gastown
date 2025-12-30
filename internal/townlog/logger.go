@@ -29,6 +29,13 @@ const (
 	EventKill EventType = "kill"
 	// EventCallback indicates a callback was processed during patrol.
 	EventCallback EventType = "callback"
+
+	// Witness patrol events
+	EventPatrolStarted  EventType = "patrol_started"
+	EventPolecatChecked EventType = "polecat_checked"
+	EventPolecatNudged  EventType = "polecat_nudged"
+	EventEscalationSent EventType = "escalation_sent"
+	EventPatrolComplete EventType = "patrol_complete"
 )
 
 // Event represents a single agent lifecycle event.
@@ -150,6 +157,36 @@ func formatLogLine(e Event) string {
 			detail = fmt.Sprintf("callback: %s", e.Context)
 		} else {
 			detail = "callback processed"
+		}
+	case EventPatrolStarted:
+		if e.Context != "" {
+			detail = fmt.Sprintf("started patrol (%s)", e.Context)
+		} else {
+			detail = "started patrol"
+		}
+	case EventPolecatChecked:
+		if e.Context != "" {
+			detail = fmt.Sprintf("checked polecat %s", e.Context)
+		} else {
+			detail = "checked polecat"
+		}
+	case EventPolecatNudged:
+		if e.Context != "" {
+			detail = fmt.Sprintf("nudged polecat (%s)", e.Context)
+		} else {
+			detail = "nudged polecat"
+		}
+	case EventEscalationSent:
+		if e.Context != "" {
+			detail = fmt.Sprintf("escalated (%s)", e.Context)
+		} else {
+			detail = "escalated"
+		}
+	case EventPatrolComplete:
+		if e.Context != "" {
+			detail = fmt.Sprintf("patrol complete (%s)", e.Context)
+		} else {
+			detail = "patrol complete"
 		}
 	default:
 		detail = string(e.Type)

@@ -46,6 +46,13 @@ const (
 	TypeBoot    = "boot"
 	TypeHalt    = "halt"
 
+	// Witness patrol events
+	TypePatrolStarted   = "patrol_started"
+	TypePolecatChecked  = "polecat_checked"
+	TypePolecatNudged   = "polecat_nudged"
+	TypeEscalationSent  = "escalation_sent"
+	TypePatrolComplete  = "patrol_complete"
+
 	// Merge queue events (emitted by refinery)
 	TypeMergeStarted = "merge_started"
 	TypeMerged       = "merged"
@@ -194,4 +201,48 @@ func MergePayload(mrID, worker, branch, reason string) map[string]interface{} {
 		p["reason"] = reason
 	}
 	return p
+}
+
+// PatrolPayload creates a payload for patrol start/complete events.
+func PatrolPayload(rig string, polecatCount int, message string) map[string]interface{} {
+	p := map[string]interface{}{
+		"rig":           rig,
+		"polecat_count": polecatCount,
+	}
+	if message != "" {
+		p["message"] = message
+	}
+	return p
+}
+
+// PolecatCheckPayload creates a payload for polecat check events.
+func PolecatCheckPayload(rig, polecat, status, issue string) map[string]interface{} {
+	p := map[string]interface{}{
+		"rig":     rig,
+		"polecat": polecat,
+		"status":  status,
+	}
+	if issue != "" {
+		p["issue"] = issue
+	}
+	return p
+}
+
+// NudgePayload creates a payload for nudge events.
+func NudgePayload(rig, target, reason string) map[string]interface{} {
+	return map[string]interface{}{
+		"rig":    rig,
+		"target": target,
+		"reason": reason,
+	}
+}
+
+// EscalationPayload creates a payload for escalation events.
+func EscalationPayload(rig, target, to, reason string) map[string]interface{} {
+	return map[string]interface{}{
+		"rig":    rig,
+		"target": target,
+		"to":     to,
+		"reason": reason,
+	}
 }

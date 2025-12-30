@@ -201,6 +201,16 @@ func printEvent(e townlog.Event) {
 		typeStr = style.Warning.Render("[kill]")
 	case townlog.EventCallback:
 		typeStr = style.Bold.Render("[callback]")
+	case townlog.EventPatrolStarted:
+		typeStr = style.Bold.Render("[patrol_started]")
+	case townlog.EventPolecatChecked:
+		typeStr = style.Dim.Render("[polecat_checked]")
+	case townlog.EventPolecatNudged:
+		typeStr = style.Warning.Render("[polecat_nudged]")
+	case townlog.EventEscalationSent:
+		typeStr = style.Error.Render("[escalation_sent]")
+	case townlog.EventPatrolComplete:
+		typeStr = style.Success.Render("[patrol_complete]")
 	default:
 		typeStr = fmt.Sprintf("[%s]", e.Type)
 	}
@@ -252,6 +262,31 @@ func formatEventDetail(e townlog.Event) string {
 			return fmt.Sprintf("callback: %s", e.Context)
 		}
 		return "callback processed"
+	case townlog.EventPatrolStarted:
+		if e.Context != "" {
+			return fmt.Sprintf("started patrol (%s)", e.Context)
+		}
+		return "started patrol"
+	case townlog.EventPolecatChecked:
+		if e.Context != "" {
+			return fmt.Sprintf("checked %s", e.Context)
+		}
+		return "checked polecat"
+	case townlog.EventPolecatNudged:
+		if e.Context != "" {
+			return fmt.Sprintf("nudged (%s)", e.Context)
+		}
+		return "nudged polecat"
+	case townlog.EventEscalationSent:
+		if e.Context != "" {
+			return fmt.Sprintf("escalated (%s)", e.Context)
+		}
+		return "escalated"
+	case townlog.EventPatrolComplete:
+		if e.Context != "" {
+			return fmt.Sprintf("patrol complete (%s)", e.Context)
+		}
+		return "patrol complete"
 	default:
 		if e.Context != "" {
 			return fmt.Sprintf("%s (%s)", e.Type, e.Context)
