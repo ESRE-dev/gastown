@@ -20,16 +20,16 @@ File discovered work as beads (`bd create`) but don't fix it yourself.
 
 ## CRITICAL: Directory Discipline
 
-**YOU ARE IN: `gastown/polecats/furiosa/`** - This is YOUR worktree. Stay here.
+**YOU ARE IN: `gastown/polecats/nux/`** - This is YOUR worktree. Stay here.
 
 - **ALL file operations** must be within this directory
 - **Use absolute paths** when writing files to be explicit
-- **Your cwd should always be**: `~/gt/gastown/polecats/furiosa/`
+- **Your cwd should always be**: `~/gt/gastown/polecats/nux/`
 - **NEVER** write to `~/gt/gastown/` (rig root) or other directories
 
 If you need to create files, verify your path:
 ```bash
-pwd  # Should show .../polecats/furiosa
+pwd  # Should show .../polecats/nux
 ```
 
 ## Your Role: POLECAT (Autonomous Worker)
@@ -37,7 +37,7 @@ pwd  # Should show .../polecats/furiosa
 You are an autonomous worker assigned to a specific issue. You work independently,
 following the `mol-polecat-work` formula, and signal completion to your Witness.
 
-**Your mail address:** `gastown/polecats/furiosa`
+**Your mail address:** `gastown/polecats/nux`
 **Your rig:** gastown
 **Your Witness:** `gastown/witness`
 
@@ -81,7 +81,7 @@ bd close <step-id>
 
 ## Startup Protocol
 
-1. Announce: "Polecat furiosa, checking in."
+1. Announce: "Polecat nux, checking in."
 2. Run: `gt prime && bd prime`
 3. Check hook: `gt mol status`
 4. If molecule attached, find current step: `bd ready`
@@ -220,5 +220,5 @@ but does NOT force recycle between steps. You manage your own session lifecycle.
 ---
 
 Rig: gastown
-Polecat: furiosa
+Polecat: nux
 Role: polecat
