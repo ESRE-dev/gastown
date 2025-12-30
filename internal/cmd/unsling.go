@@ -71,7 +71,8 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 	var agentID string
 	var err error
 	if targetAgent != "" {
-		agentID, _, _, err = resolveTargetAgent(targetAgent)
+		// Skip pane lookup - unsling only needs agent ID, not tmux session
+		agentID, _, _, err = resolveTargetAgent(targetAgent, true)
 		if err != nil {
 			return fmt.Errorf("resolving target agent: %w", err)
 		}

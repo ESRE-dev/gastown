@@ -183,7 +183,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			// Slinging to an existing agent
-			targetAgent, targetPane, _, err = resolveTargetAgent(target)
+			// Skip pane lookup if --naked (agent may be terminated)
+			targetAgent, targetPane, _, err = resolveTargetAgent(target, slingNaked)
 			if err != nil {
 				return fmt.Errorf("resolving target: %w", err)
 			}
@@ -340,11 +341,20 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 }
 
 // resolveTargetAgent converts a target spec to agent ID, pane, and hook root.
-func resolveTargetAgent(target string) (agentID string, pane string, hookRoot string, err error) {
+// If skipPane is true, skip tmux pane lookup (for --naked mode).
+func resolveTargetAgent(target string, skipPane bool) (agentID string, pane string, hookRoot string, err error) {
 	// First resolve to session name
 	sessionName, err := resolveRoleToSession(target)
 	if err != nil {
 		return "", "", "", err
+	}
+
+	// Convert session name to agent ID format (this doesn't require tmux)
+	agentID = sessionToAgentID(sessionName)
+
+	// Skip pane lookup if requested (--naked mode)
+	if skipPane {
+		return agentID, "", "", nil
 	}
 
 	// Get the pane for that session
@@ -360,8 +370,6 @@ func resolveTargetAgent(target string) (agentID string, pane string, hookRoot st
 		return "", "", "", fmt.Errorf("getting working dir for %s: %w", sessionName, err)
 	}
 
-	// Convert session name back to agent ID format
-	agentID = sessionToAgentID(sessionName)
 	return agentID, pane, hookRoot, nil
 }
 
@@ -523,7 +531,8 @@ func runSlingFormula(args []string) error {
 			}
 		} else {
 			// Slinging to an existing agent
-			targetAgent, targetPane, _, err = resolveTargetAgent(target)
+			// Skip pane lookup if --naked (agent may be terminated)
+			targetAgent, targetPane, _, err = resolveTargetAgent(target, slingNaked)
 			if err != nil {
 				return fmt.Errorf("resolving target: %w", err)
 			}
