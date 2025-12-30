@@ -966,6 +966,34 @@ func TestResolveBeadsDir(t *testing.T) {
 			t.Errorf("ResolveBeadsDir() = %q, want %q", got, want)
 		}
 	})
+
+	t.Run("circular redirect", func(t *testing.T) {
+		// Redirect that points to itself (e.g., mayor/rig/.beads/redirect -> ../../mayor/rig/.beads)
+		// This is the bug scenario from gt-csbjj
+		workDir := filepath.Join(tmpDir, "mayor", "rig")
+		beadsDir := filepath.Join(workDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create a circular redirect: ../../mayor/rig/.beads resolves back to .beads
+		redirectPath := filepath.Join(beadsDir, "redirect")
+		if err := os.WriteFile(redirectPath, []byte("../../mayor/rig/.beads\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// ResolveBeadsDir should detect the circular redirect and return the original beadsDir
+		got := ResolveBeadsDir(workDir)
+		want := beadsDir
+		if got != want {
+			t.Errorf("ResolveBeadsDir() = %q, want %q (should ignore circular redirect)", got, want)
+		}
+
+		// The circular redirect file should have been removed
+		if _, err := os.Stat(redirectPath); err == nil {
+			t.Error("circular redirect file should have been removed, but it still exists")
+		}
+	})
 }
 
 func TestParseAgentBeadID(t *testing.T) {

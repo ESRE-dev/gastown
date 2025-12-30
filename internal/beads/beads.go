@@ -30,6 +30,10 @@ var (
 // Example: if we're at crew/max/ and .beads/redirect contains "../../mayor/rig/.beads",
 // the redirect is resolved from crew/max/ (not crew/max/.beads/), giving us
 // mayor/rig/.beads at the rig root level.
+//
+// Circular redirect detection: If the resolved path equals the original beads directory,
+// this indicates an errant redirect file that should be removed. The function logs a
+// warning and returns the original beads directory.
 func ResolveBeadsDir(workDir string) string {
 	beadsDir := filepath.Join(workDir, ".beads")
 	redirectPath := filepath.Join(beadsDir, "redirect")
@@ -55,6 +59,25 @@ func ResolveBeadsDir(workDir string) string {
 
 	// Clean the path to resolve .. components
 	resolved = filepath.Clean(resolved)
+
+	// Detect circular redirects: if resolved path equals original beads dir,
+	// this is an errant redirect file (e.g., redirect in mayor/rig/.beads pointing to itself)
+	if resolved == beadsDir {
+		fmt.Fprintf(os.Stderr, "Warning: circular redirect detected in %s (points to itself), ignoring redirect\n", redirectPath)
+		// Remove the errant redirect file to prevent future warnings
+		if err := os.Remove(redirectPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not remove errant redirect file: %v\n", err)
+		}
+		return beadsDir
+	}
+
+	// Detect redirect chains: check if resolved path also has a redirect
+	resolvedRedirect := filepath.Join(resolved, "redirect")
+	if _, err := os.Stat(resolvedRedirect); err == nil {
+		fmt.Fprintf(os.Stderr, "Warning: redirect chain detected: %s -> %s (which also has a redirect)\n", beadsDir, resolved)
+		// Don't follow chains - just return the first resolved path
+		// The target's redirect is likely errant and should be removed
+	}
 
 	return resolved
 }

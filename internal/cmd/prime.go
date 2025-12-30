@@ -1187,9 +1187,36 @@ func getAgentBeadID(ctx RoleContext) string {
 
 // ensureBeadsRedirect ensures the .beads/redirect file exists for worktree-based roles.
 // This handles cases where git clean or other operations delete the redirect file.
+//
+// IMPORTANT: This function includes safety checks to prevent creating redirects in
+// the canonical beads location (mayor/rig/.beads), which would cause circular redirects.
 func ensureBeadsRedirect(ctx RoleContext) {
 	// Only applies to crew and polecat roles (they use shared beads)
 	if ctx.Role != RoleCrew && ctx.Role != RolePolecat {
+		return
+	}
+
+	// Get the rig root (parent of crew/ or polecats/)
+	relPath, err := filepath.Rel(ctx.TownRoot, ctx.WorkDir)
+	if err != nil {
+		return
+	}
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+	if len(parts) < 1 {
+		return
+	}
+	rigRoot := filepath.Join(ctx.TownRoot, parts[0])
+
+	// SAFETY CHECK: Prevent creating redirect in canonical beads location
+	// If workDir is inside mayor/rig/, we should NOT create a redirect there
+	// This prevents circular redirects like mayor/rig/.beads/redirect -> ../../mayor/rig/.beads
+	mayorRigPath := filepath.Join(rigRoot, "mayor", "rig")
+	workDirAbs, _ := filepath.Abs(ctx.WorkDir)
+	mayorRigPathAbs, _ := filepath.Abs(mayorRigPath)
+	if strings.HasPrefix(workDirAbs, mayorRigPathAbs) {
+		// We're inside mayor/rig/ - this is not a polecat/crew worker location
+		// Role detection may be wrong (e.g., GT_ROLE env var mismatch)
+		// Do NOT create a redirect here
 		return
 	}
 
@@ -1204,19 +1231,6 @@ func ensureBeadsRedirect(ctx RoleContext) {
 
 	// Determine the correct redirect path based on role and rig structure
 	var redirectContent string
-
-	// Get the rig root (parent of crew/ or polecats/)
-	var rigRoot string
-	relPath, err := filepath.Rel(ctx.TownRoot, ctx.WorkDir)
-	if err != nil {
-		return
-	}
-	parts := strings.Split(filepath.ToSlash(relPath), "/")
-	if len(parts) >= 1 {
-		rigRoot = filepath.Join(ctx.TownRoot, parts[0])
-	} else {
-		return
-	}
 
 	// Check for shared beads locations in order of preference:
 	// 1. rig/mayor/rig/.beads/ (if mayor rig clone exists)
@@ -1244,6 +1258,15 @@ func ensureBeadsRedirect(ctx RoleContext) {
 		}
 	} else {
 		// No shared beads found, nothing to redirect to
+		return
+	}
+
+	// SAFETY CHECK: Verify the redirect won't be circular
+	// Resolve the redirect target and check it's not the same as our beads dir
+	resolvedTarget := filepath.Join(ctx.WorkDir, redirectContent)
+	resolvedTarget = filepath.Clean(resolvedTarget)
+	if resolvedTarget == beadsDir {
+		// Would create circular redirect - don't do it
 		return
 	}
 
