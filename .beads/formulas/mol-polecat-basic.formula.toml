@@ -1,0 +1,89 @@
+description = """
+Minimal polecat workflow for trivial fixes.
+
+Use this for P4 backlog items, typo fixes, and simple changes that don't
+require design review or extensive testing. Just get it done.
+
+## When to Use
+- Typo fixes
+- Simple config changes
+- Obvious bug fixes
+- Documentation updates
+- P4 priority items
+
+## When NOT to Use
+- New features (use shiny or chrome)
+- Security-related changes (use chrome)
+- Complex refactoring (use shiny)
+- Anything P1 or P0 (use chrome)
+"""
+formula = "mol-polecat-basic"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "preflight"
+title = "Quick preflight check"
+description = """
+Fast initialization - just enough to start working.
+
+```bash
+gt prime                    # Load context
+gt mol status               # Check your hook
+bd show {{issue}}           # Understand the task
+```
+
+Verify you understand what needs to be done. If unclear, ask.
+
+**Exit criteria:** You know what to do."""
+
+[[steps]]
+id = "implement"
+title = "Implement {{feature}}"
+needs = ["preflight"]
+description = """
+Just do it. Keep it simple.
+
+1. Make the change
+2. Test it works locally
+3. Commit with clear message:
+
+```bash
+git add <files>
+git commit -m "fix: <description> ({{issue}})"
+```
+
+Don't overthink. Don't gold-plate. Don't scope-creep.
+
+**Exit criteria:** Change implemented and committed."""
+
+[[steps]]
+id = "postflight"
+title = "Submit and signal done"
+needs = ["implement"]
+description = """
+Push and signal completion.
+
+```bash
+# Quick test
+go test ./...               # Must pass
+
+# Push
+git push -u origin $(git branch --show-current)
+
+# Close issue
+bd close {{issue}} --reason "Fixed"
+bd sync
+
+# Signal done
+gt done
+```
+
+**Exit criteria:** Witness takes over from here."""
+
+[vars]
+[vars.issue]
+description = "The issue ID assigned to this polecat"
+required = true
+[vars.feature]
+description = "Brief description of what's being fixed"

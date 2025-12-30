@@ -55,6 +55,11 @@ Formula-on-Bead (--on flag):
   gt sling mol-review --on gt-abc       # Apply formula to existing work
   gt sling shiny --on gt-abc crew       # Apply formula, sling to crew
 
+Quality Levels (shorthand for polecat workflows):
+  gt sling gt-abc gastown --quality=basic   # mol-polecat-basic (trivial fixes)
+  gt sling gt-abc gastown --quality=shiny   # mol-polecat-shiny (standard)
+  gt sling gt-abc gastown --quality=chrome  # mol-polecat-chrome (max rigor)
+
 Compare:
   gt hook <bead>      # Just attach (no action)
   gt sling <bead>     # Attach + start now (keep context)
@@ -79,6 +84,7 @@ var (
 	slingMolecule string // --molecule: workflow to instantiate on the bead
 	slingForce    bool   // --force: force spawn even if polecat has unread mail
 	slingAccount  string // --account: Claude Code account handle to use
+	slingQuality  string // --quality: shorthand for polecat workflow (basic|shiny|chrome)
 )
 
 func init() {
@@ -95,6 +101,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingMolecule, "molecule", "", "Molecule workflow to instantiate on the bead")
 	slingCmd.Flags().BoolVar(&slingForce, "force", false, "Force spawn even if polecat has unread mail")
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
+	slingCmd.Flags().StringVarP(&slingQuality, "quality", "q", "", "Polecat workflow quality level (basic|shiny|chrome)")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -108,6 +115,22 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// --var is only for standalone formula mode, not formula-on-bead mode
 	if slingOnTarget != "" && len(slingVars) > 0 {
 		return fmt.Errorf("--var cannot be used with --on (formula-on-bead mode doesn't support variables)")
+	}
+
+	// --quality is shorthand for formula-on-bead with polecat workflow
+	// Convert: gt sling gt-abc gastown --quality=shiny
+	// To:      gt sling mol-polecat-shiny --on gt-abc gastown
+	if slingQuality != "" {
+		qualityFormula, err := qualityToFormula(slingQuality)
+		if err != nil {
+			return err
+		}
+		// The first arg should be the bead, and we wrap it with the formula
+		if slingOnTarget != "" {
+			return fmt.Errorf("--quality cannot be used with --on (both specify formula)")
+		}
+		slingOnTarget = args[0]         // The bead becomes --on target
+		args[0] = qualityFormula        // The formula becomes first arg
 	}
 
 	// Determine mode based on flags and argument types
@@ -775,5 +798,19 @@ func agentIDToBeadID(agentID string) string {
 		return beads.PolecatBeadID(rig, parts[2])
 	default:
 		return ""
+	}
+}
+
+// qualityToFormula converts a quality level to the corresponding polecat workflow formula.
+func qualityToFormula(quality string) (string, error) {
+	switch strings.ToLower(quality) {
+	case "basic", "b":
+		return "mol-polecat-basic", nil
+	case "shiny", "s":
+		return "mol-polecat-shiny", nil
+	case "chrome", "c":
+		return "mol-polecat-chrome", nil
+	default:
+		return "", fmt.Errorf("invalid quality level '%s' (use: basic, shiny, or chrome)", quality)
 	}
 }

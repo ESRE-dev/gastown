@@ -1,169 +1,453 @@
 description = """
-Polecat work with strategic context reading before design.
+Maximum rigor polecat workflow with deep context and triple review.
 
-Chrome is "shiny" (the standard workflow) with a strategic context step. Before
-designing the implementation, the polecat reads organizational context documents
-that contain vision, principles, and constraints.
+Chrome is for critical work where quality is paramount. Every phase is
+decomposed into checkable atoms. Reviews are done three times. Context
+is explicitly loaded before design begins.
 
-This ensures work aligns with strategic direction without embedding hardcoded
-paths in the workflow. The context_docs variable allows each project/organization
-to specify their own strategic documents.
+## When to Use
+- P0/P1 priority issues
+- Security-sensitive changes
+- Core architecture work
+- Public API changes
+- Anything that could break production
 
-## Variables
-
-| Variable | Source | Description |
-|----------|--------|-------------|
-| feature | cook-time | The feature being implemented |
-| context_docs | cook-time | Comma-separated paths to strategic context docs |
-
-## Use Cases
-
-1. **Gas Town work**: Use defaults (hop/CONTEXT.md, PRIMING.md)
-2. **External projects**: Override with project-specific docs
-3. **Minimal context**: Pass empty string to skip context reading"""
+## Phases
+1. **Deep Context** - Read strategic docs before starting
+2. **Design** - Draft, review, finalize
+3. **Implement** - Scaffold, core, edge cases
+4. **Test** - Write, run, review
+5. **Triple Review** - Three passes over the code
+6. **Final** - Docs, cleanup, submit
+"""
 formula = "mol-polecat-chrome"
 type = "workflow"
 version = 1
 
+# =============================================================================
+# PHASE 1: DEEP CONTEXT
+# =============================================================================
+
+[[steps]]
+id = "preflight"
+title = "Load basic context"
+description = """
+Standard initialization.
+
+```bash
+gt prime                    # Load role context
+bd prime                    # Load beads context
+gt mol status               # Check your hook
+bd show {{issue}}           # Full issue details
+gt mail inbox               # Check for additional context
+```
+
+**Exit criteria:** Session initialized, issue understood."""
+
 [[steps]]
 id = "read-strategic-context"
-title = "Read organizational context documents"
+title = "Read strategic context documents"
+needs = ["preflight"]
 description = """
-Read strategic context documents before designing your implementation.
+CRITICAL: Read the strategic context before designing.
 
-**Documents to read:**
-{{context_docs}}
+These documents contain the vision, principles, and architectural decisions
+that should guide your implementation. Do not skip this step.
 
-For each document path:
-1. Read the file using your Read tool
-2. Understand the strategic vision, principles, and constraints
-3. Note any specific guidelines that apply to {{feature}}
+**1. Read CONTEXT.md:**
+```bash
+cat ~/gt/docs/hop/CONTEXT.md
+```
+This contains:
+- Strategic vision
+- Design principles
+- What we're building and why
 
-These documents contain the organizational context that should guide your work:
-- Architectural patterns and conventions
-- Design principles and trade-offs
-- Strategic goals and priorities
-- Things to avoid or deprecate
+**2. Read PRIMING.md:**
+```bash
+cat ~/gt/docs/PRIMING.md
+```
+This contains:
+- Role taxonomy
+- Agent responsibilities
+- System architecture
 
-**Why this matters:**
-Good implementations align with organizational direction. Reading context first
-prevents designs that conflict with strategic goals or violate conventions.
+**3. Absorb and consider:**
+- How does {{feature}} fit the strategic vision?
+- What principles apply to this work?
+- Are there architectural constraints to respect?
 
-**If documents are not found:**
-Some paths may not exist in your environment. This is fine - read what's
-available and proceed. The goal is context, not completeness.
+Take notes if helpful. This context shapes your design.
 
-**Exit criteria:** You've read available context docs and understand the
-strategic considerations relevant to {{feature}}."""
+**Exit criteria:** You understand the strategic context and how it applies."""
+
+# =============================================================================
+# PHASE 2: DESIGN (Draft -> Review -> Finalize)
+# =============================================================================
 
 [[steps]]
-id = "design"
-title = "Design {{feature}}"
+id = "design-draft"
+title = "Draft design for {{feature}}"
 needs = ["read-strategic-context"]
 description = """
-Think carefully about architecture before writing code.
+Create an initial design based on strategic context.
 
-**Consider with strategic context in mind:**
-- How does this fit into the existing system?
-- Does this align with the strategic direction you read?
-- What are the edge cases?
-- What could go wrong?
-- Is there a simpler approach that still meets the goals?
+Write a design document (can be comments, markdown, or mental model):
 
-**Design principles:**
-- Follow existing codebase conventions
-- Keep it simple - avoid over-engineering
-- Prefer composition over inheritance
-- Design for the current need, not hypothetical futures
+1. **Problem Statement**: What exactly are we solving?
+2. **Approach**: How will we solve it?
+3. **Files to Modify**: What code changes?
+4. **Dependencies**: What does this depend on?
+5. **Risks**: What could go wrong?
+6. **Alternatives Considered**: What else could we do?
 
-**Exit criteria:** You have a clear mental model of what you'll build and
-how it fits the strategic direction."""
+Be specific. Reference the strategic context where relevant.
+
+**Exit criteria:** Draft design exists."""
 
 [[steps]]
-id = "implement"
-title = "Implement {{feature}}"
-needs = ["design"]
+id = "design-review"
+title = "Review your design"
+needs = ["design-draft"]
 description = """
-Write the code for {{feature}}. Follow the design. Keep it simple. Don't gold-plate.
+Step back and critically review your draft design.
 
-**Working principles:**
-- Follow existing codebase conventions
-- Make atomic, focused commits
-- Keep changes scoped to the assigned issue
-- Don't add features beyond what was asked
+Questions to ask:
+- Does this align with the strategic vision from CONTEXT.md?
+- Is this the simplest solution that works?
+- Have I considered all edge cases?
+- What would break if my assumptions are wrong?
+- Is this consistent with existing patterns in the codebase?
+- Would another engineer understand this approach?
 
-**Commit frequently:**
+Look for:
+- Over-engineering
+- Missing edge cases
+- Inconsistency with existing code
+- Scope creep beyond {{issue}}
+
+Revise the design based on this review.
+
+**Exit criteria:** Design reviewed and improved."""
+
+[[steps]]
+id = "design-finalize"
+title = "Finalize design"
+needs = ["design-review"]
+description = """
+Lock in the design before implementation.
+
+Final checklist:
+- [ ] Approach is clear and justified
+- [ ] All files to modify are identified
+- [ ] Risks are acknowledged
+- [ ] Success criteria are defined
+- [ ] Design is consistent with strategic context
+
+If you're uncertain about anything, now is the time to ask Witness:
+```bash
+gt mail send <rig>/witness -s "Design review: {{issue}}" -m "..."
+```
+
+Once finalized, commit to this design. Don't redesign mid-implementation.
+
+**Exit criteria:** Design is final, ready to implement."""
+
+# =============================================================================
+# PHASE 3: IMPLEMENT (Scaffold -> Core -> Edge Cases)
+# =============================================================================
+
+[[steps]]
+id = "implement-scaffold"
+title = "Scaffold the structure"
+needs = ["design-finalize"]
+description = """
+Create the skeleton before filling in logic.
+
+1. Create new files if needed
+2. Add function signatures with TODO bodies
+3. Set up imports and dependencies
+4. Add test file stubs
+
 ```bash
 git add <files>
-git commit -m "<type>: <description>"
+git commit -m "scaffold: structure for {{feature}} ({{issue}})"
 ```
 
-**Exit criteria:** Implementation complete, all changes committed."""
+This should compile/parse but not work yet.
+
+**Exit criteria:** Structure exists, compiles, ready for core logic."""
 
 [[steps]]
-id = "review"
-title = "Review implementation"
-needs = ["implement"]
+id = "implement-core"
+title = "Implement core logic"
+needs = ["implement-scaffold"]
 description = """
-Review your own changes before running tests.
+Fill in the happy path - the main functionality.
 
-**Check for:**
-- Does it match the design?
-- Does it align with strategic context you read?
-- Are there obvious bugs?
-- Is it readable and maintainable?
-- Are there security concerns?
+Focus on:
+- Primary use case working correctly
+- Clear, readable code
+- Following existing patterns
 
-**Fix issues found:** Don't just note them - fix them now.
+Don't worry about edge cases yet. Get the core working first.
 
-**Exit criteria:** Changes are clean, reviewed, and ready for testing."""
+```bash
+git add <files>
+git commit -m "feat: core logic for {{feature}} ({{issue}})"
+```
+
+**Exit criteria:** Core functionality works for the happy path."""
 
 [[steps]]
-id = "test"
-title = "Test {{feature}}"
-needs = ["review"]
+id = "implement-edge-cases"
+title = "Handle edge cases"
+needs = ["implement-core"]
 description = """
-Write and run tests. Unit tests for new code, integration tests if needed.
+Now handle the edge cases identified in design.
 
-**Steps:**
-1. Run the full test suite
-2. Fix any regressions
-3. Add tests for new functionality
-4. Verify edge cases are covered
+For each edge case:
+1. Add the handling code
+2. Add a test for it
+3. Verify it works
 
-**Exit criteria:** All tests pass, new code has appropriate test coverage."""
+Common edge cases:
+- Empty/nil inputs
+- Boundary conditions
+- Error conditions
+- Concurrent access (if applicable)
+
+```bash
+git add <files>
+git commit -m "feat: edge case handling for {{feature}} ({{issue}})"
+```
+
+**Exit criteria:** All known edge cases handled."""
+
+# =============================================================================
+# PHASE 4: TEST (Write -> Run -> Review)
+# =============================================================================
 
 [[steps]]
-id = "submit"
+id = "test-write"
+title = "Write comprehensive tests"
+needs = ["implement-edge-cases"]
+description = """
+Write tests for all new code.
+
+Test categories:
+1. **Unit tests** - Test individual functions
+2. **Integration tests** - Test component interaction
+3. **Regression tests** - Prevent the bug from recurring
+
+Coverage goals:
+- Happy path tested
+- Each edge case tested
+- Error conditions tested
+- Boundary conditions tested
+
+```bash
+git add *_test.go
+git commit -m "test: add tests for {{feature}} ({{issue}})"
+```
+
+**Exit criteria:** Comprehensive test coverage for new code."""
+
+[[steps]]
+id = "test-run"
+title = "Run full test suite"
+needs = ["test-write"]
+description = """
+Run ALL tests, not just your new ones.
+
+```bash
+go test ./...               # Full test suite
+go build ./...              # Build check
+```
+
+**ALL TESTS MUST PASS.**
+
+If tests fail:
+- Your code broke something: FIX IT
+- Pre-existing failure: file bead, but still need green
+
+Do not proceed until all tests pass.
+
+**Exit criteria:** Full test suite passes."""
+
+[[steps]]
+id = "test-review"
+title = "Review test coverage"
+needs = ["test-run"]
+description = """
+Verify tests are actually meaningful.
+
+Check each test:
+- Does it test real behavior, not implementation details?
+- Could a bug slip past this test?
+- Are assertions specific enough?
+
+Look for:
+- Missing negative tests (what should NOT happen)
+- Missing boundary tests
+- Tests that always pass (useless)
+- Tests that test mocks instead of real code
+
+Add any missing tests.
+
+**Exit criteria:** Tests are comprehensive and meaningful."""
+
+# =============================================================================
+# PHASE 5: TRIPLE REVIEW
+# =============================================================================
+
+[[steps]]
+id = "code-review-1"
+title = "Code review pass 1: Correctness"
+needs = ["test-review"]
+description = """
+First review pass: Is the code CORRECT?
+
+```bash
+git diff origin/main...HEAD
+```
+
+Focus on:
+- Logic errors
+- Off-by-one bugs
+- Null pointer risks
+- Race conditions
+- Resource leaks
+- Error handling gaps
+
+For each issue found: FIX IT, don't just note it.
+
+**Exit criteria:** No correctness issues remain."""
+
+[[steps]]
+id = "code-review-2"
+title = "Code review pass 2: Security"
+needs = ["code-review-1"]
+description = """
+Second review pass: Is the code SECURE?
+
+Review for OWASP Top 10:
+- Injection (SQL, command, path)
+- Broken authentication
+- Sensitive data exposure
+- XXE
+- Broken access control
+- Security misconfiguration
+- XSS
+- Insecure deserialization
+- Using components with known vulnerabilities
+- Insufficient logging
+
+Also check:
+- Secrets not hardcoded
+- Input validation
+- Output encoding
+- Proper error messages (don't leak info)
+
+**Exit criteria:** No security issues remain."""
+
+[[steps]]
+id = "code-review-3"
+title = "Code review pass 3: Quality"
+needs = ["code-review-2"]
+description = """
+Third review pass: Is the code QUALITY?
+
+Check:
+- Naming: Are names clear and consistent?
+- Structure: Is code well-organized?
+- Comments: Are complex parts explained?
+- DRY: Is there unnecessary duplication?
+- SOLID: Are principles followed?
+- Patterns: Does it match codebase conventions?
+- Cruft: Any debug code, TODOs, dead code?
+
+The code should be something you're proud of.
+
+**Exit criteria:** Code is clean, maintainable, follows conventions."""
+
+# =============================================================================
+# PHASE 6: FINAL
+# =============================================================================
+
+[[steps]]
+id = "docs-update"
+title = "Update documentation"
+needs = ["code-review-3"]
+description = """
+Update any affected documentation.
+
+Check:
+- README if user-facing changes
+- Code comments for complex logic
+- API docs if interfaces changed
+- CHANGELOG if applicable
+
+```bash
+git add docs/ *.md
+git commit -m "docs: update for {{feature}} ({{issue}})"
+```
+
+**Exit criteria:** Documentation reflects the changes."""
+
+[[steps]]
+id = "final-check"
+title = "Final pre-submit check"
+needs = ["docs-update"]
+description = """
+One last verification before submit.
+
+```bash
+# Clean state
+git status                  # Must be clean
+git stash list              # Must be empty
+
+# Tests still pass
+go test ./...
+
+# Review commit history
+git log --oneline origin/main..HEAD
+
+# Review final diff
+git diff origin/main...HEAD --stat
+```
+
+If anything is wrong, fix it before proceeding.
+
+**Exit criteria:** Everything is perfect."""
+
+[[steps]]
+id = "postflight"
 title = "Submit for merge"
-needs = ["test"]
+needs = ["final-check"]
 description = """
-Submit for merge. Final check before handoff.
+Push and signal completion.
 
-**Checklist:**
 ```bash
-git status          # Clean working tree
-git diff            # Review staged changes
-git log --oneline   # Check commit history
-```
+# Push branch
+git push -u origin $(git branch --show-current)
 
-**Submit:**
-```bash
-git push origin HEAD
-```
+# Close issue with summary
+bd close {{issue}} --reason "Implemented with chrome workflow: {{feature}}"
+bd sync
 
-**Signal completion:**
-```bash
+# Signal done
 gt done
 ```
 
-**Exit criteria:** Branch pushed, ready for merge queue."""
+Witness will verify, send to merge queue, and terminate your session.
+
+**Exit criteria:** Witness takes over from here."""
 
 [vars]
+[vars.issue]
+description = "The issue ID assigned to this polecat"
+required = true
 [vars.feature]
 description = "The feature being implemented"
 required = true
-
-[vars.context_docs]
-description = "Comma-separated paths to strategic context documents (e.g., '~/gt/docs/hop/CONTEXT.md,~/gt/docs/PRIMING.md')"
-default = "~/gt/docs/hop/CONTEXT.md,~/gt/docs/PRIMING.md"

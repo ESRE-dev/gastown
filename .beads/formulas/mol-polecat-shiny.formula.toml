@@ -1,0 +1,178 @@
+description = """
+Standard quality polecat workflow with design and review phases.
+
+Engineer in a Box - the canonical right way for most work. Design before you
+code. Review before you ship. Test before you submit.
+
+## When to Use
+- P2/P3 features and bugs
+- New functionality
+- Refactoring work
+- Any non-trivial change
+
+## Phases
+1. **Preflight** - Load context, understand assignment
+2. **Design** - Think before you code
+3. **Implement** - Write the code
+4. **Review** - Self-review your changes
+5. **Test** - Run tests, verify coverage
+6. **Postflight** - Submit and signal done
+"""
+formula = "mol-polecat-shiny"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "preflight"
+title = "Load context and verify assignment"
+description = """
+Initialize your session and understand your assignment.
+
+```bash
+gt prime                    # Load role context
+bd prime                    # Load beads context
+gt mol status               # Check your hook
+bd show {{issue}}           # Full issue details
+gt mail inbox               # Check for additional context
+```
+
+Understand:
+- What exactly needs to be done?
+- What files are likely involved?
+- Are there dependencies or blockers?
+- What does "done" look like?
+
+If blocked or unclear, mail Witness immediately.
+
+**Exit criteria:** You understand the work and can begin."""
+
+[[steps]]
+id = "design"
+title = "Design {{feature}}"
+needs = ["preflight"]
+description = """
+Think carefully about architecture BEFORE writing code.
+
+Consider:
+- How does this fit into the existing system?
+- What are the edge cases?
+- What could go wrong?
+- Is there a simpler approach?
+- What existing patterns should you follow?
+
+Write a brief design note (can be in your head or as a comment):
+- Approach: <how you'll solve it>
+- Files: <what you'll modify>
+- Risks: <what might go wrong>
+
+**Exit criteria:** You have a clear plan before touching code."""
+
+[[steps]]
+id = "implement"
+title = "Implement {{feature}}"
+needs = ["design"]
+description = """
+Write the code following your design.
+
+Working principles:
+- Follow existing codebase conventions
+- Make atomic, focused commits
+- Keep changes scoped to the assigned issue
+- Don't gold-plate or scope-creep
+
+```bash
+# Commit frequently:
+git add <files>
+git commit -m "<type>: <description> ({{issue}})"
+```
+
+If you find unrelated bugs, file a bead - don't fix them in this branch.
+
+**Exit criteria:** Implementation complete, all changes committed."""
+
+[[steps]]
+id = "review"
+title = "Review implementation"
+needs = ["implement"]
+description = """
+Self-review your changes before running tests.
+
+```bash
+git diff origin/main...HEAD     # All changes vs main
+git log --oneline origin/main..HEAD  # All commits
+```
+
+Check for:
+| Category | Look For |
+|----------|----------|
+| Bugs | Off-by-one, null handling, edge cases |
+| Security | Injection, auth bypass, exposed secrets |
+| Style | Naming, formatting, code organization |
+| Completeness | Missing error handling, incomplete paths |
+| Cruft | Debug prints, commented code, TODOs |
+
+Fix issues found - don't just note them.
+
+**Exit criteria:** Changes are clean and ready for testing."""
+
+[[steps]]
+id = "test"
+title = "Test {{feature}}"
+needs = ["review"]
+description = """
+Run tests and verify coverage.
+
+```bash
+go test ./...               # Full test suite
+```
+
+**ALL TESTS MUST PASS.** Do not proceed with failures.
+
+If tests fail:
+- Read the failure carefully
+- If your change caused it: fix it
+- If pre-existing: file a bead, but you still need green tests
+
+New features should have tests. Bug fixes should have regression tests.
+
+```bash
+# Build check
+go build ./...
+```
+
+**Exit criteria:** All tests pass, new code has appropriate coverage."""
+
+[[steps]]
+id = "postflight"
+title = "Submit for merge"
+needs = ["test"]
+description = """
+Clean up and submit.
+
+```bash
+# Verify clean state
+git status                  # Should be clean
+git stash list              # Should be empty
+
+# Push branch
+git push -u origin $(git branch --show-current)
+
+# Close issue
+bd close {{issue}} --reason "Implemented: {{feature}}"
+bd sync
+
+# Signal done
+gt done
+```
+
+Witness will verify, send to merge queue, and terminate your session.
+
+**Exit criteria:** Witness takes over from here."""
+
+[vars]
+[vars.issue]
+description = "The issue ID assigned to this polecat"
+required = true
+[vars.feature]
+description = "The feature being implemented"
+required = true
