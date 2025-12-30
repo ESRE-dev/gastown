@@ -130,6 +130,30 @@ func WriteRoutes(beadsDir string, routes []Route) error {
 	return nil
 }
 
+// GetPrefixForRig returns the beads prefix for a given rig name.
+// The prefix is returned without the trailing hyphen (e.g., "bd" not "bd-").
+// If the rig is not found in routes, returns "gt" as the default.
+// The townRoot should be the Gas Town root directory (e.g., ~/gt).
+func GetPrefixForRig(townRoot, rigName string) string {
+	beadsDir := filepath.Join(townRoot, ".beads")
+	routes, err := LoadRoutes(beadsDir)
+	if err != nil || routes == nil {
+		return "gt" // Default prefix
+	}
+
+	// Look for a route where the path starts with the rig name
+	// Routes paths are like "gastown/mayor/rig" or "beads/mayor/rig"
+	for _, r := range routes {
+		parts := strings.SplitN(r.Path, "/", 2)
+		if len(parts) > 0 && parts[0] == rigName {
+			// Return prefix without trailing hyphen
+			return strings.TrimSuffix(r.Prefix, "-")
+		}
+	}
+
+	return "gt" // Default prefix
+}
+
 // FindConflictingPrefixes checks for duplicate prefixes in routes.
 // Returns a map of prefix -> list of paths that use it.
 func FindConflictingPrefixes(beadsDir string) (map[string][]string, error) {

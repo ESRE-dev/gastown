@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var slingCmd = &cobra.Command{
@@ -790,8 +791,9 @@ func detectActor() string {
 
 // agentIDToBeadID converts an agent ID to its corresponding agent bead ID.
 // Uses canonical naming: prefix-rig-role-name
+// The prefix is looked up from routes.jsonl based on the rig name.
 func agentIDToBeadID(agentID string) string {
-	// Handle simple cases
+	// Handle simple cases (town-level agents always use gt- prefix)
 	if agentID == "mayor" {
 		return beads.MayorBeadID()
 	}
@@ -807,15 +809,21 @@ func agentIDToBeadID(agentID string) string {
 
 	rig := parts[0]
 
+	// Look up the prefix for this rig from routes.jsonl
+	prefix := "gt" // default
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		prefix = beads.GetPrefixForRig(townRoot, rig)
+	}
+
 	switch {
 	case len(parts) == 2 && parts[1] == "witness":
-		return beads.WitnessBeadID(rig)
+		return beads.WitnessBeadIDWithPrefix(prefix, rig)
 	case len(parts) == 2 && parts[1] == "refinery":
-		return beads.RefineryBeadID(rig)
+		return beads.RefineryBeadIDWithPrefix(prefix, rig)
 	case len(parts) == 3 && parts[1] == "crew":
-		return beads.CrewBeadID(rig, parts[2])
+		return beads.CrewBeadIDWithPrefix(prefix, rig, parts[2])
 	case len(parts) == 3 && parts[1] == "polecats":
-		return beads.PolecatBeadID(rig, parts[2])
+		return beads.PolecatBeadIDWithPrefix(prefix, rig, parts[2])
 	default:
 		return ""
 	}
