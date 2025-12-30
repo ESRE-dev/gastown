@@ -55,16 +55,20 @@ Example:
 }
 
 var moleculeAttachCmd = &cobra.Command{
-	Use:   "attach <pinned-bead-id> <molecule-id>",
+	Use:   "attach [pinned-bead-id] <molecule-id>",
 	Short: "Attach a molecule to a pinned bead",
 	Long: `Attach a molecule to a pinned/handoff bead.
 
 This records which molecule an agent is currently working on. The attachment
 is stored in the pinned bead's description and visible via 'bd show'.
 
-Example:
-  gt molecule attach gt-abc mol-xyz`,
-	Args: cobra.ExactArgs(2),
+When called with a single argument from an agent working directory, the
+pinned bead ID is auto-detected from the current agent's hook.
+
+Examples:
+  gt molecule attach gt-abc mol-xyz  # Explicit pinned bead
+  gt molecule attach mol-xyz         # Auto-detect from cwd`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: runMoleculeAttach,
 }
 

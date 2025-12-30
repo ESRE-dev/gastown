@@ -12,8 +12,24 @@ import (
 )
 
 func runMoleculeAttach(cmd *cobra.Command, args []string) error {
-	pinnedBeadID := args[0]
-	moleculeID := args[1]
+	var pinnedBeadID, moleculeID string
+
+	if len(args) == 2 {
+		// Explicit: gt mol attach <pinned-bead-id> <molecule-id>
+		pinnedBeadID = args[0]
+		moleculeID = args[1]
+	} else {
+		// Auto-detect: gt mol attach <molecule-id>
+		moleculeID = args[0]
+		var err error
+		pinnedBeadID, err = detectAgentBeadID()
+		if err != nil {
+			return fmt.Errorf("auto-detecting agent: %w", err)
+		}
+		if pinnedBeadID == "" {
+			return fmt.Errorf("could not detect agent from current directory - provide explicit pinned bead ID")
+		}
+	}
 
 	workDir, err := findLocalBeadsDir()
 	if err != nil {
@@ -35,6 +51,48 @@ func runMoleculeAttach(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// detectAgentBeadID detects the current agent's bead ID from the working directory.
+// Returns the agent bead ID (e.g., "gt-mayor", "gt-gastown-polecat-nux") or empty string if not detectable.
+func detectAgentBeadID() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getting current directory: %w", err)
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return "", fmt.Errorf("finding workspace: %w", err)
+	}
+	if townRoot == "" {
+		return "", fmt.Errorf("not in a Gas Town workspace")
+	}
+
+	roleInfo, err := GetRoleWithContext(cwd, townRoot)
+	if err != nil {
+		return "", fmt.Errorf("detecting role: %w", err)
+	}
+
+	roleCtx := RoleContext{
+		Role:     roleInfo.Role,
+		Rig:      roleInfo.Rig,
+		Polecat:  roleInfo.Polecat,
+		TownRoot: townRoot,
+		WorkDir:  cwd,
+	}
+
+	identity := buildAgentIdentity(roleCtx)
+	if identity == "" {
+		return "", fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
+	}
+
+	beadID := buildAgentBeadID(identity, roleCtx.Role)
+	if beadID == "" {
+		return "", fmt.Errorf("cannot build agent bead ID for identity: %s", identity)
+	}
+
+	return beadID, nil
 }
 
 func runMoleculeDetach(cmd *cobra.Command, args []string) error {
