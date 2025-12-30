@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -203,10 +202,10 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 		return nil, fmt.Errorf("creating worktree: %w", err)
 	}
 
-	// Install polecat CLAUDE.md template (non-fatal if template missing)
-	if err := m.installCLAUDETemplate(polecatPath, name); err != nil {
-		fmt.Printf("Warning: could not install CLAUDE.md template: %v\n", err)
-	}
+	// NOTE: We intentionally do NOT write to CLAUDE.md here.
+	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
+	// Writing to CLAUDE.md would overwrite project instructions and could leak
+	// Gas Town internals into the project repo if merged.
 
 	// Set up shared beads: polecat uses rig's .beads via redirect file.
 	// This eliminates git sync overhead - all polecats share one database.
@@ -416,10 +415,8 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 		return nil, fmt.Errorf("creating fresh worktree: %w", err)
 	}
 
-	// Install polecat CLAUDE.md template (non-fatal if template missing)
-	if err := m.installCLAUDETemplate(polecatPath, name); err != nil {
-		fmt.Printf("Warning: could not install CLAUDE.md template: %v\n", err)
-	}
+	// NOTE: We intentionally do NOT write to CLAUDE.md here.
+	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
 
 	// Set up shared beads
 	if err := m.setupSharedBeads(polecatPath); err != nil {
@@ -723,79 +720,6 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		Branch:    branchName,
 		Issue:     issueID,
 	}, nil
-}
-
-// installCLAUDETemplate copies the polecat CLAUDE.md template into the worktree.
-// Template variables {{rig}} and {{name}} are substituted with actual values.
-// This provides polecats with context about their role and available commands.
-func (m *Manager) installCLAUDETemplate(polecatPath, name string) error {
-	// Try multiple template locations in order of precedence:
-	// 1. Rig-specific template: <rig>/mayor/rig/templates/polecat-CLAUDE.md
-	// 2. Gastown (canonical) template: <town>/gastown/mayor/rig/templates/polecat-CLAUDE.md
-	templatePaths := []string{
-		filepath.Join(m.rig.Path, "mayor", "rig", "templates", "polecat-CLAUDE.md"),
-	}
-
-	// Add gastown fallback if we can find the town root
-	if townRoot, err := findTownRoot(m.rig.Path); err == nil && townRoot != "" {
-		gasTownTemplate := filepath.Join(townRoot, "gastown", "mayor", "rig", "templates", "polecat-CLAUDE.md")
-		// Only add fallback if different from rig-specific path
-		if gasTownTemplate != templatePaths[0] {
-			templatePaths = append(templatePaths, gasTownTemplate)
-		}
-	}
-
-	var content []byte
-	for _, templatePath := range templatePaths {
-		var err error
-		content, err = os.ReadFile(templatePath)
-		if err == nil {
-			break // Found a template
-		}
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("reading template %s: %w", templatePath, err)
-		}
-	}
-
-	if content == nil {
-		// No template found in any location - warn and skip
-		fmt.Printf("Warning: polecat template not found (checked %d locations)\n", len(templatePaths))
-		return nil
-	}
-
-	// Substitute template variables
-	output := string(content)
-	output = strings.ReplaceAll(output, "{{rig}}", m.rig.Name)
-	output = strings.ReplaceAll(output, "{{name}}", name)
-
-	// Write to polecat's CLAUDE.md
-	claudePath := filepath.Join(polecatPath, "CLAUDE.md")
-	if err := os.WriteFile(claudePath, []byte(output), 0644); err != nil {
-		return fmt.Errorf("writing CLAUDE.md: %w", err)
-	}
-
-	return nil
-}
-
-// findTownRoot locates the Gas Town root directory by walking up from startDir.
-func findTownRoot(startDir string) (string, error) {
-	absDir, err := filepath.Abs(startDir)
-	if err != nil {
-		return "", err
-	}
-
-	current := absDir
-	for {
-		// Check for primary marker (mayor/town.json)
-		if _, err := os.Stat(filepath.Join(current, "mayor", "town.json")); err == nil {
-			return current, nil
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return "", fmt.Errorf("town root not found")
-		}
-		current = parent
-	}
 }
 
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.
