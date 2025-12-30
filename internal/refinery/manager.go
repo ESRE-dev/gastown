@@ -332,45 +332,18 @@ func (m *Manager) branchToMR(branch string) *MergeRequest {
 	}
 }
 
-// run is the main processing loop (for foreground mode).
+// run is deprecated - foreground mode now just prints a message.
+// The Refinery agent (Claude) handles all merge processing.
+// See: ZFC #5 - Move merge/conflict decisions from Go to Refinery agent
 func (m *Manager) run(ref *Refinery) error {
-	fmt.Fprintln(m.output, "Refinery running...")
-	fmt.Fprintln(m.output, "Press Ctrl+C to stop")
-
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		// Process queue
-		if err := m.ProcessQueue(); err != nil {
-			fmt.Fprintf(m.output, "Queue processing error: %v\n", err)
-		}
-	}
-	return nil
-}
-
-// ProcessQueue processes all pending merge requests.
-func (m *Manager) ProcessQueue() error {
-	queue, err := m.Queue()
-	if err != nil {
-		return err
-	}
-
-	for _, item := range queue {
-		if !item.MR.IsOpen() {
-			continue
-		}
-
-		fmt.Fprintf(m.output, "Processing: %s (%s)\n", item.MR.Branch, item.MR.Worker)
-
-		result := m.ProcessMR(item.MR)
-		if result.Success {
-			fmt.Fprintln(m.output, "  ✓ Merged successfully")
-		} else {
-			fmt.Fprintf(m.output, "  ✗ Failed: %s\n", result.Error)
-		}
-	}
-
+	fmt.Fprintln(m.output, "")
+	fmt.Fprintln(m.output, "╔══════════════════════════════════════════════════════════════╗")
+	fmt.Fprintln(m.output, "║  Foreground mode is deprecated.                              ║")
+	fmt.Fprintln(m.output, "║                                                              ║")
+	fmt.Fprintln(m.output, "║  The Refinery agent (Claude) handles all merge decisions.   ║")
+	fmt.Fprintln(m.output, "║  Use 'gt refinery start' to run in background mode.         ║")
+	fmt.Fprintln(m.output, "╚══════════════════════════════════════════════════════════════╝")
+	fmt.Fprintln(m.output, "")
 	return nil
 }
 
@@ -383,113 +356,24 @@ type MergeResult struct {
 	TestsFailed bool
 }
 
-// ProcessMR processes a single merge request.
+// ProcessMR is deprecated - the Refinery agent now handles all merge processing.
+//
+// ZFC #5: Move merge/conflict decisions from Go to Refinery agent
+//
+// The agent runs git commands directly and makes decisions based on output:
+//   - Agent attempts merge: git checkout -b temp origin/polecat/<worker>
+//   - Agent detects conflict and decides: retry, notify polecat, escalate
+//   - Agent runs tests and decides: proceed, rollback, retry
+//   - Agent pushes: git push origin main
+//
+// This function is kept for backwards compatibility but always returns an error
+// indicating that the agent should handle merge processing.
+//
+// Deprecated: Use the Refinery agent (Claude) for merge processing.
 func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
-	ref, _ := m.loadState()
-	config := m.getMergeConfig()
-
-	// Claim the MR (open → in_progress)
-	if err := mr.Claim(); err != nil {
-		return MergeResult{Error: fmt.Sprintf("cannot claim MR: %v", err)}
+	return MergeResult{
+		Error: "ProcessMR is deprecated - the Refinery agent handles merge processing (ZFC #5)",
 	}
-	ref.CurrentMR = mr
-	_ = m.saveState(ref) // non-fatal: state file update
-
-	// Emit merge_started event
-	actor := fmt.Sprintf("%s/refinery", m.rig.Name)
-	_ = events.LogFeed(events.TypeMergeStarted, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, ""))
-
-	result := MergeResult{}
-
-	// 1. Fetch the branch
-	if err := m.gitRun("fetch", "origin", mr.Branch); err != nil {
-		result.Error = fmt.Sprintf("fetch failed: %v", err)
-		_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
-		m.completeMR(mr, "", result.Error) // Reopen for retry
-		return result
-	}
-
-	// 2. Checkout target branch
-	if err := m.gitRun("checkout", mr.TargetBranch); err != nil {
-		result.Error = fmt.Sprintf("checkout target failed: %v", err)
-		_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
-		m.completeMR(mr, "", result.Error) // Reopen for retry
-		return result
-	}
-
-	// Pull latest (non-fatal: may fail if remote unreachable)
-	_ = m.gitRun("pull", "origin", mr.TargetBranch)
-
-	// 3. Merge
-	err := m.gitRun("merge", "--no-ff", "-m",
-		fmt.Sprintf("Merge %s from %s", mr.Branch, mr.Worker),
-		"origin/"+mr.Branch)
-
-	if err != nil {
-		errStr := err.Error()
-		if strings.Contains(errStr, "CONFLICT") || strings.Contains(errStr, "conflict") {
-			result.Conflict = true
-			result.Error = "merge conflict"
-			// Abort the merge (best-effort cleanup)
-			_ = m.gitRun("merge", "--abort")
-			_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, "merge conflict"))
-			m.completeMR(mr, "", "merge conflict - polecat must rebase") // Reopen for rebase
-			// Notify worker about conflict
-			m.notifyWorkerConflict(mr)
-			return result
-		}
-		result.Error = fmt.Sprintf("merge failed: %v", err)
-		_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
-		m.completeMR(mr, "", result.Error) // Reopen for retry
-		return result
-	}
-
-	// 4. Run tests if configured
-	if config.RunTests && config.TestCommand != "" {
-		if err := m.runTests(config.TestCommand); err != nil {
-			result.TestsFailed = true
-			result.Error = fmt.Sprintf("tests failed: %v", err)
-			// Reset to before merge (best-effort rollback)
-			_ = m.gitRun("reset", "--hard", "HEAD~1")
-			_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
-			m.completeMR(mr, "", result.Error) // Reopen for fixes
-			return result
-		}
-	}
-
-	// 5. Push with retry logic
-	if err := m.pushWithRetry(mr.TargetBranch, config); err != nil {
-		result.Error = fmt.Sprintf("push failed: %v", err)
-		// Reset to before merge (best-effort rollback)
-		_ = m.gitRun("reset", "--hard", "HEAD~1")
-		_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
-		m.completeMR(mr, "", result.Error) // Reopen for retry
-		return result
-	}
-
-	// 6. Get merge commit SHA
-	mergeCommit, err := m.gitOutput("rev-parse", "HEAD")
-	if err != nil {
-		mergeCommit = "" // Non-fatal, continue
-	}
-
-	// Success!
-	result.Success = true
-	result.MergeCommit = mergeCommit
-	m.completeMR(mr, CloseReasonMerged, "")
-
-	// Emit merged event
-	_ = events.LogFeed(events.TypeMerged, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, ""))
-
-	// Notify worker of success
-	m.notifyWorkerMerged(mr)
-
-	// Optionally delete the merged branch (non-fatal: cleanup only)
-	if config.DeleteMergedBranches {
-		_ = m.gitRun("branch", "-D", mr.Branch)
-	}
-
-	return result
 }
 
 // completeMR marks an MR as complete.
@@ -528,6 +412,7 @@ func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg s
 }
 
 // runTests executes the test command.
+// Deprecated: The Refinery agent runs tests directly via shell commands (ZFC #5).
 func (m *Manager) runTests(testCmd string) error {
 	parts := strings.Fields(testCmd)
 	if len(parts) == 0 {
@@ -588,6 +473,7 @@ func (m *Manager) gitOutput(args ...string) (string, error) {
 
 // getMergeConfig loads the merge configuration from disk.
 // Returns default config if not configured.
+// Deprecated: Configuration is read by the agent from settings (ZFC #5).
 func (m *Manager) getMergeConfig() MergeConfig {
 	mergeConfig := DefaultMergeConfig()
 
@@ -611,6 +497,7 @@ func (m *Manager) getMergeConfig() MergeConfig {
 }
 
 // pushWithRetry pushes to the target branch with exponential backoff retry.
+// Deprecated: The Refinery agent decides retry strategy (ZFC #5).
 func (m *Manager) pushWithRetry(targetBranch string, config MergeConfig) error {
 	var lastErr error
 	delay := time.Duration(config.PushRetryDelayMs) * time.Millisecond
@@ -743,7 +630,8 @@ func (m *Manager) FindMR(idOrBranch string) (*MergeRequest, error) {
 }
 
 // Retry resets a failed merge request so it can be processed again.
-// If processNow is true, immediately processes the MR instead of waiting for the loop.
+// The processNow parameter is deprecated - the Refinery agent handles processing.
+// Clearing the error is sufficient; the agent will pick up the MR in its next patrol cycle.
 func (m *Manager) Retry(id string, processNow bool) error {
 	ref, err := m.loadState()
 	if err != nil {
@@ -772,12 +660,11 @@ func (m *Manager) Retry(id string, processNow bool) error {
 		return err
 	}
 
-	// If --now flag, process immediately
+	// Note: processNow is deprecated (ZFC #5).
+	// The Refinery agent handles merge processing.
+	// It will pick up this MR in its next patrol cycle.
 	if processNow {
-		result := m.ProcessMR(mr)
-		if !result.Success {
-			return fmt.Errorf("retry failed: %s", result.Error)
-		}
+		fmt.Fprintln(m.output, "Note: --now is deprecated. The Refinery agent will process this MR in its next patrol cycle.")
 	}
 
 	return nil
