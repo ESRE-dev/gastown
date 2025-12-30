@@ -699,3 +699,210 @@ func identityToBDActor(identity string) string {
 		return identity
 	}
 }
+
+// GUPPViolationTimeout is how long an agent can have work on hook without
+// progressing before it's considered a GUPP (Gas Town Universal Propulsion
+// Principle) violation. GUPP states: if you have work on your hook, you run it.
+const GUPPViolationTimeout = 30 * time.Minute
+
+// checkGUPPViolations looks for agents that have work-on-hook but aren't
+// progressing. This is a GUPP violation: agents with hooked work must execute.
+// The daemon detects these and notifies the relevant Witness for remediation.
+func (d *Daemon) checkGUPPViolations() {
+	// Check polecat agents - they're the ones with work-on-hook
+	rigs := d.getKnownRigs()
+	for _, rigName := range rigs {
+		d.checkRigGUPPViolations(rigName)
+	}
+}
+
+// checkRigGUPPViolations checks polecats in a specific rig for GUPP violations.
+func (d *Daemon) checkRigGUPPViolations(rigName string) {
+	// List polecat agent beads for this rig
+	// Pattern: gt-polecat-<rig>-<name>
+	cmd := exec.Command("bd", "list", "--type=agent", "--json")
+	cmd.Dir = d.config.TownRoot
+
+	output, err := cmd.Output()
+	if err != nil {
+		return // Silently fail - bd might not be available
+	}
+
+	var agents []struct {
+		ID          string `json:"id"`
+		Type        string `json:"issue_type"`
+		Description string `json:"description"`
+		UpdatedAt   string `json:"updated_at"`
+	}
+
+	if err := json.Unmarshal(output, &agents); err != nil {
+		return
+	}
+
+	prefix := "gt-polecat-" + rigName + "-"
+	for _, agent := range agents {
+		// Only check polecats for this rig
+		if !strings.HasPrefix(agent.ID, prefix) {
+			continue
+		}
+
+		// Parse agent fields
+		fields := beads.ParseAgentFieldsFromDescription(agent.Description)
+		if fields == nil {
+			continue
+		}
+
+		// Check if agent has work on hook
+		if fields.HookBead == "" {
+			continue // No hooked work - no GUPP violation possible
+		}
+
+		// Check if agent is actively working
+		if fields.AgentState == "working" || fields.AgentState == "running" {
+			// Check when the agent bead was last updated
+			updatedAt, err := time.Parse(time.RFC3339, agent.UpdatedAt)
+			if err != nil {
+				continue
+			}
+
+			age := time.Since(updatedAt)
+			if age > GUPPViolationTimeout {
+				d.logger.Printf("GUPP violation: agent %s has hook_bead=%s but hasn't updated in %v (timeout: %v)",
+					agent.ID, fields.HookBead, age.Round(time.Minute), GUPPViolationTimeout)
+
+				// Notify the witness for this rig
+				d.notifyWitnessOfGUPP(rigName, agent.ID, fields.HookBead, age)
+			}
+		}
+	}
+}
+
+// notifyWitnessOfGUPP sends a mail to the rig's witness about a GUPP violation.
+func (d *Daemon) notifyWitnessOfGUPP(rigName, agentID, hookBead string, stuckDuration time.Duration) {
+	witnessAddr := rigName + "/witness"
+	subject := fmt.Sprintf("GUPP_VIOLATION: %s stuck for %v", agentID, stuckDuration.Round(time.Minute))
+	body := fmt.Sprintf(`Agent %s has work on hook but isn't progressing.
+
+hook_bead: %s
+stuck_duration: %v
+
+Action needed: Check if agent is alive and responsive. Consider restarting if stuck.`,
+		agentID, hookBead, stuckDuration.Round(time.Minute))
+
+	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body)
+	cmd.Dir = d.config.TownRoot
+
+	if err := cmd.Run(); err != nil {
+		d.logger.Printf("Warning: failed to notify witness of GUPP violation: %v", err)
+	} else {
+		d.logger.Printf("Notified %s of GUPP violation for %s", witnessAddr, agentID)
+	}
+}
+
+// checkOrphanedWork looks for work assigned to dead agents.
+// Orphaned work needs to be reassigned or the agent needs to be restarted.
+func (d *Daemon) checkOrphanedWork() {
+	// Get list of dead agents
+	deadAgents := d.getDeadAgents()
+	if len(deadAgents) == 0 {
+		return
+	}
+
+	// For each dead agent, check if they have hooked work
+	for _, agent := range deadAgents {
+		fields := beads.ParseAgentFieldsFromDescription(agent.Description)
+		if fields == nil || fields.HookBead == "" {
+			continue // No hooked work to orphan
+		}
+
+		d.logger.Printf("Orphaned work detected: agent %s is dead but has hook_bead=%s",
+			agent.ID, fields.HookBead)
+
+		// Determine the rig from the agent ID (gt-polecat-<rig>-<name>)
+		rigName := d.extractRigFromAgentID(agent.ID)
+		if rigName != "" {
+			d.notifyWitnessOfOrphanedWork(rigName, agent.ID, fields.HookBead)
+		}
+	}
+}
+
+// getDeadAgents returns all agent beads with state=dead.
+func (d *Daemon) getDeadAgents() []struct {
+	ID          string
+	Description string
+} {
+	cmd := exec.Command("bd", "list", "--type=agent", "--json")
+	cmd.Dir = d.config.TownRoot
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	var agents []struct {
+		ID          string `json:"id"`
+		Type        string `json:"issue_type"`
+		Description string `json:"description"`
+	}
+
+	if err := json.Unmarshal(output, &agents); err != nil {
+		return nil
+	}
+
+	var dead []struct {
+		ID          string
+		Description string
+	}
+
+	for _, agent := range agents {
+		fields := beads.ParseAgentFieldsFromDescription(agent.Description)
+		if fields != nil && fields.AgentState == "dead" {
+			dead = append(dead, struct {
+				ID          string
+				Description string
+			}{agent.ID, agent.Description})
+		}
+	}
+
+	return dead
+}
+
+// extractRigFromAgentID extracts the rig name from a polecat agent ID.
+// Example: gt-polecat-gastown-max → gastown
+func (d *Daemon) extractRigFromAgentID(agentID string) string {
+	// Pattern: gt-polecat-<rig>-<name>
+	if !strings.HasPrefix(agentID, "gt-polecat-") {
+		return ""
+	}
+
+	rest := strings.TrimPrefix(agentID, "gt-polecat-")
+	// Find the rig name (everything before the last dash)
+	lastDash := strings.LastIndex(rest, "-")
+	if lastDash == -1 {
+		return ""
+	}
+
+	return rest[:lastDash]
+}
+
+// notifyWitnessOfOrphanedWork sends a mail to the rig's witness about orphaned work.
+func (d *Daemon) notifyWitnessOfOrphanedWork(rigName, agentID, hookBead string) {
+	witnessAddr := rigName + "/witness"
+	subject := fmt.Sprintf("ORPHANED_WORK: %s has hooked work but is dead", agentID)
+	body := fmt.Sprintf(`Agent %s is dead but has work on its hook.
+
+hook_bead: %s
+
+Action needed: Either restart the agent or reassign the work.`,
+		agentID, hookBead)
+
+	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body)
+	cmd.Dir = d.config.TownRoot
+
+	if err := cmd.Run(); err != nil {
+		d.logger.Printf("Warning: failed to notify witness of orphaned work: %v", err)
+	} else {
+		d.logger.Printf("Notified %s of orphaned work for %s", witnessAddr, agentID)
+	}
+}
+

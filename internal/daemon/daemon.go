@@ -20,15 +20,15 @@ import (
 )
 
 // Daemon is the town-level background service.
-// It ensures patrol agents (Deacon, Witnesses) are running and sends periodic heartbeats.
-// All health checking, nudging, and decision-making belongs in the patrol molecules.
+// It ensures patrol agents (Deacon, Witnesses) are running and detects failures.
+// This is recovery-focused: normal wake is handled by feed subscription (bd activity --follow).
+// The daemon is the safety net for dead sessions, GUPP violations, and orphaned work.
 type Daemon struct {
-	config        *Config
-	tmux          *tmux.Tmux
-	logger        *log.Logger
-	ctx           context.Context
-	cancel        context.CancelFunc
-	lastMOTDIndex int // tracks last MOTD to avoid consecutive repeats
+	config *Config
+	tmux   *tmux.Tmux
+	logger *log.Logger
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New creates a new daemon instance.
@@ -169,34 +169,38 @@ func (d *Daemon) calculateHeartbeatInterval() time.Duration {
 }
 
 // heartbeat performs one heartbeat cycle.
-// The daemon ensures patrol agents are running and sends heartbeats.
-// All health checking and decision-making belongs in the patrol molecules.
+// The daemon is recovery-focused: it ensures agents are running and detects failures.
+// Normal wake is handled by feed subscription (bd activity --follow).
+// The daemon is the safety net for edge cases:
+// - Dead sessions that need restart
+// - Agents with work-on-hook not progressing (GUPP violation)
+// - Orphaned work (assigned to dead agents)
 func (d *Daemon) heartbeat(state *State) {
-	d.logger.Println("Heartbeat starting")
+	d.logger.Println("Heartbeat starting (recovery-focused)")
 
-	// 1. Ensure Deacon is running (process management)
+	// 1. Ensure Deacon is running (restart if dead)
 	d.ensureDeaconRunning()
 
-	// 2. Send heartbeat to Deacon (simple notification, no decision-making)
-	d.pokeDeacon()
-
-	// 3. Ensure Witnesses are running for all rigs
+	// 2. Ensure Witnesses are running for all rigs (restart if dead)
 	d.ensureWitnessesRunning()
 
-	// 4. Send heartbeats to Witnesses
-	d.pokeWitnesses()
-
-	// 5. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
+	// 3. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
 	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
 	// Uses regex-based WaitForClaudeReady, which is acceptable for daemon bootstrap.
 	d.triggerPendingSpawns()
 
-	// 6. Process lifecycle requests
+	// 4. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 7. Check for stale agents (timeout fallback)
+	// 5. Check for stale agents (timeout fallback)
 	// Agents that report "running" but haven't updated in too long are marked dead
 	d.checkStaleAgents()
+
+	// 6. Check for GUPP violations (agents with work-on-hook not progressing)
+	d.checkGUPPViolations()
+
+	// 7. Check for orphaned work (assigned to dead agents)
+	d.checkOrphanedWork()
 
 	// Update state
 	state.LastHeartbeat = time.Now()
@@ -214,38 +218,6 @@ const DeaconSessionName = "gt-deacon"
 // DeaconRole is the role name for the Deacon's handoff bead.
 const DeaconRole = "deacon"
 
-// deaconMOTDMessages contains rotating motivational and educational tips
-// for the Deacon heartbeat. These make the thankless patrol role more fun.
-var deaconMOTDMessages = []string{
-	"Thanks for keeping the town running!",
-	"You are Gas Town's most critical role.",
-	"You are the heart of Gas Town! Be watchful!",
-	"Tip: Polecats are transient - spawn freely, kill liberally.",
-	"Tip: Witnesses monitor polecats; you monitor witnesses.",
-	"Tip: Wisps are transient molecules for patrol cycles.",
-	"The town sleeps soundly because you never do.",
-	"Tip: Mayor handles cross-rig coordination; you handle health.",
-	"Your vigilance keeps the agents honest.",
-	"Tip: Use 'gt deacon heartbeat' to signal you're alive.",
-	"Every heartbeat you check keeps Gas Town beating.",
-	"Tip: Stale agents need nudging; very stale ones need restarting.",
-}
-
-// nextMOTD returns the next MOTD message, rotating through the list
-// and avoiding consecutive repeats.
-func (d *Daemon) nextMOTD() string {
-	if len(deaconMOTDMessages) == 0 {
-		return "HEARTBEAT: run your rounds"
-	}
-
-	// Pick a random index that's different from the last one
-	nextIdx := d.lastMOTDIndex
-	for nextIdx == d.lastMOTDIndex && len(deaconMOTDMessages) > 1 {
-		nextIdx = int(time.Now().UnixNano() % int64(len(deaconMOTDMessages)))
-	}
-	d.lastMOTDIndex = nextIdx
-	return deaconMOTDMessages[nextIdx]
-}
 
 // ensureDeaconRunning ensures the Deacon is running.
 // ZFC-compliant: trusts agent bead state, no tmux inference.
@@ -285,37 +257,6 @@ func (d *Daemon) ensureDeaconRunning() {
 	d.logger.Println("Deacon session started successfully")
 }
 
-// pokeDeacon sends a heartbeat message to the Deacon session.
-// ZFC-compliant: trusts agent bead state, no tmux inference.
-// The Deacon molecule decides what to do with heartbeats.
-func (d *Daemon) pokeDeacon() {
-	// Check agent bead state (ZFC: trust what agent reports)
-	beadState, beadErr := d.getAgentBeadState("gt-deacon")
-	if beadErr != nil || (beadState != "running" && beadState != "working") {
-		// Agent not running per bead - don't poke (ensureDeaconRunning should start it)
-		return
-	}
-
-	// Agent reports running - send heartbeat
-	motd := d.nextMOTD()
-	msg := fmt.Sprintf("HEARTBEAT: %s", motd)
-	if err := d.tmux.SendKeysReplace(DeaconSessionName, msg, 50); err != nil {
-		d.logger.Printf("Error poking Deacon: %v", err)
-		return
-	}
-
-	d.logger.Println("Poked Deacon")
-}
-
-// witnessMOTDMessages contains rotating tips for witness heartbeats.
-var witnessMOTDMessages = []string{
-	"Time to patrol! Check your polecats.",
-	"Tip: Survey polecat health via agent beads.",
-	"Tip: Verify git state before killing polecats.",
-	"Your vigilance keeps polecats honest.",
-	"Tip: Escalate stuck workers to Mayor.",
-	"Tip: Send MERGE_READY when work is done.",
-}
 
 // ensureWitnessesRunning ensures witnesses are running for all rigs.
 // Called on each heartbeat to maintain witness patrol loops.
@@ -365,38 +306,6 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	d.logger.Printf("Witness session for %s started successfully", rigName)
 }
 
-// pokeWitnesses sends heartbeat messages to all witnesses.
-func (d *Daemon) pokeWitnesses() {
-	rigs := d.getKnownRigs()
-	for _, rigName := range rigs {
-		d.pokeWitness(rigName)
-	}
-}
-
-// pokeWitness sends a heartbeat to a specific rig's witness.
-func (d *Daemon) pokeWitness(rigName string) {
-	agentID := beads.WitnessBeadID(rigName)
-	sessionName := "gt-" + rigName + "-witness"
-
-	// Check agent bead state (ZFC: trust what agent reports)
-	beadState, beadErr := d.getAgentBeadState(agentID)
-	if beadErr != nil || (beadState != "running" && beadState != "working") {
-		// Agent not running per bead - don't poke
-		return
-	}
-
-	// Agent reports running - send heartbeat
-	idx := int(time.Now().UnixNano() % int64(len(witnessMOTDMessages)))
-	motd := witnessMOTDMessages[idx]
-	msg := fmt.Sprintf("HEARTBEAT: %s", motd)
-
-	if err := d.tmux.SendKeysReplace(sessionName, msg, 50); err != nil {
-		d.logger.Printf("Error poking witness for %s: %v", rigName, err)
-		return
-	}
-
-	d.logger.Printf("Poked witness for %s", rigName)
-}
 
 // getKnownRigs returns list of registered rig names.
 func (d *Daemon) getKnownRigs() []string {
@@ -406,17 +315,14 @@ func (d *Daemon) getKnownRigs() []string {
 		return nil
 	}
 
-	// Simple extraction - look for rig names in the JSON
-	// Full parsing would require importing config package
-	var rigs []string
-	// Parse just enough to get rig names
-	type rigsJSON struct {
+	var parsed struct {
 		Rigs map[string]interface{} `json:"rigs"`
 	}
-	var parsed rigsJSON
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return nil
 	}
+
+	var rigs []string
 	for name := range parsed.Rigs {
 		rigs = append(rigs, name)
 	}
