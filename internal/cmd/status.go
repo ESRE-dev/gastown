@@ -83,6 +83,14 @@ type RigStatus struct {
 	HasRefinery  bool            `json:"has_refinery"`
 	Hooks        []AgentHookInfo `json:"hooks,omitempty"`
 	Agents       []AgentRuntime  `json:"agents,omitempty"` // Runtime state of all agents in rig
+	MQ           *MQSummary      `json:"mq,omitempty"`     // Merge queue summary
+}
+
+// MQSummary represents the merge queue status for a rig.
+type MQSummary struct {
+	Pending  int `json:"pending"`   // Open MRs ready to merge (no blockers)
+	InFlight int `json:"in_flight"` // MRs currently being processed
+	Blocked  int `json:"blocked"`   // MRs waiting on dependencies
 }
 
 // AgentHookInfo represents an agent's hook (pinned work) status.
@@ -202,6 +210,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		// Discover runtime state for all agents in this rig
 		rs.Agents = discoverRigAgents(t, r, rs.Crews, agentBeads, mailRouter)
 
+		// Get MQ summary if rig has a refinery
+		rs.MQ = getMQSummary(r)
+
 		status.Rigs = append(status.Rigs, rs)
 
 		// Update summary
@@ -311,6 +322,22 @@ func outputStatusText(status TownStatus) error {
 			fmt.Printf("%s %s\n", roleIcons["refinery"], style.Bold.Render("Refinery"))
 			for _, agent := range refineries {
 				renderAgentDetails(agent, "   ", r.Hooks)
+			}
+			// MQ summary (shown under refinery)
+			if r.MQ != nil {
+				mqParts := []string{}
+				if r.MQ.Pending > 0 {
+					mqParts = append(mqParts, fmt.Sprintf("%d pending", r.MQ.Pending))
+				}
+				if r.MQ.InFlight > 0 {
+					mqParts = append(mqParts, style.Warning.Render(fmt.Sprintf("%d in-flight", r.MQ.InFlight)))
+				}
+				if r.MQ.Blocked > 0 {
+					mqParts = append(mqParts, style.Dim.Render(fmt.Sprintf("%d blocked", r.MQ.Blocked)))
+				}
+				if len(mqParts) > 0 {
+					fmt.Printf("   MQ: %s\n", strings.Join(mqParts, ", "))
+				}
 			}
 			fmt.Println()
 		}
@@ -673,6 +700,57 @@ func discoverRigAgents(t *tmux.Tmux, r *rig.Rig, crews []string, agentBeads *bea
 	}
 
 	return agents
+}
+
+// getMQSummary queries beads for merge-request issues and returns a summary.
+// Returns nil if the rig has no refinery or no MQ issues.
+func getMQSummary(r *rig.Rig) *MQSummary {
+	if !r.HasRefinery {
+		return nil
+	}
+
+	// Create beads instance for the rig
+	b := beads.New(r.BeadsPath())
+
+	// Query for all open merge-request type issues
+	opts := beads.ListOptions{
+		Type:     "merge-request",
+		Status:   "open",
+		Priority: -1, // No priority filter
+	}
+	openMRs, err := b.List(opts)
+	if err != nil {
+		return nil
+	}
+
+	// Query for in-progress merge-requests
+	opts.Status = "in_progress"
+	inProgressMRs, err := b.List(opts)
+	if err != nil {
+		return nil
+	}
+
+	// Count pending (open with no blockers) vs blocked
+	pending := 0
+	blocked := 0
+	for _, mr := range openMRs {
+		if len(mr.BlockedBy) > 0 || mr.BlockedByCount > 0 {
+			blocked++
+		} else {
+			pending++
+		}
+	}
+
+	// Only return summary if there's something to show
+	if pending == 0 && len(inProgressMRs) == 0 && blocked == 0 {
+		return nil
+	}
+
+	return &MQSummary{
+		Pending:  pending,
+		InFlight: len(inProgressMRs),
+		Blocked:  blocked,
+	}
 }
 
 // getAgentHook retrieves hook status for a specific agent.
