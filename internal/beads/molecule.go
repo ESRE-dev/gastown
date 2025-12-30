@@ -4,17 +4,28 @@ package beads
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 // MoleculeStep represents a parsed step from a molecule definition.
 type MoleculeStep struct {
-	Ref          string   // Step reference (from "## Step: <ref>")
-	Title        string   // Step title (first non-empty line or ref)
-	Instructions string   // Prose instructions for this step
-	Needs        []string // Step refs this step depends on
-	WaitsFor     []string // Dynamic wait conditions (e.g., "all-children")
-	Tier         string   // Optional tier hint: haiku, sonnet, opus
+	Ref          string         // Step reference (from "## Step: <ref>")
+	Title        string         // Step title (first non-empty line or ref)
+	Instructions string         // Prose instructions for this step
+	Needs        []string       // Step refs this step depends on
+	WaitsFor     []string       // Dynamic wait conditions (e.g., "all-children")
+	Tier         string         // Optional tier hint: haiku, sonnet, opus
+	Type         string         // Step type: "task" (default), "wait", etc.
+	Backoff      *BackoffConfig // Backoff configuration for wait-type steps
+}
+
+// BackoffConfig defines exponential backoff parameters for wait-type steps.
+// Used by patrol agents to implement cost-saving await-signal patterns.
+type BackoffConfig struct {
+	Base       string // Base interval (e.g., "30s")
+	Multiplier int    // Multiplier for exponential growth (default: 2)
+	Max        string // Maximum interval cap (e.g., "10m")
 }
 
 // stepHeaderRegex matches "## Step: <ref>" with optional whitespace.
@@ -30,6 +41,14 @@ var tierLineRegex = regexp.MustCompile(`(?i)^Tier:\s*(haiku|sonnet|opus)\s*$`)
 // Common conditions: "all-children" (fanout gate for dynamically bonded children)
 var waitsForLineRegex = regexp.MustCompile(`(?i)^WaitsFor:\s*(.+)$`)
 
+// typeLineRegex matches "Type: task|wait|..." lines.
+// Common types: "task" (default), "wait" (await-signal with backoff)
+var typeLineRegex = regexp.MustCompile(`(?i)^Type:\s*(\w+)\s*$`)
+
+// backoffLineRegex matches "Backoff: base=30s, multiplier=2, max=10m" lines.
+// Parses backoff configuration for wait-type steps.
+var backoffLineRegex = regexp.MustCompile(`(?i)^Backoff:\s*(.+)$`)
+
 // templateVarRegex matches {{variable}} placeholders.
 var templateVarRegex = regexp.MustCompile(`\{\{(\w+)\}\}`)
 
@@ -41,6 +60,8 @@ var templateVarRegex = regexp.MustCompile(`\{\{(\w+)\}\}`)
 //	<prose instructions>
 //	Needs: <step>, <step>  # optional
 //	Tier: haiku|sonnet|opus  # optional
+//	Type: task|wait  # optional, default is "task"
+//	Backoff: base=30s, multiplier=2, max=10m  # optional, for wait-type steps
 //
 // Returns an empty slice if no steps are found.
 func ParseMoleculeSteps(description string) ([]MoleculeStep, error) {
@@ -94,6 +115,18 @@ func ParseMoleculeSteps(description string) ([]MoleculeStep, error) {
 				continue
 			}
 
+			// Check for Type: line
+			if matches := typeLineRegex.FindStringSubmatch(trimmed); matches != nil {
+				currentStep.Type = strings.ToLower(matches[1])
+				continue
+			}
+
+			// Check for Backoff: line
+			if matches := backoffLineRegex.FindStringSubmatch(trimmed); matches != nil {
+				currentStep.Backoff = parseBackoffConfig(matches[1])
+				continue
+			}
+
 			// Regular instruction line
 			instructionLines = append(instructionLines, line)
 		}
@@ -139,6 +172,51 @@ func ParseMoleculeSteps(description string) ([]MoleculeStep, error) {
 	finalizeStep()
 
 	return steps, nil
+}
+
+// parseBackoffConfig parses a backoff configuration string.
+// Expected format: "base=30s, multiplier=2, max=10m"
+// Returns nil if parsing fails.
+func parseBackoffConfig(configStr string) *BackoffConfig {
+	cfg := &BackoffConfig{
+		Multiplier: 2, // Default multiplier
+	}
+
+	// Split by comma and parse key=value pairs
+	parts := strings.Split(configStr, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		// Split by = to get key and value
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(strings.ToLower(kv[0]))
+		value := strings.TrimSpace(kv[1])
+
+		switch key {
+		case "base":
+			cfg.Base = value
+		case "multiplier":
+			if m, err := strconv.Atoi(value); err == nil {
+				cfg.Multiplier = m
+			}
+		case "max":
+			cfg.Max = value
+		}
+	}
+
+	// Return nil if no base was specified (incomplete config)
+	if cfg.Base == "" {
+		return nil
+	}
+
+	return cfg
 }
 
 // ExpandTemplateVars replaces {{variable}} placeholders in text using the provided context map.

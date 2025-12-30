@@ -642,3 +642,148 @@ Needs: b`,
 		t.Error("ValidateMolecule() = nil, want error for cycle in subgraph")
 	}
 }
+
+func TestParseMoleculeSteps_WithType(t *testing.T) {
+	desc := `## Step: await-signal
+Wait for a wake signal before proceeding.
+Type: wait
+
+## Step: check-reality
+Check for work to do.
+Type: task
+Needs: await-signal
+
+## Step: work
+Do the actual work (default type).
+Needs: check-reality`
+
+	steps, err := ParseMoleculeSteps(desc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(steps) != 3 {
+		t.Fatalf("expected 3 steps, got %d", len(steps))
+	}
+
+	// await-signal has type wait
+	if steps[0].Type != "wait" {
+		t.Errorf("step[0].Type = %q, want wait", steps[0].Type)
+	}
+
+	// check-reality has explicit type task
+	if steps[1].Type != "task" {
+		t.Errorf("step[1].Type = %q, want task", steps[1].Type)
+	}
+
+	// work has no type specified (empty string, default)
+	if steps[2].Type != "" {
+		t.Errorf("step[2].Type = %q, want empty (default)", steps[2].Type)
+	}
+}
+
+func TestParseMoleculeSteps_WithBackoff(t *testing.T) {
+	desc := `## Step: await-signal
+Wait for a wake signal with exponential backoff.
+Type: wait
+Backoff: base=30s, multiplier=2, max=10m
+
+## Step: check-reality
+Check for work.
+Needs: await-signal`
+
+	steps, err := ParseMoleculeSteps(desc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(steps))
+	}
+
+	// await-signal has backoff config
+	if steps[0].Backoff == nil {
+		t.Fatal("step[0].Backoff is nil, want BackoffConfig")
+	}
+	if steps[0].Backoff.Base != "30s" {
+		t.Errorf("step[0].Backoff.Base = %q, want 30s", steps[0].Backoff.Base)
+	}
+	if steps[0].Backoff.Multiplier != 2 {
+		t.Errorf("step[0].Backoff.Multiplier = %d, want 2", steps[0].Backoff.Multiplier)
+	}
+	if steps[0].Backoff.Max != "10m" {
+		t.Errorf("step[0].Backoff.Max = %q, want 10m", steps[0].Backoff.Max)
+	}
+
+	// check-reality has no backoff
+	if steps[1].Backoff != nil {
+		t.Errorf("step[1].Backoff = %+v, want nil", steps[1].Backoff)
+	}
+}
+
+func TestParseMoleculeSteps_BackoffDefaultMultiplier(t *testing.T) {
+	desc := `## Step: wait-step
+Simple wait.
+Type: wait
+Backoff: base=1m, max=30m`
+
+	steps, err := ParseMoleculeSteps(desc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(steps))
+	}
+
+	if steps[0].Backoff == nil {
+		t.Fatal("step[0].Backoff is nil, want BackoffConfig")
+	}
+	// Default multiplier is 2
+	if steps[0].Backoff.Multiplier != 2 {
+		t.Errorf("step[0].Backoff.Multiplier = %d, want 2 (default)", steps[0].Backoff.Multiplier)
+	}
+}
+
+func TestParseMoleculeSteps_BackoffIncomplete(t *testing.T) {
+	desc := `## Step: bad-backoff
+Missing base.
+Backoff: multiplier=3, max=1h`
+
+	steps, err := ParseMoleculeSteps(desc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(steps))
+	}
+
+	// Backoff without base should be nil
+	if steps[0].Backoff != nil {
+		t.Errorf("step[0].Backoff = %+v, want nil (missing base)", steps[0].Backoff)
+	}
+}
+
+func TestParseMoleculeSteps_TypeCaseInsensitive(t *testing.T) {
+	desc := `## Step: step1
+First step.
+TYPE: WAIT
+
+## Step: step2
+Second step.
+type: Task
+Needs: step1`
+
+	steps, err := ParseMoleculeSteps(desc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(steps))
+	}
+
+	// Type is normalized to lowercase
+	if steps[0].Type != "wait" {
+		t.Errorf("step[0].Type = %q, want wait", steps[0].Type)
+	}
+	if steps[1].Type != "task" {
+		t.Errorf("step[1].Type = %q, want task", steps[1].Type)
+	}
+}
