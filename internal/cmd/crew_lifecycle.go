@@ -17,70 +17,84 @@ import (
 )
 
 func runCrewRemove(cmd *cobra.Command, args []string) error {
-	name := args[0]
-	// Parse rig/name format (e.g., "beads/emma" -> rig=beads, name=emma)
-	if rig, crewName, ok := parseRigSlashName(name); ok {
-		if crewRig == "" {
-			crewRig = rig
+	var lastErr error
+
+	for _, arg := range args {
+		name := arg
+		rigOverride := crewRig
+
+		// Parse rig/name format (e.g., "beads/emma" -> rig=beads, name=emma)
+		if rig, crewName, ok := parseRigSlashName(name); ok {
+			if rigOverride == "" {
+				rigOverride = rig
+			}
+			name = crewName
 		}
-		name = crewName
-	}
 
-	crewMgr, r, err := getCrewManager(crewRig)
-	if err != nil {
-		return err
-	}
+		crewMgr, r, err := getCrewManager(rigOverride)
+		if err != nil {
+			fmt.Printf("Error removing %s: %v\n", arg, err)
+			lastErr = err
+			continue
+		}
 
-	// Check for running session (unless forced)
-	if !crewForce {
+		// Check for running session (unless forced)
+		if !crewForce {
+			t := tmux.NewTmux()
+			sessionID := crewSessionName(r.Name, name)
+			hasSession, _ := t.HasSession(sessionID)
+			if hasSession {
+				fmt.Printf("Error removing %s: session '%s' is running (use --force to kill and remove)\n", arg, sessionID)
+				lastErr = fmt.Errorf("session running")
+				continue
+			}
+		}
+
+		// Kill session if it exists
 		t := tmux.NewTmux()
 		sessionID := crewSessionName(r.Name, name)
-		hasSession, _ := t.HasSession(sessionID)
-		if hasSession {
-			return fmt.Errorf("session '%s' is running (use --force to kill and remove)", sessionID)
+		if hasSession, _ := t.HasSession(sessionID); hasSession {
+			if err := t.KillSession(sessionID); err != nil {
+				fmt.Printf("Error killing session for %s: %v\n", arg, err)
+				lastErr = err
+				continue
+			}
+			fmt.Printf("Killed session %s\n", sessionID)
+		}
+
+		// Remove the crew workspace
+		if err := crewMgr.Remove(name, crewForce); err != nil {
+			if err == crew.ErrCrewNotFound {
+				fmt.Printf("Error removing %s: crew workspace not found\n", arg)
+			} else if err == crew.ErrHasChanges {
+				fmt.Printf("Error removing %s: uncommitted changes (use --force)\n", arg)
+			} else {
+				fmt.Printf("Error removing %s: %v\n", arg, err)
+			}
+			lastErr = err
+			continue
+		}
+
+		fmt.Printf("%s Removed crew workspace: %s/%s\n",
+			style.Bold.Render("✓"), r.Name, name)
+
+		// Close the agent bead if it exists
+		// Format: gt-<rig>-crew-<name> (matches session name format)
+		agentBeadID := fmt.Sprintf("gt-%s-crew-%s", r.Name, name)
+		closeCmd := exec.Command("bd", "close", agentBeadID, "--reason=Crew workspace removed")
+		closeCmd.Dir = r.Path // Run from rig directory for proper beads resolution
+		if output, err := closeCmd.CombinedOutput(); err != nil {
+			// Non-fatal: bead might not exist or already be closed
+			if !strings.Contains(string(output), "no issue found") &&
+				!strings.Contains(string(output), "already closed") {
+				style.PrintWarning("could not close agent bead %s: %v", agentBeadID, err)
+			}
+		} else {
+			fmt.Printf("Closed agent bead: %s\n", agentBeadID)
 		}
 	}
 
-	// Kill session if it exists
-	t := tmux.NewTmux()
-	sessionID := crewSessionName(r.Name, name)
-	if hasSession, _ := t.HasSession(sessionID); hasSession {
-		if err := t.KillSession(sessionID); err != nil {
-			return fmt.Errorf("killing session: %w", err)
-		}
-		fmt.Printf("Killed session %s\n", sessionID)
-	}
-
-	// Remove the crew workspace
-	if err := crewMgr.Remove(name, crewForce); err != nil {
-		if err == crew.ErrCrewNotFound {
-			return fmt.Errorf("crew workspace '%s' not found", name)
-		}
-		if err == crew.ErrHasChanges {
-			return fmt.Errorf("crew workspace has uncommitted changes (use --force to remove anyway)")
-		}
-		return fmt.Errorf("removing crew workspace: %w", err)
-	}
-
-	fmt.Printf("%s Removed crew workspace: %s/%s\n",
-		style.Bold.Render("✓"), r.Name, name)
-
-	// Close the agent bead if it exists
-	// Format: gt-<rig>-crew-<name> (matches session name format)
-	agentBeadID := fmt.Sprintf("gt-%s-crew-%s", r.Name, name)
-	closeCmd := exec.Command("bd", "close", agentBeadID, "--reason=Crew workspace removed")
-	closeCmd.Dir = r.Path // Run from rig directory for proper beads resolution
-	if output, err := closeCmd.CombinedOutput(); err != nil {
-		// Non-fatal: bead might not exist or already be closed
-		if !strings.Contains(string(output), "no issue found") &&
-			!strings.Contains(string(output), "already closed") {
-			style.PrintWarning("could not close agent bead %s: %v", agentBeadID, err)
-		}
-	} else {
-		fmt.Printf("Closed agent bead: %s\n", agentBeadID)
-	}
-
-	return nil
+	return lastErr
 }
 
 func runCrewRefresh(cmd *cobra.Command, args []string) error {
@@ -225,97 +239,117 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 		return runCrewRestartAll()
 	}
 
-	name := args[0]
-	// Parse rig/name format (e.g., "beads/emma" -> rig=beads, name=emma)
-	if rig, crewName, ok := parseRigSlashName(name); ok {
-		if crewRig == "" {
-			crewRig = rig
+	var lastErr error
+
+	for _, arg := range args {
+		name := arg
+		rigOverride := crewRig
+
+		// Parse rig/name format (e.g., "beads/emma" -> rig=beads, name=emma)
+		if rig, crewName, ok := parseRigSlashName(name); ok {
+			if rigOverride == "" {
+				rigOverride = rig
+			}
+			name = crewName
 		}
-		name = crewName
-	}
 
-	crewMgr, r, err := getCrewManager(crewRig)
-	if err != nil {
-		return err
-	}
-
-	// Get the crew worker, create if not exists (idempotent)
-	worker, err := crewMgr.Get(name)
-	if err == crew.ErrCrewNotFound {
-		fmt.Printf("Creating crew workspace %s in %s...\n", name, r.Name)
-		worker, err = crewMgr.Add(name, false) // No feature branch for crew
+		crewMgr, r, err := getCrewManager(rigOverride)
 		if err != nil {
-			return fmt.Errorf("creating crew workspace: %w", err)
+			fmt.Printf("Error restarting %s: %v\n", arg, err)
+			lastErr = err
+			continue
 		}
-		fmt.Printf("Created crew workspace: %s/%s\n", r.Name, name)
-	} else if err != nil {
-		return fmt.Errorf("getting crew worker: %w", err)
-	}
 
-	t := tmux.NewTmux()
-	sessionID := crewSessionName(r.Name, name)
-
-	// Kill existing session if running
-	if hasSession, _ := t.HasSession(sessionID); hasSession {
-		if err := t.KillSession(sessionID); err != nil {
-			return fmt.Errorf("killing old session: %w", err)
+		// Get the crew worker, create if not exists (idempotent)
+		worker, err := crewMgr.Get(name)
+		if err == crew.ErrCrewNotFound {
+			fmt.Printf("Creating crew workspace %s in %s...\n", name, r.Name)
+			worker, err = crewMgr.Add(name, false) // No feature branch for crew
+			if err != nil {
+				fmt.Printf("Error creating %s: %v\n", arg, err)
+				lastErr = err
+				continue
+			}
+			fmt.Printf("Created crew workspace: %s/%s\n", r.Name, name)
+		} else if err != nil {
+			fmt.Printf("Error getting %s: %v\n", arg, err)
+			lastErr = err
+			continue
 		}
-		fmt.Printf("Killed session %s\n", sessionID)
+
+		t := tmux.NewTmux()
+		sessionID := crewSessionName(r.Name, name)
+
+		// Kill existing session if running
+		if hasSession, _ := t.HasSession(sessionID); hasSession {
+			if err := t.KillSession(sessionID); err != nil {
+				fmt.Printf("Error killing session for %s: %v\n", arg, err)
+				lastErr = err
+				continue
+			}
+			fmt.Printf("Killed session %s\n", sessionID)
+		}
+
+		// Start new session
+		if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
+			fmt.Printf("Error creating session for %s: %v\n", arg, err)
+			lastErr = err
+			continue
+		}
+
+		// Set environment
+		t.SetEnvironment(sessionID, "GT_ROLE", "crew")
+		t.SetEnvironment(sessionID, "GT_RIG", r.Name)
+		t.SetEnvironment(sessionID, "GT_CREW", name)
+
+		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
+		theme := getThemeForRig(r.Name)
+		_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
+
+		// Wait for shell to be ready
+		if err := t.WaitForShellReady(sessionID, constants.ShellReadyTimeout); err != nil {
+			fmt.Printf("Error waiting for shell for %s: %v\n", arg, err)
+			lastErr = err
+			continue
+		}
+
+		// Start claude with skip permissions (crew workers are trusted)
+		// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
+		bdActor := fmt.Sprintf("%s/crew/%s", r.Name, name)
+		claudeCmd := fmt.Sprintf("export GT_ROLE=crew GT_RIG=%s GT_CREW=%s BD_ACTOR=%s && claude --dangerously-skip-permissions", r.Name, name, bdActor)
+		if err := t.SendKeys(sessionID, claudeCmd); err != nil {
+			fmt.Printf("Error starting claude for %s: %v\n", arg, err)
+			lastErr = err
+			continue
+		}
+
+		// Wait for Claude to start, then prime it
+		shells := constants.SupportedShells
+		if err := t.WaitForCommand(sessionID, shells, constants.ClaudeStartTimeout); err != nil {
+			style.PrintWarning("Timeout waiting for Claude to start for %s: %v", arg, err)
+		}
+		// Give Claude time to initialize after process starts
+		time.Sleep(constants.ShutdownNotifyDelay)
+		if err := t.SendKeys(sessionID, "gt prime"); err != nil {
+			// Non-fatal: Claude started but priming failed
+			style.PrintWarning("Could not send prime command to %s: %v", arg, err)
+		}
+
+		// Send crew resume prompt after prime completes
+		// Use NudgeSession (the canonical way to message Claude) with longer pre-delay
+		// to ensure gt prime has finished processing
+		time.Sleep(5 * time.Second)
+		crewPrompt := "Read your mail, act on anything urgent, else await instructions."
+		if err := t.NudgeSession(sessionID, crewPrompt); err != nil {
+			style.PrintWarning("Could not send resume prompt to %s: %v", arg, err)
+		}
+
+		fmt.Printf("%s Restarted crew workspace: %s/%s\n",
+			style.Bold.Render("✓"), r.Name, name)
+		fmt.Printf("Attach with: %s\n", style.Dim.Render(fmt.Sprintf("gt crew at %s", name)))
 	}
 
-	// Start new session
-	if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment
-	t.SetEnvironment(sessionID, "GT_ROLE", "crew")
-	t.SetEnvironment(sessionID, "GT_RIG", r.Name)
-	t.SetEnvironment(sessionID, "GT_CREW", name)
-
-	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
-	theme := getThemeForRig(r.Name)
-	_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
-
-	// Wait for shell to be ready
-	if err := t.WaitForShellReady(sessionID, constants.ShellReadyTimeout); err != nil {
-		return fmt.Errorf("waiting for shell: %w", err)
-	}
-
-	// Start claude with skip permissions (crew workers are trusted)
-	// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-	bdActor := fmt.Sprintf("%s/crew/%s", r.Name, name)
-	claudeCmd := fmt.Sprintf("export GT_ROLE=crew GT_RIG=%s GT_CREW=%s BD_ACTOR=%s && claude --dangerously-skip-permissions", r.Name, name, bdActor)
-	if err := t.SendKeys(sessionID, claudeCmd); err != nil {
-		return fmt.Errorf("starting claude: %w", err)
-	}
-
-	// Wait for Claude to start, then prime it
-	shells := constants.SupportedShells
-	if err := t.WaitForCommand(sessionID, shells, constants.ClaudeStartTimeout); err != nil {
-		style.PrintWarning("Timeout waiting for Claude to start: %v", err)
-	}
-	// Give Claude time to initialize after process starts
-	time.Sleep(constants.ShutdownNotifyDelay)
-	if err := t.SendKeys(sessionID, "gt prime"); err != nil {
-		// Non-fatal: Claude started but priming failed
-		style.PrintWarning("Could not send prime command: %v", err)
-	}
-
-	// Send crew resume prompt after prime completes
-	// Use NudgeSession (the canonical way to message Claude) with longer pre-delay
-	// to ensure gt prime has finished processing
-	time.Sleep(5 * time.Second)
-	crewPrompt := "Read your mail, act on anything urgent, else await instructions."
-	if err := t.NudgeSession(sessionID, crewPrompt); err != nil {
-		style.PrintWarning("Could not send resume prompt: %v", err)
-	}
-
-	fmt.Printf("%s Restarted crew workspace: %s/%s\n",
-		style.Bold.Render("✓"), r.Name, name)
-	fmt.Printf("Attach with: %s\n", style.Dim.Render(fmt.Sprintf("gt crew at %s", name)))
-
-	return nil
+	return lastErr
 }
 
 // runCrewRestartAll restarts all running crew sessions.

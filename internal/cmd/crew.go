@@ -107,17 +107,19 @@ Examples:
 }
 
 var crewRemoveCmd = &cobra.Command{
-	Use:   "remove <name>",
-	Short: "Remove a crew workspace",
-	Long: `Remove a crew workspace from the rig.
+	Use:   "remove <name...>",
+	Short: "Remove crew workspace(s)",
+	Long: `Remove one or more crew workspaces from the rig.
 
 Checks for uncommitted changes and running sessions before removing.
 Use --force to skip checks and remove anyway.
 
 Examples:
-  gt crew remove dave             # Remove with safety checks
-  gt crew remove dave --force     # Force remove`,
-	Args: cobra.ExactArgs(1),
+  gt crew remove dave                       # Remove with safety checks
+  gt crew remove dave emma fred             # Remove multiple
+  gt crew remove beads/grip beads/fang      # Remove from specific rig
+  gt crew remove dave --force               # Force remove`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: runCrewRemove,
 }
 
@@ -152,9 +154,9 @@ Examples:
 }
 
 var crewRestartCmd = &cobra.Command{
-	Use:     "restart [name]",
+	Use:     "restart [name...]",
 	Aliases: []string{"rs"},
-	Short:   "Kill and restart crew workspace session",
+	Short:   "Kill and restart crew workspace session(s)",
 	Long: `Kill the tmux session and restart fresh with Claude.
 
 Useful when a crew member gets confused or needs a clean slate.
@@ -168,11 +170,13 @@ The command will:
 Use --all to restart all running crew sessions across all rigs.
 
 Examples:
-  gt crew restart dave            # Restart dave's session
-  gt crew rs emma                 # Same, using alias
-  gt crew restart --all           # Restart all running crew sessions
-  gt crew restart --all --rig beads   # Restart all crew in beads rig
-  gt crew restart --all --dry-run     # Preview what would be restarted`,
+  gt crew restart dave                  # Restart dave's session
+  gt crew restart dave emma fred        # Restart multiple
+  gt crew restart beads/grip beads/fang # Restart from specific rig
+  gt crew rs emma                       # Same, using alias
+  gt crew restart --all                 # Restart all running crew sessions
+  gt crew restart --all --rig beads     # Restart all crew in beads rig
+  gt crew restart --all --dry-run       # Preview what would be restarted`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if crewAll {
 			if len(args) > 0 {
@@ -180,8 +184,8 @@ Examples:
 			}
 			return nil
 		}
-		if len(args) != 1 {
-			return fmt.Errorf("requires exactly 1 argument (or --all)")
+		if len(args) < 1 {
+			return fmt.Errorf("requires at least 1 argument (or --all)")
 		}
 		return nil
 	},
