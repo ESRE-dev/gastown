@@ -11,7 +11,6 @@ import (
 
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -105,11 +104,10 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
-	// Create CLAUDE.md with crew worker prompting
-	if err := m.createClaudeMD(name, crewPath); err != nil {
-		_ = os.RemoveAll(crewPath) // best-effort cleanup
-		return nil, fmt.Errorf("creating CLAUDE.md: %w", err)
-	}
+	// NOTE: We intentionally do NOT write to CLAUDE.md here.
+	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
+	// Writing to CLAUDE.md would overwrite project instructions and leak
+	// Gas Town internals into the project repo when workers commit/push.
 
 	// Create crew worker state
 	now := time.Now()
@@ -129,69 +127,6 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	}
 
 	return crew, nil
-}
-
-// createClaudeMD creates the CLAUDE.md file for crew worker prompting.
-// Uses the crew template from internal/templates for comprehensive context.
-func (m *Manager) createClaudeMD(name, crewPath string) error {
-	// Try to use templates for comprehensive crew context
-	tmpl, err := templates.New()
-	if err != nil {
-		// Fall back to minimal content if templates fail
-		return m.createClaudeMDFallback(name, crewPath)
-	}
-
-	// Find town root by walking up from rig path
-	townRoot := filepath.Dir(m.rig.Path)
-
-	// Build template data
-	data := templates.RoleData{
-		Role:     "crew",
-		RigName:  m.rig.Name,
-		TownRoot: townRoot,
-		WorkDir:  crewPath,
-		Polecat:  name, // Used for crew member name
-	}
-
-	// Render the crew template
-	content, err := tmpl.RenderRole("crew", data)
-	if err != nil {
-		// Fall back if rendering fails
-		return m.createClaudeMDFallback(name, crewPath)
-	}
-
-	claudePath := filepath.Join(crewPath, "CLAUDE.md")
-	return os.WriteFile(claudePath, []byte(content), 0644)
-}
-
-// createClaudeMDFallback creates a minimal CLAUDE.md if templates fail.
-func (m *Manager) createClaudeMDFallback(name, crewPath string) error {
-	content := fmt.Sprintf(`# Claude: Crew Worker - %s
-
-Run `+"`gt prime`"+` for full crew worker context.
-
-You are a **crew worker** in the %s rig. Crew workers are user-managed persistent workspaces.
-
-## Key Differences from Polecats
-
-- **User-managed**: You are NOT managed by the Witness daemon
-- **Persistent**: Your workspace is not automatically cleaned up
-- **Long-lived identity**: You keep your name across sessions
-- **Mail enabled**: You can send and receive mail
-
-## Key Commands
-
-- `+"`gt prime`"+` - Output full crew worker context
-- `+"`gt mail inbox`"+` - Check your inbox
-- `+"`bd ready`"+` - Available issues (if beads configured)
-- `+"`bd show <id>`"+` - View issue details
-- `+"`bd close <id>`"+` - Mark issue complete
-
-Crew: %s | Rig: %s
-`, name, m.rig.Name, name, m.rig.Name)
-
-	claudePath := filepath.Join(crewPath, "CLAUDE.md")
-	return os.WriteFile(claudePath, []byte(content), 0644)
 }
 
 // Remove deletes a crew worker.
