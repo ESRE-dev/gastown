@@ -48,9 +48,9 @@ type GitAuditResult struct {
 
 // ExecuteLanding performs the witness landing protocol for a swarm.
 func (m *Manager) ExecuteLanding(swarmID string, config LandingConfig) (*LandingResult, error) {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return nil, ErrSwarmNotFound
+	swarm, err := m.LoadSwarm(swarmID)
+	if err != nil {
+		return nil, err
 	}
 
 	result := &LandingResult{

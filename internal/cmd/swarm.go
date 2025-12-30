@@ -658,14 +658,9 @@ func runSwarmLand(cmd *cobra.Command, args []string) error {
 
 	// Use swarm manager for the actual landing (git operations)
 	mgr := swarm.NewManager(foundRig)
-	sw, err := mgr.Create(swarmID, nil, "main")
+	sw, err := mgr.LoadSwarm(swarmID)
 	if err != nil {
-		return fmt.Errorf("loading swarm for landing: %w", err)
-	}
-
-	// Execute landing to main
-	if err := mgr.LandToMain(swarmID); err != nil {
-		return fmt.Errorf("landing swarm: %w", err)
+		return fmt.Errorf("loading swarm from beads: %w", err)
 	}
 
 	// Execute full landing protocol

@@ -19,9 +19,9 @@ var (
 // CreateIntegrationBranch creates the integration branch for a swarm.
 // The branch is created from the swarm's BaseCommit and pushed to origin.
 func (m *Manager) CreateIntegrationBranch(swarmID string) error {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return ErrSwarmNotFound
+	swarm, err := m.LoadSwarm(swarmID)
+	if err != nil {
+		return err
 	}
 
 	branchName := swarm.Integration
@@ -45,9 +45,9 @@ func (m *Manager) CreateIntegrationBranch(swarmID string) error {
 // MergeToIntegration merges a worker branch into the integration branch.
 // Returns ErrMergeConflict if the merge has conflicts.
 func (m *Manager) MergeToIntegration(swarmID, workerBranch string) error {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return ErrSwarmNotFound
+	swarm, err := m.LoadSwarm(swarmID)
+	if err != nil {
+		return err
 	}
 
 	// Ensure we're on the integration branch
@@ -87,9 +87,9 @@ func (m *Manager) AbortMerge() error {
 
 // LandToMain merges the integration branch to the target branch (usually main).
 func (m *Manager) LandToMain(swarmID string) error {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return ErrSwarmNotFound
+	swarm, err := m.LoadSwarm(swarmID)
+	if err != nil {
+		return err
 	}
 
 	// Checkout target branch
@@ -101,7 +101,7 @@ func (m *Manager) LandToMain(swarmID string) error {
 	_ = m.gitRun("pull", "origin", swarm.TargetBranch)
 
 	// Merge integration branch
-	err := m.gitRun("merge", "--no-ff", "-m",
+	err = m.gitRun("merge", "--no-ff", "-m",
 		fmt.Sprintf("Land swarm %s", swarmID),
 		swarm.Integration)
 	if err != nil {
@@ -121,9 +121,9 @@ func (m *Manager) LandToMain(swarmID string) error {
 
 // CleanupBranches removes all branches associated with a swarm.
 func (m *Manager) CleanupBranches(swarmID string) error {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return ErrSwarmNotFound
+	swarm, err := m.LoadSwarm(swarmID)
+	if err != nil {
+		return err
 	}
 
 	var lastErr error
@@ -151,9 +151,9 @@ func (m *Manager) CleanupBranches(swarmID string) error {
 
 // GetIntegrationBranch returns the integration branch name for a swarm.
 func (m *Manager) GetIntegrationBranch(swarmID string) (string, error) {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return "", ErrSwarmNotFound
+	swarm, err := m.LoadSwarm(swarmID)
+	if err != nil {
+		return "", err
 	}
 	return swarm.Integration, nil
 }

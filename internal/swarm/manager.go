@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/steveyegge/gastown/internal/rig"
 )
@@ -22,9 +21,9 @@ var (
 )
 
 // Manager handles swarm lifecycle operations.
+// Manager is stateless - all swarm state is discovered from beads.
 type Manager struct {
 	rig     *rig.Rig
-	swarms  map[string]*Swarm
 	workDir string
 }
 
@@ -32,224 +31,158 @@ type Manager struct {
 func NewManager(r *rig.Rig) *Manager {
 	return &Manager{
 		rig:     r,
-		swarms:  make(map[string]*Swarm),
 		workDir: r.Path,
 	}
 }
 
-// Create creates a new swarm from an epic.
-func (m *Manager) Create(epicID string, workers []string, targetBranch string) (*Swarm, error) {
-	if _, exists := m.swarms[epicID]; exists {
-		return nil, ErrSwarmExists
+// LoadSwarm loads swarm state from beads by querying the epic.
+// This is the canonical way to get swarm state - no in-memory caching.
+func (m *Manager) LoadSwarm(epicID string) (*Swarm, error) {
+	// Query beads for the epic
+	cmd := exec.Command("bd", "show", epicID, "--json")
+	cmd.Dir = m.workDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("bd show: %s", strings.TrimSpace(stderr.String()))
 	}
 
-	// Get current git commit as base (optional - may not have git)
+	// Parse the epic
+	var epic struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Status    string `json:"status"`
+		MolType   string `json:"mol_type"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &epic); err != nil {
+		return nil, fmt.Errorf("parsing epic: %w", err)
+	}
+
+	// Verify it's a swarm molecule
+	if epic.MolType != "swarm" {
+		return nil, fmt.Errorf("epic %s is not a swarm (mol_type=%s)", epicID, epic.MolType)
+	}
+
+	// Get current git commit as base
 	baseCommit, _ := m.getGitHead()
 	if baseCommit == "" {
 		baseCommit = "unknown"
 	}
 
-	now := time.Now()
+	// Map status to swarm state
+	state := SwarmActive
+	if epic.Status == "closed" {
+		state = SwarmLanded
+	}
+
 	swarm := &Swarm{
 		ID:           epicID,
 		RigName:      m.rig.Name,
 		EpicID:       epicID,
 		BaseCommit:   baseCommit,
 		Integration:  fmt.Sprintf("swarm/%s", epicID),
-		TargetBranch: targetBranch,
-		State:        SwarmCreated,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		Workers:      workers,
+		TargetBranch: "main",
+		State:        state,
+		Workers:      []string{}, // Discovered from active tasks
 		Tasks:        []SwarmTask{},
 	}
 
-	// Load tasks from beads
+	// Load tasks from beads (children of the epic)
 	tasks, err := m.loadTasksFromBeads(epicID)
-	if err != nil {
-		// Non-fatal - swarm can start without tasks loaded
-	} else {
+	if err == nil {
 		swarm.Tasks = tasks
-	}
-
-	m.swarms[epicID] = swarm
-	return swarm, nil
-}
-
-// Start activates a swarm, transitioning from Created to Active.
-func (m *Manager) Start(swarmID string) error {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return ErrSwarmNotFound
-	}
-
-	if swarm.State != SwarmCreated {
-		return fmt.Errorf("%w: cannot start from state %s", ErrInvalidState, swarm.State)
-	}
-
-	swarm.State = SwarmActive
-	swarm.UpdatedAt = time.Now()
-	return nil
-}
-
-// UpdateState transitions the swarm to a new state.
-func (m *Manager) UpdateState(swarmID string, state SwarmState) error {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return ErrSwarmNotFound
-	}
-
-	// Validate state transition
-	if !isValidTransition(swarm.State, state) {
-		return fmt.Errorf("%w: cannot transition from %s to %s",
-			ErrInvalidState, swarm.State, state)
-	}
-
-	swarm.State = state
-	swarm.UpdatedAt = time.Now()
-	return nil
-}
-
-// Cancel cancels a swarm with a reason.
-func (m *Manager) Cancel(swarmID string, reason string) error {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return ErrSwarmNotFound
-	}
-
-	if swarm.State.IsTerminal() {
-		return fmt.Errorf("%w: swarm already in terminal state %s",
-			ErrInvalidState, swarm.State)
-	}
-
-	swarm.State = SwarmCancelled
-	swarm.Error = reason
-	swarm.UpdatedAt = time.Now()
-	return nil
-}
-
-// GetSwarm returns a swarm by ID.
-func (m *Manager) GetSwarm(id string) (*Swarm, error) {
-	swarm, ok := m.swarms[id]
-	if !ok {
-		return nil, ErrSwarmNotFound
-	}
-	return swarm, nil
-}
-
-// GetReadyTasks returns tasks ready to be assigned.
-func (m *Manager) GetReadyTasks(swarmID string) ([]SwarmTask, error) {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return nil, ErrSwarmNotFound
-	}
-
-	var ready []SwarmTask
-	for _, task := range swarm.Tasks {
-		if task.State == TaskPending {
-			ready = append(ready, task)
+		// Discover workers from assigned tasks
+		for _, task := range tasks {
+			if task.Assignee != "" {
+				swarm.Workers = appendUnique(swarm.Workers, task.Assignee)
+			}
 		}
 	}
 
-	if len(ready) == 0 {
+	return swarm, nil
+}
+
+// appendUnique appends s to slice if not already present.
+func appendUnique(slice []string, s string) []string {
+	for _, v := range slice {
+		if v == s {
+			return slice
+		}
+	}
+	return append(slice, s)
+}
+
+// GetSwarm loads a swarm from beads. Alias for LoadSwarm for compatibility.
+func (m *Manager) GetSwarm(id string) (*Swarm, error) {
+	return m.LoadSwarm(id)
+}
+
+// GetReadyTasks returns tasks ready to be assigned by querying beads.
+func (m *Manager) GetReadyTasks(swarmID string) ([]SwarmTask, error) {
+	// Use bd swarm status to get ready front
+	cmd := exec.Command("bd", "swarm", "status", swarmID, "--json")
+	cmd.Dir = m.workDir
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil, ErrSwarmNotFound
+	}
+
+	var status struct {
+		Ready []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"ready"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		return nil, fmt.Errorf("parsing status: %w", err)
+	}
+
+	if len(status.Ready) == 0 {
 		return nil, ErrNoReadyTasks
 	}
-	return ready, nil
-}
 
-// GetActiveTasks returns tasks currently in progress.
-func (m *Manager) GetActiveTasks(swarmID string) ([]SwarmTask, error) {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return nil, ErrSwarmNotFound
-	}
-
-	var active []SwarmTask
-	for _, task := range swarm.Tasks {
-		if task.State == TaskInProgress || task.State == TaskAssigned {
-			active = append(active, task)
+	tasks := make([]SwarmTask, len(status.Ready))
+	for i, r := range status.Ready {
+		tasks[i] = SwarmTask{
+			IssueID: r.ID,
+			Title:   r.Title,
+			State:   TaskPending,
 		}
 	}
-	return active, nil
+	return tasks, nil
 }
 
-// IsComplete checks if all tasks are in terminal states.
+// IsComplete checks if all tasks are closed by querying beads.
 func (m *Manager) IsComplete(swarmID string) (bool, error) {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
+	cmd := exec.Command("bd", "swarm", "status", swarmID, "--json")
+	cmd.Dir = m.workDir
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
 		return false, ErrSwarmNotFound
 	}
 
-	if len(swarm.Tasks) == 0 {
-		return false, nil
+	var status struct {
+		Ready   []struct{ ID string } `json:"ready"`
+		Active  []struct{ ID string } `json:"active"`
+		Blocked []struct{ ID string } `json:"blocked"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		return false, fmt.Errorf("parsing status: %w", err)
 	}
 
-	for _, task := range swarm.Tasks {
-		if !task.State.IsComplete() {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// AssignTask assigns a task to a worker.
-func (m *Manager) AssignTask(swarmID, taskID, worker string) error {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return ErrSwarmNotFound
-	}
-
-	for i, task := range swarm.Tasks {
-		if task.IssueID == taskID {
-			swarm.Tasks[i].Assignee = worker
-			swarm.Tasks[i].State = TaskAssigned
-			swarm.Tasks[i].Branch = fmt.Sprintf("polecat/%s/%s", worker, taskID)
-			swarm.UpdatedAt = time.Now()
-			return nil
-		}
-	}
-	return fmt.Errorf("task %s not found in swarm", taskID)
-}
-
-// UpdateTaskState updates a task's state.
-func (m *Manager) UpdateTaskState(swarmID, taskID string, state TaskState) error {
-	swarm, ok := m.swarms[swarmID]
-	if !ok {
-		return ErrSwarmNotFound
-	}
-
-	for i, task := range swarm.Tasks {
-		if task.IssueID == taskID {
-			swarm.Tasks[i].State = state
-			if state == TaskMerged {
-				now := time.Now()
-				swarm.Tasks[i].MergedAt = &now
-			}
-			swarm.UpdatedAt = time.Now()
-			return nil
-		}
-	}
-	return fmt.Errorf("task %s not found in swarm", taskID)
-}
-
-// ListSwarms returns all swarms in the manager.
-func (m *Manager) ListSwarms() []*Swarm {
-	swarms := make([]*Swarm, 0, len(m.swarms))
-	for _, s := range m.swarms {
-		swarms = append(swarms, s)
-	}
-	return swarms
-}
-
-// ListActiveSwarms returns non-terminal swarms.
-func (m *Manager) ListActiveSwarms() []*Swarm {
-	var active []*Swarm
-	for _, s := range m.swarms {
-		if s.State.IsActive() {
-			active = append(active, s)
-		}
-	}
-	return active
+	// Complete if nothing is ready, active, or blocked
+	return len(status.Ready) == 0 && len(status.Active) == 0 && len(status.Blocked) == 0, nil
 }
 
 // isValidTransition checks if a state transition is allowed.
