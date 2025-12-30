@@ -153,6 +153,15 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1")
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/%s", m.rig.Name, polecat))
 
+	// Hook the issue to the polecat if provided via --issue flag
+	if opts.Issue != "" {
+		agentID := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
+		if err := m.hookIssue(opts.Issue, agentID, workDir); err != nil {
+			// Non-fatal - warn but continue (session can still start)
+			fmt.Printf("Warning: could not hook issue %s: %v\n", opts.Issue, err)
+		}
+	}
+
 	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(m.rig.Name)
 	_ = m.tmux.ConfigureGasTownSession(sessionID, theme, m.rig.Name, polecat, "polecat")
@@ -175,10 +184,6 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	if err := m.tmux.SendKeys(sessionID, command); err != nil {
 		return fmt.Errorf("sending command: %w", err)
 	}
-
-	// NOTE: No issue injection needed here. Work assignments are sent via mail
-	// before session start, and the SessionStart hook runs gt prime + mail check
-	// which shows the polecat its assignment.
 
 	return nil
 }
@@ -388,4 +393,18 @@ func (m *Manager) StopAll(force bool) error {
 	}
 
 	return lastErr
+}
+
+// hookIssue pins an issue to a polecat's hook using bd update.
+// This makes the work visible via 'gt mol status' when the session starts.
+func (m *Manager) hookIssue(issueID, agentID, workDir string) error {
+	// Use bd update to set status=hooked and assign to the polecat
+	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID)
+	cmd.Dir = workDir
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("bd update failed: %w", err)
+	}
+	fmt.Printf("✓ Hooked issue %s to %s\n", issueID, agentID)
+	return nil
 }
