@@ -15,10 +15,10 @@ func init() {
 }
 
 var nudgeCmd = &cobra.Command{
-	Use:     "nudge <rig/polecat> <message>",
+	Use:     "nudge <target> <message>",
 	GroupID: GroupComm,
-	Short:   "Send a message to a polecat session reliably",
-	Long: `Sends a message to a polecat's Claude Code session.
+	Short:   "Send a message to a polecat or deacon session reliably",
+	Long: `Sends a message to a polecat's or deacon's Claude Code session.
 
 Uses a reliable delivery pattern:
 1. Sends text in literal mode (-l flag)
@@ -28,9 +28,13 @@ Uses a reliable delivery pattern:
 This is the ONLY way to send messages to Claude sessions.
 Do not use raw tmux send-keys elsewhere.
 
+Special targets:
+  deacon    Maps to the Deacon session (gt-deacon)
+
 Examples:
   gt nudge gastown/furiosa "Check your mail and start working"
-  gt nudge gastown/alpha "What's your status?"`,
+  gt nudge gastown/alpha "What's your status?"
+  gt nudge deacon session-started`,
 	Args: cobra.ExactArgs(2),
 	RunE: runNudge,
 }
@@ -64,6 +68,32 @@ func runNudge(cmd *cobra.Command, args []string) error {
 	message = fmt.Sprintf("[from %s] %s", sender, message)
 
 	t := tmux.NewTmux()
+
+	// Special case: "deacon" target maps to the Deacon session
+	if target == "deacon" {
+		// Check if Deacon session exists
+		exists, err := t.HasSession(DeaconSessionName)
+		if err != nil {
+			return fmt.Errorf("checking deacon session: %w", err)
+		}
+		if !exists {
+			// Deacon not running - this is not an error, just log and return
+			fmt.Printf("%s Deacon not running, nudge skipped\n", style.Dim.Render("○"))
+			return nil
+		}
+
+		if err := t.NudgeSession(DeaconSessionName, message); err != nil {
+			return fmt.Errorf("nudging deacon: %w", err)
+		}
+
+		fmt.Printf("%s Nudged deacon\n", style.Bold.Render("✓"))
+
+		// Log nudge event
+		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+			LogNudge(townRoot, "deacon", message)
+		}
+		return nil
+	}
 
 	// Check if target is rig/polecat format or raw session name
 	if strings.Contains(target, "/") {

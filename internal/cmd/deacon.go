@@ -410,6 +410,7 @@ func ensurePatrolHooks(workspacePath string) error {
 	}
 
 	// Standard patrol hooks
+	// Note: SessionStart nudges Deacon for GUPP backstop (agent wake notification)
 	hooksJSON := `{
   "hooks": {
     "SessionStart": [
@@ -418,7 +419,7 @@ func ensurePatrolHooks(workspacePath string) error {
         "hooks": [
           {
             "type": "command",
-            "command": "gt prime && gt mail check --inject"
+            "command": "gt prime && gt mail check --inject && gt nudge deacon session-started"
           }
         ]
       }

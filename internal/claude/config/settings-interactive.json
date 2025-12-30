@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "gt prime"
+            "command": "gt prime && gt nudge deacon session-started"
           }
         ]
       }
