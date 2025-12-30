@@ -45,6 +45,12 @@ const (
 	TypeNudge   = "nudge"
 	TypeBoot    = "boot"
 	TypeHalt    = "halt"
+
+	// Merge queue events (emitted by refinery)
+	TypeMergeStarted = "merge_started"
+	TypeMerged       = "merged"
+	TypeMergeFailed  = "merge_failed"
+	TypeMergeSkipped = "merge_skipped"
 )
 
 // EventsFile is the name of the raw events log.
@@ -171,4 +177,21 @@ func BootPayload(rig string, agents []string) map[string]interface{} {
 		"rig":    rig,
 		"agents": agents,
 	}
+}
+
+// MergePayload creates a payload for merge queue events.
+// mrID: merge request ID
+// worker: polecat name that submitted the work
+// branch: source branch being merged
+// reason: failure reason (for merge_failed/merge_skipped events)
+func MergePayload(mrID, worker, branch, reason string) map[string]interface{} {
+	p := map[string]interface{}{
+		"mr":     mrID,
+		"worker": worker,
+		"branch": branch,
+	}
+	if reason != "" {
+		p["reason"] = reason
+	}
+	return p
 }

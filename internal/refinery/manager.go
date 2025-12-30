@@ -15,6 +15,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -394,11 +395,16 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 	ref.CurrentMR = mr
 	_ = m.saveState(ref) // non-fatal: state file update
 
+	// Emit merge_started event
+	actor := fmt.Sprintf("%s/refinery", m.rig.Name)
+	_ = events.LogFeed(events.TypeMergeStarted, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, ""))
+
 	result := MergeResult{}
 
 	// 1. Fetch the branch
 	if err := m.gitRun("fetch", "origin", mr.Branch); err != nil {
 		result.Error = fmt.Sprintf("fetch failed: %v", err)
+		_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
 		m.completeMR(mr, "", result.Error) // Reopen for retry
 		return result
 	}
@@ -406,6 +412,7 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 	// 2. Checkout target branch
 	if err := m.gitRun("checkout", mr.TargetBranch); err != nil {
 		result.Error = fmt.Sprintf("checkout target failed: %v", err)
+		_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
 		m.completeMR(mr, "", result.Error) // Reopen for retry
 		return result
 	}
@@ -425,12 +432,14 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 			result.Error = "merge conflict"
 			// Abort the merge (best-effort cleanup)
 			_ = m.gitRun("merge", "--abort")
+			_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, "merge conflict"))
 			m.completeMR(mr, "", "merge conflict - polecat must rebase") // Reopen for rebase
 			// Notify worker about conflict
 			m.notifyWorkerConflict(mr)
 			return result
 		}
 		result.Error = fmt.Sprintf("merge failed: %v", err)
+		_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
 		m.completeMR(mr, "", result.Error) // Reopen for retry
 		return result
 	}
@@ -442,6 +451,7 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 			result.Error = fmt.Sprintf("tests failed: %v", err)
 			// Reset to before merge (best-effort rollback)
 			_ = m.gitRun("reset", "--hard", "HEAD~1")
+			_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
 			m.completeMR(mr, "", result.Error) // Reopen for fixes
 			return result
 		}
@@ -452,6 +462,7 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 		result.Error = fmt.Sprintf("push failed: %v", err)
 		// Reset to before merge (best-effort rollback)
 		_ = m.gitRun("reset", "--hard", "HEAD~1")
+		_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
 		m.completeMR(mr, "", result.Error) // Reopen for retry
 		return result
 	}
@@ -466,6 +477,9 @@ func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
 	result.Success = true
 	result.MergeCommit = mergeCommit
 	m.completeMR(mr, CloseReasonMerged, "")
+
+	// Emit merged event
+	_ = events.LogFeed(events.TypeMerged, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, ""))
 
 	// Notify worker of success
 	m.notifyWorkerMerged(mr)
@@ -487,6 +501,7 @@ func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg s
 	ref.CurrentMR = nil
 
 	now := time.Now()
+	actor := fmt.Sprintf("%s/refinery", m.rig.Name)
 
 	if closeReason != "" {
 		// Close the MR (in_progress → closed)
@@ -501,6 +516,8 @@ func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg s
 			ref.Stats.TodayMerged++
 		case CloseReasonSuperseded:
 			ref.Stats.TotalSkipped++
+			// Emit merge_skipped event
+			_ = events.LogFeed(events.TypeMergeSkipped, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, "superseded"))
 		default:
 			// Other close reasons (rejected, conflict) count as failed
 			ref.Stats.TotalFailed++

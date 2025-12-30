@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mrqueue"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -374,6 +375,10 @@ func (e *Engineer) handleFailure(mr *beads.Issue, result ProcessResult) {
 
 // ProcessMRFromQueue processes a merge request from wisp queue.
 func (e *Engineer) ProcessMRFromQueue(ctx context.Context, mr *mrqueue.MR) ProcessResult {
+	// Emit merge_started event
+	actor := fmt.Sprintf("%s/refinery", e.rig.Name)
+	_ = events.LogFeed(events.TypeMergeStarted, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, ""))
+
 	// MR fields are directly on the struct (no parsing needed)
 	fmt.Fprintln(e.output, "[Engineer] Processing MR from queue:")
 	fmt.Fprintf(e.output, "  Branch: %s\n", mr.Branch)
@@ -391,6 +396,11 @@ func (e *Engineer) ProcessMRFromQueue(ctx context.Context, mr *mrqueue.MR) Proce
 
 // handleSuccessFromQueue handles a successful merge from wisp queue.
 func (e *Engineer) handleSuccessFromQueue(mr *mrqueue.MR, result ProcessResult) {
+	actor := fmt.Sprintf("%s/refinery", e.rig.Name)
+
+	// Emit merged event
+	_ = events.LogFeed(events.TypeMerged, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, ""))
+
 	// 1. Close source issue with reference to MR
 	if mr.SourceIssue != "" {
 		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
@@ -421,6 +431,11 @@ func (e *Engineer) handleSuccessFromQueue(mr *mrqueue.MR, result ProcessResult) 
 
 // handleFailureFromQueue handles a failed merge from wisp queue.
 func (e *Engineer) handleFailureFromQueue(mr *mrqueue.MR, result ProcessResult) {
+	actor := fmt.Sprintf("%s/refinery", e.rig.Name)
+
+	// Emit merge_failed event
+	_ = events.LogFeed(events.TypeMergeFailed, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, result.Error))
+
 	// MR stays in queue for retry - no action needed on the file
 	// Log the failure
 	fmt.Fprintf(e.output, "[Engineer] ✗ Failed: %s - %s\n", mr.ID, result.Error)
