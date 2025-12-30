@@ -719,6 +719,10 @@ func detectSender() string {
 // detectSenderFromRole builds an address from the GT_ROLE and related env vars.
 // GT_ROLE can be either a simple role name ("crew", "polecat") or a full address
 // ("gastown/crew/joe") depending on how the session was started.
+//
+// If GT_ROLE is a simple name but required env vars (GT_RIG, GT_POLECAT, etc.)
+// are missing, falls back to cwd-based detection. This could return "overseer"
+// if cwd doesn't match any known agent path - a misconfigured agent session.
 func detectSenderFromRole(role string) string {
 	rig := os.Getenv("GT_RIG")
 

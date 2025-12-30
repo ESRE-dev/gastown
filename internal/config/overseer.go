@@ -74,8 +74,13 @@ func SaveOverseerConfig(path string, config *OverseerConfig) error {
 
 // validateOverseerConfig validates an OverseerConfig.
 func validateOverseerConfig(c *OverseerConfig) error {
+	// Type must be "overseer" (allow empty for backwards compat on load, set on save)
 	if c.Type != "overseer" && c.Type != "" {
 		return fmt.Errorf("%w: expected type 'overseer', got '%s'", ErrInvalidType, c.Type)
+	}
+	// Ensure type is set for saving
+	if c.Type == "" {
+		c.Type = "overseer"
 	}
 	if c.Version > CurrentOverseerVersion {
 		return fmt.Errorf("%w: got %d, max supported %d", ErrInvalidVersion, c.Version, CurrentOverseerVersion)
