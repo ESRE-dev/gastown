@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -127,13 +128,15 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	// Handing off ourselves - print feedback then respawn
 	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), currentSession)
 
-	// Log handoff event
+	// Log handoff event (both townlog and events feed)
 	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
 		agent := sessionToGTRole(currentSession)
 		if agent == "" {
 			agent = currentSession
 		}
 		LogHandoff(townRoot, agent, handoffSubject)
+		// Also log to activity feed
+		_ = events.LogFeed(events.TypeHandoff, agent, events.HandoffPayload(handoffSubject, true))
 	}
 
 	// Dry run mode - show what would happen (BEFORE any side effects)

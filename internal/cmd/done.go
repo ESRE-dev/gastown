@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
@@ -213,8 +214,9 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Witness notified of %s\n", style.Bold.Render("✓"), exitType)
 	}
 
-	// Log done event
+	// Log done event (townlog and activity feed)
 	LogDone(townRoot, sender, issueID)
+	_ = events.LogFeed(events.TypeDone, sender, events.DonePayload(issueID, branch))
 
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)

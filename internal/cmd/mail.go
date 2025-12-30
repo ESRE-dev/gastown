@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -383,6 +384,9 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 	if err := router.Send(msg); err != nil {
 		return fmt.Errorf("sending message: %w", err)
 	}
+
+	// Log mail event to activity feed
+	_ = events.LogFeed(events.TypeMail, from, events.MailPayload(to, mailSubject))
 
 	fmt.Printf("%s Message sent to %s\n", style.Bold.Render("✓"), to)
 	fmt.Printf("  Subject: %s\n", mailSubject)

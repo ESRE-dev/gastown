@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -163,6 +164,9 @@ func runHook(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Work attached to hook (pinned bead)\n", style.Bold.Render("✓"))
 	fmt.Printf("  Use 'gt handoff' to restart with this work\n")
 	fmt.Printf("  Use 'gt mol status' to see hook status\n")
+
+	// Log hook event to activity feed
+	_ = events.LogFeed(events.TypeHook, agentID, events.HookPayload(beadID))
 
 	return nil
 }

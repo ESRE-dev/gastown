@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -329,6 +330,10 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Work attached to hook (status=hooked)\n", style.Bold.Render("✓"))
+
+	// Log sling event to activity feed
+	actor := detectActor()
+	_ = events.LogFeed(events.TypeSling, actor, events.SlingPayload(beadID, targetAgent))
 
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	updateAgentHookBead(targetAgent, beadID)
@@ -688,6 +693,12 @@ func runSlingFormula(args []string) error {
 	}
 	fmt.Printf("%s Attached to hook (status=hooked)\n", style.Bold.Render("✓"))
 
+	// Log sling event to activity feed (formula slinging)
+	actor := detectActor()
+	payload := events.SlingPayload(wispResult.RootID, targetAgent)
+	payload["formula"] = formulaName
+	_ = events.LogFeed(events.TypeSling, actor, payload)
+
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	updateAgentHookBead(targetAgent, wispResult.RootID)
 
@@ -766,6 +777,15 @@ func wakeRigAgents(rigName string) {
 	// Silent nudges - sessions might not exist yet
 	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
 	_ = t.NudgeSession(refinerySession, "Polecat dispatched - check for merge requests")
+}
+
+// detectActor returns the current agent's actor string for event logging.
+func detectActor() string {
+	roleInfo, err := GetRole()
+	if err != nil {
+		return "unknown"
+	}
+	return roleInfo.ActorString()
 }
 
 // agentIDToBeadID converts an agent ID to its corresponding agent bead ID.
