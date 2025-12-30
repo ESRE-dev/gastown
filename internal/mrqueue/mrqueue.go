@@ -41,13 +41,16 @@ func New(rigPath string) *Queue {
 }
 
 // NewFromWorkdir creates a queue by finding the rig root from a working directory.
+// It follows beads redirects to ensure all clones use the same shared mrqueue.
 func NewFromWorkdir(workdir string) (*Queue, error) {
 	// Walk up to find .beads or rig root
 	dir := workdir
 	for {
 		beadsDir := filepath.Join(dir, ".beads")
 		if info, err := os.Stat(beadsDir); err == nil && info.IsDir() {
-			return &Queue{dir: filepath.Join(beadsDir, "mq")}, nil
+			// Check for redirect and follow it
+			finalDir := resolveBeadsRedirect(beadsDir)
+			return &Queue{dir: filepath.Join(finalDir, "mq")}, nil
 		}
 
 		parent := filepath.Dir(dir)
@@ -56,6 +59,34 @@ func NewFromWorkdir(workdir string) (*Queue, error) {
 		}
 		dir = parent
 	}
+}
+
+// resolveBeadsRedirect follows beads redirect files to find the final directory.
+// Returns the original dir if no redirect or on error.
+func resolveBeadsRedirect(beadsDir string) string {
+	redirectPath := filepath.Join(beadsDir, "redirect")
+	data, err := os.ReadFile(redirectPath)
+	if err != nil {
+		return beadsDir // No redirect file
+	}
+
+	target := strings.TrimSpace(string(data))
+	if target == "" {
+		return beadsDir
+	}
+
+	// Resolve relative path from beadsDir's parent
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(beadsDir), target)
+	}
+
+	// Clean and verify the target exists
+	target = filepath.Clean(target)
+	if info, err := os.Stat(target); err == nil && info.IsDir() {
+		return target
+	}
+
+	return beadsDir // Target doesn't exist, use original
 }
 
 // EnsureDir creates the MQ directory if it doesn't exist.
