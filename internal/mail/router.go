@@ -2,6 +2,7 @@ package mail
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -128,6 +129,291 @@ func isTownLevelAddress(address string) bool {
 	return addr == "mayor" || addr == "deacon" || addr == "overseer"
 }
 
+// isGroupAddress returns true if the address is a @group address.
+// Group addresses start with @ and resolve to multiple recipients.
+func isGroupAddress(address string) bool {
+	return strings.HasPrefix(address, "@")
+}
+
+// GroupType represents the type of group address.
+type GroupType string
+
+const (
+	GroupTypeRig      GroupType = "rig"      // @rig/<rigname> - all agents in a rig
+	GroupTypeTown     GroupType = "town"     // @town - all town-level agents
+	GroupTypeRole     GroupType = "role"     // @witnesses, @dogs, etc. - all agents of a role
+	GroupTypeRigRole  GroupType = "rig-role" // @crew/<rigname>, @polecats/<rigname> - role in a rig
+	GroupTypeOverseer GroupType = "overseer" // @overseer - human operator
+)
+
+// ParsedGroup represents a parsed @group address.
+type ParsedGroup struct {
+	Type      GroupType
+	RoleType  string // witness, crew, polecat, dog, etc.
+	Rig       string // rig name for rig-scoped groups
+	Original  string // original @group string
+}
+
+// parseGroupAddress parses a @group address into its components.
+// Returns nil if the address is not a valid group address.
+//
+// Supported patterns:
+//   - @rig/<rigname>: All agents in a rig
+//   - @town: All town-level agents (mayor, deacon)
+//   - @witnesses: All witnesses across rigs
+//   - @crew/<rigname>: Crew workers in a specific rig
+//   - @polecats/<rigname>: Polecats in a specific rig
+//   - @dogs: All Deacon dogs
+//   - @overseer: Human operator (special case)
+func parseGroupAddress(address string) *ParsedGroup {
+	if !isGroupAddress(address) {
+		return nil
+	}
+
+	// Remove @ prefix
+	group := strings.TrimPrefix(address, "@")
+
+	// Special cases that don't require parsing
+	switch group {
+	case "overseer":
+		return &ParsedGroup{Type: GroupTypeOverseer, Original: address}
+	case "town":
+		return &ParsedGroup{Type: GroupTypeTown, Original: address}
+	case "witnesses":
+		return &ParsedGroup{Type: GroupTypeRole, RoleType: "witness", Original: address}
+	case "dogs":
+		return &ParsedGroup{Type: GroupTypeRole, RoleType: "dog", Original: address}
+	case "refineries":
+		return &ParsedGroup{Type: GroupTypeRole, RoleType: "refinery", Original: address}
+	case "deacons":
+		return &ParsedGroup{Type: GroupTypeRole, RoleType: "deacon", Original: address}
+	}
+
+	// Parse patterns with slashes: @rig/<name>, @crew/<rig>, @polecats/<rig>
+	parts := strings.SplitN(group, "/", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return nil // Invalid format
+	}
+
+	prefix, qualifier := parts[0], parts[1]
+
+	switch prefix {
+	case "rig":
+		return &ParsedGroup{Type: GroupTypeRig, Rig: qualifier, Original: address}
+	case "crew":
+		return &ParsedGroup{Type: GroupTypeRigRole, RoleType: "crew", Rig: qualifier, Original: address}
+	case "polecats":
+		return &ParsedGroup{Type: GroupTypeRigRole, RoleType: "polecat", Rig: qualifier, Original: address}
+	default:
+		return nil // Unknown group type
+	}
+}
+
+// agentBead represents an agent bead as returned by bd list --type=agent.
+type agentBead struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+}
+
+// agentBeadToAddress converts an agent bead to a mail address.
+// Uses the agent bead ID to derive the address:
+//   - gt-mayor → mayor/
+//   - gt-deacon → deacon/
+//   - gt-gastown-witness → gastown/witness
+//   - gt-gastown-crew-max → gastown/max
+//   - gt-gastown-polecat-Toast → gastown/Toast
+func agentBeadToAddress(bead *agentBead) string {
+	if bead == nil {
+		return ""
+	}
+
+	id := bead.ID
+	if !strings.HasPrefix(id, "gt-") {
+		return "" // Not a valid agent bead ID
+	}
+
+	// Strip prefix
+	rest := strings.TrimPrefix(id, "gt-")
+	parts := strings.Split(rest, "-")
+
+	switch len(parts) {
+	case 1:
+		// Town-level: gt-mayor, gt-deacon
+		return parts[0] + "/"
+	case 2:
+		// Rig singleton: gt-gastown-witness
+		return parts[0] + "/" + parts[1]
+	default:
+		// Rig named agent: gt-gastown-crew-max, gt-gastown-polecat-Toast
+		// Skip the role part (parts[1]) and use rig/name format
+		if len(parts) >= 3 {
+			// Rejoin if name has hyphens: gt-gastown-polecat-my-agent
+			name := strings.Join(parts[2:], "-")
+			return parts[0] + "/" + name
+		}
+		return ""
+	}
+}
+
+// ResolveGroupAddress resolves a @group address to individual recipient addresses.
+// Returns the list of resolved addresses and any error.
+// This is the public entry point for group resolution.
+func (r *Router) ResolveGroupAddress(address string) ([]string, error) {
+	group := parseGroupAddress(address)
+	if group == nil {
+		return nil, fmt.Errorf("invalid group address: %s", address)
+	}
+	return r.resolveGroup(group)
+}
+
+// resolveGroup resolves a @group address to individual recipient addresses.
+// Returns the list of resolved addresses and any error.
+func (r *Router) resolveGroup(group *ParsedGroup) ([]string, error) {
+	if group == nil {
+		return nil, errors.New("nil group")
+	}
+
+	switch group.Type {
+	case GroupTypeOverseer:
+		return r.resolveOverseer()
+	case GroupTypeTown:
+		return r.resolveTownAgents()
+	case GroupTypeRole:
+		return r.resolveAgentsByRole(group.RoleType, "")
+	case GroupTypeRig:
+		return r.resolveAgentsByRig(group.Rig)
+	case GroupTypeRigRole:
+		return r.resolveAgentsByRole(group.RoleType, group.Rig)
+	default:
+		return nil, fmt.Errorf("unknown group type: %s", group.Type)
+	}
+}
+
+// resolveOverseer resolves @overseer to the human operator's address.
+// Loads the overseer config and returns "overseer" as the address.
+func (r *Router) resolveOverseer() ([]string, error) {
+	if r.townRoot == "" {
+		return nil, errors.New("town root not set, cannot resolve @overseer")
+	}
+
+	// Load overseer config to verify it exists
+	configPath := config.OverseerConfigPath(r.townRoot)
+	_, err := config.LoadOverseerConfig(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving @overseer: %w", err)
+	}
+
+	// Return the overseer address
+	return []string{"overseer"}, nil
+}
+
+// resolveTownAgents resolves @town to all town-level agents (mayor, deacon).
+func (r *Router) resolveTownAgents() ([]string, error) {
+	// Town-level agents have rig=null in their description
+	agents, err := r.queryAgents("rig: null")
+	if err != nil {
+		return nil, err
+	}
+
+	var addresses []string
+	for _, agent := range agents {
+		if addr := agentBeadToAddress(agent); addr != "" {
+			addresses = append(addresses, addr)
+		}
+	}
+
+	return addresses, nil
+}
+
+// resolveAgentsByRole resolves agents by their role_type.
+// If rig is non-empty, also filters by rig.
+func (r *Router) resolveAgentsByRole(roleType, rig string) ([]string, error) {
+	// Build query filter
+	query := "role_type: " + roleType
+	agents, err := r.queryAgents(query)
+	if err != nil {
+		return nil, err
+	}
+
+	var addresses []string
+	for _, agent := range agents {
+		// Filter by rig if specified
+		if rig != "" {
+			// Check if agent's description contains matching rig
+			if !strings.Contains(agent.Description, "rig: "+rig) {
+				continue
+			}
+		}
+		if addr := agentBeadToAddress(agent); addr != "" {
+			addresses = append(addresses, addr)
+		}
+	}
+
+	return addresses, nil
+}
+
+// resolveAgentsByRig resolves @rig/<rigname> to all agents in that rig.
+func (r *Router) resolveAgentsByRig(rig string) ([]string, error) {
+	// Query for agents with matching rig in description
+	query := "rig: " + rig
+	agents, err := r.queryAgents(query)
+	if err != nil {
+		return nil, err
+	}
+
+	var addresses []string
+	for _, agent := range agents {
+		if addr := agentBeadToAddress(agent); addr != "" {
+			addresses = append(addresses, addr)
+		}
+	}
+
+	return addresses, nil
+}
+
+// queryAgents queries agent beads using bd list with description filtering.
+func (r *Router) queryAgents(descContains string) ([]*agentBead, error) {
+	beadsDir := r.resolveBeadsDir("")
+	args := []string{"list", "--type=agent", "--json", "--limit=0"}
+
+	if descContains != "" {
+		args = append(args, "--desc-contains="+descContains)
+	}
+
+	cmd := exec.Command("bd", args...)
+	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
+	cmd.Dir = filepath.Dir(beadsDir)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg != "" {
+			return nil, errors.New(errMsg)
+		}
+		return nil, fmt.Errorf("querying agents: %w", err)
+	}
+
+	var agents []*agentBead
+	if err := json.Unmarshal(stdout.Bytes(), &agents); err != nil {
+		return nil, fmt.Errorf("parsing agent query result: %w", err)
+	}
+
+	// Filter for open agents only (closed agents are inactive)
+	var active []*agentBead
+	for _, agent := range agents {
+		if agent.Status == "open" || agent.Status == "in_progress" {
+			active = append(active, agent)
+		}
+	}
+
+	return active, nil
+}
+
 // shouldBeWisp determines if a message should be stored as a wisp.
 // Returns true if:
 // - Message.Wisp is explicitly set
@@ -154,14 +440,61 @@ func (r *Router) shouldBeWisp(msg *Message) bool {
 
 // Send delivers a message via beads message.
 // Routes the message to the correct beads database based on recipient address.
-// If the recipient is a mailing list (list:name), fans out to all list members,
-// creating a separate copy for each recipient.
+// Supports fan-out for:
+// - Mailing lists (list:name) - fans out to all list members
+// - @group addresses - resolves and fans out to matching agents
 func (r *Router) Send(msg *Message) error {
 	// Check for mailing list address
 	if isListAddress(msg.To) {
 		return r.sendToList(msg)
 	}
 
+	// Check for @group address - resolve and fan-out
+	if isGroupAddress(msg.To) {
+		return r.sendToGroup(msg)
+	}
+
+	// Single recipient - send directly
+	return r.sendToSingle(msg)
+}
+
+// sendToGroup resolves a @group address and sends individual messages to each member.
+func (r *Router) sendToGroup(msg *Message) error {
+	group := parseGroupAddress(msg.To)
+	if group == nil {
+		return fmt.Errorf("invalid group address: %s", msg.To)
+	}
+
+	recipients, err := r.resolveGroup(group)
+	if err != nil {
+		return fmt.Errorf("resolving group %s: %w", msg.To, err)
+	}
+
+	if len(recipients) == 0 {
+		return fmt.Errorf("no recipients found for group: %s", msg.To)
+	}
+
+	// Fan-out: send a copy to each recipient
+	var errs []string
+	for _, recipient := range recipients {
+		// Create a copy of the message for this recipient
+		msgCopy := *msg
+		msgCopy.To = recipient
+
+		if err := r.sendToSingle(&msgCopy); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", recipient, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("some group sends failed: %s", strings.Join(errs, "; "))
+	}
+
+	return nil
+}
+
+// sendToSingle sends a message to a single recipient.
+func (r *Router) sendToSingle(msg *Message) error {
 	// Convert addresses to beads identities
 	toIdentity := addressToIdentity(msg.To)
 

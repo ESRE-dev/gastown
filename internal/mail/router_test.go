@@ -220,6 +220,8 @@ func TestNewRouterWithTownRoot(t *testing.T) {
 	}
 }
 
+// ============ Mailing List Tests ============
+
 func TestIsListAddress(t *testing.T) {
 	tests := []struct {
 		address string
@@ -364,4 +366,168 @@ func containsHelper(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// ============ @group Address Tests ============
+
+func TestIsGroupAddress(t *testing.T) {
+	tests := []struct {
+		address string
+		want    bool
+	}{
+		{"@rig/gastown", true},
+		{"@town", true},
+		{"@witnesses", true},
+		{"@crew/gastown", true},
+		{"@dogs", true},
+		{"@overseer", true},
+		{"@polecats/gastown", true},
+		{"mayor/", false},
+		{"gastown/Toast", false},
+		{"", false},
+		{"rig/gastown", false}, // Missing @
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			got := isGroupAddress(tt.address)
+			if got != tt.want {
+				t.Errorf("isGroupAddress(%q) = %v, want %v", tt.address, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseGroupAddress(t *testing.T) {
+	tests := []struct {
+		address      string
+		wantType     GroupType
+		wantRoleType string
+		wantRig      string
+		wantNil      bool
+	}{
+		// Special patterns
+		{"@overseer", GroupTypeOverseer, "", "", false},
+		{"@town", GroupTypeTown, "", "", false},
+
+		// Role-based patterns (all agents of a role type)
+		{"@witnesses", GroupTypeRole, "witness", "", false},
+		{"@dogs", GroupTypeRole, "dog", "", false},
+		{"@refineries", GroupTypeRole, "refinery", "", false},
+		{"@deacons", GroupTypeRole, "deacon", "", false},
+
+		// Rig pattern (all agents in a rig)
+		{"@rig/gastown", GroupTypeRig, "", "gastown", false},
+		{"@rig/beads", GroupTypeRig, "", "beads", false},
+
+		// Rig+role patterns
+		{"@crew/gastown", GroupTypeRigRole, "crew", "gastown", false},
+		{"@polecats/gastown", GroupTypeRigRole, "polecat", "gastown", false},
+
+		// Invalid patterns
+		{"mayor/", "", "", "", true},
+		{"@invalid", "", "", "", true},
+		{"@crew/", "", "", "", true}, // Empty rig
+		{"@rig", "", "", "", true},   // Missing rig name
+		{"", "", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			got := parseGroupAddress(tt.address)
+
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("parseGroupAddress(%q) = %+v, want nil", tt.address, got)
+				}
+				return
+			}
+
+			if got == nil {
+				t.Errorf("parseGroupAddress(%q) = nil, want non-nil", tt.address)
+				return
+			}
+
+			if got.Type != tt.wantType {
+				t.Errorf("parseGroupAddress(%q).Type = %q, want %q", tt.address, got.Type, tt.wantType)
+			}
+			if got.RoleType != tt.wantRoleType {
+				t.Errorf("parseGroupAddress(%q).RoleType = %q, want %q", tt.address, got.RoleType, tt.wantRoleType)
+			}
+			if got.Rig != tt.wantRig {
+				t.Errorf("parseGroupAddress(%q).Rig = %q, want %q", tt.address, got.Rig, tt.wantRig)
+			}
+			if got.Original != tt.address {
+				t.Errorf("parseGroupAddress(%q).Original = %q, want %q", tt.address, got.Original, tt.address)
+			}
+		})
+	}
+}
+
+func TestAgentBeadToAddress(t *testing.T) {
+	tests := []struct {
+		name   string
+		bead   *agentBead
+		want   string
+	}{
+		{
+			name: "nil bead",
+			bead: nil,
+			want: "",
+		},
+		{
+			name: "town-level mayor",
+			bead: &agentBead{ID: "gt-mayor"},
+			want: "mayor/",
+		},
+		{
+			name: "town-level deacon",
+			bead: &agentBead{ID: "gt-deacon"},
+			want: "deacon/",
+		},
+		{
+			name: "rig singleton witness",
+			bead: &agentBead{ID: "gt-gastown-witness"},
+			want: "gastown/witness",
+		},
+		{
+			name: "rig singleton refinery",
+			bead: &agentBead{ID: "gt-gastown-refinery"},
+			want: "gastown/refinery",
+		},
+		{
+			name: "rig crew worker",
+			bead: &agentBead{ID: "gt-gastown-crew-max"},
+			want: "gastown/max",
+		},
+		{
+			name: "rig polecat worker",
+			bead: &agentBead{ID: "gt-gastown-polecat-Toast"},
+			want: "gastown/Toast",
+		},
+		{
+			name: "rig polecat with hyphenated name",
+			bead: &agentBead{ID: "gt-gastown-polecat-my-agent"},
+			want: "gastown/my-agent",
+		},
+		{
+			name: "non-gt prefix (invalid)",
+			bead: &agentBead{ID: "bd-gastown-witness"},
+			want: "",
+		},
+		{
+			name: "empty ID",
+			bead: &agentBead{ID: ""},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := agentBeadToAddress(tt.bead)
+			if got != tt.want {
+				t.Errorf("agentBeadToAddress(%+v) = %q, want %q", tt.bead, got, tt.want)
+			}
+		})
+	}
 }
