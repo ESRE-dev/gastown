@@ -1,0 +1,169 @@
+description = """
+Polecat work with strategic context reading before design.
+
+Chrome is "shiny" (the standard workflow) with a strategic context step. Before
+designing the implementation, the polecat reads organizational context documents
+that contain vision, principles, and constraints.
+
+This ensures work aligns with strategic direction without embedding hardcoded
+paths in the workflow. The context_docs variable allows each project/organization
+to specify their own strategic documents.
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| feature | cook-time | The feature being implemented |
+| context_docs | cook-time | Comma-separated paths to strategic context docs |
+
+## Use Cases
+
+1. **Gas Town work**: Use defaults (hop/CONTEXT.md, PRIMING.md)
+2. **External projects**: Override with project-specific docs
+3. **Minimal context**: Pass empty string to skip context reading"""
+formula = "mol-polecat-chrome"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "read-strategic-context"
+title = "Read organizational context documents"
+description = """
+Read strategic context documents before designing your implementation.
+
+**Documents to read:**
+{{context_docs}}
+
+For each document path:
+1. Read the file using your Read tool
+2. Understand the strategic vision, principles, and constraints
+3. Note any specific guidelines that apply to {{feature}}
+
+These documents contain the organizational context that should guide your work:
+- Architectural patterns and conventions
+- Design principles and trade-offs
+- Strategic goals and priorities
+- Things to avoid or deprecate
+
+**Why this matters:**
+Good implementations align with organizational direction. Reading context first
+prevents designs that conflict with strategic goals or violate conventions.
+
+**If documents are not found:**
+Some paths may not exist in your environment. This is fine - read what's
+available and proceed. The goal is context, not completeness.
+
+**Exit criteria:** You've read available context docs and understand the
+strategic considerations relevant to {{feature}}."""
+
+[[steps]]
+id = "design"
+title = "Design {{feature}}"
+needs = ["read-strategic-context"]
+description = """
+Think carefully about architecture before writing code.
+
+**Consider with strategic context in mind:**
+- How does this fit into the existing system?
+- Does this align with the strategic direction you read?
+- What are the edge cases?
+- What could go wrong?
+- Is there a simpler approach that still meets the goals?
+
+**Design principles:**
+- Follow existing codebase conventions
+- Keep it simple - avoid over-engineering
+- Prefer composition over inheritance
+- Design for the current need, not hypothetical futures
+
+**Exit criteria:** You have a clear mental model of what you'll build and
+how it fits the strategic direction."""
+
+[[steps]]
+id = "implement"
+title = "Implement {{feature}}"
+needs = ["design"]
+description = """
+Write the code for {{feature}}. Follow the design. Keep it simple. Don't gold-plate.
+
+**Working principles:**
+- Follow existing codebase conventions
+- Make atomic, focused commits
+- Keep changes scoped to the assigned issue
+- Don't add features beyond what was asked
+
+**Commit frequently:**
+```bash
+git add <files>
+git commit -m "<type>: <description>"
+```
+
+**Exit criteria:** Implementation complete, all changes committed."""
+
+[[steps]]
+id = "review"
+title = "Review implementation"
+needs = ["implement"]
+description = """
+Review your own changes before running tests.
+
+**Check for:**
+- Does it match the design?
+- Does it align with strategic context you read?
+- Are there obvious bugs?
+- Is it readable and maintainable?
+- Are there security concerns?
+
+**Fix issues found:** Don't just note them - fix them now.
+
+**Exit criteria:** Changes are clean, reviewed, and ready for testing."""
+
+[[steps]]
+id = "test"
+title = "Test {{feature}}"
+needs = ["review"]
+description = """
+Write and run tests. Unit tests for new code, integration tests if needed.
+
+**Steps:**
+1. Run the full test suite
+2. Fix any regressions
+3. Add tests for new functionality
+4. Verify edge cases are covered
+
+**Exit criteria:** All tests pass, new code has appropriate test coverage."""
+
+[[steps]]
+id = "submit"
+title = "Submit for merge"
+needs = ["test"]
+description = """
+Submit for merge. Final check before handoff.
+
+**Checklist:**
+```bash
+git status          # Clean working tree
+git diff            # Review staged changes
+git log --oneline   # Check commit history
+```
+
+**Submit:**
+```bash
+git push origin HEAD
+```
+
+**Signal completion:**
+```bash
+gt done
+```
+
+**Exit criteria:** Branch pushed, ready for merge queue."""
+
+[vars]
+[vars.feature]
+description = "The feature being implemented"
+required = true
+
+[vars.context_docs]
+description = "Comma-separated paths to strategic context documents (e.g., '~/gt/docs/hop/CONTEXT.md,~/gt/docs/PRIMING.md')"
+default = "~/gt/docs/hop/CONTEXT.md,~/gt/docs/PRIMING.md"
