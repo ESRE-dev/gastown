@@ -82,10 +82,10 @@ func (r *Router) resolveBeadsDir(address string) string {
 	return filepath.Join(r.townRoot, ".beads")
 }
 
-// isTownLevelAddress returns true if the address is for a town-level agent.
+// isTownLevelAddress returns true if the address is for a town-level agent or the overseer.
 func isTownLevelAddress(address string) bool {
 	addr := strings.TrimSuffix(address, "/")
-	return addr == "mayor" || addr == "deacon"
+	return addr == "mayor" || addr == "deacon" || addr == "overseer"
 }
 
 // shouldBeWisp determines if a message should be stored as a wisp.
@@ -118,7 +118,7 @@ func (r *Router) Send(msg *Message) error {
 	// Convert addresses to beads identities
 	toIdentity := addressToIdentity(msg.To)
 
-	// Build labels for from/thread/reply-to
+	// Build labels for from/thread/reply-to/cc
 	var labels []string
 	labels = append(labels, "from:"+msg.From)
 	if msg.ThreadID != "" {
@@ -126,6 +126,11 @@ func (r *Router) Send(msg *Message) error {
 	}
 	if msg.ReplyTo != "" {
 		labels = append(labels, "reply-to:"+msg.ReplyTo)
+	}
+	// Add CC labels (one per recipient)
+	for _, cc := range msg.CC {
+		ccIdentity := addressToIdentity(cc)
+		labels = append(labels, "cc:"+ccIdentity)
 	}
 
 	// Build command: bd create <subject> --type=message --assignee=<recipient> -d <body>

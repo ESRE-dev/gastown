@@ -40,11 +40,21 @@ func init() {
 
 // TownStatus represents the overall status of the workspace.
 type TownStatus struct {
-	Name     string        `json:"name"`
-	Location string        `json:"location"`
-	Agents   []AgentRuntime `json:"agents"`   // Global agents (Mayor, Deacon)
-	Rigs     []RigStatus   `json:"rigs"`
-	Summary  StatusSum     `json:"summary"`
+	Name     string         `json:"name"`
+	Location string         `json:"location"`
+	Overseer *OverseerInfo  `json:"overseer,omitempty"` // Human operator
+	Agents   []AgentRuntime `json:"agents"`             // Global agents (Mayor, Deacon)
+	Rigs     []RigStatus    `json:"rigs"`
+	Summary  StatusSum      `json:"summary"`
+}
+
+// OverseerInfo represents the human operator's identity and status.
+type OverseerInfo struct {
+	Name       string `json:"name"`
+	Email      string `json:"email,omitempty"`
+	Username   string `json:"username,omitempty"`
+	Source     string `json:"source"`
+	UnreadMail int    `json:"unread_mail"`
 }
 
 // AgentRuntime represents the runtime state of an agent.
@@ -137,10 +147,27 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Create mail router for inbox lookups
 	mailRouter := mail.NewRouter(townRoot)
 
+	// Load overseer config
+	var overseerInfo *OverseerInfo
+	if overseerConfig, err := config.LoadOrDetectOverseer(townRoot); err == nil && overseerConfig != nil {
+		overseerInfo = &OverseerInfo{
+			Name:     overseerConfig.Name,
+			Email:    overseerConfig.Email,
+			Username: overseerConfig.Username,
+			Source:   overseerConfig.Source,
+		}
+		// Get overseer mail count
+		if mailbox, err := mailRouter.GetMailbox("overseer"); err == nil {
+			_, unread, _ := mailbox.Count()
+			overseerInfo.UnreadMail = unread
+		}
+	}
+
 	// Build status
 	status := TownStatus{
 		Name:     townConfig.Name,
 		Location: townRoot,
+		Overseer: overseerInfo,
 		Agents:   discoverGlobalAgents(t, agentBeads, mailRouter),
 		Rigs:     make([]RigStatus, 0, len(rigs)),
 	}
@@ -206,6 +233,21 @@ func outputStatusText(status TownStatus) error {
 	// Header
 	fmt.Printf("%s %s\n", style.Bold.Render("Town:"), status.Name)
 	fmt.Printf("%s\n\n", style.Dim.Render(status.Location))
+
+	// Overseer info
+	if status.Overseer != nil {
+		overseerDisplay := status.Overseer.Name
+		if status.Overseer.Email != "" {
+			overseerDisplay = fmt.Sprintf("%s <%s>", status.Overseer.Name, status.Overseer.Email)
+		} else if status.Overseer.Username != "" && status.Overseer.Username != status.Overseer.Name {
+			overseerDisplay = fmt.Sprintf("%s (@%s)", status.Overseer.Name, status.Overseer.Username)
+		}
+		fmt.Printf("👤 %s %s\n", style.Bold.Render("Overseer:"), overseerDisplay)
+		if status.Overseer.UnreadMail > 0 {
+			fmt.Printf("   📬 %d unread\n", status.Overseer.UnreadMail)
+		}
+		fmt.Println()
+	}
 
 	// Role icons
 	roleIcons := map[string]string{

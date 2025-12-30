@@ -28,6 +28,7 @@ var (
 	mailReplyTo       string
 	mailNotify        bool
 	mailSendSelf      bool
+	mailCC            []string // CC recipients
 	mailInboxJSON     bool
 	mailReadJSON      bool
 	mailInboxUnread   bool
@@ -114,7 +115,8 @@ Examples:
   gt mail send gastown/Toast -s "Task" -m "Fix bug" --type task --priority 1
   gt mail send gastown/Toast -s "Urgent" -m "Help!" --urgent
   gt mail send mayor/ -s "Re: Status" -m "Done" --reply-to msg-abc123
-  gt mail send --self -s "Handoff" -m "Context for next session"`,
+  gt mail send --self -s "Handoff" -m "Context for next session"
+  gt mail send gastown/Toast -s "Update" -m "Progress report" --cc overseer`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runMailSend,
 }
@@ -241,6 +243,7 @@ func init() {
 	mailSendCmd.Flags().BoolVar(&mailWisp, "wisp", true, "Send as wisp (ephemeral, default)")
 	mailSendCmd.Flags().BoolVar(&mailPermanent, "permanent", false, "Send as permanent (not ephemeral, synced to remote)")
 	mailSendCmd.Flags().BoolVar(&mailSendSelf, "self", false, "Send to self (auto-detect from cwd)")
+	mailSendCmd.Flags().StringArrayVar(&mailCC, "cc", nil, "CC recipients (can be used multiple times)")
 	_ = mailSendCmd.MarkFlagRequired("subject") // cobra flags: error only at runtime if missing
 
 	// Inbox flags
@@ -350,6 +353,9 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 	// Set wisp flag (ephemeral message) - default true, --permanent overrides
 	msg.Wisp = mailWisp && !mailPermanent
 
+	// Set CC recipients
+	msg.CC = mailCC
+
 	// Handle reply-to: auto-set type to reply and look up thread
 	if mailReplyTo != "" {
 		msg.ReplyTo = mailReplyTo
@@ -380,6 +386,9 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Message sent to %s\n", style.Bold.Render("✓"), to)
 	fmt.Printf("  Subject: %s\n", mailSubject)
+	if len(msg.CC) > 0 {
+		fmt.Printf("  CC: %s\n", strings.Join(msg.CC, ", "))
+	}
 	if msg.Type != mail.TypeNotification {
 		fmt.Printf("  Type: %s\n", msg.Type)
 	}
@@ -689,19 +698,77 @@ func findLocalBeadsDir() (string, error) {
 }
 
 // detectSender determines the current context's address.
+// Priority:
+//  1. GT_ROLE env var → use the role-based identity (agent session)
+//  2. No GT_ROLE → return "overseer" (human at terminal)
+//
+// All Gas Town agents run in tmux sessions with GT_ROLE set at spawn.
+// Humans in regular terminals won't have GT_ROLE, so they're the overseer.
 func detectSender() string {
-	// Check environment variables (set by session start)
-	rig := os.Getenv("GT_RIG")
-	polecat := os.Getenv("GT_POLECAT")
-
-	if rig != "" && polecat != "" {
-		return fmt.Sprintf("%s/%s", rig, polecat)
+	// Check GT_ROLE first (authoritative for agent sessions)
+	role := os.Getenv("GT_ROLE")
+	if role != "" {
+		// Agent session - build address from role and context
+		return detectSenderFromRole(role)
 	}
 
-	// Check current directory
+	// No GT_ROLE means human at terminal - they're the overseer
+	return "overseer"
+}
+
+// detectSenderFromRole builds an address from the GT_ROLE and related env vars.
+// GT_ROLE can be either a simple role name ("crew", "polecat") or a full address
+// ("gastown/crew/joe") depending on how the session was started.
+func detectSenderFromRole(role string) string {
+	rig := os.Getenv("GT_RIG")
+
+	// Check if role is already a full address (contains /)
+	if strings.Contains(role, "/") {
+		// GT_ROLE is already a full address, use it directly
+		return role
+	}
+
+	// GT_ROLE is a simple role name, build the full address
+	switch role {
+	case "mayor":
+		return "mayor/"
+	case "deacon":
+		return "deacon/"
+	case "polecat":
+		polecat := os.Getenv("GT_POLECAT")
+		if rig != "" && polecat != "" {
+			return fmt.Sprintf("%s/%s", rig, polecat)
+		}
+		// Fallback to cwd detection for polecats
+		return detectSenderFromCwd()
+	case "crew":
+		crew := os.Getenv("GT_CREW")
+		if rig != "" && crew != "" {
+			return fmt.Sprintf("%s/crew/%s", rig, crew)
+		}
+		// Fallback to cwd detection for crew
+		return detectSenderFromCwd()
+	case "witness":
+		if rig != "" {
+			return fmt.Sprintf("%s/witness", rig)
+		}
+		return detectSenderFromCwd()
+	case "refinery":
+		if rig != "" {
+			return fmt.Sprintf("%s/refinery", rig)
+		}
+		return detectSenderFromCwd()
+	default:
+		// Unknown role, try cwd detection
+		return detectSenderFromCwd()
+	}
+}
+
+// detectSenderFromCwd is the legacy cwd-based detection for edge cases.
+func detectSenderFromCwd() string {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "mayor/"
+		return "overseer"
 	}
 
 	// If in a rig's polecats directory, extract address (format: rig/polecats/name)
@@ -744,8 +811,8 @@ func detectSender() string {
 		}
 	}
 
-	// Default to mayor
-	return "mayor/"
+	// Default to overseer (human)
+	return "overseer"
 }
 
 func runMailCheck(cmd *cobra.Command, args []string) error {

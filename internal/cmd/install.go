@@ -180,6 +180,19 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		// these global agent beads in its beads database.
 	}
 
+	// Detect and save overseer identity
+	overseer, err := config.DetectOverseer(absPath)
+	if err != nil {
+		fmt.Printf("   %s Could not detect overseer identity: %v\n", style.Dim.Render("⚠"), err)
+	} else {
+		overseerPath := config.OverseerConfigPath(absPath)
+		if err := config.SaveOverseerConfig(overseerPath, overseer); err != nil {
+			fmt.Printf("   %s Could not save overseer config: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Detected overseer: %s (via %s)\n", overseer.FormatOverseerIdentity(), overseer.Source)
+		}
+	}
+
 	// Initialize git if requested (--git or --github implies --git)
 	if installGit || installGitHub != "" {
 		fmt.Println()

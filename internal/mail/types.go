@@ -102,6 +102,10 @@ type Message struct {
 	// Wisp marks this as a transient message (stored in same DB but filtered from JSONL export).
 	// Wisp messages auto-cleanup on patrol squash.
 	Wisp bool `json:"wisp,omitempty"`
+
+	// CC contains addresses that should receive a copy of this message.
+	// CC'd recipients see the message in their inbox but are not the primary recipient.
+	CC []string `json:"cc,omitempty"`
 }
 
 // NewMessage creates a new message with a generated ID and thread ID.
@@ -161,7 +165,7 @@ type BeadsMessage struct {
 	Priority    int       `json:"priority"`    // 0=urgent, 1=high, 2=normal, 3=low
 	Status      string    `json:"status"`      // open=unread, closed=read
 	CreatedAt   time.Time `json:"created_at"`
-	Labels      []string  `json:"labels"` // Metadata labels (from:X, thread:X, reply-to:X, msg-type:X)
+	Labels      []string  `json:"labels"` // Metadata labels (from:X, thread:X, reply-to:X, msg-type:X, cc:X)
 	Pinned      bool      `json:"pinned,omitempty"`
 	Wisp        bool      `json:"wisp,omitempty"` // Ephemeral message (filtered from JSONL export)
 
@@ -170,6 +174,7 @@ type BeadsMessage struct {
 	threadID string
 	replyTo  string
 	msgType  string
+	cc       []string // CC recipients
 }
 
 // ParseLabels extracts metadata from the labels array.
@@ -183,8 +188,25 @@ func (bm *BeadsMessage) ParseLabels() {
 			bm.replyTo = strings.TrimPrefix(label, "reply-to:")
 		} else if strings.HasPrefix(label, "msg-type:") {
 			bm.msgType = strings.TrimPrefix(label, "msg-type:")
+		} else if strings.HasPrefix(label, "cc:") {
+			bm.cc = append(bm.cc, strings.TrimPrefix(label, "cc:"))
 		}
 	}
+}
+
+// GetCC returns the parsed CC recipients.
+func (bm *BeadsMessage) GetCC() []string {
+	return bm.cc
+}
+
+// IsCCRecipient checks if the given identity is in the CC list.
+func (bm *BeadsMessage) IsCCRecipient(identity string) bool {
+	for _, cc := range bm.cc {
+		if cc == identity {
+			return true
+		}
+	}
+	return false
 }
 
 // ToMessage converts a BeadsMessage to a GGT Message.
@@ -212,6 +234,12 @@ func (bm *BeadsMessage) ToMessage() *Message {
 		msgType = MessageType(bm.msgType)
 	}
 
+	// Convert CC identities to addresses
+	var ccAddrs []string
+	for _, cc := range bm.cc {
+		ccAddrs = append(ccAddrs, identityToAddress(cc))
+	}
+
 	return &Message{
 		ID:        bm.ID,
 		From:      identityToAddress(bm.sender),
@@ -225,6 +253,7 @@ func (bm *BeadsMessage) ToMessage() *Message {
 		ThreadID:  bm.threadID,
 		ReplyTo:   bm.replyTo,
 		Wisp:      bm.Wisp,
+		CC:        ccAddrs,
 	}
 }
 
@@ -287,6 +316,7 @@ func ParseMessageType(s string) MessageType {
 // to canonical form (Postel's Law - be liberal in what you accept).
 //
 // Addresses use slash format:
+//   - "overseer" → "overseer" (human operator, no trailing slash)
 //   - "mayor/" → "mayor/"
 //   - "mayor" → "mayor/"
 //   - "deacon/" → "deacon/"
@@ -297,6 +327,11 @@ func ParseMessageType(s string) MessageType {
 //   - "gastown/refinery" → "gastown/refinery"
 //   - "gastown/" → "gastown" (rig broadcast)
 func addressToIdentity(address string) string {
+	// Overseer (human operator) - no trailing slash, distinct from agents
+	if address == "overseer" {
+		return "overseer"
+	}
+
 	// Town-level agents: mayor and deacon keep trailing slash
 	if address == "mayor" || address == "mayor/" {
 		return "mayor/"
@@ -324,6 +359,7 @@ func addressToIdentity(address string) string {
 // identityToAddress converts a beads identity back to a GGT address.
 //
 // Liberal normalization (Postel's Law):
+//   - "overseer" → "overseer" (human operator)
 //   - "mayor/" → "mayor/"
 //   - "deacon/" → "deacon/"
 //   - "gastown/polecats/Toast" → "gastown/Toast" (normalized)
@@ -331,6 +367,11 @@ func addressToIdentity(address string) string {
 //   - "gastown/Toast" → "gastown/Toast" (already canonical)
 //   - "gastown/refinery" → "gastown/refinery"
 func identityToAddress(identity string) string {
+	// Overseer (human operator) - no trailing slash
+	if identity == "overseer" {
+		return "overseer"
+	}
+
 	// Town-level agents ensure trailing slash
 	if identity == "mayor" || identity == "mayor/" {
 		return "mayor/"

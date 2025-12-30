@@ -104,11 +104,45 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 }
 
 // listFromDir queries messages from a beads directory.
+// Returns messages where identity is the assignee OR a CC recipient.
 func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
-	// bd list --type=message --assignee=<identity> --json --status=open
+	// Query 1: messages where identity is the primary recipient
+	directMsgs, err := m.queryMessages(beadsDir, "--assignee", m.identity)
+	if err != nil {
+		return nil, err
+	}
+
+	// Query 2: messages where identity is CC'd
+	ccMsgs, err := m.queryMessages(beadsDir, "--label", "cc:"+m.identity)
+	if err != nil {
+		// CC query failing is non-fatal, just use direct messages
+		return directMsgs, nil
+	}
+
+	// Merge and dedupe (a message could theoretically be in both if someone CCs the primary recipient)
+	seen := make(map[string]bool)
+	var messages []*Message
+	for _, msg := range directMsgs {
+		if !seen[msg.ID] {
+			seen[msg.ID] = true
+			messages = append(messages, msg)
+		}
+	}
+	for _, msg := range ccMsgs {
+		if !seen[msg.ID] {
+			seen[msg.ID] = true
+			messages = append(messages, msg)
+		}
+	}
+
+	return messages, nil
+}
+
+// queryMessages runs a bd list query with the given filter flag and value.
+func (m *Mailbox) queryMessages(beadsDir, filterFlag, filterValue string) ([]*Message, error) {
 	cmd := exec.Command("bd", "list",
 		"--type", "message",
-		"--assignee", m.identity,
+		filterFlag, filterValue,
 		"--status", "open",
 		"--json",
 	)
