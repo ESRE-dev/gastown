@@ -27,6 +27,8 @@ const (
 	EventCrash EventType = "crash"
 	// EventKill indicates an agent was killed intentionally.
 	EventKill EventType = "kill"
+	// EventCallback indicates a callback was processed during patrol.
+	EventCallback EventType = "callback"
 )
 
 // Event represents a single agent lifecycle event.
@@ -142,6 +144,12 @@ func formatLogLine(e Event) string {
 			detail = fmt.Sprintf("killed (%s)", e.Context)
 		} else {
 			detail = "killed"
+		}
+	case EventCallback:
+		if e.Context != "" {
+			detail = fmt.Sprintf("callback: %s", e.Context)
+		} else {
+			detail = "callback processed"
 		}
 	default:
 		detail = string(e.Type)

@@ -199,6 +199,8 @@ func printEvent(e townlog.Event) {
 		typeStr = style.Error.Render("[crash]")
 	case townlog.EventKill:
 		typeStr = style.Warning.Render("[kill]")
+	case townlog.EventCallback:
+		typeStr = style.Bold.Render("[callback]")
 	default:
 		typeStr = fmt.Sprintf("[%s]", e.Type)
 	}
@@ -245,6 +247,11 @@ func formatEventDetail(e townlog.Event) string {
 			return fmt.Sprintf("killed (%s)", e.Context)
 		}
 		return "killed"
+	case townlog.EventCallback:
+		if e.Context != "" {
+			return fmt.Sprintf("callback: %s", e.Context)
+		}
+		return "callback processed"
 	default:
 		if e.Context != "" {
 			return fmt.Sprintf("%s (%s)", e.Type, e.Context)
