@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -181,7 +182,8 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 
 	polecatPath := m.polecatDir(name)
 	// Unique branch per run - prevents drift from stale branches
-	branchName := fmt.Sprintf("polecat/%s-%d", name, time.Now().UnixMilli())
+	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
+	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
 
 	// Create polecats directory if needed
 	polecatsDir := filepath.Join(m.rig.Path, "polecats")
@@ -408,7 +410,8 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 	// Create fresh worktree with unique branch name
 	// Old branches are left behind - they're ephemeral (never pushed to origin)
 	// and will be cleaned up by garbage collection
-	branchName := fmt.Sprintf("polecat/%s-%d", name, time.Now().UnixMilli())
+	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
+	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
 	if err := repoGit.WorktreeAdd(polecatPath, branchName); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree: %w", err)
 	}
