@@ -27,7 +27,8 @@ type HandlerResult struct {
 }
 
 // HandlePolecatDone processes a POLECAT_DONE message from a polecat.
-// Creates a cleanup wisp for the polecat to trigger the verification flow.
+// For ESCALATED/DEFERRED exits (no pending MR), auto-nukes if clean.
+// For exits with pending MR, creates a cleanup wisp to wait for MERGED.
 func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResult {
 	result := &HandlerResult{
 		MessageID:    msg.ID,
@@ -41,7 +42,27 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 		return result
 	}
 
+	// Check if this polecat has a pending MR
+	// ESCALATED/DEFERRED exits typically have no MR pending
+	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
+
+	if !hasPendingMR {
+		// No MR pending - can auto-nuke immediately if clean
+		nukeResult := AutoNukeIfClean(workDir, rigName, payload.PolecatName)
+		if nukeResult.Nuked {
+			result.Handled = true
+			result.Action = fmt.Sprintf("auto-nuked %s (exit=%s, no MR): %s", payload.PolecatName, payload.Exit, nukeResult.Reason)
+			return result
+		}
+		if nukeResult.Error != nil {
+			// Nuke failed - fall through to create wisp for manual cleanup
+			result.Error = nukeResult.Error
+		}
+		// Couldn't auto-nuke (dirty state or verification failed) - create wisp for manual intervention
+	}
+
 	// Create a cleanup wisp for this polecat
+	// Either waiting for MR to be merged, or needs manual cleanup
 	wispID, err := createCleanupWisp(workDir, payload.PolecatName, payload.IssueID, payload.Branch)
 	if err != nil {
 		result.Error = fmt.Errorf("creating cleanup wisp: %w", err)
@@ -50,13 +71,18 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 
 	result.Handled = true
 	result.WispCreated = wispID
-	result.Action = fmt.Sprintf("created cleanup wisp %s for polecat %s", wispID, payload.PolecatName)
+	if hasPendingMR {
+		result.Action = fmt.Sprintf("created cleanup wisp %s for %s (waiting for MR %s)", wispID, payload.PolecatName, payload.MRID)
+	} else {
+		result.Action = fmt.Sprintf("created cleanup wisp %s for %s (needs manual cleanup: dirty state)", wispID, payload.PolecatName)
+	}
 
 	return result
 }
 
 // HandleLifecycleShutdown processes a LIFECYCLE:Shutdown message.
 // Similar to POLECAT_DONE but triggered by daemon rather than polecat.
+// Auto-nukes if clean since shutdown means no pending work.
 func HandleLifecycleShutdown(workDir, rigName string, msg *mail.Message) *HandlerResult {
 	result := &HandlerResult{
 		MessageID:    msg.ID,
@@ -71,7 +97,19 @@ func HandleLifecycleShutdown(workDir, rigName string, msg *mail.Message) *Handle
 	}
 	polecatName := matches[1]
 
-	// Create a cleanup wisp
+	// Shutdown means no pending work - try to auto-nuke immediately
+	nukeResult := AutoNukeIfClean(workDir, rigName, polecatName)
+	if nukeResult.Nuked {
+		result.Handled = true
+		result.Action = fmt.Sprintf("auto-nuked %s (shutdown): %s", polecatName, nukeResult.Reason)
+		return result
+	}
+	if nukeResult.Error != nil {
+		// Nuke failed - fall through to create wisp
+		result.Error = nukeResult.Error
+	}
+
+	// Couldn't auto-nuke - create a cleanup wisp for manual intervention
 	wispID, err := createCleanupWisp(workDir, polecatName, "", "")
 	if err != nil {
 		result.Error = fmt.Errorf("creating cleanup wisp: %w", err)
@@ -80,7 +118,7 @@ func HandleLifecycleShutdown(workDir, rigName string, msg *mail.Message) *Handle
 
 	result.Handled = true
 	result.WispCreated = wispID
-	result.Action = fmt.Sprintf("created cleanup wisp %s for shutdown %s", wispID, polecatName)
+	result.Action = fmt.Sprintf("created cleanup wisp %s for shutdown %s (needs manual cleanup)", wispID, polecatName)
 
 	return result
 }
@@ -179,9 +217,17 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 	switch cleanupStatus {
 	case "clean":
 		// Safe to nuke - polecat has confirmed clean state
-		result.Handled = true
-		result.WispCreated = wispID
-		result.Action = fmt.Sprintf("found cleanup wisp %s for %s, ready to nuke (cleanup_status=clean)", wispID, payload.PolecatName)
+		// Execute the nuke immediately
+		if err := NukePolecat(workDir, rigName, payload.PolecatName); err != nil {
+			result.Handled = true
+			result.WispCreated = wispID
+			result.Error = fmt.Errorf("nuke failed for %s: %w", payload.PolecatName, err)
+			result.Action = fmt.Sprintf("cleanup wisp %s for %s: nuke FAILED", wispID, payload.PolecatName)
+		} else {
+			result.Handled = true
+			result.WispCreated = wispID
+			result.Action = fmt.Sprintf("auto-nuked %s (cleanup_status=clean, wisp=%s)", payload.PolecatName, wispID)
+		}
 
 	case "has_uncommitted":
 		// Has uncommitted changes - might be WIP, escalate to Mayor
@@ -205,11 +251,18 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 		result.Action = fmt.Sprintf("BLOCKED: %s has unpushed commits, DO NOT NUKE", payload.PolecatName)
 
 	default:
-		// Unknown or no status - be conservative and allow nuke
-		// (backward compatibility for polecats that haven't reported status yet)
-		result.Handled = true
-		result.WispCreated = wispID
-		result.Action = fmt.Sprintf("found cleanup wisp %s for %s, ready to nuke (cleanup_status=%s)", wispID, payload.PolecatName, cleanupStatus)
+		// Unknown or no status - we already verified commit is on main above
+		// Safe to nuke since verification passed
+		if err := NukePolecat(workDir, rigName, payload.PolecatName); err != nil {
+			result.Handled = true
+			result.WispCreated = wispID
+			result.Error = fmt.Errorf("nuke failed for %s: %w", payload.PolecatName, err)
+			result.Action = fmt.Sprintf("cleanup wisp %s for %s: nuke FAILED", wispID, payload.PolecatName)
+		} else {
+			result.Handled = true
+			result.WispCreated = wispID
+			result.Action = fmt.Sprintf("auto-nuked %s (commit on main, cleanup_status=%s, wisp=%s)", payload.PolecatName, cleanupStatus, wispID)
+		}
 	}
 
 	return result
@@ -561,6 +614,88 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 	}
 
 	return nil
+}
+
+// NukePolecat executes the actual nuke operation for a polecat.
+// This kills the tmux session, removes the worktree, and cleans up beads.
+// Should only be called after all safety checks pass.
+func NukePolecat(workDir, rigName, polecatName string) error {
+	address := fmt.Sprintf("%s/%s", rigName, polecatName)
+
+	cmd := exec.Command("gt", "polecat", "nuke", address)
+	cmd.Dir = workDir
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg != "" {
+			return fmt.Errorf("nuke failed: %s", errMsg)
+		}
+		return fmt.Errorf("nuke failed: %w", err)
+	}
+
+	return nil
+}
+
+// NukePolecatResult contains the result of an auto-nuke attempt.
+type NukePolecatResult struct {
+	Nuked   bool
+	Skipped bool
+	Reason  string
+	Error   error
+}
+
+// AutoNukeIfClean checks if a polecat is safe to nuke and nukes it if so.
+// This is used for idle polecats with no pending MR - they can be nuked immediately.
+// Returns whether the nuke was performed and any error.
+func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
+	result := &NukePolecatResult{}
+
+	// Check cleanup_status from agent bead
+	cleanupStatus := getCleanupStatus(workDir, rigName, polecatName)
+
+	switch cleanupStatus {
+	case "clean":
+		// Safe to nuke
+		if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+			result.Error = err
+			result.Reason = fmt.Sprintf("nuke failed: %v", err)
+		} else {
+			result.Nuked = true
+			result.Reason = "auto-nuked (cleanup_status=clean, no MR)"
+		}
+
+	case "has_uncommitted", "has_stash", "has_unpushed":
+		// Not safe - has work that could be lost
+		result.Skipped = true
+		result.Reason = fmt.Sprintf("skipped: has %s", strings.TrimPrefix(cleanupStatus, "has_"))
+
+	default:
+		// Unknown status - check git state directly as fallback
+		onMain, err := verifyCommitOnMain(workDir, rigName, polecatName)
+		if err != nil {
+			// Can't verify - skip (polecat may not exist)
+			result.Skipped = true
+			result.Reason = fmt.Sprintf("skipped: couldn't verify git state: %v", err)
+		} else if onMain {
+			// Commit is on main, likely safe
+			if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+				result.Error = err
+				result.Reason = fmt.Sprintf("nuke failed: %v", err)
+			} else {
+				result.Nuked = true
+				result.Reason = "auto-nuked (commit on main, no cleanup_status)"
+			}
+		} else {
+			// Not on main - skip, might have unpushed work
+			result.Skipped = true
+			result.Reason = "skipped: commit not on main, may have unpushed work"
+		}
+	}
+
+	return result
 }
 
 // verifyCommitOnMain checks if the polecat's current commit is on main.
