@@ -143,7 +143,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	// Dry run mode - show what would happen (BEFORE any side effects)
 	if handoffDryRun {
 		if handoffSubject != "" || handoffMessage != "" {
-			fmt.Printf("Would send handoff mail: subject=%q\n", handoffSubject)
+			fmt.Printf("Would send handoff mail: subject=%q (auto-hooked)\n", handoffSubject)
 		}
 		fmt.Printf("Would execute: tmux clear-history -t %s\n", pane)
 		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", pane, restartCmd)
@@ -151,12 +151,14 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	}
 
 	// If subject/message provided, send handoff mail to self first
+	// The mail is auto-hooked so the next session picks it up
 	if handoffSubject != "" || handoffMessage != "" {
-		if err := sendHandoffMail(handoffSubject, handoffMessage); err != nil {
+		beadID, err := sendHandoffMail(handoffSubject, handoffMessage)
+		if err != nil {
 			style.PrintWarning("could not send handoff mail: %v", err)
 			// Continue anyway - the respawn is more important
 		} else {
-			fmt.Printf("%s Sent handoff mail\n", style.Bold.Render("📬"))
+			fmt.Printf("%s Sent handoff mail %s (auto-hooked)\n", style.Bold.Render("📬"), beadID)
 		}
 	}
 
@@ -480,8 +482,9 @@ func getSessionPane(sessionName string) (string, error) {
 	return lines[0], nil
 }
 
-// sendHandoffMail sends a handoff mail to self using gt mail send.
-func sendHandoffMail(subject, message string) error {
+// sendHandoffMail sends a handoff mail to self and auto-hooks it.
+// Returns the created bead ID and any error.
+func sendHandoffMail(subject, message string) (string, error) {
 	// Build subject with handoff prefix if not already present
 	if subject == "" {
 		subject = "🤝 HANDOFF: Session cycling"
@@ -494,11 +497,69 @@ func sendHandoffMail(subject, message string) error {
 		message = "Context cycling. Check bd ready for pending work."
 	}
 
-	// Use gt mail send to self (--self flag sends to current agent identity)
-	cmd := exec.Command("gt", "mail", "send", "--self", "-s", subject, "-m", message)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	// Detect agent identity for self-mail
+	agentID, _, _, err := resolveSelfTarget()
+	if err != nil {
+		return "", fmt.Errorf("detecting agent identity: %w", err)
+	}
+
+	// Detect town root for beads location
+	townRoot := detectTownRootFromCwd()
+	if townRoot == "" {
+		return "", fmt.Errorf("cannot detect town root")
+	}
+
+	// Build labels for mail metadata (matches mail router format)
+	labels := fmt.Sprintf("from:%s", agentID)
+
+	// Create mail bead directly using bd create with --silent to get the ID
+	// Mail goes to town-level beads (hq- prefix)
+	args := []string{
+		"create", subject,
+		"--type", "message",
+		"--assignee", agentID,
+		"-d", message,
+		"--priority", "2",
+		"--labels", labels,
+		"--actor", agentID,
+		"--ephemeral", // Handoff mail is ephemeral
+		"--silent",    // Output only the bead ID
+	}
+
+	cmd := exec.Command("bd", args...)
+	cmd.Dir = townRoot // Run from town root for town-level beads
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
+
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg != "" {
+			return "", fmt.Errorf("creating handoff mail: %s", errMsg)
+		}
+		return "", fmt.Errorf("creating handoff mail: %w", err)
+	}
+
+	beadID := strings.TrimSpace(stdout.String())
+	if beadID == "" {
+		return "", fmt.Errorf("bd create did not return bead ID")
+	}
+
+	// Auto-hook the created mail bead
+	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
+	hookCmd.Dir = townRoot
+	hookCmd.Env = append(os.Environ(), "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
+	hookCmd.Stderr = os.Stderr
+
+	if err := hookCmd.Run(); err != nil {
+		// Non-fatal: mail was created, just couldn't hook
+		style.PrintWarning("created mail %s but failed to auto-hook: %v", beadID, err)
+		return beadID, nil
+	}
+
+	return beadID, nil
 }
 
 // looksLikeBeadID checks if a string looks like a bead ID.
