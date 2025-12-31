@@ -629,6 +629,9 @@ func validateMessagingConfig(c *MessagingConfig) error {
 	if c.Announces == nil {
 		c.Announces = make(map[string]AnnounceConfig)
 	}
+	if c.NudgeChannels == nil {
+		c.NudgeChannels = make(map[string][]string)
+	}
 
 	// Validate lists have at least one recipient
 	for name, recipients := range c.Lists {
@@ -654,6 +657,16 @@ func validateMessagingConfig(c *MessagingConfig) error {
 		}
 		if announce.RetainCount < 0 {
 			return fmt.Errorf("%w: announce '%s' retain_count must be non-negative", ErrMissingField, name)
+		}
+	}
+
+	// Validate nudge channels have non-empty names and at least one recipient
+	for name, recipients := range c.NudgeChannels {
+		if name == "" {
+			return fmt.Errorf("%w: nudge channel name cannot be empty", ErrMissingField)
+		}
+		if len(recipients) == 0 {
+			return fmt.Errorf("%w: nudge channel '%s' has no recipients", ErrMissingField, name)
 		}
 	}
 

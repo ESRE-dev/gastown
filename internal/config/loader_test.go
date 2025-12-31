@@ -566,6 +566,8 @@ func TestMessagingConfigRoundTrip(t *testing.T) {
 		Readers:     []string{"@town"},
 		RetainCount: 100,
 	}
+	original.NudgeChannels["workers"] = []string{"gastown/polecats/*", "gastown/crew/*"}
+	original.NudgeChannels["witnesses"] = []string{"*/witness"}
 
 	if err := SaveMessagingConfig(path, original); err != nil {
 		t.Fatalf("SaveMessagingConfig: %v", err)
@@ -605,6 +607,17 @@ func TestMessagingConfigRoundTrip(t *testing.T) {
 	}
 	if a, ok := loaded.Announces["alerts"]; !ok || a.RetainCount != 100 {
 		t.Error("announce not preserved")
+	}
+
+	// Check nudge channels
+	if len(loaded.NudgeChannels) != 2 {
+		t.Errorf("NudgeChannels count = %d, want 2", len(loaded.NudgeChannels))
+	}
+	if workers, ok := loaded.NudgeChannels["workers"]; !ok || len(workers) != 2 {
+		t.Error("workers nudge channel not preserved")
+	}
+	if witnesses, ok := loaded.NudgeChannels["witnesses"]; !ok || len(witnesses) != 1 {
+		t.Error("witnesses nudge channel not preserved")
 	}
 }
 
@@ -692,6 +705,27 @@ func TestMessagingConfigValidation(t *testing.T) {
 				Version: 1,
 				Announces: map[string]AnnounceConfig{
 					"alerts": {Readers: []string{"@town"}, RetainCount: -1},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid config with nudge channels",
+			config: &MessagingConfig{
+				Type:    "messaging",
+				Version: 1,
+				NudgeChannels: map[string][]string{
+					"workers": {"gastown/polecats/*", "gastown/crew/*"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "nudge channel with no recipients",
+			config: &MessagingConfig{
+				Version: 1,
+				NudgeChannels: map[string][]string{
+					"empty": {},
 				},
 			},
 			wantErr: true,
