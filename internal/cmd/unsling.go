@@ -26,7 +26,7 @@ Examples:
   gt unsling greenplace/joe            # Clear joe's hook
   gt unsling gt-abc greenplace/joe     # Unsling gt-abc from joe
 
-The bead's status changes from 'pinned' back to 'open'.
+The bead's status changes from 'hooked' back to 'open'.
 
 Related commands:
   gt sling <bead>    # Hook + start (inverse of unsling)
@@ -92,14 +92,14 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 
 	b := beads.New(workDir)
 
-	// Find pinned bead for this agent
+	// Find hooked bead for this agent
 	pinnedBeads, err := b.List(beads.ListOptions{
-		Status:   beads.StatusPinned,
+		Status:   beads.StatusHooked,
 		Assignee: agentID,
 		Priority: -1,
 	})
 	if err != nil {
-		return fmt.Errorf("checking pinned beads: %w", err)
+		return fmt.Errorf("checking hooked beads: %w", err)
 	}
 
 	if len(pinnedBeads) == 0 {
@@ -139,7 +139,7 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 	// Unpin by setting status back to open
 	status := "open"
 	if err := b.Update(pinned.ID, beads.UpdateOptions{Status: &status}); err != nil {
-		return fmt.Errorf("unpinning bead %s: %w", pinned.ID, err)
+		return fmt.Errorf("unhooking bead %s: %w", pinned.ID, err)
 	}
 
 	// Log unhook event

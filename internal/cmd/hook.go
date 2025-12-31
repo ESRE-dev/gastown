@@ -67,7 +67,7 @@ func init() {
 	hookCmd.Flags().StringVarP(&hookSubject, "subject", "s", "", "Subject for handoff mail (optional)")
 	hookCmd.Flags().StringVarP(&hookMessage, "message", "m", "", "Message for handoff mail (optional)")
 	hookCmd.Flags().BoolVarP(&hookDryRun, "dry-run", "n", false, "Show what would be done")
-	hookCmd.Flags().BoolVarP(&hookForce, "force", "f", false, "Replace existing incomplete pinned bead")
+	hookCmd.Flags().BoolVarP(&hookForce, "force", "f", false, "Replace existing incomplete hooked bead")
 
 	// --json flag for status output (used when no args, i.e., gt hook --json)
 	hookCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON (for status)")
@@ -114,17 +114,17 @@ func runHook(cmd *cobra.Command, args []string) error {
 
 	b := beads.New(workDir)
 
-	// Check for existing pinned bead for this agent
+	// Check for existing hooked bead for this agent
 	existingPinned, err := b.List(beads.ListOptions{
-		Status:   beads.StatusPinned,
+		Status:   beads.StatusHooked,
 		Assignee: agentID,
 		Priority: -1,
 	})
 	if err != nil {
-		return fmt.Errorf("checking existing pinned beads: %w", err)
+		return fmt.Errorf("checking existing hooked beads: %w", err)
 	}
 
-	// If there's an existing pinned bead, check if we can auto-replace
+	// If there's an existing hooked bead, check if we can auto-replace
 	if len(existingPinned) > 0 {
 		existing := existingPinned[0]
 
@@ -169,7 +169,7 @@ func runHook(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			// Existing incomplete bead blocks new hook
-			return fmt.Errorf("existing pinned bead %s is incomplete (%s)\n  Use --force to replace, or complete the existing work first",
+			return fmt.Errorf("existing hooked bead %s is incomplete (%s)\n  Use --force to replace, or complete the existing work first",
 				existing.ID, existing.Title)
 		}
 	}
@@ -177,7 +177,7 @@ func runHook(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Hooking %s...\n", style.Bold.Render("🪝"), beadID)
 
 	if hookDryRun {
-		fmt.Printf("Would run: bd update %s --status=pinned --assignee=%s\n", beadID, agentID)
+		fmt.Printf("Would run: bd update %s --status=hooked --assignee=%s\n", beadID, agentID)
 		if hookSubject != "" {
 			fmt.Printf("  subject (for handoff mail): %s\n", hookSubject)
 		}
@@ -187,14 +187,14 @@ func runHook(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Pin the bead using bd update (discovery-based approach)
-	pinCmd := exec.Command("bd", "update", beadID, "--status=pinned", "--assignee="+agentID)
-	pinCmd.Stderr = os.Stderr
-	if err := pinCmd.Run(); err != nil {
-		return fmt.Errorf("pinning bead: %w", err)
+	// Hook the bead using bd update (discovery-based approach)
+	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
+	hookCmd.Stderr = os.Stderr
+	if err := hookCmd.Run(); err != nil {
+		return fmt.Errorf("hooking bead: %w", err)
 	}
 
-	fmt.Printf("%s Work attached to hook (pinned bead)\n", style.Bold.Render("✓"))
+	fmt.Printf("%s Work attached to hook (hooked bead)\n", style.Bold.Render("✓"))
 	fmt.Printf("  Use 'gt handoff' to restart with this work\n")
 	fmt.Printf("  Use 'gt hook' to see hook status\n")
 
