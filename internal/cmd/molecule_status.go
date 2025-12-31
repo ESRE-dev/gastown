@@ -286,18 +286,11 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		// Explicit target provided
 		target = args[0]
 	} else {
-		// Auto-detect using env-aware role detection
-		roleInfo, err := GetRoleWithContext(cwd, townRoot)
-		if err != nil {
-			return fmt.Errorf("detecting role: %w", err)
-		}
-		roleCtx = RoleContext{
-			Role:     roleInfo.Role,
-			Rig:      roleInfo.Rig,
-			Polecat:  roleInfo.Polecat,
-			TownRoot: townRoot,
-			WorkDir:  cwd,
-		}
+		// Use cwd-based detection for status display
+		// This ensures we show the hook for the agent whose directory we're in,
+		// not the agent from the GT_ROLE env var (which might be different if
+		// we cd'd into another rig's crew/polecat directory)
+		roleCtx = detectRole(cwd, townRoot)
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
@@ -666,18 +659,11 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 		// Explicit target provided
 		target = args[0]
 	} else {
-		// Auto-detect using env-aware role detection
-		roleInfo, err := GetRoleWithContext(cwd, townRoot)
-		if err != nil {
-			return fmt.Errorf("detecting role: %w", err)
-		}
-		roleCtx = RoleContext{
-			Role:     roleInfo.Role,
-			Rig:      roleInfo.Rig,
-			Polecat:  roleInfo.Polecat,
-			TownRoot: townRoot,
-			WorkDir:  cwd,
-		}
+		// Use cwd-based detection for status display
+		// This ensures we show the hook for the agent whose directory we're in,
+		// not the agent from the GT_ROLE env var (which might be different if
+		// we cd'd into another rig's crew/polecat directory)
+		roleCtx = detectRole(cwd, townRoot)
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
