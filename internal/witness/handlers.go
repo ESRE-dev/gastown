@@ -2,6 +2,7 @@ package witness
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -122,7 +123,7 @@ func HandleHelp(workDir, rigName string, msg *mail.Message, router *mail.Router)
 }
 
 // HandleMerged processes a MERGED message from the Refinery.
-// Finds the cleanup wisp for this polecat and triggers the nuke.
+// Verifies cleanup_status before allowing nuke, escalates if work is at risk.
 func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 	result := &HandlerResult{
 		MessageID:    msg.ID,
@@ -150,9 +151,46 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 		return result
 	}
 
-	result.Handled = true
-	result.WispCreated = wispID // Reference to existing wisp
-	result.Action = fmt.Sprintf("found cleanup wisp %s for %s, ready to nuke", wispID, payload.PolecatName)
+	// ZFC #10: Check cleanup_status before allowing nuke
+	// This prevents work loss when MERGED signal arrives for stale MRs or
+	// when polecat has new unpushed work since the MR was created.
+	cleanupStatus := getCleanupStatus(workDir, rigName, payload.PolecatName)
+
+	switch cleanupStatus {
+	case "clean":
+		// Safe to nuke - polecat has confirmed clean state
+		result.Handled = true
+		result.WispCreated = wispID
+		result.Action = fmt.Sprintf("found cleanup wisp %s for %s, ready to nuke (cleanup_status=clean)", wispID, payload.PolecatName)
+
+	case "has_uncommitted":
+		// Has uncommitted changes - might be WIP, escalate to Mayor
+		result.Handled = true
+		result.WispCreated = wispID
+		result.Error = fmt.Errorf("polecat %s has uncommitted changes - escalate to Mayor before nuke", payload.PolecatName)
+		result.Action = fmt.Sprintf("BLOCKED: %s has uncommitted work, needs escalation", payload.PolecatName)
+
+	case "has_stash":
+		// Has stashed work - definitely needs review
+		result.Handled = true
+		result.WispCreated = wispID
+		result.Error = fmt.Errorf("polecat %s has stashed work - escalate to Mayor before nuke", payload.PolecatName)
+		result.Action = fmt.Sprintf("BLOCKED: %s has stashed work, needs escalation", payload.PolecatName)
+
+	case "has_unpushed":
+		// Critical: has unpushed commits that could be lost
+		result.Handled = true
+		result.WispCreated = wispID
+		result.Error = fmt.Errorf("polecat %s has unpushed commits - DO NOT NUKE, escalate to Mayor", payload.PolecatName)
+		result.Action = fmt.Sprintf("BLOCKED: %s has unpushed commits, DO NOT NUKE", payload.PolecatName)
+
+	default:
+		// Unknown or no status - be conservative and allow nuke
+		// (backward compatibility for polecats that haven't reported status yet)
+		result.Handled = true
+		result.WispCreated = wispID
+		result.Action = fmt.Sprintf("found cleanup wisp %s for %s, ready to nuke (cleanup_status=%s)", wispID, payload.PolecatName, cleanupStatus)
+	}
 
 	return result
 }
@@ -315,6 +353,60 @@ func findCleanupWisp(workDir, polecatName string) (string, error) {
 	}
 
 	return "", nil
+}
+
+// agentBeadResponse is used to parse the bd show --json response for agent beads.
+type agentBeadResponse struct {
+	Description string `json:"description"`
+}
+
+// getCleanupStatus retrieves the cleanup_status from a polecat's agent bead.
+// Returns the status string: "clean", "has_uncommitted", "has_stash", "has_unpushed"
+// Returns empty string if agent bead doesn't exist or has no cleanup_status.
+//
+// ZFC #10: This enables the Witness to verify it's safe to nuke before proceeding.
+// The polecat self-reports its git state when running `gt done`, and we trust that report.
+func getCleanupStatus(workDir, rigName, polecatName string) string {
+	// Construct agent bead ID: gt-<rigName>-polecat-<polecatName>
+	agentBeadID := fmt.Sprintf("gt-%s-polecat-%s", rigName, polecatName)
+
+	cmd := exec.Command("bd", "show", agentBeadID, "--json")
+	cmd.Dir = workDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		// Agent bead doesn't exist or bd failed - return empty (unknown status)
+		return ""
+	}
+
+	output := stdout.Bytes()
+	if len(output) == 0 {
+		return ""
+	}
+
+	// Parse the JSON response
+	var resp agentBeadResponse
+	if err := json.Unmarshal(output, &resp); err != nil {
+		return ""
+	}
+
+	// Parse cleanup_status from description
+	// Description format has "cleanup_status: <value>" line
+	for _, line := range strings.Split(resp.Description, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "cleanup_status:") {
+			value := strings.TrimSpace(strings.TrimPrefix(line, "cleanup_status:"))
+			value = strings.TrimSpace(strings.TrimPrefix(value, "Cleanup_status:"))
+			if value != "" && value != "null" {
+				return value
+			}
+		}
+	}
+
+	return ""
 }
 
 // escalateToMayor sends an escalation mail to the Mayor.
