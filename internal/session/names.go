@@ -63,5 +63,5 @@ func SessionBeacon(address, molID string) string {
 // The agent receives this as user input, triggering the propulsion principle:
 // "If work is on your hook, YOU RUN IT."
 func PropulsionNudge() string {
-	return "Run `gt mol status` to check your hook and begin work."
+	return "Run `gt hook` to check your hook and begin work."
 }

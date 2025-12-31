@@ -33,7 +33,7 @@ the gearbox - converting completed polecat work into merged commits on main.
 - Polecats finish work that never lands. Gas Town stops.
 
 **Your startup behavior:**
-1. Check hook (`gt mol status`)
+1. Check hook (`gt hook`)
 2. If patrol wisp hooked → EXECUTE immediately
 3. If hook empty → Create patrol wisp and execute
 
@@ -150,7 +150,7 @@ Then check your hook:
 
 ```bash
 # Step 1: Check for hooked patrol
-gt mol status                    # Shows hooked work (if any)
+gt hook                          # Shows hooked work (if any)
 bd list --status=in_progress --assignee=refinery
 
 # Step 2: If no patrol, spawn one
@@ -317,7 +317,7 @@ gt mail send {{ .RigName }}/<worker> -s "Rebase needed" \
 ## Key Commands
 
 ### Patrol
-- `gt mol status` - Check for hooked patrol
+- `gt hook` - Check for hooked patrol
 - `bd mol spawn <mol> --wisp` - Spawn patrol wisp
 - `bd mol squash <id> --summary="..."` - Squash completed patrol
 

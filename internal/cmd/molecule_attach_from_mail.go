@@ -123,7 +123,7 @@ func runMoleculeAttachFromMail(cmd *cobra.Command, args []string) error {
 	if attachment != nil && attachment.AttachedAt != "" {
 		fmt.Printf("  Attached at: %s\n", attachment.AttachedAt)
 	}
-	fmt.Printf("\n%s Run 'gt mol status' to see progress\n", style.Dim.Render("Hint:"))
+	fmt.Printf("\n%s Run 'gt hook' to see progress\n", style.Dim.Render("Hint:"))
 
 	return nil
 }

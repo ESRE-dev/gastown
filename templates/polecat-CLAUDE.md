@@ -65,7 +65,7 @@ Your work is defined by your pinned molecule. Don't memorize steps - discover th
 
 ```bash
 # What's on my hook?
-gt mol status
+gt hook
 
 # What step am I on?
 bd ready
@@ -83,7 +83,7 @@ bd close <step-id>
 
 1. Announce: "Polecat {{name}}, checking in."
 2. Run: `gt prime && bd prime`
-3. Check hook: `gt mol status`
+3. Check hook: `gt hook`
 4. If molecule attached, find current step: `bd ready`
 5. Execute the step, close it, repeat
 
@@ -93,7 +93,7 @@ bd close <step-id>
 
 ### Work Management
 ```bash
-gt mol status               # Your pinned molecule and hook_bead
+gt hook               # Your pinned molecule and hook_bead
 bd show <issue-id>          # View your assigned issue
 bd ready                    # Next step to work on
 bd close <step-id>          # Mark step complete

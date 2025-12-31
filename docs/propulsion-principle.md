@@ -17,7 +17,7 @@ depends on one thing: when an agent finds work on their hook, they EXECUTE.
 When you were spawned, work was hooked for you. The system trusts that:
 
 1. You will find it on your hook
-2. You will understand what it is (`bd show` / `gt mol status`)
+2. You will understand what it is (`bd show` / `gt hook`)
 3. You will BEGIN IMMEDIATELY
 
 This isn't about being a good worker. This is physics. Steam engines don't
@@ -31,7 +31,7 @@ memorize steps or wait for instructions - discover them:
 ### Orientation Commands
 
 ```bash
-gt mol status          # What's on my hook?
+gt hook              # What's on my hook?
 bd mol current         # Where am I in the molecule?
 bd ready               # What step is next?
 bd show <step-id>      # What does this step require?
@@ -62,7 +62,7 @@ One command. Auto-advance. Momentum preserved.
 ### The Propulsion Loop
 
 ```
-1. gt mol status              # What's hooked?
+1. gt hook                   # What's hooked?
 2. bd mol current             # Where am I?
 3. Execute step
 4. bd close <step> --continue # Close and advance
@@ -82,7 +82,7 @@ Polecat restarts with work on hook
 
 ## Startup Behavior
 
-1. Check hook (`gt mol status`)
+1. Check hook (`gt hook`)
 2. Work hooked → EXECUTE immediately
 3. Hook empty → Check mail for attached work
 4. Nothing anywhere → ERROR: escalate to Witness

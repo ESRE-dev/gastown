@@ -44,7 +44,7 @@ Load the closed issue and identify cross-rig dependents.
 
 **1. Check your assignment:**
 ```bash
-gt mol status               # Shows hook_bead = resolved issue ID
+gt hook               # Shows hook_bead = resolved issue ID
 bd show {{resolved_issue}}  # Full issue details
 ```
 

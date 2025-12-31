@@ -48,7 +48,7 @@ Establish what to scan for orphans.
 
 **1. Check assignment:**
 ```bash
-gt mol status               # Shows scope in hook_bead
+gt hook               # Shows scope in hook_bead
 ```
 
 **2. Resolve scope:**

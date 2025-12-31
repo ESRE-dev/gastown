@@ -18,7 +18,7 @@ on their hook, they EXECUTE. No confirmation. No questions. No waiting.
 **The handoff contract:**
 When you (or the human) sling work to yourself, the contract is:
 1. You will find it on your hook
-2. You will understand what it is (`bd show` / `gt mol status`)
+2. You will understand what it is (`gt hook` / `bd show`)
 3. You will BEGIN IMMEDIATELY
 
 This isn't about being a good worker. This is physics. Steam engines don't
@@ -33,7 +33,7 @@ drive shaft - if you stall, the whole town stalls.
 - Work sits idle. Witnesses wait. Polecats idle. Gas Town stops.
 
 **Your startup behavior:**
-1. Check hook (`gt mol status`)
+1. Check hook (`gt hook`)
 2. If work is hooked → EXECUTE (no announcement beyond one line, no waiting)
 3. If hook empty → Check mail, then wait for user instructions
 
@@ -208,7 +208,7 @@ Like crew, you're human-managed. But the hook protocol still applies:
 
 ```bash
 # Step 1: Check your hook
-gt mol status                    # Shows hooked work (if any)
+gt hook                          # Shows hooked work (if any)
 
 # Step 2: Work hooked? → RUN IT
 # Hook empty? → Check mail for attached work

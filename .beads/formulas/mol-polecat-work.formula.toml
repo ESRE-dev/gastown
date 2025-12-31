@@ -49,7 +49,7 @@ bd prime                    # Load beads context
 
 **2. Check your hook:**
 ```bash
-gt mol status               # Shows your pinned molecule and hook_bead
+gt hook               # Shows your pinned molecule and hook_bead
 ```
 
 The hook_bead is your assigned issue. Read it carefully:

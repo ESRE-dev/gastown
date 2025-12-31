@@ -31,7 +31,7 @@ The bead's status changes from 'pinned' back to 'open'.
 Related commands:
   gt sling <bead>    # Hook + start (inverse of unsling)
   gt hook <bead>     # Hook without starting
-  gt mol status      # See what's on your hook`,
+  gt hook      # See what's on your hook`,
 	Args: cobra.MaximumNArgs(2),
 	RunE: runUnsling,
 }

@@ -145,7 +145,7 @@ bd mol burn <id>             # Discard wisp (explicit ID)
 
 ```bash
 # Hook management (operates on current agent's hook)
-gt mol status                # What's on MY hook
+gt hook                    # What's on MY hook
 gt mol current               # What should I work on next
 gt mol progress <id>         # Execution progress of molecule
 gt mol attach <bead> <mol>   # Pin molecule to bead

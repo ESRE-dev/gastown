@@ -46,7 +46,7 @@ Load the convoy bead and verify it's ready for archival.
 
 **1. Check your assignment:**
 ```bash
-gt mol status               # Shows hook_bead = convoy ID
+gt hook               # Shows hook_bead = convoy ID
 bd show {{convoy}}          # Full convoy details
 ```
 

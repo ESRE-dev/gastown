@@ -117,7 +117,7 @@ bd mol current               # Where am I in the current molecule?
 
 ```bash
 # Hook management
-gt mol status                # What's on MY hook
+gt hook                    # What's on MY hook
 gt mol current               # What should I work on next
 gt mol progress <id>         # Execution progress of molecule
 gt mol attach <bead> <mol>   # Pin molecule to bead

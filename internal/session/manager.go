@@ -428,7 +428,7 @@ func (m *Manager) StopAll(force bool) error {
 }
 
 // hookIssue pins an issue to a polecat's hook using bd update.
-// This makes the work visible via 'gt mol status' when the session starts.
+// This makes the work visible via 'gt hook' when the session starts.
 func (m *Manager) hookIssue(issueID, agentID, workDir string) error {
 	// Use bd update to set status=hooked and assign to the polecat
 	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID)

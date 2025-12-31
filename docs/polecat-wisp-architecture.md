@@ -23,7 +23,7 @@ Patrol agents (Witness, Refinery, Deacon) use **wisps** to prevent accumulation.
 
 ```bash
 # 1. Check current status
-gt mol status
+gt hook
 
 # 2. Find next step
 bd ready --parent=gt-abc
@@ -122,7 +122,7 @@ bd mol burn gt-abc
 ### Checking Your Hook
 
 ```bash
-gt mol status
+gt hook
 ```
 
 Shows what molecule is pinned to your current agent and the associated bead.
@@ -150,7 +150,7 @@ gt done
 
 ```
 1. Spawn with work on hook
-2. gt mol status           # What's hooked?
+2. gt hook           # What's hooked?
 3. bd mol current          # Where am I?
 4. Execute current step
 5. bd close <step> --continue
