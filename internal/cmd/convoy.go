@@ -161,6 +161,13 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Default --notify to mayor/ when mayor creates a convoy
+	if convoyNotify == "" {
+		if roleInfo, err := GetRole(); err == nil && roleInfo.Role == RoleMayor {
+			convoyNotify = "mayor/"
+		}
+	}
+
 	// Create convoy issue in town beads
 	description := fmt.Sprintf("Convoy tracking %d issues", len(trackedIssues))
 	if convoyNotify != "" {
