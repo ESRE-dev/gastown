@@ -88,9 +88,11 @@ type RigStatus struct {
 
 // MQSummary represents the merge queue status for a rig.
 type MQSummary struct {
-	Pending  int `json:"pending"`   // Open MRs ready to merge (no blockers)
-	InFlight int `json:"in_flight"` // MRs currently being processed
-	Blocked  int `json:"blocked"`   // MRs waiting on dependencies
+	Pending  int    `json:"pending"`   // Open MRs ready to merge (no blockers)
+	InFlight int    `json:"in_flight"` // MRs currently being processed
+	Blocked  int    `json:"blocked"`   // MRs waiting on dependencies
+	State    string `json:"state"`     // idle, processing, or blocked
+	Health   string `json:"health"`    // healthy, stale, or empty
 }
 
 // AgentHookInfo represents an agent's hook (pinned work) status.
@@ -336,7 +338,20 @@ func outputStatusText(status TownStatus) error {
 					mqParts = append(mqParts, style.Dim.Render(fmt.Sprintf("%d blocked", r.MQ.Blocked)))
 				}
 				if len(mqParts) > 0 {
-					fmt.Printf("   MQ: %s\n", strings.Join(mqParts, ", "))
+					// Add state indicator
+					stateIcon := "○" // idle
+					switch r.MQ.State {
+					case "processing":
+						stateIcon = style.Success.Render("●")
+					case "blocked":
+						stateIcon = style.Error.Render("○")
+					}
+					// Add health warning if stale
+					healthSuffix := ""
+					if r.MQ.Health == "stale" {
+						healthSuffix = style.Error.Render(" [stale]")
+					}
+					fmt.Printf("   MQ: %s %s%s\n", stateIcon, strings.Join(mqParts, ", "), healthSuffix)
 				}
 			}
 			fmt.Println()
@@ -741,6 +756,28 @@ func getMQSummary(r *rig.Rig) *MQSummary {
 		}
 	}
 
+	// Determine queue state
+	state := "idle"
+	if len(inProgressMRs) > 0 {
+		state = "processing"
+	} else if pending > 0 {
+		state = "idle" // Has work but not processing yet
+	} else if blocked > 0 {
+		state = "blocked" // Only blocked items, nothing processable
+	}
+
+	// Determine queue health
+	health := "empty"
+	total := pending + len(inProgressMRs) + blocked
+	if total > 0 {
+		health = "healthy"
+		// Check for potential issues
+		if pending > 10 && len(inProgressMRs) == 0 {
+			// Large queue but nothing processing - may be stuck
+			health = "stale"
+		}
+	}
+
 	// Only return summary if there's something to show
 	if pending == 0 && len(inProgressMRs) == 0 && blocked == 0 {
 		return nil
@@ -750,6 +787,8 @@ func getMQSummary(r *rig.Rig) *MQSummary {
 		Pending:  pending,
 		InFlight: len(inProgressMRs),
 		Blocked:  blocked,
+		State:    state,
+		Health:   health,
 	}
 }
 
