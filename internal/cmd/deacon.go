@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -114,8 +116,84 @@ This command is typically called by the daemon during cold startup.`,
 	RunE: runDeaconTriggerPending,
 }
 
+var deaconHealthCheckCmd = &cobra.Command{
+	Use:   "health-check <agent>",
+	Short: "Send a health check ping to an agent and track response",
+	Long: `Send a HEALTH_CHECK nudge to an agent and wait for response.
 
-var triggerTimeout time.Duration
+This command is used by the Deacon during health rounds to detect stuck sessions.
+It tracks consecutive failures and determines when force-kill is warranted.
+
+The detection protocol:
+1. Send HEALTH_CHECK nudge to the agent
+2. Wait for agent to update their bead (configurable timeout, default 30s)
+3. If no activity update, increment failure counter
+4. After N consecutive failures (default 3), recommend force-kill
+
+Exit codes:
+  0 - Agent responded or is in cooldown (no action needed)
+  1 - Error occurred
+  2 - Agent should be force-killed (consecutive failures exceeded)
+
+Examples:
+  gt deacon health-check gastown/polecats/max
+  gt deacon health-check gastown/witness --timeout=60s
+  gt deacon health-check deacon --failures=5`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDeaconHealthCheck,
+}
+
+var deaconForceKillCmd = &cobra.Command{
+	Use:   "force-kill <agent>",
+	Short: "Force-kill an unresponsive agent session",
+	Long: `Force-kill an agent session that has been detected as stuck.
+
+This command is used by the Deacon when an agent fails consecutive health checks.
+It performs the force-kill protocol:
+
+1. Log the intervention (send mail to agent)
+2. Kill the tmux session
+3. Update agent bead state to "killed"
+4. Notify mayor (optional, for visibility)
+
+After force-kill, the agent is 'asleep'. Normal wake mechanisms apply:
+- gt rig boot restarts it
+- Or stays asleep until next activity trigger
+
+This respects the cooldown period - won't kill if recently killed.
+
+Examples:
+  gt deacon force-kill gastown/polecats/max
+  gt deacon force-kill gastown/witness --reason="unresponsive for 90s"`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDeaconForceKill,
+}
+
+var deaconHealthStateCmd = &cobra.Command{
+	Use:   "health-state",
+	Short: "Show health check state for all monitored agents",
+	Long: `Display the current health check state including:
+- Consecutive failure counts
+- Last ping and response times
+- Force-kill history and cooldowns
+
+This helps the Deacon understand which agents may need attention.`,
+	RunE: runDeaconHealthState,
+}
+
+
+var (
+	triggerTimeout time.Duration
+
+	// Health check flags
+	healthCheckTimeout  time.Duration
+	healthCheckFailures int
+	healthCheckCooldown time.Duration
+
+	// Force kill flags
+	forceKillReason     string
+	forceKillSkipNotify bool
+)
 
 func init() {
 	deaconCmd.AddCommand(deaconStartCmd)
@@ -125,10 +203,27 @@ func init() {
 	deaconCmd.AddCommand(deaconRestartCmd)
 	deaconCmd.AddCommand(deaconHeartbeatCmd)
 	deaconCmd.AddCommand(deaconTriggerPendingCmd)
+	deaconCmd.AddCommand(deaconHealthCheckCmd)
+	deaconCmd.AddCommand(deaconForceKillCmd)
+	deaconCmd.AddCommand(deaconHealthStateCmd)
 
 	// Flags for trigger-pending
 	deaconTriggerPendingCmd.Flags().DurationVar(&triggerTimeout, "timeout", 2*time.Second,
 		"Timeout for checking if Claude is ready")
+
+	// Flags for health-check
+	deaconHealthCheckCmd.Flags().DurationVar(&healthCheckTimeout, "timeout", 30*time.Second,
+		"How long to wait for agent response")
+	deaconHealthCheckCmd.Flags().IntVar(&healthCheckFailures, "failures", 3,
+		"Number of consecutive failures before recommending force-kill")
+	deaconHealthCheckCmd.Flags().DurationVar(&healthCheckCooldown, "cooldown", 5*time.Minute,
+		"Minimum time between force-kills of same agent")
+
+	// Flags for force-kill
+	deaconForceKillCmd.Flags().StringVar(&forceKillReason, "reason", "",
+		"Reason for force-kill (included in notifications)")
+	deaconForceKillCmd.Flags().BoolVar(&forceKillSkipNotify, "skip-notify", false,
+		"Skip sending notification mail to mayor")
 
 	rootCmd.AddCommand(deaconCmd)
 }
@@ -463,5 +558,328 @@ func ensurePatrolHooks(workspacePath string) error {
 }
 `
 	return os.WriteFile(settingsPath, []byte(hooksJSON), 0600)
+}
+
+// runDeaconHealthCheck implements the health-check command.
+// It sends a HEALTH_CHECK nudge to an agent, waits for response, and tracks state.
+func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
+	agent := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load health check state
+	state, err := deacon.LoadHealthCheckState(townRoot)
+	if err != nil {
+		return fmt.Errorf("loading health check state: %w", err)
+	}
+	agentState := state.GetAgentState(agent)
+
+	// Check if agent is in cooldown
+	if agentState.IsInCooldown(healthCheckCooldown) {
+		remaining := agentState.CooldownRemaining(healthCheckCooldown)
+		fmt.Printf("%s Agent %s is in cooldown (remaining: %s)\n",
+			style.Dim.Render("○"), agent, remaining.Round(time.Second))
+		return nil
+	}
+
+	// Get agent bead info before ping (for baseline)
+	beadID, sessionName, err := agentAddressToIDs(agent)
+	if err != nil {
+		return fmt.Errorf("invalid agent address: %w", err)
+	}
+
+	t := tmux.NewTmux()
+
+	// Check if session exists
+	exists, err := t.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !exists {
+		fmt.Printf("%s Agent %s session not running\n", style.Dim.Render("○"), agent)
+		return nil
+	}
+
+	// Get current bead update time
+	baselineTime, err := getAgentBeadUpdateTime(townRoot, beadID)
+	if err != nil {
+		// Bead might not exist yet - that's okay
+		baselineTime = time.Time{}
+	}
+
+	// Record ping
+	agentState.RecordPing()
+
+	// Send health check nudge
+	if err := t.NudgeSession(sessionName, "HEALTH_CHECK: respond with any action to confirm responsiveness"); err != nil {
+		return fmt.Errorf("sending nudge: %w", err)
+	}
+
+	fmt.Printf("%s Sent HEALTH_CHECK to %s, waiting %s...\n",
+		style.Bold.Render("→"), agent, healthCheckTimeout)
+
+	// Wait for response
+	deadline := time.Now().Add(healthCheckTimeout)
+	responded := false
+
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second) // Check every 2 seconds
+
+		newTime, err := getAgentBeadUpdateTime(townRoot, beadID)
+		if err != nil {
+			continue
+		}
+
+		// If bead was updated after our baseline, agent responded
+		if newTime.After(baselineTime) {
+			responded = true
+			break
+		}
+	}
+
+	// Record result
+	if responded {
+		agentState.RecordResponse()
+		if err := deacon.SaveHealthCheckState(townRoot, state); err != nil {
+			style.PrintWarning("failed to save health check state: %v", err)
+		}
+		fmt.Printf("%s Agent %s responded (failures reset to 0)\n",
+			style.Bold.Render("✓"), agent)
+		return nil
+	}
+
+	// No response - record failure
+	agentState.RecordFailure()
+	if err := deacon.SaveHealthCheckState(townRoot, state); err != nil {
+		style.PrintWarning("failed to save health check state: %v", err)
+	}
+
+	fmt.Printf("%s Agent %s did not respond (consecutive failures: %d/%d)\n",
+		style.Dim.Render("⚠"), agent, agentState.ConsecutiveFailures, healthCheckFailures)
+
+	// Check if force-kill threshold reached
+	if agentState.ShouldForceKill(healthCheckFailures) {
+		fmt.Printf("%s Agent %s should be force-killed\n", style.Bold.Render("✗"), agent)
+		os.Exit(2) // Exit code 2 = should force-kill
+	}
+
+	return nil
+}
+
+// runDeaconForceKill implements the force-kill command.
+// It kills a stuck agent session and updates its bead state.
+func runDeaconForceKill(cmd *cobra.Command, args []string) error {
+	agent := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load health check state
+	state, err := deacon.LoadHealthCheckState(townRoot)
+	if err != nil {
+		return fmt.Errorf("loading health check state: %w", err)
+	}
+	agentState := state.GetAgentState(agent)
+
+	// Check cooldown (unless bypassed)
+	if agentState.IsInCooldown(healthCheckCooldown) {
+		remaining := agentState.CooldownRemaining(healthCheckCooldown)
+		return fmt.Errorf("agent %s is in cooldown (remaining: %s) - cannot force-kill yet",
+			agent, remaining.Round(time.Second))
+	}
+
+	// Get session name
+	_, sessionName, err := agentAddressToIDs(agent)
+	if err != nil {
+		return fmt.Errorf("invalid agent address: %w", err)
+	}
+
+	t := tmux.NewTmux()
+
+	// Check if session exists
+	exists, err := t.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !exists {
+		fmt.Printf("%s Agent %s session not running\n", style.Dim.Render("○"), agent)
+		return nil
+	}
+
+	// Build reason
+	reason := forceKillReason
+	if reason == "" {
+		reason = fmt.Sprintf("unresponsive after %d consecutive health check failures",
+			agentState.ConsecutiveFailures)
+	}
+
+	// Step 1: Log the intervention (send mail to agent)
+	fmt.Printf("%s Sending force-kill notification to %s...\n", style.Dim.Render("1."), agent)
+	mailBody := fmt.Sprintf("Deacon detected %s as unresponsive.\nReason: %s\nAction: force-killing session", agent, reason)
+	sendMail(townRoot, agent, "FORCE_KILL: unresponsive", mailBody)
+
+	// Step 2: Kill the tmux session
+	fmt.Printf("%s Killing tmux session %s...\n", style.Dim.Render("2."), sessionName)
+	if err := t.KillSession(sessionName); err != nil {
+		return fmt.Errorf("killing session: %w", err)
+	}
+
+	// Step 3: Update agent bead state (optional - best effort)
+	fmt.Printf("%s Updating agent bead state to 'killed'...\n", style.Dim.Render("3."))
+	updateAgentBeadState(townRoot, agent, "killed", reason)
+
+	// Step 4: Notify mayor (optional)
+	if !forceKillSkipNotify {
+		fmt.Printf("%s Notifying mayor...\n", style.Dim.Render("4."))
+		notifyBody := fmt.Sprintf("Agent %s was force-killed by Deacon.\nReason: %s", agent, reason)
+		sendMail(townRoot, "mayor/", "Agent killed: "+agent, notifyBody)
+	}
+
+	// Record force-kill in state
+	agentState.RecordForceKill()
+	if err := deacon.SaveHealthCheckState(townRoot, state); err != nil {
+		style.PrintWarning("failed to save health check state: %v", err)
+	}
+
+	fmt.Printf("%s Force-killed agent %s (total kills: %d)\n",
+		style.Bold.Render("✓"), agent, agentState.ForceKillCount)
+	fmt.Printf("  %s\n", style.Dim.Render("Agent is now 'asleep'. Use 'gt rig boot' to restart."))
+
+	return nil
+}
+
+// runDeaconHealthState shows the current health check state.
+func runDeaconHealthState(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	state, err := deacon.LoadHealthCheckState(townRoot)
+	if err != nil {
+		return fmt.Errorf("loading health check state: %w", err)
+	}
+
+	if len(state.Agents) == 0 {
+		fmt.Printf("%s No health check state recorded yet\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	fmt.Printf("%s Health Check State (updated %s)\n\n",
+		style.Bold.Render("●"),
+		state.LastUpdated.Format(time.RFC3339))
+
+	for agentID, agentState := range state.Agents {
+		fmt.Printf("Agent: %s\n", style.Bold.Render(agentID))
+
+		if !agentState.LastPingTime.IsZero() {
+			fmt.Printf("  Last ping: %s ago\n", time.Since(agentState.LastPingTime).Round(time.Second))
+		}
+		if !agentState.LastResponseTime.IsZero() {
+			fmt.Printf("  Last response: %s ago\n", time.Since(agentState.LastResponseTime).Round(time.Second))
+		}
+
+		fmt.Printf("  Consecutive failures: %d\n", agentState.ConsecutiveFailures)
+		fmt.Printf("  Total force-kills: %d\n", agentState.ForceKillCount)
+
+		if !agentState.LastForceKillTime.IsZero() {
+			fmt.Printf("  Last force-kill: %s ago\n", time.Since(agentState.LastForceKillTime).Round(time.Second))
+			if agentState.IsInCooldown(healthCheckCooldown) {
+				remaining := agentState.CooldownRemaining(healthCheckCooldown)
+				fmt.Printf("  Cooldown: %s remaining\n", remaining.Round(time.Second))
+			}
+		}
+		fmt.Println()
+	}
+
+	return nil
+}
+
+// agentAddressToIDs converts an agent address to bead ID and session name.
+// Supports formats: "gastown/polecats/max", "gastown/witness", "deacon", "mayor"
+func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
+	switch address {
+	case "deacon":
+		return "gt-deacon", DeaconSessionName, nil
+	case "mayor":
+		return "gt-mayor", "gt-mayor", nil
+	}
+
+	parts := strings.Split(address, "/")
+	switch len(parts) {
+	case 2:
+		// rig/role: "gastown/witness", "gastown/refinery"
+		rig, role := parts[0], parts[1]
+		switch role {
+		case "witness":
+			return fmt.Sprintf("gt-%s-witness", rig), fmt.Sprintf("gt-%s-witness", rig), nil
+		case "refinery":
+			return fmt.Sprintf("gt-%s-refinery", rig), fmt.Sprintf("gt-%s-refinery", rig), nil
+		default:
+			return "", "", fmt.Errorf("unknown role: %s", role)
+		}
+	case 3:
+		// rig/type/name: "gastown/polecats/max", "gastown/crew/alpha"
+		rig, agentType, name := parts[0], parts[1], parts[2]
+		switch agentType {
+		case "polecats":
+			return fmt.Sprintf("gt-%s-polecat-%s", rig, name), fmt.Sprintf("gt-%s-%s", rig, name), nil
+		case "crew":
+			return fmt.Sprintf("gt-%s-crew-%s", rig, name), fmt.Sprintf("gt-%s-crew-%s", rig, name), nil
+		default:
+			return "", "", fmt.Errorf("unknown agent type: %s", agentType)
+		}
+	default:
+		return "", "", fmt.Errorf("invalid agent address format: %s (expected rig/type/name or rig/role)", address)
+	}
+}
+
+// getAgentBeadUpdateTime gets the update time from an agent bead.
+func getAgentBeadUpdateTime(townRoot, beadID string) (time.Time, error) {
+	cmd := exec.Command("bd", "show", beadID, "--json")
+	cmd.Dir = townRoot
+
+	output, err := cmd.Output()
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	var issues []struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil {
+		return time.Time{}, err
+	}
+
+	if len(issues) == 0 {
+		return time.Time{}, fmt.Errorf("bead not found: %s", beadID)
+	}
+
+	return time.Parse(time.RFC3339, issues[0].UpdatedAt)
+}
+
+// sendMail sends a mail message using gt mail send.
+func sendMail(townRoot, to, subject, body string) {
+	cmd := exec.Command("gt", "mail", "send", to, "-s", subject, "-m", body)
+	cmd.Dir = townRoot
+	_ = cmd.Run() // Best effort
+}
+
+// updateAgentBeadState updates an agent bead's state.
+func updateAgentBeadState(townRoot, agent, state, reason string) {
+	beadID, _, err := agentAddressToIDs(agent)
+	if err != nil {
+		return
+	}
+
+	// Use bd agent state command
+	cmd := exec.Command("bd", "agent", "state", beadID, state)
+	cmd.Dir = townRoot
+	_ = cmd.Run() // Best effort
 }
 
