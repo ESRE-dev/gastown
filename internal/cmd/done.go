@@ -153,29 +153,43 @@ func runDone(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Build MR bead title and description
-		title := fmt.Sprintf("Merge: %s", issueID)
-		description := fmt.Sprintf("branch: %s\ntarget: %s\nsource_issue: %s\nrig: %s",
-			branch, target, issueID, rigName)
-		if worker != "" {
-			description += fmt.Sprintf("\nworker: %s", worker)
-		}
-
-		// Create MR bead (ephemeral wisp - will be cleaned up after merge)
-		mrIssue, err := bd.Create(beads.CreateOptions{
-			Title:       title,
-			Type:        "merge-request",
-			Priority:    priority,
-			Description: description,
-		})
+		// Check if MR bead already exists for this branch (idempotency)
+		existingMR, err := bd.FindMRForBranch(branch)
 		if err != nil {
-			return fmt.Errorf("creating merge request bead: %w", err)
+			style.PrintWarning("could not check for existing MR: %v", err)
+			// Continue with creation attempt - Create will fail if duplicate
 		}
-		mrID = mrIssue.ID
 
-		// Success output
-		fmt.Printf("%s Work submitted to merge queue\n", style.Bold.Render("✓"))
-		fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
+		if existingMR != nil {
+			// MR already exists - use it instead of creating a new one
+			mrID = existingMR.ID
+			fmt.Printf("%s MR already exists (idempotent)\n", style.Bold.Render("✓"))
+			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
+		} else {
+			// Build MR bead title and description
+			title := fmt.Sprintf("Merge: %s", issueID)
+			description := fmt.Sprintf("branch: %s\ntarget: %s\nsource_issue: %s\nrig: %s",
+				branch, target, issueID, rigName)
+			if worker != "" {
+				description += fmt.Sprintf("\nworker: %s", worker)
+			}
+
+			// Create MR bead (ephemeral wisp - will be cleaned up after merge)
+			mrIssue, err := bd.Create(beads.CreateOptions{
+				Title:       title,
+				Type:        "merge-request",
+				Priority:    priority,
+				Description: description,
+			})
+			if err != nil {
+				return fmt.Errorf("creating merge request bead: %w", err)
+			}
+			mrID = mrIssue.ID
+
+			// Success output
+			fmt.Printf("%s Work submitted to merge queue\n", style.Bold.Render("✓"))
+			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
+		}
 		fmt.Printf("  Source: %s\n", branch)
 		fmt.Printf("  Target: %s\n", target)
 		fmt.Printf("  Issue: %s\n", issueID)
