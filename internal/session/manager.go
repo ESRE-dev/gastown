@@ -190,7 +190,13 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	if err := m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal warning - Claude might still start
 	}
-	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Wait for Claude to be fully ready at the prompt (not just started)
+	// PRAGMATIC APPROACH: Use fixed delay rather than detection.
+	// WaitForClaudeReady has false positives (detects > in various contexts).
+	// Claude startup takes ~5-8 seconds on typical machines.
+	// 10 second delay is conservative but reliable.
+	time.Sleep(10 * time.Second)
 
 	// Inject session beacon for predecessor discovery via /resume
 	// This becomes the session title in Claude Code's session picker
@@ -205,8 +211,8 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	// Send the propulsion nudge to trigger autonomous work execution.
 	// The beacon alone is just metadata - this nudge is the actual instruction
 	// that triggers Claude to check the hook and begin work.
-	// Small delay to ensure beacon is processed first.
-	time.Sleep(500 * time.Millisecond)
+	// Wait for beacon to be fully processed (needs to be separate prompt)
+	time.Sleep(2 * time.Second)
 	if err := m.tmux.NudgeSession(sessionID, PropulsionNudge()); err != nil {
 		// Non-fatal: witness can still nudge later
 	}
