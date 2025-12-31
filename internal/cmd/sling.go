@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"crypto/rand"
+	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -31,6 +33,15 @@ This is THE command for assigning work in Gas Town. It handles:
   - Dispatching to dogs (Deacon's helper workers)
   - Formula instantiation and wisp creation
   - No-tmux mode for manual agent operation
+  - Auto-convoy creation for dashboard visibility
+
+Auto-Convoy:
+  When slinging a single issue (not a formula), sling automatically creates
+  a convoy to track the work unless --no-convoy is specified. This ensures
+  all work appears in 'gt convoy list', even "swarm of one" assignments.
+
+  gt sling gt-abc gastown              # Creates "Work: <issue-title>" convoy
+  gt sling gt-abc gastown --no-convoy  # Skip auto-convoy creation
 
 Target Resolution:
   gt sling gt-abc                       # Self (current agent)
@@ -93,6 +104,7 @@ var (
 	slingForce    bool   // --force: force spawn even if polecat has unread mail
 	slingAccount  string // --account: Claude Code account handle to use
 	slingQuality  string // --quality: shorthand for polecat workflow (basic|shiny|chrome)
+	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
 )
 
 func init() {
@@ -110,6 +122,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingForce, "force", false, "Force spawn even if polecat has unread mail")
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
 	slingCmd.Flags().StringVarP(&slingQuality, "quality", "q", "", "Polecat workflow quality level (basic|shiny|chrome)")
+	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -274,6 +287,29 @@ func runSling(cmd *cobra.Command, args []string) error {
 			assignee = "(unknown)"
 		}
 		return fmt.Errorf("bead %s is already pinned to %s\nUse --force to re-sling", beadID, assignee)
+	}
+
+	// Auto-convoy: check if issue is already tracked by a convoy
+	// If not, create one for dashboard visibility (unless --no-convoy is set)
+	if !slingNoConvoy && formulaName == "" {
+		existingConvoy := isTrackedByConvoy(beadID)
+		if existingConvoy == "" {
+			if slingDryRun {
+				fmt.Printf("Would create convoy 'Work: %s'\n", info.Title)
+				fmt.Printf("Would add tracking relation to %s\n", beadID)
+			} else {
+				convoyID, err := createAutoConvoy(beadID, info.Title)
+				if err != nil {
+					// Log warning but don't fail - convoy is optional
+					fmt.Printf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
+				} else {
+					fmt.Printf("%s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
+					fmt.Printf("  Tracking: %s\n", beadID)
+				}
+			}
+		} else {
+			fmt.Printf("%s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
+		}
 	}
 
 	if slingDryRun {
@@ -1052,4 +1088,93 @@ func generateDogName(mgr *dog.Manager) string {
 	}
 
 	return fmt.Sprintf("dog%d", len(dogs)+1)
+}
+
+// slingGenerateShortID generates a short random ID (5 lowercase chars).
+func slingGenerateShortID() string {
+	b := make([]byte, 3)
+	rand.Read(b)
+	return strings.ToLower(base32.StdEncoding.EncodeToString(b)[:5])
+}
+
+// isTrackedByConvoy checks if an issue is already being tracked by a convoy.
+// Returns the convoy ID if tracked, empty string otherwise.
+func isTrackedByConvoy(beadID string) string {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return ""
+	}
+
+	// Query town beads for any convoy that tracks this issue
+	// Convoys use "tracks" dependency type: convoy -> tracked issue
+	townBeads := filepath.Join(townRoot, ".beads")
+	dbPath := filepath.Join(townBeads, "beads.db")
+
+	// Query dependencies where this bead is being tracked
+	// Also check for external reference format: external:rig:issue-id
+	query := fmt.Sprintf(`
+		SELECT d.issue_id
+		FROM dependencies d
+		JOIN issues i ON d.issue_id = i.id
+		WHERE d.type = 'tracks'
+		AND i.issue_type = 'convoy'
+		AND (d.depends_on_id = '%s' OR d.depends_on_id LIKE '%%:%s')
+		LIMIT 1
+	`, beadID, beadID)
+
+	queryCmd := exec.Command("sqlite3", dbPath, query)
+	out, err := queryCmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	convoyID := strings.TrimSpace(string(out))
+	return convoyID
+}
+
+// createAutoConvoy creates an auto-convoy for a single issue and tracks it.
+// Returns the created convoy ID.
+func createAutoConvoy(beadID, beadTitle string) (string, error) {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return "", fmt.Errorf("finding town root: %w", err)
+	}
+
+	townBeads := filepath.Join(townRoot, ".beads")
+
+	// Generate convoy ID with cv- prefix
+	convoyID := fmt.Sprintf("hq-cv-%s", slingGenerateShortID())
+
+	// Create convoy with title "Work: <issue-title>"
+	convoyTitle := fmt.Sprintf("Work: %s", beadTitle)
+	description := fmt.Sprintf("Auto-created convoy tracking %s", beadID)
+
+	createArgs := []string{
+		"create",
+		"--type=convoy",
+		"--id=" + convoyID,
+		"--title=" + convoyTitle,
+		"--description=" + description,
+	}
+
+	createCmd := exec.Command("bd", createArgs...)
+	createCmd.Dir = townBeads
+	createCmd.Stderr = os.Stderr
+
+	if err := createCmd.Run(); err != nil {
+		return "", fmt.Errorf("creating convoy: %w", err)
+	}
+
+	// Add tracking relation: convoy tracks the issue
+	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
+	depCmd := exec.Command("bd", depArgs...)
+	depCmd.Dir = townBeads
+	depCmd.Stderr = os.Stderr
+
+	if err := depCmd.Run(); err != nil {
+		// Convoy was created but tracking failed - log warning but continue
+		fmt.Printf("%s Could not add tracking relation: %v\n", style.Dim.Render("Warning:"), err)
+	}
+
+	return convoyID, nil
 }
