@@ -36,48 +36,25 @@ var (
 )
 
 var swarmCmd = &cobra.Command{
-	Use:     "swarm",
-	GroupID: GroupWork,
-	Short:   "Manage multi-agent swarms",
-	Long: `Manage coordinated multi-agent work units (swarms).
+	Use:        "swarm",
+	GroupID:    GroupWork,
+	Short:      "[DEPRECATED] Use 'gt convoy' instead",
+	Deprecated: "Use 'gt convoy' for work tracking. A 'swarm' is now just the ephemeral workers on a convoy.",
+	Long: `DEPRECATED: Use 'gt convoy' instead.
 
-A swarm coordinates multiple polecats working on related tasks from a shared
-base commit. Work is merged to an integration branch, then landed to main.
+The term "swarm" now refers to the ephemeral set of workers on a convoy's issues,
+not a persistent tracking unit. Use 'gt convoy' for creating and tracking batched work.
 
-SWARM LIFECYCLE:
-                          epic (tasks)
-                              │
-                              ▼
-  ┌────────────────────────────────────────────┐
-  │                   SWARM                    │
-  │  ┌──────────┐ ┌──────────┐ ┌──────────┐   │
-  │  │ Polecat  │ │ Polecat  │ │ Polecat  │   │
-  │  │  Toast   │ │   Nux    │ │ Capable  │   │
-  │  └────┬─────┘ └────┬─────┘ └────┬─────┘   │
-  │       │            │            │         │
-  │       ▼            ▼            ▼         │
-  │  ┌──────────────────────────────────────┐ │
-  │  │        integration/<epic>            │ │
-  │  └───────────────────┬──────────────────┘ │
-  └──────────────────────┼────────────────────┘
-                         │
-                         ▼ land
-                      main
+TERMINOLOGY:
+  Convoy: Persistent tracking unit (what this command was trying to be)
+  Swarm:  Ephemeral workers on a convoy (no separate tracking needed)
 
-STATES:
-  creating  → Swarm being set up
-  active    → Workers executing tasks
-  merging   → Work being integrated
-  landed    → Successfully merged to main
-  cancelled → Swarm aborted
+MIGRATION:
+  gt swarm create  →  gt convoy create
+  gt swarm status  →  gt convoy status
+  gt swarm list    →  gt convoy list
 
-COMMANDS:
-  create    Create a new swarm from an epic
-  status    Show swarm progress
-  list      List swarms in a rig
-  land      Manually land completed swarm
-  cancel    Cancel an active swarm
-  dispatch  Assign next ready task to a worker`,
+See 'gt convoy --help' for the new workflow.`,
 }
 
 var swarmCreateCmd = &cobra.Command{

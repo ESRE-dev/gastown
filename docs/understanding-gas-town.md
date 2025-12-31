@@ -49,7 +49,7 @@ Both do project work, but with key differences:
 
 **When to use Polecats**:
 - Discrete, well-defined tasks
-- Batch work (via swarms)
+- Batch work (tracked via convoys)
 - Parallelizable work
 - Work that benefits from supervision
 

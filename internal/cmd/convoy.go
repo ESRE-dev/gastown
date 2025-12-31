@@ -26,26 +26,34 @@ var (
 var convoyCmd = &cobra.Command{
 	Use:     "convoy",
 	GroupID: GroupWork,
-	Short:   "Manage cross-rig issue tracking",
-	Long: `Manage convoys for tracking issues across multiple rigs.
+	Short:   "Track batches of work across rigs",
+	Long: `Manage convoys - the primary unit for tracking batched work.
 
-A convoy is a tracking unit that monitors issues across project chains.
-Unlike swarms (which coordinate parallel work), convoys simply track
-related issues and auto-close when all tracked issues complete.
+A convoy is a persistent tracking unit that monitors related issues across
+rigs. When you kick off work (even a single issue), a convoy tracks it so
+you can see when it lands and what was included.
 
-CONVOY VS SWARM:
-  Swarm:  Multiple polecats working on tasks from a shared base commit
-  Convoy: Cross-rig issue tracker, monitors progress without spawning workers
+WHAT IS A CONVOY:
+  - Persistent tracking unit with an ID (hq-*)
+  - Tracks issues across rigs (frontend+backend, beads+gastown, etc.)
+  - Auto-closes when all tracked issues complete → notifies subscribers
+  - Can be reopened by adding more issues
+
+WHAT IS A SWARM:
+  - Ephemeral: "the workers currently assigned to a convoy's issues"
+  - No separate ID - uses the convoy ID
+  - Dissolves when work completes
 
 TRACKING SEMANTICS:
   - 'tracks' relation is non-blocking (tracked issues don't block convoy)
   - Cross-prefix capable (convoy in hq-* tracks issues in gt-*, bd-*)
-  - Reactive completion: convoy auto-closes when all tracked issues close
+  - Landed: all tracked issues closed → notification sent to subscribers
 
 COMMANDS:
-  create    Create a new convoy tracking specified issues
-  status    Show convoy progress and tracked issues
-  list      List all convoys`,
+  create    Create a convoy tracking specified issues
+  add       Add issues to an existing convoy (reopens if closed)
+  status    Show convoy progress, tracked issues, and active workers
+  list      List convoys (the dashboard view)`,
 }
 
 var convoyCreateCmd = &cobra.Command{

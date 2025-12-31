@@ -1,231 +1,74 @@
-# Swarms
+# Swarm (Ephemeral Worker View)
 
-Swarms coordinate multiple polecats working on related tasks from a shared base commit.
+> **Note**: "Swarm" is an ephemeral concept, not a persistent entity.
+> For tracking work, see [Convoys](convoy.md).
 
-## Concept
+## What is a Swarm?
 
-A swarm is a coordinated multi-agent work unit. When you have an epic with multiple
-independent tasks, a swarm lets you:
+A **swarm** is simply "the workers currently assigned to a convoy's issues."
+It has no separate ID and no persistent state - it's just a view of active workers.
 
-1. **Parallelize** - Multiple polecats work simultaneously
-2. **Isolate** - Each worker branches from the same base commit
-3. **Integrate** - All work merges to an integration branch before landing
-4. **Coordinate** - Task dispatch respects dependencies
+| Concept | Persistent? | ID | Description |
+|---------|-------------|-----|-------------|
+| **Convoy** | Yes | hq-* | The tracking unit. What you create and track. |
+| **Swarm** | No | None | The workers. Ephemeral view of who's working. |
+
+## The Relationship
 
 ```
-                      epic (tasks)
-                          │
-                          ▼
-┌────────────────────────────────────────────┐
-│                   SWARM                    │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐   │
-│  │ Polecat  │ │ Polecat  │ │ Polecat  │   │
-│  │  Toast   │ │   Nux    │ │ Capable  │   │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘   │
-│       │            │            │         │
-│       ▼            ▼            ▼         │
-│  ┌──────────────────────────────────────┐ │
-│  │        integration/<epic>            │ │
-│  └───────────────────┬──────────────────┘ │
-└──────────────────────┼────────────────────┘
-                       │
-                       ▼ land
-                    main
+Convoy hq-abc ─────────tracks───────────► Issues
+                                            │
+                                            │ assigned to
+                                            ▼
+                                         Polecats
+                                            │
+                                    ────────┴────────
+                                    "the swarm"
+                                    (ephemeral)
 ```
 
-## Swarm Lifecycle
+When you say "kick off a swarm," you're really:
+1. Creating a convoy (persistent tracking)
+2. Assigning polecats to the convoy's issues
+3. The swarm = those polecats while they work
 
-| State | Description |
-|-------|-------------|
-| `created` | Swarm set up, not yet started |
-| `active` | Workers actively executing tasks |
-| `merging` | All work done, integration in progress |
-| `landed` | Successfully merged to main |
-| `cancelled` | Swarm aborted |
-| `failed` | Swarm failed and cannot recover |
+When the work completes, the convoy lands and the swarm dissolves.
 
-## Commands
+## Viewing the Swarm
 
-### Create a Swarm
+The swarm appears in convoy status:
 
 ```bash
-# Create swarm from existing epic
-gt swarm create greenplace --epic gp-abc --worker Toast --worker Nux
-
-# Create and start immediately
-gt swarm create greenplace --epic gp-abc --worker Toast --start
-
-# Specify target branch (defaults to main)
-gt swarm create greenplace --epic gp-abc --worker Toast --target develop
+gt convoy status hq-abc
 ```
 
-The epic should already exist in beads with child tasks. The swarm will track
-which tasks are ready, in-progress, and complete.
+```
+Convoy: hq-abc (Deploy v2.0)
+════════════════════════════
 
-### Start a Swarm
+Progress: 2/3 complete
 
-```bash
-# Start a previously created swarm
-gt swarm start gp-abc
+Issues
+  ✓ gt-xyz: Update API              closed
+  → bd-ghi: Update docs             in_progress  @beads/amber
+  ○ gt-jkl: Final review            open
+
+Workers (the swarm)          ← this is the swarm
+  beads/amber     bd-ghi     running 12m
 ```
 
-This transitions the swarm from `created` to `active` and begins dispatching
-tasks to workers.
+## Historical Note
 
-### Check Swarm Status
+Earlier Gas Town development used "swarm" as if it were a persistent entity
+with its own lifecycle. The `gt swarm` commands were built on this model.
 
-```bash
-# Human-readable status
-gt swarm status gp-abc
+The correct model is:
+- **Convoy** = the persistent tracking unit (what `gt swarm` was trying to be)
+- **Swarm** = ephemeral workers (no separate tracking needed)
 
-# JSON output
-gt swarm status gp-abc --json
-```
-
-Shows:
-- Swarm metadata (epic, rig, target branch)
-- Ready front (tasks with no blockers)
-- Active tasks (in-progress with assignees)
-- Blocked tasks (waiting on dependencies)
-- Completed tasks
-
-### List Swarms
-
-```bash
-# All swarms across all rigs
-gt swarm list
-
-# Swarms in specific rig
-gt swarm list greenplace
-
-# Filter by status
-gt swarm list --status=active
-gt swarm list greenplace --status=landed
-
-# JSON output
-gt swarm list --json
-```
-
-### Dispatch Tasks
-
-```bash
-# Auto-dispatch next ready task to idle polecat
-gt swarm dispatch gp-abc
-
-# Dispatch in specific rig
-gt swarm dispatch gp-abc --rig greenplace
-```
-
-Finds the first unassigned ready task and assigns it to an available polecat.
-Uses `gt sling` internally.
-
-### Land a Swarm
-
-```bash
-# Manually land completed swarm
-gt swarm land gp-abc
-```
-
-This:
-1. Verifies all tasks are complete
-2. Stops any running polecat sessions
-3. Audits git state (checks for uncommitted/unpushed code)
-4. Merges integration branch to target (main)
-5. Cleans up branches
-6. Closes the epic in beads
-
-**Note**: Normally the Refinery handles landing automatically.
-
-### Cancel a Swarm
-
-```bash
-gt swarm cancel gp-abc
-```
-
-Marks the swarm as cancelled. Does not automatically stop sessions or clean up
-branches - use `gt swarm land` for full cleanup if needed.
-
-## How It Works
-
-### Beads Integration
-
-Swarms are built on beads molecules:
-- The epic is marked as `mol_type=swarm`
-- Tasks are child issues of the epic
-- Task dependencies are beads dependencies
-- State is queried from beads, not cached
-
-### Task Flow
-
-1. **Ready front**: Tasks with no uncompleted dependencies are "ready"
-2. **Dispatch**: `gt swarm dispatch` or `gt sling` assigns ready tasks
-3. **Execution**: Polecat works the task, commits, signals `gt done`
-4. **Merge**: Refinery merges to integration branch
-5. **Next**: When dependencies clear, new tasks become ready
-
-### Integration Branch
-
-Each swarm has an integration branch: `swarm/<epic-id>`
-
-- Created from the base commit when swarm starts
-- Each completed task merges here
-- Avoids merge conflicts from landing directly to main
-- Final landing merges integration → main
-
-### Git Safety
-
-Before landing, the swarm manager audits each worker's git state:
-
-| Check | Risk |
-|-------|------|
-| Uncommitted changes | Code loss if not in .beads/ |
-| Unpushed commits | Code not in remote |
-| Stashes | Forgotten work |
-
-If code is at risk, landing blocks and notifies Mayor.
-
-## Swarm vs Single Assignment
-
-| Scenario | Use |
-|----------|-----|
-| Single task, one polecat | `gt sling` |
-| Multiple independent tasks | `gt swarm create` |
-| Sequential dependent tasks | Molecule (not swarm) |
-| Large feature with subtasks | Swarm with dependencies |
-
-## Example Workflow
-
-```bash
-# 1. Create epic with tasks in beads
-bd create --type=epic --title="Add authentication" --id gp-auth
-bd create --title="Add login form" --parent gp-auth
-bd create --title="Add session management" --parent gp-auth
-bd create --title="Add logout flow" --parent gp-auth
-
-# 2. Create swarm
-gt swarm create greenplace --epic gp-auth --worker Toast --worker Nux --start
-
-# 3. Monitor progress
-gt swarm status gp-auth
-
-# 4. Dispatch more as tasks complete
-gt swarm dispatch gp-auth
-
-# 5. Land when complete
-gt swarm land gp-auth
-```
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| "No ready tasks" | Check dependencies with `bd show <epic>` |
-| "No idle polecats" | Create more with `gt polecat create` |
-| "Code at risk" | Workers need to commit/push before landing |
-| "Swarm not found" | Epic may not be marked `mol_type=swarm` |
+The `gt swarm` command is being deprecated in favor of `gt convoy`.
 
 ## See Also
 
-- [Molecules](molecules.md) - Workflow templates
+- [Convoys](convoy.md) - The persistent tracking unit
 - [Propulsion Principle](propulsion-principle.md) - Worker execution model
-- [Mail Protocol](mail-protocol.md) - Agent communication
