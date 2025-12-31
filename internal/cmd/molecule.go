@@ -17,23 +17,26 @@ var moleculeCmd = &cobra.Command{
 	RunE:    requireSubcommand,
 	Long: `Agent-specific molecule workflow operations.
 
-These commands operate on the current agent's hook and attached molecules.
-For beads data operations (listing, showing, creating molecules), use bd:
+These commands operate on YOUR hook and YOUR attached molecules.
+Use 'gt hook' to see what's on your hook (alias for 'gt mol status').
 
-  bd formula list    List molecule protos (replaces gt mol catalog)
-  bd mol show        Show molecule details (replaces gt mol show)
-  bd mol pour        Instantiate molecule (replaces gt mol instantiate)
-  bd mol bond        Bond molecules together (replaces gt mol bond)
+VIEWING YOUR WORK:
+  gt hook              Show what's on your hook
+  gt mol current       Show what you should be working on
+  gt mol progress      Show execution progress
 
-AGENT COMMANDS:
-  status       Show what's on current agent's hook
-  current      Show what agent should be working on
-  progress     Show execution progress of attached molecule
-  attach       Attach molecule to agent's hook
-  detach       Detach molecule from agent's hook
-  burn         Burn attached molecule (no record)
-  squash       Squash attached molecule (→ digest)
-  step         Step operations within a molecule`,
+WORKING ON STEPS:
+  gt mol step done     Complete current step (auto-continues)
+
+LIFECYCLE:
+  gt mol attach        Attach molecule to your hook
+  gt mol detach        Detach molecule from your hook
+  gt mol burn          Discard attached molecule (no record)
+  gt mol squash        Compress to digest (permanent record)
+
+TO DISPATCH WORK (with molecules):
+  gt sling mol-xxx target   # Pour formula + sling to agent
+  gt formulas               # List available formulas`,
 }
 
 
