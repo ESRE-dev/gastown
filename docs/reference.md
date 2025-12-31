@@ -187,9 +187,15 @@ gt mol step done <step>      # Complete a molecule step
 
 | Variable | Purpose |
 |----------|---------|
+| `BD_ACTOR` | Agent identity for attribution (see [identity.md](identity.md)) |
 | `BEADS_DIR` | Point to shared beads database |
 | `BEADS_NO_DAEMON` | Required for worktree polecats |
+| `GIT_AUTHOR_NAME` | Set to BD_ACTOR for commit attribution |
+| `GIT_AUTHOR_EMAIL` | Workspace owner email |
 | `GT_TOWN_ROOT` | Override town root detection |
+| `GT_ROLE` | Agent role type (mayor, polecat, etc.) |
+| `GT_RIG` | Rig name for rig-level agents |
+| `GT_POLECAT` | Polecat name (for polecats only) |
 
 ## CLI Reference
 

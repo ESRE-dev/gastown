@@ -87,7 +87,8 @@ Distribute work across workspaces:
 
 ## Agent Provenance
 
-Every agent operation is attributed:
+Every agent operation is attributed. See [identity.md](identity.md) for the
+complete BD_ACTOR format convention.
 
 ### Git Commits
 
