@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -730,12 +731,18 @@ func (d *Daemon) checkStaleAgents() {
 		beads.MayorBeadID(),
 	}
 
-	// Add rig-specific agents (witness, refinery) for known rigs
-	// For now, we check gastown - could be expanded to discover rigs dynamically
-	rigs := []string{"gastown", "beads"}
-	for _, rig := range rigs {
-		agentBeadIDs = append(agentBeadIDs, beads.WitnessBeadID(rig))
-		agentBeadIDs = append(agentBeadIDs, beads.RefineryBeadID(rig))
+	// Dynamically discover rigs from the rigs config
+	rigsConfigPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		// Log warning but continue with global agents only
+		d.logger.Printf("Warning: could not load rigs config: %v", err)
+	} else {
+		// Add rig-specific agents (witness, refinery) for each discovered rig
+		for rigName := range rigsConfig.Rigs {
+			agentBeadIDs = append(agentBeadIDs, beads.WitnessBeadID(rigName))
+			agentBeadIDs = append(agentBeadIDs, beads.RefineryBeadID(rigName))
+		}
 	}
 
 	for _, agentBeadID := range agentBeadIDs {
