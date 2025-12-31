@@ -60,6 +60,16 @@ func parseListName(address string) string {
 	return strings.TrimPrefix(address, "list:")
 }
 
+// isQueueAddress returns true if the address uses queue:name syntax.
+func isQueueAddress(address string) bool {
+	return strings.HasPrefix(address, "queue:")
+}
+
+// parseQueueName extracts the queue name from a queue:name address.
+func parseQueueName(address string) string {
+	return strings.TrimPrefix(address, "queue:")
+}
+
 // expandList returns the recipients for a mailing list.
 // Returns ErrUnknownList if the list is not found.
 func (r *Router) expandList(listName string) ([]string, error) {

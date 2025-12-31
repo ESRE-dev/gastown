@@ -267,6 +267,52 @@ func TestParseListName(t *testing.T) {
 	}
 }
 
+func TestIsQueueAddress(t *testing.T) {
+	tests := []struct {
+		address string
+		want    bool
+	}{
+		{"queue:work", true},
+		{"queue:gastown/polecats", true},
+		{"queue:", true}, // Edge case: empty queue name (will fail on expand)
+		{"mayor/", false},
+		{"gastown/witness", false},
+		{"queuework", false}, // Missing colon
+		{"list:oncall", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			got := isQueueAddress(tt.address)
+			if got != tt.want {
+				t.Errorf("isQueueAddress(%q) = %v, want %v", tt.address, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseQueueName(t *testing.T) {
+	tests := []struct {
+		address string
+		want    string
+	}{
+		{"queue:work", "work"},
+		{"queue:gastown/polecats", "gastown/polecats"},
+		{"queue:", ""},
+		{"queue:priority-high", "priority-high"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			got := parseQueueName(tt.address)
+			if got != tt.want {
+				t.Errorf("parseQueueName(%q) = %q, want %q", tt.address, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExpandList(t *testing.T) {
 	// Create temp directory with messaging config
 	tmpDir := t.TempDir()
