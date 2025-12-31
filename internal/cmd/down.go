@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
@@ -22,6 +23,7 @@ This gracefully shuts down all infrastructure agents:
 
   • Witnesses - Per-rig polecat managers
   • Mayor     - Global work coordinator
+  • Boot      - Deacon's watchdog
   • Deacon    - Health orchestrator
   • Daemon    - Go background process
 
@@ -79,7 +81,15 @@ func runDown(cmd *cobra.Command, args []string) error {
 		printDownStatus("Mayor", true, "stopped")
 	}
 
-	// 3. Stop Deacon
+	// 3. Stop Boot (Deacon's watchdog)
+	if err := stopSession(t, boot.SessionName); err != nil {
+		printDownStatus("Boot", false, err.Error())
+		allOK = false
+	} else {
+		printDownStatus("Boot", true, "stopped")
+	}
+
+	// 4. Stop Deacon
 	if err := stopSession(t, DeaconSessionName); err != nil {
 		printDownStatus("Deacon", false, err.Error())
 		allOK = false
@@ -87,7 +97,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		printDownStatus("Deacon", true, "stopped")
 	}
 
-	// 4. Stop Daemon last
+	// 5. Stop Daemon last
 	running, _, _ := daemon.IsRunning(townRoot)
 	if running {
 		if err := daemon.StopDaemon(townRoot); err != nil {
@@ -100,7 +110,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		printDownStatus("Daemon", true, "not running")
 	}
 
-	// 5. Kill tmux server if --all
+	// 6. Kill tmux server if --all
 	if downAll {
 		if err := t.KillServer(); err != nil {
 			printDownStatus("Tmux server", false, err.Error())
@@ -114,7 +124,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	if allOK {
 		fmt.Printf("%s All services stopped\n", style.Bold.Render("✓"))
 		// Log halt event with stopped services
-		stoppedServices := []string{"daemon", "deacon", "mayor"}
+		stoppedServices := []string{"daemon", "deacon", "boot", "mayor"}
 		for _, rigName := range rigs {
 			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/witness", rigName))
 		}
