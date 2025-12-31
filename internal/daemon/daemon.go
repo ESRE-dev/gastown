@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/feed"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -147,6 +148,10 @@ func (d *Daemon) heartbeat(state *State) {
 	// 1. Poke Boot (the Deacon's watchdog) instead of Deacon directly
 	// Boot handles the "when to wake Deacon" decision via triage logic
 	d.ensureBootRunning()
+
+	// 1b. Direct Deacon heartbeat check (belt-and-suspenders)
+	// Boot may not detect all stuck states; this provides a fallback
+	d.checkDeaconHeartbeat()
 
 	// 2. Ensure Witnesses are running for all rigs (restart if dead)
 	d.ensureWitnessesRunning()
@@ -293,6 +298,54 @@ func (d *Daemon) ensureDeaconRunning() {
 	d.logger.Println("Deacon session started successfully")
 }
 
+// checkDeaconHeartbeat checks if the Deacon is making progress.
+// This is a belt-and-suspenders fallback in case Boot doesn't detect stuck states.
+// Uses the heartbeat file that the Deacon updates on each patrol cycle.
+func (d *Daemon) checkDeaconHeartbeat() {
+	hb := deacon.ReadHeartbeat(d.config.TownRoot)
+	if hb == nil {
+		// No heartbeat file - Deacon hasn't started a cycle yet
+		return
+	}
+
+	age := hb.Age()
+
+	// If heartbeat is very stale (>15 min), the Deacon is likely stuck
+	if !hb.ShouldPoke() {
+		// Heartbeat is fresh enough
+		return
+	}
+
+	d.logger.Printf("Deacon heartbeat is stale (%s old), checking session...", age.Round(time.Minute))
+
+	// Check if session exists
+	hasSession, err := d.tmux.HasSession(DeaconSessionName)
+	if err != nil {
+		d.logger.Printf("Error checking Deacon session: %v", err)
+		return
+	}
+
+	if !hasSession {
+		// Session doesn't exist - ensureBootRunning will handle restart
+		return
+	}
+
+	// Session exists but heartbeat is stale - Deacon is stuck
+	if age > 30*time.Minute {
+		// Very stuck - restart the session
+		d.logger.Printf("Deacon stuck for %s - restarting session", age.Round(time.Minute))
+		if err := d.tmux.KillSession(DeaconSessionName); err != nil {
+			d.logger.Printf("Error killing stuck Deacon: %v", err)
+		}
+		// ensureDeaconRunning will be called next heartbeat to restart
+	} else {
+		// Stuck but not critically - nudge to wake up
+		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
+		if err := d.tmux.NudgeSession(DeaconSessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
+			d.logger.Printf("Error nudging stuck Deacon: %v", err)
+		}
+	}
+}
 
 // ensureWitnessesRunning ensures witnesses are running for all rigs.
 // Called on each heartbeat to maintain witness patrol loops.

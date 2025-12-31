@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/boot"
+	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -288,9 +289,30 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 		return "report", "deacon-missing", nil
 	}
 
-	// Deacon exists - check if it's responsive (basic pane output check)
-	// In degraded mode, we can't do sophisticated analysis
-	// Just verify the session is alive
+	// Deacon exists - check heartbeat to detect stuck sessions
+	// A session can exist but be stuck (not making progress)
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" {
+		hb := deacon.ReadHeartbeat(townRoot)
+		if hb.ShouldPoke() {
+			// Heartbeat is stale (>15 min) - Deacon is stuck
+			// Nudge the session to try to wake it up
+			age := hb.Age()
+			if age > 30*time.Minute {
+				// Very stuck - restart the session
+				fmt.Printf("Deacon heartbeat is %s old - restarting session\n", age.Round(time.Minute))
+				if err := tm.KillSession(deaconSession); err == nil {
+					return "restart", "deacon-stuck", nil
+				}
+			} else {
+				// Stuck but not critically - try nudging first
+				fmt.Printf("Deacon heartbeat is %s old - nudging session\n", age.Round(time.Minute))
+				_ = tm.NudgeSession(deaconSession, "HEALTH_CHECK: heartbeat is stale, respond to confirm responsiveness")
+				return "nudge", "deacon-stale", nil
+			}
+		}
+	}
+
 	return "nothing", "", nil
 }
 
