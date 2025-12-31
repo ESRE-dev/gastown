@@ -262,6 +262,12 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 
 	elapsed := time.Since(startTime)
 
+	// Read default branch from rig config
+	defaultBranch := "main"
+	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, name)); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+
 	fmt.Printf("\n%s Rig created in %.1fs\n", style.Success.Render("✓"), elapsed.Seconds())
 	fmt.Printf("\nStructure:\n")
 	fmt.Printf("  %s/\n", name)
@@ -269,8 +275,8 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ├── .repo.git/        (shared bare repo for refinery+polecats)\n")
 	fmt.Printf("  ├── .beads/           (prefix: %s)\n", newRig.Config.Prefix)
 	fmt.Printf("  ├── plugins/          (rig-level plugins)\n")
-	fmt.Printf("  ├── mayor/rig/        (clone: main)\n")
-	fmt.Printf("  ├── refinery/rig/     (worktree: main, sees polecat branches)\n")
+	fmt.Printf("  ├── mayor/rig/        (clone: %s)\n", defaultBranch)
+	fmt.Printf("  ├── refinery/rig/     (worktree: %s, sees polecat branches)\n", defaultBranch)
 	fmt.Printf("  ├── crew/%s/        (your workspace)\n", crewName)
 	fmt.Printf("  ├── witness/\n")
 	fmt.Printf("  └── polecats/\n")

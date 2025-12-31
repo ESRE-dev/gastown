@@ -213,6 +213,19 @@ func (g *Git) CurrentBranch() (string, error) {
 	return g.run("rev-parse", "--abbrev-ref", "HEAD")
 }
 
+// DefaultBranch returns the default branch name (what HEAD points to).
+// This works for both regular and bare repositories.
+// Returns "main" as fallback if detection fails.
+func (g *Git) DefaultBranch() string {
+	// Try symbolic-ref first (works for bare repos)
+	branch, err := g.run("symbolic-ref", "--short", "HEAD")
+	if err == nil && branch != "" {
+		return branch
+	}
+	// Fallback to main
+	return "main"
+}
+
 // HasUncommittedChanges returns true if there are uncommitted changes.
 func (g *Git) HasUncommittedChanges() (bool, error) {
 	status, err := g.Status()

@@ -24,12 +24,13 @@ var (
 
 // RigConfig represents the rig-level configuration (config.json at rig root).
 type RigConfig struct {
-	Type      string       `json:"type"`       // "rig"
-	Version   int          `json:"version"`    // schema version
-	Name      string       `json:"name"`       // rig name
-	GitURL    string       `json:"git_url"`    // repository URL
-	CreatedAt time.Time    `json:"created_at"` // when rig was created
-	Beads     *BeadsConfig `json:"beads,omitempty"`
+	Type          string       `json:"type"`                     // "rig"
+	Version       int          `json:"version"`                  // schema version
+	Name          string       `json:"name"`                     // rig name
+	GitURL        string       `json:"git_url"`                  // repository URL
+	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
+	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
+	Beads         *BeadsConfig `json:"beads,omitempty"`
 }
 
 // BeadsConfig represents beads configuration for the rig.
@@ -227,9 +228,17 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}
 	bareGit := git.NewGitWithDir(bareRepoPath, "")
 
+	// Detect default branch (main, master, etc.)
+	defaultBranch := bareGit.DefaultBranch()
+	rigConfig.DefaultBranch = defaultBranch
+	// Re-save config with default branch
+	if err := m.saveRigConfig(rigPath, rigConfig); err != nil {
+		return nil, fmt.Errorf("updating rig config with default branch: %w", err)
+	}
+
 	// Create mayor as regular clone (separate from bare repo).
 	// Mayor doesn't need to see polecat branches - that's refinery's job.
-	// This also allows mayor to stay on main without conflicting with refinery.
+	// This also allows mayor to stay on the default branch without conflicting with refinery.
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
@@ -242,14 +251,14 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
 	}
 
-	// Create refinery as worktree from bare repo on main.
-	// Refinery needs to see polecat branches (shared .repo.git) and merges them to main.
-	// Being on main allows direct merge workflow.
+	// Create refinery as worktree from bare repo on default branch.
+	// Refinery needs to see polecat branches (shared .repo.git) and merges them.
+	// Being on the default branch allows direct merge workflow.
 	refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
 	if err := os.MkdirAll(filepath.Dir(refineryRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating refinery dir: %w", err)
 	}
-	if err := bareGit.WorktreeAddExisting(refineryRigPath, "main"); err != nil {
+	if err := bareGit.WorktreeAddExisting(refineryRigPath, defaultBranch); err != nil {
 		return nil, fmt.Errorf("creating refinery worktree: %w", err)
 	}
 	// Create refinery CLAUDE.md (overrides any from cloned repo)
@@ -342,6 +351,20 @@ func (m *Manager) saveRigConfig(rigPath string, cfg *RigConfig) error {
 		return err
 	}
 	return os.WriteFile(configPath, data, 0644)
+}
+
+// LoadRigConfig reads the rig configuration from config.json.
+func LoadRigConfig(rigPath string) (*RigConfig, error) {
+	configPath := filepath.Join(rigPath, "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+	var cfg RigConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
 }
 
 // initAgentStates creates initial state.json files for agents.
