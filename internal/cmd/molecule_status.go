@@ -578,6 +578,18 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 	fmt.Println(style.Bold.Render("🚀 AUTONOMOUS MODE - Work on hook triggers immediate execution"))
 	fmt.Println()
 
+	// Check if this is a mail bead - display mail-specific format
+	if status.PinnedBead.Type == "message" {
+		sender := extractMailSender(status.PinnedBead.Labels)
+		fmt.Printf("%s %s (mail)\n", style.Bold.Render("🪝 Hook:"), status.PinnedBead.ID)
+		if sender != "" {
+			fmt.Printf("   From: %s\n", sender)
+		}
+		fmt.Printf("   Subject: %s\n", status.PinnedBead.Title)
+		fmt.Printf("   Run: gt mail read %s\n", status.PinnedBead.ID)
+		return nil
+	}
+
 	fmt.Printf("%s %s: %s\n", style.Bold.Render("🪝 Hooked:"), status.PinnedBead.ID, status.PinnedBead.Title)
 
 	// Show attached molecule
@@ -849,6 +861,17 @@ func getGitRootForMolStatus() (string, error) {
 // pinned beads in any rig's beads directory.
 func isTownLevelRole(agentID string) bool {
 	return agentID == "mayor" || agentID == "deacon"
+}
+
+// extractMailSender extracts the sender from mail bead labels.
+// Mail beads have a "from:X" label containing the sender address.
+func extractMailSender(labels []string) string {
+	for _, label := range labels {
+		if strings.HasPrefix(label, "from:") {
+			return strings.TrimPrefix(label, "from:")
+		}
+	}
+	return ""
 }
 
 // scanAllRigsForHookedBeads scans all registered rigs for hooked beads
