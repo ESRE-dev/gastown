@@ -476,6 +476,13 @@ func (g *Git) WorktreeAddExisting(path, branch string) error {
 	return err
 }
 
+// WorktreeAddExistingForce creates a new worktree even if the branch is already checked out elsewhere.
+// This is useful for cross-rig worktrees where multiple clones need to be on main.
+func (g *Git) WorktreeAddExistingForce(path, branch string) error {
+	_, err := g.run("worktree", "add", "--force", path, branch)
+	return err
+}
+
 // WorktreeRemove removes a worktree.
 func (g *Git) WorktreeRemove(path string, force bool) error {
 	args := []string{"worktree", "remove", path}

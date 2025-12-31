@@ -63,9 +63,32 @@ Example output:
 	RunE: runWorktreeList,
 }
 
+// Worktree remove command flags
+var (
+	worktreeRemoveForce bool
+)
+
+var worktreeRemoveCmd = &cobra.Command{
+	Use:   "remove <rig>",
+	Short: "Remove a cross-rig worktree",
+	Long: `Remove a git worktree created for cross-rig work.
+
+This command removes a worktree that was previously created with 'gt worktree <rig>'.
+It will refuse to remove a worktree with uncommitted changes unless --force is used.
+
+Examples:
+  gt worktree remove beads         # Remove beads worktree
+  gt worktree remove beads --force # Force remove even with uncommitted changes`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWorktreeRemove,
+}
+
 func init() {
 	worktreeCmd.Flags().BoolVar(&worktreeNoCD, "no-cd", false, "Just print path (don't print cd command)")
 	worktreeCmd.AddCommand(worktreeListCmd)
+
+	worktreeRemoveCmd.Flags().BoolVarP(&worktreeRemoveForce, "force", "f", false, "Force remove even with uncommitted changes")
+	worktreeCmd.AddCommand(worktreeRemoveCmd)
 
 	rootCmd.AddCommand(worktreeCmd)
 }
@@ -128,8 +151,9 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create the worktree on main branch
-	// Use WorktreeAddExisting to checkout an existing branch (main)
-	if err := g.WorktreeAddExisting(worktreePath, "main"); err != nil {
+	// Use WorktreeAddExistingForce because main may already be checked out
+	// in other worktrees (e.g., mayor/rig). This is safe for cross-rig work.
+	if err := g.WorktreeAddExistingForce(worktreePath, "main"); err != nil {
 		return fmt.Errorf("creating worktree: %w", err)
 	}
 
@@ -259,4 +283,58 @@ func getGitStatusSummary(dir string) string {
 	uncommitted := len(status.Modified) + len(status.Added) + len(status.Deleted) + len(status.Untracked)
 
 	return fmt.Sprintf("%d uncommitted", uncommitted)
+}
+
+func runWorktreeRemove(cmd *cobra.Command, args []string) error {
+	targetRig := args[0]
+
+	// Detect current crew identity from cwd
+	detected, err := detectCrewFromCwd()
+	if err != nil {
+		return fmt.Errorf("must be in a crew workspace to use this command: %w", err)
+	}
+
+	sourceRig := detected.rigName
+	crewName := detected.crewName
+
+	// Cannot remove worktree in your own rig (doesn't make sense)
+	if targetRig == sourceRig {
+		return fmt.Errorf("cannot remove worktree in your own rig '%s'", targetRig)
+	}
+
+	// Verify target rig exists
+	_, targetRigInfo, err := getRig(targetRig)
+	if err != nil {
+		return fmt.Errorf("rig '%s' not found - run 'gt rigs' to see available rigs", targetRig)
+	}
+
+	// Compute worktree path: ~/gt/<target-rig>/crew/<source-rig>-<name>/
+	worktreeName := fmt.Sprintf("%s-%s", sourceRig, crewName)
+	worktreePath := filepath.Join(constants.RigCrewPath(targetRigInfo.Path), worktreeName)
+
+	// Check if worktree exists
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return fmt.Errorf("worktree does not exist at %s", worktreePath)
+	}
+
+	// Check for uncommitted changes (unless --force)
+	if !worktreeRemoveForce {
+		statusSummary := getGitStatusSummary(worktreePath)
+		if statusSummary != "clean" && statusSummary != "error" {
+			return fmt.Errorf("worktree has %s - use --force to remove anyway", statusSummary)
+		}
+	}
+
+	// Get the target rig's mayor path (where the main git repo is)
+	targetMayorRig := constants.RigMayorPath(targetRigInfo.Path)
+	g := git.NewGit(targetMayorRig)
+
+	// Remove the worktree
+	if err := g.WorktreeRemove(worktreePath, worktreeRemoveForce); err != nil {
+		return fmt.Errorf("removing worktree: %w", err)
+	}
+
+	fmt.Printf("%s Removed worktree at %s\n", style.Success.Render("✓"), worktreePath)
+
+	return nil
 }
