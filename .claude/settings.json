@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "gt prime && gt nudge deacon session-started"
+            "command": "bash ~/.claude/hooks/session-start.sh && gt nudge deacon session-started"
           }
         ]
       }
