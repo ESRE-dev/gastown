@@ -37,6 +37,7 @@ var convoyCmd = &cobra.Command{
 	Use:     "convoy",
 	GroupID: GroupWork,
 	Short:   "Track batches of work across rigs",
+	RunE:    requireSubcommand,
 	Long: `Manage convoys - the primary unit for tracking batched work.
 
 A convoy is a persistent tracking unit that monitors related issues across

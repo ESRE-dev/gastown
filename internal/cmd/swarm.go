@@ -40,6 +40,7 @@ var swarmCmd = &cobra.Command{
 	GroupID:    GroupWork,
 	Short:      "[DEPRECATED] Use 'gt convoy' instead",
 	Deprecated: "Use 'gt convoy' for work tracking. A 'swarm' is now just the ephemeral workers on a convoy.",
+	RunE:       requireSubcommand,
 	Long: `DEPRECATED: Use 'gt convoy' instead.
 
 The term "swarm" now refers to the ephemeral set of workers on a convoy's issues,

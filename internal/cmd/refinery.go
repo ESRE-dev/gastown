@@ -25,6 +25,7 @@ var refineryCmd = &cobra.Command{
 	Aliases: []string{"ref"},
 	GroupID: GroupAgents,
 	Short:   "Manage the merge queue processor",
+	RunE:    requireSubcommand,
 	Long: `Manage the Refinery merge queue processor for a rig.
 
 The Refinery processes merge requests from polecats, merging their work

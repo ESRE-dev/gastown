@@ -29,6 +29,7 @@ var witnessCmd = &cobra.Command{
 	Use:     "witness",
 	GroupID: GroupAgents,
 	Short:   "Manage the polecat monitoring agent",
+	RunE:    requireSubcommand,
 	Long: `Manage the Witness monitoring agent for a rig.
 
 The Witness monitors polecats for stuck/idle state, nudges polecats

@@ -37,6 +37,7 @@ var sessionCmd = &cobra.Command{
 	Aliases: []string{"sess"},
 	GroupID: GroupAgents,
 	Short:   "Manage polecat sessions",
+	RunE:    requireSubcommand,
 	Long: `Manage tmux sessions for polecats.
 
 Sessions are tmux sessions running Claude for each polecat.

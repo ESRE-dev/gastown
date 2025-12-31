@@ -21,6 +21,7 @@ var mayorCmd = &cobra.Command{
 	Aliases: []string{"may"},
 	GroupID: GroupAgents,
 	Short:   "Manage the Mayor session",
+	RunE:    requireSubcommand,
 	Long: `Manage the Mayor tmux session.
 
 The Mayor is the global coordinator for Gas Town, running as a persistent

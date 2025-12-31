@@ -53,6 +53,7 @@ var mqCmd = &cobra.Command{
 	Use:     "mq",
 	GroupID: GroupWork,
 	Short:   "Merge queue operations",
+	RunE:    requireSubcommand,
 	Long: `Manage the merge queue for a rig.
 
 The merge queue tracks work branches from polecats waiting to be merged.
@@ -168,6 +169,7 @@ Example:
 var mqIntegrationCmd = &cobra.Command{
 	Use:   "integration",
 	Short: "Manage integration branches for epics",
+	RunE:  requireSubcommand,
 	Long: `Manage integration branches for batch work on epics.
 
 Integration branches allow multiple MRs for an epic to target a shared

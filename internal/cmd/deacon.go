@@ -26,6 +26,7 @@ var deaconCmd = &cobra.Command{
 	Aliases: []string{"dea"},
 	GroupID: GroupAgents,
 	Short:   "Manage the Deacon session",
+	RunE:    requireSubcommand,
 	Long: `Manage the Deacon tmux session.
 
 The Deacon is the hierarchical health-check orchestrator for Gas Town.

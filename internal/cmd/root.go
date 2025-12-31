@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -84,4 +85,15 @@ func buildCommandPath(cmd *cobra.Command) string {
 		parts = append([]string{c.Name()}, parts...)
 	}
 	return strings.Join(parts, " ")
+}
+
+// requireSubcommand returns a RunE function for parent commands that require
+// a subcommand. Without this, Cobra silently shows help and exits 0 for
+// unknown subcommands like "gt mol foobar", masking errors.
+func requireSubcommand(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("requires a subcommand\n\nRun '%s --help' for usage", buildCommandPath(cmd))
+	}
+	return fmt.Errorf("unknown command %q for %q\n\nRun '%s --help' for available commands",
+		args[0], buildCommandPath(cmd), buildCommandPath(cmd))
 }

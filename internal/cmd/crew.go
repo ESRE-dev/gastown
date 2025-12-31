@@ -24,6 +24,7 @@ var crewCmd = &cobra.Command{
 	Use:     "crew",
 	GroupID: GroupWorkspace,
 	Short:   "Manage crew workspaces (user-managed persistent workspaces)",
+	RunE:    requireSubcommand,
 	Long: `Crew workers are user-managed persistent workspaces within a rig.
 
 Unlike polecats which are witness-managed and transient, crew workers are:

@@ -33,6 +33,7 @@ var polecatCmd = &cobra.Command{
 	Aliases: []string{"cat", "polecats"},
 	GroupID: GroupAgents,
 	Short:   "Manage polecats in rigs",
+	RunE:    requireSubcommand,
 	Long: `Manage polecat lifecycle in rigs.
 
 Polecats are worker agents that operate in their own git worktrees.

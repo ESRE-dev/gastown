@@ -14,6 +14,7 @@ var moleculeCmd = &cobra.Command{
 	Aliases: []string{"molecule"},
 	GroupID: GroupWork,
 	Short:   "Agent molecule workflow commands",
+	RunE:    requireSubcommand,
 	Long: `Agent-specific molecule workflow operations.
 
 These commands operate on the current agent's hook and attached molecules.
@@ -204,6 +205,7 @@ a permanent (but compact) record.`,
 var moleculeStepCmd = &cobra.Command{
 	Use:   "step",
 	Short: "Molecule step operations",
+	RunE:  requireSubcommand,
 	Long: `Commands for working with molecule steps.
 
 A molecule is a DAG of steps. Each step is a beads issue with the molecule root
