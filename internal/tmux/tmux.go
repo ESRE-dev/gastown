@@ -91,6 +91,12 @@ func (t *Tmux) KillServer() error {
 	return err
 }
 
+// IsAvailable checks if tmux is installed and can be invoked.
+func (t *Tmux) IsAvailable() bool {
+	cmd := exec.Command("tmux", "-V")
+	return cmd.Run() == nil
+}
+
 // HasSession checks if a session exists.
 func (t *Tmux) HasSession(name string) (bool, error) {
 	_, err := t.run("has-session", "-t", name)

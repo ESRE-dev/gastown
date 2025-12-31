@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/feed"
 	"github.com/steveyegge/gastown/internal/keepalive"
@@ -189,8 +190,9 @@ func (d *Daemon) calculateHeartbeatInterval() time.Duration {
 func (d *Daemon) heartbeat(state *State) {
 	d.logger.Println("Heartbeat starting (recovery-focused)")
 
-	// 1. Ensure Deacon is running (restart if dead)
-	d.ensureDeaconRunning()
+	// 1. Poke Boot (the Deacon's watchdog) instead of Deacon directly
+	// Boot handles the "when to wake Deacon" decision via triage logic
+	d.ensureBootRunning()
 
 	// 2. Ensure Witnesses are running for all rigs (restart if dead)
 	d.ensureWitnessesRunning()
@@ -233,6 +235,71 @@ const DeaconSessionName = "gt-deacon"
 // DeaconRole is the role name for the Deacon's handoff bead.
 const DeaconRole = "deacon"
 
+// ensureBootRunning spawns Boot to triage the Deacon.
+// Boot is a fresh-each-tick watchdog that decides whether to start/wake/nudge
+// the Deacon, centralizing the "when to wake" decision in an agent.
+// In degraded mode (no tmux), falls back to mechanical checks.
+func (d *Daemon) ensureBootRunning() {
+	b := boot.New(d.config.TownRoot)
+
+	// Check if Boot is already running (recent marker)
+	if b.IsRunning() {
+		d.logger.Println("Boot already running, skipping spawn")
+		return
+	}
+
+	// Check for degraded mode
+	degraded := os.Getenv("GT_DEGRADED") == "true"
+	if degraded || !d.tmux.IsAvailable() {
+		// In degraded mode, run mechanical triage directly
+		d.logger.Println("Degraded mode: running mechanical Boot triage")
+		d.runDegradedBootTriage(b)
+		return
+	}
+
+	// Spawn Boot in a fresh tmux session
+	d.logger.Println("Spawning Boot for triage...")
+	if err := b.Spawn(); err != nil {
+		d.logger.Printf("Error spawning Boot: %v, falling back to direct Deacon check", err)
+		// Fallback: ensure Deacon is running directly
+		d.ensureDeaconRunning()
+		return
+	}
+
+	d.logger.Println("Boot spawned successfully")
+}
+
+// runDegradedBootTriage performs mechanical Boot logic without AI reasoning.
+// This is for degraded mode when tmux is unavailable.
+func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
+	startTime := time.Now()
+	status := &boot.Status{
+		Running:   true,
+		StartedAt: startTime,
+	}
+
+	// Simple check: is Deacon session alive?
+	hasDeacon, err := d.tmux.HasSession(DeaconSessionName)
+	if err != nil {
+		d.logger.Printf("Error checking Deacon session: %v", err)
+		status.LastAction = "error"
+		status.Error = err.Error()
+	} else if !hasDeacon {
+		d.logger.Println("Deacon not running, starting...")
+		d.ensureDeaconRunning()
+		status.LastAction = "start"
+		status.Target = "deacon"
+	} else {
+		status.LastAction = "nothing"
+	}
+
+	status.Running = false
+	status.CompletedAt = time.Now()
+
+	if err := b.SaveStatus(status); err != nil {
+		d.logger.Printf("Warning: failed to save Boot status: %v", err)
+	}
+}
 
 // ensureDeaconRunning ensures the Deacon is running.
 // ZFC-compliant: trusts agent bead state, no tmux inference.
