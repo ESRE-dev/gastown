@@ -312,10 +312,12 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 	}
 
 	// Update agent bead with new state and clear hook_bead (work is done)
-	bd := beads.New(cwd)
+	// Use town root for routing - ensures cross-beads references work
+	bd := beads.New(townRoot)
 	emptyHook := ""
 	if err := bd.UpdateAgentState(agentBeadID, newState, &emptyHook); err != nil {
-		// Silently ignore - beads might not be configured
+		// Log warning instead of silent ignore - helps debug cross-beads issues
+		fmt.Fprintf(os.Stderr, "Warning: couldn't update agent %s state on done: %v\n", agentBeadID, err)
 		return
 	}
 
@@ -324,7 +326,8 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 	cleanupStatus := computeCleanupStatus(cwd)
 	if cleanupStatus != "" {
 		if err := bd.UpdateAgentCleanupStatus(agentBeadID, cleanupStatus); err != nil {
-			// Silently ignore
+			// Log warning instead of silent ignore
+			fmt.Fprintf(os.Stderr, "Warning: couldn't update agent %s cleanup status: %v\n", agentBeadID, err)
 			return
 		}
 	}

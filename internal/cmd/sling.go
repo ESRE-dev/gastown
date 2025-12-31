@@ -790,6 +790,11 @@ func runSlingFormula(args []string) error {
 
 // updateAgentHookBead updates the agent bead's hook_bead field when work is slung.
 // This enables the witness to see what each agent is working on.
+//
+// IMPORTANT: Uses town root for routing so cross-beads references work.
+// The agent bead (e.g., gt-gastown-polecat-nux) may be in rig beads,
+// while the hook bead (e.g., hq-oosxt) may be in town beads.
+// Running from town root gives access to routes.jsonl for proper resolution.
 func updateAgentHookBead(agentID, beadID string) {
 	// Convert agent ID to agent bead ID
 	// Format examples (canonical: prefix-rig-role-name):
@@ -802,15 +807,20 @@ func updateAgentHookBead(agentID, beadID string) {
 		return
 	}
 
-	// Find beads directory - try current directory first
-	workDir, err := os.Getwd()
+	// Use town root for routing - this ensures cross-beads references work.
+	// Town beads (hq-*) and rig beads (gt-*) are resolved via routes.jsonl
+	// which lives at town root.
+	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
+		// Not in a Gas Town workspace - can't update agent bead
+		fmt.Fprintf(os.Stderr, "Warning: couldn't find town root to update agent hook: %v\n", err)
 		return
 	}
 
-	bd := beads.New(workDir)
+	bd := beads.New(townRoot)
 	if err := bd.UpdateAgentState(agentBeadID, "running", &beadID); err != nil {
-		// Silently ignore - agent bead might not exist yet
+		// Log warning instead of silent ignore - helps debug cross-beads issues
+		fmt.Fprintf(os.Stderr, "Warning: couldn't update agent %s hook to %s: %v\n", agentBeadID, beadID, err)
 		return
 	}
 }
