@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -32,12 +33,17 @@ Uses a reliable delivery pattern:
 This is the ONLY way to send messages to Claude sessions.
 Do not use raw tmux send-keys elsewhere.
 
-Special targets:
-  deacon    Maps to the Deacon session (gt-deacon)
+Role shortcuts (expand to session names):
+  mayor     Maps to gt-mayor
+  deacon    Maps to gt-deacon
+  witness   Maps to gt-<rig>-witness (uses current rig)
+  refinery  Maps to gt-<rig>-refinery (uses current rig)
 
 Examples:
   gt nudge greenplace/furiosa "Check your mail and start working"
   gt nudge greenplace/alpha -m "What's your status?"
+  gt nudge mayor "Status update requested"
+  gt nudge witness "Check polecat health"
   gt nudge deacon session-started`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runNudge,
@@ -81,6 +87,27 @@ func runNudge(cmd *cobra.Command, args []string) error {
 	message = fmt.Sprintf("[from %s] %s", sender, message)
 
 	t := tmux.NewTmux()
+
+	// Expand role shortcuts to session names
+	// These shortcuts let users type "mayor" instead of "gt-mayor"
+	switch target {
+	case "mayor":
+		target = session.MayorSessionName()
+	case "witness", "refinery":
+		// These need the current rig
+		roleInfo, err := GetRole()
+		if err != nil {
+			return fmt.Errorf("cannot determine rig for %s shortcut: %w", target, err)
+		}
+		if roleInfo.Rig == "" {
+			return fmt.Errorf("cannot determine rig for %s shortcut (not in a rig context)", target)
+		}
+		if target == "witness" {
+			target = session.WitnessSessionName(roleInfo.Rig)
+		} else {
+			target = session.RefinerySessionName(roleInfo.Rig)
+		}
+	}
 
 	// Special case: "deacon" target maps to the Deacon session
 	if target == "deacon" {
