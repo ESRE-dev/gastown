@@ -210,13 +210,27 @@ Your hooked work persists across sessions. The handoff mail is just context note
 
 **Crew workers push directly to main. No feature branches.**
 
-Why:
-- You own your clone - no isolation needed
-- Work is fast (10-15 min) - branch overhead exceeds value
-- Branches go stale with context cycling - main is always current
-- You're a trusted maintainer, not a contributor needing review
+### The Landing Rule
 
-Workflow:
+> **Work is NOT landed until it's either on `main` or submitted to the Refinery MQ.**
+
+Feature branches are dangerous in multi-agent environments:
+- The repo baseline can diverge wildly in hours
+- Branches go stale with context cycling
+- Merge conflicts compound exponentially with time
+- Other agents can't see or build on unmerged work
+
+**Valid landing states:**
+1. **Pushed to main** - Work is immediately available to all agents
+2. **Submitted to Refinery** - `gt done` creates MR, Refinery will merge
+
+**Invalid states (work is at risk):**
+- Sitting on a local branch
+- Pushed to a remote feature branch but not in MQ
+- "I'll merge it later" - later never comes in agent time
+
+### Workflow
+
 ```bash
 git pull                    # Start fresh
 # ... do work ...
@@ -225,6 +239,15 @@ git push                    # Direct to main
 ```
 
 If push fails (someone else pushed): `git pull --rebase && git push`
+
+### Cross-Rig Work (gt worktree)
+
+`gt worktree` creates a branch for working in another rig's codebase. This is the
+ONE exception where branches are created. But the rule still applies:
+
+- Complete the work in one session if possible
+- Submit to that rig's Refinery immediately when done
+- Never leave cross-rig work sitting on an unmerged branch
 
 ## Key Commands
 

@@ -207,6 +207,19 @@ When all steps are done, the molecule gets squashed automatically when you run `
 Run `gt done` when your work is complete. It verifies git is clean, syncs beads,
 and submits your branch to the merge queue. The Witness handles the rest.
 
+### The Landing Rule
+
+> **Work is NOT landed until it's on `main` OR in the Refinery MQ.**
+
+Your branch sitting on origin is NOT landed. You must run `gt done` to submit it
+to the merge queue. Without this step:
+- Your work is invisible to other agents
+- The branch will go stale as main diverges
+- Merge conflicts will compound over time
+- Work can be lost if your polecat is recycled
+
+**Branch → `gt done` → MR in queue → Refinery merges → LANDED**
+
 ## If You're Stuck
 
 1. **File an issue**: `bd create --title="Blocked: <reason>" --type=task`
