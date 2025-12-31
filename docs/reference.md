@@ -224,10 +224,10 @@ gt sling <bead> <rig> --molecule=<proto>
 ```bash
 gt convoy create "name" [issues...]     # Create convoy tracking issues
 gt convoy create "name" gt-a bd-b --notify mayor/  # With notification
-gt convoy add <convoy-id> <issue-id>    # Add issue (reopens if closed)
-gt convoy status [convoy-id]            # Show progress + workers (the swarm)
+gt convoy status [convoy-id]            # Show progress (🚚 hq-cv-*)
 gt convoy list                          # Dashboard of active convoys
-gt convoy list --active                 # Active only
+gt convoy list --all                    # Include landed convoys
+gt convoy list --status=closed          # Only landed convoys
 ```
 
 Note: "Swarm" is ephemeral (workers on a convoy's issues). See [Convoys](convoy.md).

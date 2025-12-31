@@ -28,6 +28,31 @@ These roles do actual project work:
 | **Crew** | Persistent worker with own clone | Long-lived, user-managed |
 | **Dog** | Deacon helper for infrastructure tasks | Ephemeral, Deacon-managed |
 
+## Convoys: Tracking Work
+
+A **convoy** (🚚) is how you track batched work in Gas Town. When you kick off work -
+even a single issue - create a convoy to track it.
+
+```bash
+# Create a convoy tracking some issues
+gt convoy create "Feature X" gt-abc gt-def --notify overseer
+
+# Check progress
+gt convoy status hq-cv-abc
+
+# Dashboard of active convoys
+gt convoy list
+```
+
+**Why convoys matter:**
+- Single view of "what's in flight"
+- Cross-rig tracking (convoy in hq-*, issues in gt-*, bd-*)
+- Auto-notification when work lands
+- Historical record of completed work (`gt convoy list --all`)
+
+The "swarm" is ephemeral - just the workers currently assigned to a convoy's issues.
+When issues close, the convoy lands. See [Convoys](convoy.md) for details.
+
 ## Crew vs Polecats
 
 Both do project work, but with key differences:
