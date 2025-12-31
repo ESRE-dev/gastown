@@ -283,9 +283,12 @@ func ensureSession(t *tmux.Tmux, sessionName, workDir, role string) error {
 		}
 		time.Sleep(constants.ShutdownNotifyDelay)
 
-		// Inject session beacon for predecessor discovery via /resume
-		beacon := session.SessionBeacon(role, "")
-		_ = t.NudgeSession(sessionName, beacon) // Non-fatal
+		// Inject startup nudge for predecessor discovery via /resume
+		_ = session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
+			Recipient: role,
+			Sender:    "human",
+			Topic:     "cold-start",
+		}) // Non-fatal
 	}
 
 	return nil
@@ -329,10 +332,13 @@ func ensureWitness(t *tmux.Tmux, sessionName, rigPath, rigName string) error {
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Inject session beacon for predecessor discovery via /resume
+	// Inject startup nudge for predecessor discovery via /resume
 	address := fmt.Sprintf("%s/witness", rigName)
-	beacon := session.SessionBeacon(address, "patrol")
-	_ = t.NudgeSession(sessionName, beacon) // Non-fatal
+	_ = session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
+		Recipient: address,
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}) // Non-fatal
 
 	return nil
 }
@@ -553,10 +559,13 @@ func ensureCrewSession(t *tmux.Tmux, sessionName, crewPath, rigName, crewName st
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Inject session beacon for predecessor discovery via /resume
+	// Inject startup nudge for predecessor discovery via /resume
 	address := fmt.Sprintf("%s/crew/%s", rigName, crewName)
-	beacon := session.SessionBeacon(address, "")
-	_ = t.NudgeSession(sessionName, beacon) // Non-fatal
+	_ = session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
+		Recipient: address,
+		Sender:    "human",
+		Topic:     "cold-start",
+	}) // Non-fatal
 
 	return nil
 }
@@ -654,10 +663,13 @@ func ensurePolecatSession(t *tmux.Tmux, sessionName, polecatPath, rigName, polec
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Inject session beacon for predecessor discovery via /resume
+	// Inject startup nudge for predecessor discovery via /resume
 	address := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
-	beacon := session.SessionBeacon(address, "")
-	_ = t.NudgeSession(sessionName, beacon) // Non-fatal
+	_ = session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
+		Recipient: address,
+		Sender:    "witness",
+		Topic:     "dispatch",
+	}) // Non-fatal
 
 	return nil
 }

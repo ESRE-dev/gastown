@@ -344,10 +344,13 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Inject session beacon for predecessor discovery via /resume
+	// Inject startup nudge for predecessor discovery via /resume
 	address := fmt.Sprintf("%s/witness", rigName)
-	beacon := session.SessionBeacon(address, "patrol")
-	_ = t.NudgeSession(sessionName, beacon) // Non-fatal
+	_ = session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
+		Recipient: address,
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}) // Non-fatal
 
 	return true, nil
 }

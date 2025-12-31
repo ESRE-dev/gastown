@@ -799,12 +799,13 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		// Give Claude time to initialize after process starts
 		time.Sleep(constants.ShutdownNotifyDelay)
 
-		// Inject session beacon for predecessor discovery via /resume
+		// Inject startup nudge for predecessor discovery via /resume
 		address := fmt.Sprintf("%s/crew/%s", rigName, name)
-		beacon := session.SessionBeacon(address, "")
-		if err := t.NudgeSession(sessionID, beacon); err != nil {
-			// Non-fatal: session works without beacon
-		}
+		_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
+			Recipient: address,
+			Sender:    "human",
+			Topic:     "cold-start",
+		}) // Non-fatal: session works without nudge
 
 		// Send gt prime to initialize context
 		if err := t.NudgeSession(sessionID, "gt prime"); err != nil {
@@ -940,10 +941,13 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 	// Give Claude time to initialize
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Inject session beacon for predecessor discovery via /resume
+	// Inject startup nudge for predecessor discovery via /resume
 	address := fmt.Sprintf("%s/crew/%s", rigName, crewName)
-	beacon := session.SessionBeacon(address, "")
-	_ = t.NudgeSession(sessionID, beacon) // Non-fatal
+	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
+		Recipient: address,
+		Sender:    "human",
+		Topic:     "cold-start",
+	}) // Non-fatal
 
 	// Send gt prime to initialize context (non-fatal: session works without priming)
 	_ = t.NudgeSession(sessionID, "gt prime")

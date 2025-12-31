@@ -197,14 +197,15 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	// 10 second delay is conservative but reliable.
 	time.Sleep(10 * time.Second)
 
-	// Inject session beacon for predecessor discovery via /resume
+	// Inject startup nudge for predecessor discovery via /resume
 	// This becomes the session title in Claude Code's session picker
 	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
-	molID := opts.Issue // Use issue ID if provided
-	beacon := SessionBeacon(address, molID)
-	if err := m.tmux.NudgeSession(sessionID, beacon); err != nil {
-		// Non-fatal: session works without beacon
-	}
+	_ = StartupNudge(m.tmux, sessionID, StartupNudgeConfig{
+		Recipient: address,
+		Sender:    "witness",
+		Topic:     "assigned",
+		MolID:     opts.Issue,
+	}) // Non-fatal: session works without nudge
 
 	// GUPP: Gas Town Universal Propulsion Principle
 	// Send the propulsion nudge to trigger autonomous work execution.

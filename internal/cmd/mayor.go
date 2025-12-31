@@ -146,9 +146,12 @@ func startMayorSession(t *tmux.Tmux) error {
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Inject session beacon for predecessor discovery via /resume
-	beacon := session.SessionBeacon("mayor", "")
-	_ = t.NudgeSession(MayorSessionName, beacon) // Non-fatal
+	// Inject startup nudge for predecessor discovery via /resume
+	_ = session.StartupNudge(t, MayorSessionName, session.StartupNudgeConfig{
+		Recipient: "mayor",
+		Sender:    "human",
+		Topic:     "cold-start",
+	}) // Non-fatal
 
 	return nil
 }

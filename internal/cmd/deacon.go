@@ -302,9 +302,12 @@ func startDeaconSession(t *tmux.Tmux) error {
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Inject session beacon for predecessor discovery via /resume
-	beacon := session.SessionBeacon("deacon", "patrol")
-	_ = t.NudgeSession(DeaconSessionName, beacon) // Non-fatal
+	// Inject startup nudge for predecessor discovery via /resume
+	_ = session.StartupNudge(t, DeaconSessionName, session.StartupNudgeConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}) // Non-fatal
 
 	return nil
 }
