@@ -17,12 +17,14 @@ import (
 )
 
 var (
-	installForce    bool
-	installName     string
-	installNoBeads  bool
-	installGit      bool
-	installGitHub   string
-	installPrivate  bool
+	installForce      bool
+	installName       string
+	installOwner      string
+	installPublicName string
+	installNoBeads    bool
+	installGit        bool
+	installGitHub     string
+	installPrivate    bool
 )
 
 var installCmd = &cobra.Command{
@@ -56,6 +58,8 @@ Examples:
 func init() {
 	installCmd.Flags().BoolVarP(&installForce, "force", "f", false, "Overwrite existing HQ")
 	installCmd.Flags().StringVarP(&installName, "name", "n", "", "Town name (defaults to directory name)")
+	installCmd.Flags().StringVar(&installOwner, "owner", "", "Owner email for entity identity (defaults to git config user.email)")
+	installCmd.Flags().StringVar(&installPublicName, "public-name", "", "Public display name (defaults to town name)")
 	installCmd.Flags().BoolVar(&installNoBeads, "no-beads", false, "Skip town beads initialization")
 	installCmd.Flags().BoolVar(&installGit, "git", false, "Initialize git with .gitignore")
 	installCmd.Flags().StringVar(&installGitHub, "github", "", "Create GitHub repo (format: owner/repo)")
@@ -115,12 +119,29 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("   ✓ Created mayor/\n")
 
+	// Determine owner (defaults to git user.email)
+	owner := installOwner
+	if owner == "" {
+		out, err := exec.Command("git", "config", "user.email").Output()
+		if err == nil {
+			owner = strings.TrimSpace(string(out))
+		}
+	}
+
+	// Determine public name (defaults to town name)
+	publicName := installPublicName
+	if publicName == "" {
+		publicName = townName
+	}
+
 	// Create town.json in mayor/
 	townConfig := &config.TownConfig{
-		Type:      "town",
-		Version:   config.CurrentTownVersion,
-		Name:      townName,
-		CreatedAt: time.Now(),
+		Type:       "town",
+		Version:    config.CurrentTownVersion,
+		Name:       townName,
+		Owner:      owner,
+		PublicName: publicName,
+		CreatedAt:  time.Now(),
 	}
 	townPath := filepath.Join(mayorDir, "town.json")
 	if err := config.SaveTownConfig(townPath, townConfig); err != nil {

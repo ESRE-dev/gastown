@@ -8,10 +8,12 @@ import (
 
 // TownConfig represents the main town identity (mayor/town.json).
 type TownConfig struct {
-	Type      string    `json:"type"`    // "town"
-	Version   int       `json:"version"` // schema version
-	Name      string    `json:"name"`    // town identifier
-	CreatedAt time.Time `json:"created_at"`
+	Type       string    `json:"type"`                  // "town"
+	Version    int       `json:"version"`               // schema version
+	Name       string    `json:"name"`                  // town identifier (internal)
+	Owner      string    `json:"owner,omitempty"`       // owner email (entity identity)
+	PublicName string    `json:"public_name,omitempty"` // public display name
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // MayorConfig represents town-level behavioral configuration (mayor/config.json).
@@ -70,7 +72,8 @@ type AgentState struct {
 }
 
 // CurrentTownVersion is the current schema version for TownConfig.
-const CurrentTownVersion = 1
+// Version 2: Added Owner and PublicName fields for federation identity.
+const CurrentTownVersion = 2
 
 // CurrentRigsVersion is the current schema version for RigsConfig.
 const CurrentRigsVersion = 1
