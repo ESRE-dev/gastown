@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -134,6 +136,16 @@ func startMayorSession(t *tmux.Tmux) error {
 	if err := t.SendKeysDelayed(MayorSessionName, claudeCmd, 200); err != nil {
 		return fmt.Errorf("sending command: %w", err)
 	}
+
+	// Wait for Claude to start (non-fatal)
+	if err := t.WaitForCommand(MayorSessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal
+	}
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject session beacon for predecessor discovery via /resume
+	beacon := session.SessionBeacon("mayor", "")
+	_ = t.NudgeSession(MayorSessionName, beacon) // Non-fatal
 
 	return nil
 }

@@ -11,9 +11,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/refinery"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -271,6 +273,20 @@ func ensureSession(t *tmux.Tmux, sessionName, workDir, role string) error {
 		return err
 	}
 
+	// Wait for Claude to start (non-fatal)
+	// Note: Deacon respawn loop makes beacon tricky - Claude restarts multiple times
+	// For non-respawn (mayor), inject beacon
+	if role != "deacon" {
+		if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+			// Non-fatal
+		}
+		time.Sleep(constants.ShutdownNotifyDelay)
+
+		// Inject session beacon for predecessor discovery via /resume
+		beacon := session.SessionBeacon(role, "")
+		_ = t.NudgeSession(sessionName, beacon) // Non-fatal
+	}
+
 	return nil
 }
 
@@ -305,6 +321,17 @@ func ensureWitness(t *tmux.Tmux, sessionName, rigPath, rigName string) error {
 	if err := t.SendKeysDelayed(sessionName, claudeCmd, 200); err != nil {
 		return err
 	}
+
+	// Wait for Claude to start (non-fatal)
+	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal
+	}
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject session beacon for predecessor discovery via /resume
+	address := fmt.Sprintf("%s/witness", rigName)
+	beacon := session.SessionBeacon(address, "patrol")
+	_ = t.NudgeSession(sessionName, beacon) // Non-fatal
 
 	return nil
 }
@@ -517,6 +544,17 @@ func ensureCrewSession(t *tmux.Tmux, sessionName, crewPath, rigName, crewName st
 		return err
 	}
 
+	// Wait for Claude to start (non-fatal)
+	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal
+	}
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject session beacon for predecessor discovery via /resume
+	address := fmt.Sprintf("%s/crew/%s", rigName, crewName)
+	beacon := session.SessionBeacon(address, "")
+	_ = t.NudgeSession(sessionName, beacon) // Non-fatal
+
 	return nil
 }
 
@@ -604,6 +642,17 @@ func ensurePolecatSession(t *tmux.Tmux, sessionName, polecatPath, rigName, polec
 	if err := t.SendKeysDelayed(sessionName, claudeCmd, 200); err != nil {
 		return err
 	}
+
+	// Wait for Claude to start (non-fatal)
+	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal
+	}
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject session beacon for predecessor discovery via /resume
+	address := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+	beacon := session.SessionBeacon(address, "")
+	_ = t.NudgeSession(sessionName, beacon) // Non-fatal
 
 	return nil
 }

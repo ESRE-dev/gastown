@@ -6,10 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/claude"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/witness"
@@ -332,6 +335,17 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 	if err := t.SendKeys(sessionName, fmt.Sprintf("export GT_ROLE=witness BD_ACTOR=%s GIT_AUTHOR_NAME=%s && claude --dangerously-skip-permissions", bdActor, bdActor)); err != nil {
 		return false, fmt.Errorf("sending command: %w", err)
 	}
+
+	// Wait for Claude to start (non-fatal)
+	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal
+	}
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject session beacon for predecessor discovery via /resume
+	address := fmt.Sprintf("%s/witness", rigName)
+	beacon := session.SessionBeacon(address, "patrol")
+	_ = t.NudgeSession(sessionName, beacon) // Non-fatal
 
 	return true, nil
 }

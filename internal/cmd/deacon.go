@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -196,6 +198,16 @@ func startDeaconSession(t *tmux.Tmux) error {
 	if err := t.SendKeys(DeaconSessionName, "export GT_ROLE=deacon BD_ACTOR=deacon GIT_AUTHOR_NAME=deacon && claude --dangerously-skip-permissions"); err != nil {
 		return fmt.Errorf("sending command: %w", err)
 	}
+
+	// Wait for Claude to start (non-fatal)
+	if err := t.WaitForCommand(DeaconSessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal
+	}
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject session beacon for predecessor discovery via /resume
+	beacon := session.SessionBeacon("deacon", "patrol")
+	_ = t.NudgeSession(DeaconSessionName, beacon) // Non-fatal
 
 	return nil
 }

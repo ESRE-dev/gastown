@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -797,6 +798,13 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		// Give Claude time to initialize after process starts
 		time.Sleep(constants.ShutdownNotifyDelay)
 
+		// Inject session beacon for predecessor discovery via /resume
+		address := fmt.Sprintf("%s/crew/%s", rigName, name)
+		beacon := session.SessionBeacon(address, "")
+		if err := t.NudgeSession(sessionID, beacon); err != nil {
+			// Non-fatal: session works without beacon
+		}
+
 		// Send gt prime to initialize context
 		if err := t.SendKeys(sessionID, "gt prime"); err != nil {
 			style.PrintWarning("Could not send prime command: %v", err)
@@ -930,6 +938,11 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 
 	// Give Claude time to initialize
 	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject session beacon for predecessor discovery via /resume
+	address := fmt.Sprintf("%s/crew/%s", rigName, crewName)
+	beacon := session.SessionBeacon(address, "")
+	_ = t.NudgeSession(sessionID, beacon) // Non-fatal
 
 	// Send gt prime to initialize context (non-fatal: session works without priming)
 	_ = t.SendKeys(sessionID, "gt prime")

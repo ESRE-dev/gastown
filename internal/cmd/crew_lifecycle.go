@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -181,6 +182,18 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("starting claude: %w", err)
 	}
 
+	// Wait for Claude to start
+	shells := constants.SupportedShells
+	if err := t.WaitForCommand(sessionID, shells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal
+	}
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject session beacon for predecessor discovery via /resume
+	address := fmt.Sprintf("%s/crew/%s", r.Name, name)
+	beacon := session.SessionBeacon(address, "")
+	_ = t.NudgeSession(sessionID, beacon) // Non-fatal
+
 	fmt.Printf("%s Refreshed crew workspace: %s/%s\n",
 		style.Bold.Render("✓"), r.Name, name)
 	fmt.Printf("Attach with: %s\n", style.Dim.Render(fmt.Sprintf("gt crew at %s", name)))
@@ -330,6 +343,14 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 		}
 		// Give Claude time to initialize after process starts
 		time.Sleep(constants.ShutdownNotifyDelay)
+
+		// Inject session beacon for predecessor discovery via /resume
+		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
+		beacon := session.SessionBeacon(address, "")
+		if err := t.NudgeSession(sessionID, beacon); err != nil {
+			// Non-fatal: session works without beacon
+		}
+
 		if err := t.SendKeys(sessionID, "gt prime"); err != nil {
 			// Non-fatal: Claude started but priming failed
 			style.PrintWarning("Could not send prime command to %s: %v", arg, err)
@@ -495,6 +516,12 @@ func restartCrewSession(rigName, crewName, clonePath string) error {
 		// Non-fatal warning
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject session beacon for predecessor discovery via /resume
+	address := fmt.Sprintf("%s/crew/%s", rigName, crewName)
+	beacon := session.SessionBeacon(address, "")
+	_ = t.NudgeSession(sessionID, beacon) // Non-fatal
+
 	if err := t.SendKeys(sessionID, "gt prime"); err != nil {
 		// Non-fatal
 	}

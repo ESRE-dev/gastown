@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/claude"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -183,6 +184,21 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	}
 	if err := m.tmux.SendKeys(sessionID, command); err != nil {
 		return fmt.Errorf("sending command: %w", err)
+	}
+
+	// Wait for Claude to start (non-fatal: session continues even if this times out)
+	if err := m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal warning - Claude might still start
+	}
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject session beacon for predecessor discovery via /resume
+	// This becomes the session title in Claude Code's session picker
+	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
+	molID := opts.Issue // Use issue ID if provided
+	beacon := SessionBeacon(address, molID)
+	if err := m.tmux.NudgeSession(sessionID, beacon); err != nil {
+		// Non-fatal: session works without beacon
 	}
 
 	return nil
