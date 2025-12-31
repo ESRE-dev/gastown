@@ -164,6 +164,19 @@ The `gt done` command:
 - Witness verifies and forwards to Refinery
 - Refinery merges your branch to main
 
+### The Landing Rule
+
+> **Work is NOT landed until it's on `main` OR in the Refinery MQ.**
+
+Your branch sitting on origin is NOT landed. You must run `gt done` to submit it
+to the merge queue. Without this step:
+- Your work is invisible to other agents
+- The branch will go stale as main diverges
+- Merge conflicts will compound over time
+- Work can be lost if your polecat is recycled
+
+**Branch → `gt done` → MR in queue → Refinery merges → LANDED**
+
 ---
 
 ## Self-Managed Session Lifecycle
