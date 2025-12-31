@@ -3,6 +3,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"time"
 )
 
@@ -103,6 +104,7 @@ type RigSettings struct {
 	Theme      *ThemeConfig      `json:"theme,omitempty"`       // tmux theme settings
 	Namepool   *NamepoolConfig   `json:"namepool,omitempty"`    // polecat name pool settings
 	Crew       *CrewConfig       `json:"crew,omitempty"`        // crew startup settings
+	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings
 }
 
 // CrewConfig represents crew workspace settings for a rig.
@@ -117,6 +119,85 @@ type CrewConfig struct {
 	//   "max, but not emma"      - start max, skip emma
 	// If empty, defaults to starting no crew automatically.
 	Startup string `json:"startup,omitempty"`
+}
+
+// RuntimeConfig represents LLM runtime configuration for agent sessions.
+// This allows switching between different LLM backends (claude, aider, etc.)
+// without modifying startup code.
+type RuntimeConfig struct {
+	// Command is the CLI command to invoke (e.g., "claude", "aider").
+	// Default: "claude"
+	Command string `json:"command,omitempty"`
+
+	// Args are additional command-line arguments.
+	// Default: ["--dangerously-skip-permissions"]
+	Args []string `json:"args,omitempty"`
+
+	// InitialPrompt is an optional first message to send after startup.
+	// For claude, this is passed as the prompt argument.
+	// Empty by default (hooks handle context).
+	InitialPrompt string `json:"initial_prompt,omitempty"`
+}
+
+// DefaultRuntimeConfig returns a RuntimeConfig with sensible defaults.
+func DefaultRuntimeConfig() *RuntimeConfig {
+	return &RuntimeConfig{
+		Command: "claude",
+		Args:    []string{"--dangerously-skip-permissions"},
+	}
+}
+
+// BuildCommand returns the full command line string.
+// For use with tmux SendKeys.
+func (rc *RuntimeConfig) BuildCommand() string {
+	if rc == nil {
+		return DefaultRuntimeConfig().BuildCommand()
+	}
+
+	cmd := rc.Command
+	if cmd == "" {
+		cmd = "claude"
+	}
+
+	// Build args
+	args := rc.Args
+	if args == nil {
+		args = []string{"--dangerously-skip-permissions"}
+	}
+
+	// Combine command and args
+	if len(args) > 0 {
+		return cmd + " " + strings.Join(args, " ")
+	}
+	return cmd
+}
+
+// BuildCommandWithPrompt returns the full command line with an initial prompt.
+// If the config has an InitialPrompt, it's appended as a quoted argument.
+// If prompt is provided, it overrides the config's InitialPrompt.
+func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
+	base := rc.BuildCommand()
+
+	// Use provided prompt or fall back to config
+	p := prompt
+	if p == "" && rc != nil {
+		p = rc.InitialPrompt
+	}
+
+	if p == "" {
+		return base
+	}
+
+	// Quote the prompt for shell safety
+	return base + " " + quoteForShell(p)
+}
+
+// quoteForShell quotes a string for safe shell usage.
+func quoteForShell(s string) string {
+	// Simple quoting: wrap in double quotes, escape internal quotes
+	escaped := strings.ReplaceAll(s, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	return `"` + escaped + `"`
 }
 
 // ThemeConfig represents tmux theme settings for a rig.

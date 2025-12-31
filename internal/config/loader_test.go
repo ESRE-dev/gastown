@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -800,5 +801,200 @@ func TestMessagingConfigPath(t *testing.T) {
 	expected := "/home/user/gt/config/messaging.json"
 	if path != expected {
 		t.Errorf("MessagingConfigPath = %q, want %q", path, expected)
+	}
+}
+
+func TestRuntimeConfigDefaults(t *testing.T) {
+	rc := DefaultRuntimeConfig()
+	if rc.Command != "claude" {
+		t.Errorf("Command = %q, want %q", rc.Command, "claude")
+	}
+	if len(rc.Args) != 1 || rc.Args[0] != "--dangerously-skip-permissions" {
+		t.Errorf("Args = %v, want [--dangerously-skip-permissions]", rc.Args)
+	}
+}
+
+func TestRuntimeConfigBuildCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		rc   *RuntimeConfig
+		want string
+	}{
+		{
+			name: "nil config uses defaults",
+			rc:   nil,
+			want: "claude --dangerously-skip-permissions",
+		},
+		{
+			name: "default config",
+			rc:   DefaultRuntimeConfig(),
+			want: "claude --dangerously-skip-permissions",
+		},
+		{
+			name: "custom command",
+			rc:   &RuntimeConfig{Command: "aider", Args: []string{"--no-git"}},
+			want: "aider --no-git",
+		},
+		{
+			name: "multiple args",
+			rc:   &RuntimeConfig{Command: "claude", Args: []string{"--model", "opus", "--no-confirm"}},
+			want: "claude --model opus --no-confirm",
+		},
+		{
+			name: "empty command uses default",
+			rc:   &RuntimeConfig{Command: "", Args: nil},
+			want: "claude --dangerously-skip-permissions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.rc.BuildCommand()
+			if got != tt.want {
+				t.Errorf("BuildCommand() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
+	tests := []struct {
+		name   string
+		rc     *RuntimeConfig
+		prompt string
+		want   string
+	}{
+		{
+			name:   "no prompt",
+			rc:     DefaultRuntimeConfig(),
+			prompt: "",
+			want:   "claude --dangerously-skip-permissions",
+		},
+		{
+			name:   "with prompt",
+			rc:     DefaultRuntimeConfig(),
+			prompt: "gt prime",
+			want:   `claude --dangerously-skip-permissions "gt prime"`,
+		},
+		{
+			name:   "prompt with quotes",
+			rc:     DefaultRuntimeConfig(),
+			prompt: `Hello "world"`,
+			want:   `claude --dangerously-skip-permissions "Hello \"world\""`,
+		},
+		{
+			name:   "config initial prompt used if no override",
+			rc:     &RuntimeConfig{Command: "aider", Args: []string{}, InitialPrompt: "/help"},
+			prompt: "",
+			want:   `aider "/help"`,
+		},
+		{
+			name:   "override takes precedence over config",
+			rc:     &RuntimeConfig{Command: "aider", Args: []string{}, InitialPrompt: "/help"},
+			prompt: "custom prompt",
+			want:   `aider "custom prompt"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.rc.BuildCommandWithPrompt(tt.prompt)
+			if got != tt.want {
+				t.Errorf("BuildCommandWithPrompt(%q) = %q, want %q", tt.prompt, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildAgentStartupCommand(t *testing.T) {
+	// Test without rig config (uses defaults)
+	cmd := BuildAgentStartupCommand("witness", "gastown/witness", "", "")
+
+	// Should contain environment exports and claude command
+	if !strings.Contains(cmd, "export") {
+		t.Error("expected export in command")
+	}
+	if !strings.Contains(cmd, "GT_ROLE=witness") {
+		t.Error("expected GT_ROLE=witness in command")
+	}
+	if !strings.Contains(cmd, "BD_ACTOR=gastown/witness") {
+		t.Error("expected BD_ACTOR in command")
+	}
+	if !strings.Contains(cmd, "claude --dangerously-skip-permissions") {
+		t.Error("expected claude command in output")
+	}
+}
+
+func TestBuildPolecatStartupCommand(t *testing.T) {
+	cmd := BuildPolecatStartupCommand("gastown", "toast", "", "")
+
+	if !strings.Contains(cmd, "GT_ROLE=polecat") {
+		t.Error("expected GT_ROLE=polecat in command")
+	}
+	if !strings.Contains(cmd, "GT_RIG=gastown") {
+		t.Error("expected GT_RIG=gastown in command")
+	}
+	if !strings.Contains(cmd, "GT_POLECAT=toast") {
+		t.Error("expected GT_POLECAT=toast in command")
+	}
+	if !strings.Contains(cmd, "BD_ACTOR=gastown/polecats/toast") {
+		t.Error("expected BD_ACTOR in command")
+	}
+}
+
+func TestBuildCrewStartupCommand(t *testing.T) {
+	cmd := BuildCrewStartupCommand("gastown", "max", "", "")
+
+	if !strings.Contains(cmd, "GT_ROLE=crew") {
+		t.Error("expected GT_ROLE=crew in command")
+	}
+	if !strings.Contains(cmd, "GT_RIG=gastown") {
+		t.Error("expected GT_RIG=gastown in command")
+	}
+	if !strings.Contains(cmd, "GT_CREW=max") {
+		t.Error("expected GT_CREW=max in command")
+	}
+	if !strings.Contains(cmd, "BD_ACTOR=gastown/crew/max") {
+		t.Error("expected BD_ACTOR in command")
+	}
+}
+
+func TestLoadRuntimeConfigFromSettings(t *testing.T) {
+	// Create temp rig with custom runtime config
+	dir := t.TempDir()
+	settingsDir := filepath.Join(dir, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("creating settings dir: %v", err)
+	}
+
+	settings := NewRigSettings()
+	settings.Runtime = &RuntimeConfig{
+		Command: "aider",
+		Args:    []string{"--no-git", "--model", "claude-3"},
+	}
+	if err := SaveRigSettings(filepath.Join(settingsDir, "config.json"), settings); err != nil {
+		t.Fatalf("saving settings: %v", err)
+	}
+
+	// Load and verify
+	rc := LoadRuntimeConfig(dir)
+	if rc.Command != "aider" {
+		t.Errorf("Command = %q, want %q", rc.Command, "aider")
+	}
+	if len(rc.Args) != 3 {
+		t.Errorf("Args = %v, want 3 args", rc.Args)
+	}
+
+	cmd := rc.BuildCommand()
+	if cmd != "aider --no-git --model claude-3" {
+		t.Errorf("BuildCommand() = %q, want %q", cmd, "aider --no-git --model claude-3")
+	}
+}
+
+func TestLoadRuntimeConfigFallsBackToDefaults(t *testing.T) {
+	// Non-existent path should use defaults
+	rc := LoadRuntimeConfig("/nonexistent/path")
+	if rc.Command != "claude" {
+		t.Errorf("Command = %q, want %q (default)", rc.Command, "claude")
 	}
 }

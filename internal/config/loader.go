@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -688,4 +689,114 @@ func LoadOrCreateMessagingConfig(path string) (*MessagingConfig, error) {
 		return nil, err
 	}
 	return config, nil
+}
+
+// LoadRuntimeConfig loads the RuntimeConfig from a rig's settings.
+// Falls back to defaults if settings don't exist or don't specify runtime config.
+// rigPath should be the path to the rig directory (e.g., ~/gt/gastown).
+func LoadRuntimeConfig(rigPath string) *RuntimeConfig {
+	settingsPath := filepath.Join(rigPath, "settings", "config.json")
+	settings, err := LoadRigSettings(settingsPath)
+	if err != nil {
+		return DefaultRuntimeConfig()
+	}
+	if settings.Runtime == nil {
+		return DefaultRuntimeConfig()
+	}
+	// Fill in defaults for empty fields
+	rc := settings.Runtime
+	if rc.Command == "" {
+		rc.Command = "claude"
+	}
+	if rc.Args == nil {
+		rc.Args = []string{"--dangerously-skip-permissions"}
+	}
+	return rc
+}
+
+// GetRuntimeCommand is a convenience function that returns the full command string
+// for starting an LLM session. It loads the config and builds the command.
+func GetRuntimeCommand(rigPath string) string {
+	return LoadRuntimeConfig(rigPath).BuildCommand()
+}
+
+// GetRuntimeCommandWithPrompt returns the full command with an initial prompt.
+func GetRuntimeCommandWithPrompt(rigPath, prompt string) string {
+	return LoadRuntimeConfig(rigPath).BuildCommandWithPrompt(prompt)
+}
+
+// BuildStartupCommand builds a full startup command with environment exports.
+// envVars is a map of environment variable names to values.
+// rigPath is optional - if empty, uses defaults.
+// prompt is optional - if provided, appended as the initial prompt.
+func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) string {
+	var rc *RuntimeConfig
+	if rigPath != "" {
+		rc = LoadRuntimeConfig(rigPath)
+	} else {
+		rc = DefaultRuntimeConfig()
+	}
+
+	// Build environment export prefix
+	var exports []string
+	for k, v := range envVars {
+		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Sort for deterministic output
+	sort.Strings(exports)
+
+	var cmd string
+	if len(exports) > 0 {
+		cmd = "export " + strings.Join(exports, " ") + " && "
+	}
+
+	// Add runtime command
+	if prompt != "" {
+		cmd += rc.BuildCommandWithPrompt(prompt)
+	} else {
+		cmd += rc.BuildCommand()
+	}
+
+	return cmd
+}
+
+// BuildAgentStartupCommand is a convenience function for starting agent sessions.
+// It sets standard environment variables (GT_ROLE, BD_ACTOR, GIT_AUTHOR_NAME)
+// and builds the full startup command.
+func BuildAgentStartupCommand(role, bdActor, rigPath, prompt string) string {
+	envVars := map[string]string{
+		"GT_ROLE":         role,
+		"BD_ACTOR":        bdActor,
+		"GIT_AUTHOR_NAME": bdActor,
+	}
+	return BuildStartupCommand(envVars, rigPath, prompt)
+}
+
+// BuildPolecatStartupCommand builds the startup command for a polecat.
+// Sets GT_ROLE, GT_RIG, GT_POLECAT, BD_ACTOR, and GIT_AUTHOR_NAME.
+func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) string {
+	bdActor := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+	envVars := map[string]string{
+		"GT_ROLE":         "polecat",
+		"GT_RIG":          rigName,
+		"GT_POLECAT":      polecatName,
+		"BD_ACTOR":        bdActor,
+		"GIT_AUTHOR_NAME": polecatName,
+	}
+	return BuildStartupCommand(envVars, rigPath, prompt)
+}
+
+// BuildCrewStartupCommand builds the startup command for a crew member.
+// Sets GT_ROLE, GT_RIG, GT_CREW, BD_ACTOR, and GIT_AUTHOR_NAME.
+func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
+	bdActor := fmt.Sprintf("%s/crew/%s", rigName, crewName)
+	envVars := map[string]string{
+		"GT_ROLE":         "crew",
+		"GT_RIG":          rigName,
+		"GT_CREW":         crewName,
+		"BD_ACTOR":        bdActor,
+		"GIT_AUTHOR_NAME": crewName,
+	}
+	return BuildStartupCommand(envVars, rigPath, prompt)
 }
