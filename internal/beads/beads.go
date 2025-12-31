@@ -404,6 +404,8 @@ func (b *Beads) Blocked() ([]*Issue, error) {
 }
 
 // Create creates a new issue and returns it.
+// If opts.Actor is empty, it defaults to the BD_ACTOR environment variable.
+// This ensures created_by is populated for issue provenance tracking.
 func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	args := []string{"create", "--json"}
 
@@ -422,8 +424,13 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	if opts.Parent != "" {
 		args = append(args, "--parent="+opts.Parent)
 	}
-	if opts.Actor != "" {
-		args = append(args, "--actor="+opts.Actor)
+	// Default Actor from BD_ACTOR env var if not specified
+	actor := opts.Actor
+	if actor == "" {
+		actor = os.Getenv("BD_ACTOR")
+	}
+	if actor != "" {
+		args = append(args, "--actor="+actor)
 	}
 
 	out, err := b.run(args...)
@@ -784,6 +791,7 @@ func ParseAgentFields(description string) *AgentFields {
 // CreateAgentBead creates an agent bead for tracking agent lifecycle.
 // The ID format is: <prefix>-<rig>-<role>-<name> (e.g., gt-gastown-polecat-Toast)
 // Use AgentBeadID() helper to generate correct IDs.
+// The created_by field is populated from BD_ACTOR env var for provenance tracking.
 func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, error) {
 	description := FormatAgentDescription(title, fields)
 
@@ -792,6 +800,11 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--type=agent",
 		"--title=" + title,
 		"--description=" + description,
+	}
+
+	// Default actor from BD_ACTOR env var for provenance tracking
+	if actor := os.Getenv("BD_ACTOR"); actor != "" {
+		args = append(args, "--actor="+actor)
 	}
 
 	out, err := b.run(args...)
