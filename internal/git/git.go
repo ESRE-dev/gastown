@@ -743,7 +743,11 @@ func (g *Git) BranchPushedToRemote(localBranch, remote string) (bool, int, error
 		return n == 0, n, nil
 	}
 
-	// Remote branch exists - check if local is ahead
+	// Remote branch exists - fetch to ensure we have the local tracking ref
+	// This handles the case where we just pushed and origin/branch doesn't exist locally yet
+	_, _ = g.run("fetch", remote, localBranch)
+
+	// Check if local is ahead
 	count, err := g.run("rev-list", "--count", remoteBranch+"..HEAD")
 	if err != nil {
 		return false, 0, fmt.Errorf("counting unpushed commits: %w", err)
