@@ -198,12 +198,12 @@ gt mail inbox
 # Process each message: lifecycle requests, escalations
 ```
 
-**queue-scan**: Fetch remote and identify branches
+**queue-scan**: Check beads merge queue (source of truth)
 ```bash
-git fetch origin
-git branch -r | grep polecat
-gt refinery queue {{ .RigName }}
+git fetch --prune origin
+gt mq list {{ .RigName }}
 ```
+The beads MQ is the source of truth for pending merges, not git branches.
 If queue empty, skip to context-check step.
 
 **process-branch**: Pick next branch, rebase on main

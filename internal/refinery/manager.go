@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
@@ -239,14 +240,21 @@ func (m *Manager) Stop() error {
 }
 
 // Queue returns the current merge queue.
+// Uses beads merge-request issues as the source of truth (not git branches).
 func (m *Manager) Queue() ([]QueueItem, error) {
-	// Discover branches that look like polecat work branches
-	branches, err := m.discoverWorkBranches()
+	// Query beads for open merge-request type issues
+	// BeadsPath() returns the git-synced beads location
+	b := beads.New(m.rig.BeadsPath())
+	issues, err := b.List(beads.ListOptions{
+		Type:     "merge-request",
+		Status:   "open",
+		Priority: -1, // No priority filter
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("querying merge queue from beads: %w", err)
 	}
 
-	// Load any pending MRs from state
+	// Load any current processing state
 	ref, err := m.loadState()
 	if err != nil {
 		return nil, err
@@ -265,10 +273,14 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 		})
 	}
 
-	// Add discovered branches as pending
-	for _, branch := range branches {
-		mr := m.branchToMR(branch)
+	// Convert beads issues to queue items
+	for _, issue := range issues {
+		mr := m.issueToBead(issue)
 		if mr != nil {
+			// Skip if this is the currently processing MR
+			if ref.CurrentMR != nil && ref.CurrentMR.ID == mr.ID {
+				continue
+			}
 			items = append(items, QueueItem{
 				Position: pos,
 				MR:       mr,
@@ -279,6 +291,44 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	}
 
 	return items, nil
+}
+
+// issueToBead converts a beads issue to a MergeRequest.
+func (m *Manager) issueToBead(issue *beads.Issue) *MergeRequest {
+	if issue == nil {
+		return nil
+	}
+
+	fields := beads.ParseMRFields(issue)
+	if fields == nil {
+		// No MR fields in description, construct from title/ID
+		return &MergeRequest{
+			ID:           issue.ID,
+			IssueID:      issue.ID,
+			Status:       MROpen,
+			CreatedAt:    parseTime(issue.CreatedAt),
+			TargetBranch: "main",
+		}
+	}
+
+	return &MergeRequest{
+		ID:           issue.ID,
+		Branch:       fields.Branch,
+		Worker:       fields.Worker,
+		IssueID:      fields.SourceIssue,
+		TargetBranch: fields.Target,
+		Status:       MROpen,
+		CreatedAt:    parseTime(issue.CreatedAt),
+	}
+}
+
+// parseTime parses a time string, returning zero time on error.
+func parseTime(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t, _ = time.Parse("2006-01-02T15:04:05Z", s)
+	}
+	return t
 }
 
 // discoverWorkBranches finds branches that look like polecat work.
