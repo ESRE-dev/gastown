@@ -1,6 +1,6 @@
 # Gas Town
 
-Multi-agent orchestrator for Claude Code. Sling work to agents; they run it.
+Multi-agent orchestrator for Claude Code. Track work with convoys; sling to agents.
 
 ## Why Gas Town?
 
@@ -23,8 +23,13 @@ gt install ~/gt
 # Add a project
 gt rig add myproject --remote=https://github.com/you/repo.git
 
-# Sling work to a polecat (worker)
+# Create a convoy and sling work (standard workflow)
+gt convoy create "Feature X" issue-123 issue-456 --notify --human
 gt sling issue-123 myproject
+gt sling issue-456 myproject
+
+# Track progress on dashboard
+gt convoy list
 ```
 
 ## Core Concepts
@@ -47,15 +52,20 @@ Town (~/gt/)              Your workspace
 ### Minimal (No Tmux)
 Run individual Claude Code instances manually. Gas Town just tracks state.
 ```bash
-gt sling issue-123 myproject      # Creates work assignment
-claude --resume                    # Agent reads mail, runs work
+gt convoy create "Fix bugs" issue-123  # Create convoy (sling auto-creates if skipped)
+gt sling issue-123 myproject           # Assign to worker
+claude --resume                        # Agent reads mail, runs work
+gt convoy list                         # Check progress
 ```
 
 ### Full Stack (Tmux)
 Agents run in tmux sessions. Daemon manages lifecycle.
 ```bash
-gt daemon start                    # Start lifecycle manager
-gt sling issue-123 myproject       # Spawns polecat automatically
+gt daemon start                        # Start lifecycle manager
+gt convoy create "Feature X" issue-123 issue-456
+gt sling issue-123 myproject           # Spawns polecat automatically
+gt sling issue-456 myproject           # Another worker
+gt convoy list                         # Dashboard view
 ```
 
 ### Pick Your Roles
@@ -99,7 +109,9 @@ needs = ["test"]
 bd formula list                    # See available formulas
 bd cook shiny                      # Cook into a protomolecule
 bd mol pour shiny --var feature=auth   # Create runnable molecule
+gt convoy create "Auth feature" gt-xyz  # Track with convoy
 gt sling gt-xyz myproject          # Assign to worker
+gt convoy list                     # Monitor progress
 ```
 
 ### What Happens
@@ -178,7 +190,12 @@ Most other work happens through agents - just ask them.
 ### For Agents
 
 ```bash
-# Work
+# Convoy (primary dashboard)
+gt convoy list                    # Active work across all rigs
+gt convoy status <id>             # Detailed convoy progress
+gt convoy create "name" <issues>  # Create new convoy
+
+# Work assignment
 gt sling <bead> <rig>             # Assign work to polecat
 bd ready                          # Show available work
 bd list --status=in_progress      # Active work

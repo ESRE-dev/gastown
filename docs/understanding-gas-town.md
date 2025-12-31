@@ -138,7 +138,8 @@ For work that should be owned by the target rig:
 # Create issue in target rig
 bd create --prefix beads "Fix authentication bug"
 
-# Sling to target rig's workers
+# Create convoy and sling to target rig
+gt convoy create "Auth fix" bd-xyz
 gt sling bd-xyz beads
 ```
 

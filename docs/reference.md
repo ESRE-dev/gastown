@@ -214,23 +214,28 @@ gt rig list
 gt rig remove <name>
 ```
 
-### Work Assignment
+### Convoy Management (Primary Dashboard)
 ```bash
-gt sling <bead> <rig>        # Assign to polecat
-gt sling <bead> <rig> --molecule=<proto>
-```
-
-### Convoy Management (Work Tracking)
-```bash
+gt convoy list                          # Dashboard of active convoys
+gt convoy status [convoy-id]            # Show progress (🚚 hq-cv-*)
 gt convoy create "name" [issues...]     # Create convoy tracking issues
 gt convoy create "name" gt-a bd-b --notify mayor/  # With notification
-gt convoy status [convoy-id]            # Show progress (🚚 hq-cv-*)
-gt convoy list                          # Dashboard of active convoys
 gt convoy list --all                    # Include landed convoys
 gt convoy list --status=closed          # Only landed convoys
 ```
 
 Note: "Swarm" is ephemeral (workers on a convoy's issues). See [Convoys](convoy.md).
+
+### Work Assignment
+```bash
+# Standard workflow: convoy first, then sling
+gt convoy create "Feature X" gt-abc gt-def
+gt sling gt-abc <rig>                    # Assign to polecat
+gt sling gt-def <rig> --molecule=<proto> # With workflow template
+
+# Quick sling (auto-creates convoy)
+gt sling <bead> <rig>                    # Auto-convoy for dashboard visibility
+```
 
 ### Communication
 ```bash
