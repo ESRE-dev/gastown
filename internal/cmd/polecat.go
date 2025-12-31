@@ -237,13 +237,20 @@ This is the nuclear option for post-merge cleanup. It:
   3. Deletes the polecat branch
   4. Closes the agent bead (if exists)
 
-Use this after the Refinery has merged the polecat's work.
+SAFETY CHECKS: The command refuses to nuke a polecat if:
+  - Worktree has unpushed/uncommitted changes
+  - Polecat has an open merge request (MR bead)
+  - Polecat has work on its hook
+
+Use --force to bypass safety checks (LOSES WORK).
+Use --dry-run to see what would happen and safety check status.
 
 Examples:
   gt polecat nuke greenplace/Toast
   gt polecat nuke greenplace/Toast greenplace/Furiosa
   gt polecat nuke greenplace --all
-  gt polecat nuke greenplace --all --dry-run`,
+  gt polecat nuke greenplace --all --dry-run
+  gt polecat nuke greenplace/Toast --force  # bypass safety checks`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runPolecatNuke,
 }
@@ -312,7 +319,7 @@ func init() {
 	// Nuke flags
 	polecatNukeCmd.Flags().BoolVar(&polecatNukeAll, "all", false, "Nuke all polecats in the rig")
 	polecatNukeCmd.Flags().BoolVar(&polecatNukeDryRun, "dry-run", false, "Show what would be nuked without doing it")
-	polecatNukeCmd.Flags().BoolVarP(&polecatNukeForce, "force", "f", false, "Force nuke even if polecat has unpushed work")
+	polecatNukeCmd.Flags().BoolVarP(&polecatNukeForce, "force", "f", false, "Force nuke, bypassing all safety checks (LOSES WORK)")
 
 	// Check-recovery flags
 	polecatCheckRecoveryCmd.Flags().BoolVar(&polecatCheckRecoveryJSON, "json", false, "Output as JSON")
@@ -1341,55 +1348,107 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check recovery status for each polecat unless --force is set
-	// This prevents accidental data loss when nuking polecats with unpushed work
+	// Safety checks: refuse to nuke polecats with active work unless --force is set
+	// Checks:
+	// 1. Unpushed commits - worktree has uncommitted/unpushed changes
+	// 2. Open MR beads - polecat has open merge requests pending
+	// 3. Work on hook - polecat has work assigned to its hook
 	if !polecatNukeForce && !polecatNukeDryRun {
-		var needsRecovery []string
+		type blockReason struct {
+			polecat string
+			reasons []string
+		}
+		var blocked []blockReason
+
 		for _, p := range toNuke {
-			// Check cleanup_status from agent bead
+			var reasons []string
+
+			// Get polecat info for branch name
+			polecatInfo, infoErr := p.mgr.Get(p.polecatName)
+
+			// Check 1: Unpushed commits via cleanup_status or git state
 			bd := beads.New(p.r.Path)
 			agentBeadID := beads.PolecatBeadID(p.rigName, p.polecatName)
-			_, fields, err := bd.GetAgentBead(agentBeadID)
+			agentIssue, fields, err := bd.GetAgentBead(agentBeadID)
 
-			var recoveryNeeded bool
 			if err != nil || fields == nil {
 				// No agent bead - fall back to git check
-				polecatInfo, infoErr := p.mgr.Get(p.polecatName)
 				if infoErr == nil && polecatInfo != nil {
 					gitState, gitErr := getGitState(polecatInfo.ClonePath)
-					if gitErr != nil || !gitState.Clean {
-						recoveryNeeded = true
+					if gitErr != nil {
+						reasons = append(reasons, "cannot check git state")
+					} else if !gitState.Clean {
+						if gitState.UnpushedCommits > 0 {
+							reasons = append(reasons, fmt.Sprintf("has %d unpushed commit(s)", gitState.UnpushedCommits))
+						} else if len(gitState.UncommittedFiles) > 0 {
+							reasons = append(reasons, fmt.Sprintf("has %d uncommitted file(s)", len(gitState.UncommittedFiles)))
+						} else if gitState.StashCount > 0 {
+							reasons = append(reasons, fmt.Sprintf("has %d stash(es)", gitState.StashCount))
+						}
 					}
 				}
 			} else {
 				// Check cleanup_status from agent bead
 				switch fields.CleanupStatus {
 				case "clean":
-					recoveryNeeded = false
-				case "has_uncommitted", "has_unpushed", "has_stash", "unknown", "":
-					recoveryNeeded = true
+					// OK
+				case "has_unpushed":
+					reasons = append(reasons, "has unpushed commits")
+				case "has_uncommitted":
+					reasons = append(reasons, "has uncommitted changes")
+				case "has_stash":
+					reasons = append(reasons, "has stashed changes")
+				case "unknown", "":
+					reasons = append(reasons, "cleanup status unknown")
 				default:
-					recoveryNeeded = true
+					reasons = append(reasons, fmt.Sprintf("cleanup status: %s", fields.CleanupStatus))
+				}
+
+				// Check 3: Work on hook (check both Issue.HookBead from slot and fields.HookBead)
+				hookBead := agentIssue.HookBead
+				if hookBead == "" {
+					hookBead = fields.HookBead
+				}
+				if hookBead != "" {
+					reasons = append(reasons, fmt.Sprintf("has work on hook (%s)", hookBead))
 				}
 			}
 
-			if recoveryNeeded {
-				needsRecovery = append(needsRecovery, fmt.Sprintf("%s/%s", p.rigName, p.polecatName))
+			// Check 2: Open MR beads for this branch
+			if infoErr == nil && polecatInfo != nil && polecatInfo.Branch != "" {
+				mr, mrErr := bd.FindMRForBranch(polecatInfo.Branch)
+				if mrErr == nil && mr != nil {
+					reasons = append(reasons, fmt.Sprintf("has open MR (%s)", mr.ID))
+				}
+			}
+
+			if len(reasons) > 0 {
+				blocked = append(blocked, blockReason{
+					polecat: fmt.Sprintf("%s/%s", p.rigName, p.polecatName),
+					reasons: reasons,
+				})
 			}
 		}
 
-		if len(needsRecovery) > 0 {
-			fmt.Printf("%s The following polecats have unpushed/uncommitted work:\n", style.Error.Render("Error:"))
-			for _, pc := range needsRecovery {
-				fmt.Printf("  - %s\n", pc)
+		if len(blocked) > 0 {
+			fmt.Printf("%s Cannot nuke the following polecats:\n\n", style.Error.Render("Error:"))
+			var polecatList []string
+			for _, b := range blocked {
+				fmt.Printf("  %s:\n", style.Bold.Render(b.polecat))
+				for _, r := range b.reasons {
+					fmt.Printf("    - %s\n", r)
+				}
+				polecatList = append(polecatList, b.polecat)
 			}
 			fmt.Println()
-			fmt.Println("These polecats NEED RECOVERY before cleanup.")
+			fmt.Println("Safety checks failed. Resolve issues before nuking, or use --force.")
 			fmt.Println("Options:")
-			fmt.Printf("  1. Escalate to Mayor: gt mail send mayor/ -s \"RECOVERY_NEEDED\" -m \"...\"\n")
-			fmt.Printf("  2. Force nuke (LOSES WORK): gt polecat nuke --force %s\n", strings.Join(needsRecovery, " "))
+			fmt.Printf("  1. Complete work: gt done (from polecat session)\n")
+			fmt.Printf("  2. Push changes: git push (from polecat worktree)\n")
+			fmt.Printf("  3. Escalate: gt mail send mayor/ -s \"RECOVERY_NEEDED\" -m \"...\"\n")
+			fmt.Printf("  4. Force nuke (LOSES WORK): gt polecat nuke --force %s\n", strings.Join(polecatList, " "))
 			fmt.Println()
-			return fmt.Errorf("blocked: %d polecat(s) need recovery", len(needsRecovery))
+			return fmt.Errorf("blocked: %d polecat(s) have active work", len(blocked))
 		}
 	}
 
@@ -1405,6 +1464,62 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  - Delete worktree: %s/polecats/%s\n", p.r.Path, p.polecatName)
 			fmt.Printf("  - Delete branch (if exists)\n")
 			fmt.Printf("  - Close agent bead: %s\n", beads.PolecatBeadID(p.rigName, p.polecatName))
+
+			// Show safety check status in dry-run
+			fmt.Printf("\n  Safety checks:\n")
+			polecatInfo, infoErr := p.mgr.Get(p.polecatName)
+			bd := beads.New(p.r.Path)
+			agentBeadID := beads.PolecatBeadID(p.rigName, p.polecatName)
+			agentIssue, fields, err := bd.GetAgentBead(agentBeadID)
+
+			// Check 1: Git state
+			if err != nil || fields == nil {
+				if infoErr == nil && polecatInfo != nil {
+					gitState, gitErr := getGitState(polecatInfo.ClonePath)
+					if gitErr != nil {
+						fmt.Printf("    - Git state: %s\n", style.Warning.Render("cannot check"))
+					} else if gitState.Clean {
+						fmt.Printf("    - Git state: %s\n", style.Success.Render("clean"))
+					} else {
+						fmt.Printf("    - Git state: %s\n", style.Error.Render("dirty"))
+					}
+				} else {
+					fmt.Printf("    - Git state: %s\n", style.Dim.Render("unknown (no polecat info)"))
+				}
+				fmt.Printf("    - Hook: %s\n", style.Dim.Render("unknown (no agent bead)"))
+			} else {
+				if fields.CleanupStatus == "clean" {
+					fmt.Printf("    - Git state: %s\n", style.Success.Render("clean"))
+				} else if fields.CleanupStatus != "" {
+					fmt.Printf("    - Git state: %s (%s)\n", style.Error.Render("dirty"), fields.CleanupStatus)
+				} else {
+					fmt.Printf("    - Git state: %s\n", style.Warning.Render("unknown"))
+				}
+
+				hookBead := agentIssue.HookBead
+				if hookBead == "" {
+					hookBead = fields.HookBead
+				}
+				if hookBead != "" {
+					fmt.Printf("    - Hook: %s (%s)\n", style.Error.Render("has work"), hookBead)
+				} else {
+					fmt.Printf("    - Hook: %s\n", style.Success.Render("empty"))
+				}
+			}
+
+			// Check 2: Open MR
+			if infoErr == nil && polecatInfo != nil && polecatInfo.Branch != "" {
+				mr, mrErr := bd.FindMRForBranch(polecatInfo.Branch)
+				if mrErr == nil && mr != nil {
+					fmt.Printf("    - Open MR: %s (%s)\n", style.Error.Render("yes"), mr.ID)
+				} else {
+					fmt.Printf("    - Open MR: %s\n", style.Success.Render("none"))
+				}
+			} else {
+				fmt.Printf("    - Open MR: %s\n", style.Dim.Render("unknown (no branch info)"))
+			}
+
+			fmt.Println()
 			continue
 		}
 
