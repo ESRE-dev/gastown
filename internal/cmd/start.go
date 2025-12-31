@@ -753,7 +753,7 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 				style.PrintWarning("Timeout waiting for Claude to start: %v", err)
 			}
 			time.Sleep(constants.ShutdownNotifyDelay)
-			if err := t.SendKeys(sessionID, "gt prime"); err != nil {
+			if err := t.NudgeSession(sessionID, "gt prime"); err != nil {
 				style.PrintWarning("Could not send prime command: %v", err)
 			}
 		} else {
@@ -806,7 +806,7 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		}
 
 		// Send gt prime to initialize context
-		if err := t.SendKeys(sessionID, "gt prime"); err != nil {
+		if err := t.NudgeSession(sessionID, "gt prime"); err != nil {
 			style.PrintWarning("Could not send prime command: %v", err)
 		}
 
@@ -945,7 +945,7 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 	_ = t.NudgeSession(sessionID, beacon) // Non-fatal
 
 	// Send gt prime to initialize context (non-fatal: session works without priming)
-	_ = t.SendKeys(sessionID, "gt prime")
+	_ = t.NudgeSession(sessionID, "gt prime")
 
 	return nil
 }
