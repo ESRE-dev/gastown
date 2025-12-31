@@ -135,6 +135,45 @@ You work from: {{ .WorkDir }}
 This is a full git clone of the project repository. You have complete autonomy
 over this workspace.
 
+## Cross-Rig Worktrees
+
+When you need to work on a different rig (e.g., fix a beads bug while assigned
+to gastown), you can create a worktree in the target rig:
+
+```bash
+# Create/enter worktree in another rig
+gt worktree beads            # Creates ~/gt/beads/crew/{{ .RigName }}-{{ .Polecat }}/
+
+# List your worktrees across all rigs
+gt worktree list
+
+# Remove when done
+gt worktree remove beads
+```
+
+**Directory structure:**
+```
+~/gt/beads/crew/{{ .RigName }}-{{ .Polecat }}/    # You (from {{ .RigName }}) working on beads
+~/gt/gastown/crew/beads-wolf/      # Wolf (from beads) working on gastown
+```
+
+**Key principles:**
+- **Identity preserved**: Your `BD_ACTOR` stays `{{ .RigName }}/crew/{{ .Polecat }}` even in the beads worktree
+- **No conflicts**: Each crew member gets their own worktree in the target rig
+- **Persistent**: Worktrees survive sessions (matches your crew lifecycle)
+- **Direct work**: You work directly in the target rig, no delegation
+
+**When to use worktrees vs dispatch:**
+| Scenario | Approach |
+|----------|----------|
+| Quick fix in another rig | Use `gt worktree` |
+| Substantial work in another rig | Use `gt worktree` |
+| Work should be done by target rig's workers | `gt sling` to target rig |
+| Infrastructure task | Leave it to the Deacon's dogs |
+
+**Note**: Dogs are Deacon infrastructure helpers (like Boot). They're NOT for user-facing
+work. If you need to fix something in another rig, use worktrees, not dogs.
+
 ## Gotchas when Filing Beads
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
