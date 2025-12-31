@@ -12,31 +12,47 @@ import (
 )
 
 var hookCmd = &cobra.Command{
-	Use:     "hook <bead-id>",
+	Use:     "hook [bead-id]",
 	GroupID: GroupWork,
-	Short:   "Attach work to your hook (durable across restarts)",
-	Long: `Attach a bead (issue) to your hook for durable work tracking.
+	Short:   "Show or attach work on your hook",
+	Long: `Show what's on your hook, or attach new work.
+
+With no arguments, shows your current hook status (alias for 'gt mol status').
+With a bead ID, attaches that work to your hook.
 
 The hook is the "durability primitive" - work on your hook survives session
 restarts, context compaction, and handoffs. When you restart (via gt handoff),
 your SessionStart hook finds the attached work and you continue from where
 you left off.
 
-This is "assign without action" - use gt sling to also start immediately,
-or gt handoff to hook and restart with fresh context.
-
 Examples:
+  gt hook                           # Show what's on my hook
+  gt hook status                    # Same as above
   gt hook gt-abc                    # Attach issue gt-abc to your hook
   gt hook gt-abc -s "Fix the bug"   # With subject for handoff mail
-  gt hook gt-abc -m "Check tests"   # With context message
 
 Related commands:
-  gt mol status      # See what's on your hook
   gt sling <bead>    # Hook + start now (keep context)
   gt handoff <bead>  # Hook + restart (fresh context)
-  gt nudge <agent>   # Send message to trigger execution`,
-	Args: cobra.ExactArgs(1),
-	RunE: runHook,
+  gt unsling         # Remove work from hook`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runHookOrStatus,
+}
+
+// hookStatusCmd shows hook status (alias for mol status)
+var hookStatusCmd = &cobra.Command{
+	Use:   "status [target]",
+	Short: "Show what's on your hook",
+	Long: `Show what's slung on your hook.
+
+This is an alias for 'gt mol status'. Shows what work is currently
+attached to your hook, along with progress information.
+
+Examples:
+  gt hook status                    # Show my hook
+  gt hook status greenplace/nux     # Show nux's hook`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runMoleculeStatus,
 }
 
 var (
@@ -51,7 +67,22 @@ func init() {
 	hookCmd.Flags().StringVarP(&hookMessage, "message", "m", "", "Message for handoff mail (optional)")
 	hookCmd.Flags().BoolVarP(&hookDryRun, "dry-run", "n", false, "Show what would be done")
 	hookCmd.Flags().BoolVarP(&hookForce, "force", "f", false, "Replace existing incomplete pinned bead")
+
+	// Add status subcommand (shares --json flag with mol status)
+	hookStatusCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
+	hookCmd.AddCommand(hookStatusCmd)
+
 	rootCmd.AddCommand(hookCmd)
+}
+
+// runHookOrStatus dispatches to status or hook based on args
+func runHookOrStatus(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		// No args - show status
+		return runMoleculeStatus(cmd, args)
+	}
+	// Has arg - attach work
+	return runHook(cmd, args)
 }
 
 func runHook(cmd *cobra.Command, args []string) error {
