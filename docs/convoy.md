@@ -2,6 +2,22 @@
 
 Convoys are the primary unit for tracking batched work across rigs.
 
+## Quick Start
+
+```bash
+# Create a convoy tracking some issues
+gt convoy create "Feature X" gt-abc gt-def --notify overseer
+
+# Check progress
+gt convoy status hq-cv-abc
+
+# List active convoys (the dashboard)
+gt convoy list
+
+# See all convoys including landed ones
+gt convoy list --all
+```
+
 ## Concept
 
 A **convoy** is a persistent tracking unit that monitors related issues across
@@ -9,7 +25,7 @@ multiple rigs. When you kick off work - even a single issue - a convoy tracks it
 so you can see when it lands and what was included.
 
 ```
-                    Convoy (hq-abc)
+                 🚚 Convoy (hq-cv-abc)
                          │
             ┌────────────┼────────────┐
             │            │            │
@@ -33,7 +49,7 @@ so you can see when it lands and what was included.
 
 | Concept | Persistent? | ID | Description |
 |---------|-------------|-----|-------------|
-| **Convoy** | Yes | hq-* | Tracking unit. What you create, track, get notified about. |
+| **Convoy** | Yes | hq-cv-* | Tracking unit. What you create, track, get notified about. |
 | **Swarm** | No | None | Ephemeral. "The workers currently on this convoy's issues." |
 
 When you "kick off a swarm", you're really:
@@ -76,13 +92,15 @@ gt convoy create "Feature X" gt-a gt-b gt-c
 
 ### Add Issues
 
-```bash
-# Add to existing convoy
-gt convoy add hq-abc gt-new-issue
+> **Note**: `gt convoy add` is not yet implemented. Use `bd dep add` directly:
 
-# Adding to closed convoy reopens it
-gt convoy add hq-abc gt-followup-fix
-# → Convoy hq-abc reopened
+```bash
+# Add issue to existing convoy
+bd dep add hq-cv-abc gt-new-issue --type=tracks
+
+# Adding to closed convoy requires reopening first
+bd update hq-cv-abc --status=open
+bd dep add hq-cv-abc gt-followup-fix --type=tracks
 ```
 
 ### Check Status
@@ -97,32 +115,43 @@ gt convoy status
 
 Example output:
 ```
-Convoy: hq-abc (Deploy v2.0)
-════════════════════════════
+🚚 hq-cv-abc: Deploy v2.0
 
-Progress: 3/5 complete
+  Status:    ●
+  Progress:  2/4 completed
+  Created:   2025-12-30T10:15:00-08:00
 
-Issues
-  ✓ gt-xyz: Update API              closed
-  ✓ bd-abc: Fix validation          closed
-  → bd-ghi: Update docs             in_progress  @beads/amber
-  ○ gt-jkl: Deploy to prod          blocked by bd-ghi
-
-Workers (the swarm)
-  beads/amber     bd-ghi     running 12m
+  Tracked Issues:
+    ✓ gt-xyz: Update API endpoint [task]
+    ✓ bd-abc: Fix validation [bug]
+    ○ bd-ghi: Update docs [task]
+    ○ gt-jkl: Deploy to prod [task]
 ```
 
 ### List Convoys (Dashboard)
 
 ```bash
-# Active convoys - the primary attention view
-gt convoy list --active
-
-# All convoys
+# Active convoys (default) - the primary attention view
 gt convoy list
+
+# All convoys including landed
+gt convoy list --all
+
+# Only landed convoys
+gt convoy list --status=closed
 
 # JSON output
 gt convoy list --json
+```
+
+Example output:
+```
+Convoys
+
+  🚚 hq-cv-w3nm6: Feature X ●
+  🚚 hq-cv-abc12: Bug fixes ●
+
+Use 'gt convoy status <id>' for detailed view.
 ```
 
 ## Notifications
@@ -139,14 +168,13 @@ gt convoy create "Feature X" gt-abc --notify mayor/ --notify --human
 
 Notification content:
 ```
-📦 Convoy Landed: Deploy v2.0 (hq-abc)
+🚚 Convoy Landed: Deploy v2.0 (hq-cv-abc)
 
 Issues (3):
   ✓ gt-xyz: Update API endpoint
   ✓ gt-def: Add validation
   ✓ bd-abc: Update docs
 
-Workers: gastown/nux, gastown/furiosa, beads/amber
 Duration: 2h 15m
 ```
 
@@ -167,7 +195,7 @@ Even "swarm of one" gets convoy visibility.
 
 ## Cross-Rig Tracking
 
-Convoys live in town-level beads (hq-* prefix) and can track issues from any rig:
+Convoys live in town-level beads (`hq-cv-*` prefix) and can track issues from any rig:
 
 ```bash
 # Track issues from multiple rigs
