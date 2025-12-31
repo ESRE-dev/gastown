@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +15,13 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// generateShortID generates a short random ID (5 lowercase chars).
+func generateShortID() string {
+	b := make([]byte, 3)
+	rand.Read(b)
+	return strings.ToLower(base32.StdEncoding.EncodeToString(b)[:5])
+}
 
 // Convoy command flags
 var (
@@ -142,9 +151,13 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		description += fmt.Sprintf("\nMolecule: %s", convoyMolecule)
 	}
 
+	// Generate convoy ID with cv- prefix
+	convoyID := fmt.Sprintf("hq-cv-%s", generateShortID())
+
 	createArgs := []string{
 		"create",
 		"--type=convoy",
+		"--id=" + convoyID,
 		"--title=" + name,
 		"--description=" + description,
 		"--json",
@@ -161,17 +174,14 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating convoy: %w (%s)", err, strings.TrimSpace(stderr.String()))
 	}
 
-	// Parse created convoy ID
-	var created struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &created); err != nil {
-		return fmt.Errorf("parsing convoy response: %w", err)
-	}
-
-	convoyID := created.ID
-	if convoyID == "" {
-		return fmt.Errorf("convoy created but no ID returned")
+	// Store notify address in slot if specified (for convoy-cleanup to read)
+	if convoyNotify != "" {
+		slotArgs := []string{"slot", "set", convoyID, "notify", convoyNotify}
+		slotCmd := exec.Command("bd", slotArgs...)
+		slotCmd.Dir = townBeads
+		if err := slotCmd.Run(); err != nil {
+			style.PrintWarning("couldn't set notify slot: %v", err)
+		}
 	}
 
 	// Add 'tracks' relations for each tracked issue
@@ -190,7 +200,7 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output
-	fmt.Printf("%s Created convoy %s\n\n", style.Bold.Render("✓"), convoyID)
+	fmt.Printf("%s Created convoy 🚚 %s\n\n", style.Bold.Render("✓"), convoyID)
 	fmt.Printf("  Name:     %s\n", name)
 	fmt.Printf("  Tracking: %d issues\n", trackedCount)
 	if len(trackedIssues) > 0 {
@@ -295,7 +305,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Printf("%s %s\n\n", style.Bold.Render(convoy.ID+":"), convoy.Title)
+	fmt.Printf("🚚 %s %s\n\n", style.Bold.Render(convoy.ID+":"), convoy.Title)
 	fmt.Printf("  Status:    %s\n", formatConvoyStatus(convoy.Status))
 	fmt.Printf("  Progress:  %d/%d completed\n", completed, len(tracked))
 	fmt.Printf("  Created:   %s\n", convoy.CreatedAt)
@@ -356,7 +366,7 @@ func showAllConvoyStatus(townBeads string) error {
 
 	fmt.Printf("%s\n\n", style.Bold.Render("Active Convoys"))
 	for _, c := range convoys {
-		fmt.Printf("  %s: %s\n", c.ID, c.Title)
+		fmt.Printf("  🚚 %s: %s\n", c.ID, c.Title)
 	}
 	fmt.Printf("\nUse 'gt convoy status <id>' for detailed status.\n")
 
@@ -409,7 +419,7 @@ func runConvoyList(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s\n\n", style.Bold.Render("Convoys"))
 	for _, c := range convoys {
 		status := formatConvoyStatus(c.Status)
-		fmt.Printf("  %s: %s %s\n", c.ID, c.Title, status)
+		fmt.Printf("  🚚 %s: %s %s\n", c.ID, c.Title, status)
 	}
 	fmt.Printf("\nUse 'gt convoy status <id>' for detailed view.\n")
 
