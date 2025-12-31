@@ -218,7 +218,10 @@ func New(workDir string) *Beads {
 
 // run executes a bd command and returns stdout.
 func (b *Beads) run(args ...string) ([]byte, error) {
-	cmd := exec.Command("bd", args...)
+	// Use --no-daemon for faster read operations (avoids daemon IPC overhead)
+	// The daemon is primarily useful for write coalescing, not reads
+	fullArgs := append([]string{"--no-daemon"}, args...)
+	cmd := exec.Command("bd", fullArgs...)
 	cmd.Dir = b.workDir
 
 	var stdout, stderr bytes.Buffer
@@ -387,6 +390,55 @@ func (b *Beads) Show(id string) (*Issue, error) {
 	}
 
 	return issues[0], nil
+}
+
+// ShowMultiple fetches multiple issues by ID in a single bd call.
+// Returns a map of ID to Issue. Missing IDs are not included in the map.
+func (b *Beads) ShowMultiple(ids []string) (map[string]*Issue, error) {
+	if len(ids) == 0 {
+		return make(map[string]*Issue), nil
+	}
+
+	// bd show supports multiple IDs
+	args := append([]string{"show", "--json"}, ids...)
+	out, err := b.run(args...)
+	if err != nil {
+		// If bd fails, return empty map (some IDs might not exist)
+		return make(map[string]*Issue), nil
+	}
+
+	var issues []*Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("parsing bd show output: %w", err)
+	}
+
+	result := make(map[string]*Issue, len(issues))
+	for _, issue := range issues {
+		result[issue.ID] = issue
+	}
+
+	return result, nil
+}
+
+// ListAgentBeads returns all agent beads in a single query.
+// Returns a map of agent bead ID to Issue.
+func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
+	out, err := b.run("list", "--type=agent", "--json")
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []*Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	}
+
+	result := make(map[string]*Issue, len(issues))
+	for _, issue := range issues {
+		result[issue.ID] = issue
+	}
+
+	return result, nil
 }
 
 // Blocked returns issues that are blocked by dependencies.
