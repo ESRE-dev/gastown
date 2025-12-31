@@ -2,11 +2,14 @@
 package refinery
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -200,8 +203,6 @@ type ProcessResult struct {
 }
 
 // ProcessMR processes a single merge request from a beads issue.
-// Note: The Refinery agent primarily processes merges via git commands
-// in the role prompt, not via this Go code path.
 func (e *Engineer) ProcessMR(ctx context.Context, mr *beads.Issue) ProcessResult {
 	// Parse MR fields from description
 	mrFields := beads.ParseMRFields(mr)
@@ -212,16 +213,164 @@ func (e *Engineer) ProcessMR(ctx context.Context, mr *beads.Issue) ProcessResult
 		}
 	}
 
-	// Log what we would process
-	fmt.Fprintln(e.output, "[Engineer] Would process:")
+	// Log what we're processing
+	fmt.Fprintln(e.output, "[Engineer] Processing MR:")
 	fmt.Fprintf(e.output, "  Branch: %s\n", mrFields.Branch)
 	fmt.Fprintf(e.output, "  Target: %s\n", mrFields.Target)
 	fmt.Fprintf(e.output, "  Worker: %s\n", mrFields.Worker)
 
-	// This code path is not used in production - Refinery agent uses git commands
+	return e.doMerge(ctx, mrFields.Branch, mrFields.Target, mrFields.SourceIssue)
+}
+
+// doMerge performs the actual git merge operation.
+// This is the core merge logic shared by ProcessMR and ProcessMRFromQueue.
+func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue string) ProcessResult {
+	// Step 1: Fetch the source branch from origin
+	fmt.Fprintf(e.output, "[Engineer] Fetching branch %s from origin...\n", branch)
+	if err := e.git.FetchBranch("origin", branch); err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to fetch branch %s: %v", branch, err),
+		}
+	}
+
+	// Step 2: Checkout the target branch
+	fmt.Fprintf(e.output, "[Engineer] Checking out target branch %s...\n", target)
+	if err := e.git.Checkout(target); err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to checkout target %s: %v", target, err),
+		}
+	}
+
+	// Make sure target is up to date with origin
+	if err := e.git.Pull("origin", target); err != nil {
+		// Pull might fail if nothing to pull, that's ok
+		fmt.Fprintf(e.output, "[Engineer] Warning: pull from origin/%s: %v (continuing)\n", target, err)
+	}
+
+	// Step 3: Check for merge conflicts
+	fmt.Fprintf(e.output, "[Engineer] Checking for conflicts...\n")
+	remoteBranch := "origin/" + branch
+	conflicts, err := e.git.CheckConflicts(remoteBranch, target)
+	if err != nil {
+		return ProcessResult{
+			Success:  false,
+			Conflict: true,
+			Error:    fmt.Sprintf("conflict check failed: %v", err),
+		}
+	}
+	if len(conflicts) > 0 {
+		return ProcessResult{
+			Success:  false,
+			Conflict: true,
+			Error:    fmt.Sprintf("merge conflicts in: %v", conflicts),
+		}
+	}
+
+	// Step 4: Run tests if configured
+	if e.config.RunTests && e.config.TestCommand != "" {
+		fmt.Fprintf(e.output, "[Engineer] Running tests: %s\n", e.config.TestCommand)
+		result := e.runTests(ctx)
+		if !result.Success {
+			return ProcessResult{
+				Success:     false,
+				TestsFailed: true,
+				Error:       result.Error,
+			}
+		}
+		fmt.Fprintln(e.output, "[Engineer] Tests passed")
+	}
+
+	// Step 5: Perform the actual merge
+	mergeMsg := fmt.Sprintf("Merge %s into %s", branch, target)
+	if sourceIssue != "" {
+		mergeMsg = fmt.Sprintf("Merge %s into %s (%s)", branch, target, sourceIssue)
+	}
+	fmt.Fprintf(e.output, "[Engineer] Merging with message: %s\n", mergeMsg)
+	if err := e.git.MergeNoFF(remoteBranch, mergeMsg); err != nil {
+		if errors.Is(err, git.ErrMergeConflict) {
+			_ = e.git.AbortMerge()
+			return ProcessResult{
+				Success:  false,
+				Conflict: true,
+				Error:    "merge conflict during actual merge",
+			}
+		}
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("merge failed: %v", err),
+		}
+	}
+
+	// Step 6: Get the merge commit SHA
+	mergeCommit, err := e.git.Rev("HEAD")
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to get merge commit SHA: %v", err),
+		}
+	}
+
+	// Step 7: Push to origin
+	fmt.Fprintf(e.output, "[Engineer] Pushing to origin/%s...\n", target)
+	if err := e.git.Push("origin", target, false); err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to push to origin: %v", err),
+		}
+	}
+
+	fmt.Fprintf(e.output, "[Engineer] Successfully merged: %s\n", mergeCommit[:8])
 	return ProcessResult{
-		Success: false,
-		Error:   "ProcessMR: use Refinery agent's git-based merge flow instead",
+		Success:     true,
+		MergeCommit: mergeCommit,
+	}
+}
+
+// runTests runs the configured test command and returns the result.
+func (e *Engineer) runTests(ctx context.Context) ProcessResult {
+	if e.config.TestCommand == "" {
+		return ProcessResult{Success: true}
+	}
+
+	// Run the test command with retries for flaky tests
+	maxRetries := e.config.RetryFlakyTests
+	if maxRetries < 1 {
+		maxRetries = 1
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			fmt.Fprintf(e.output, "[Engineer] Retrying tests (attempt %d/%d)...\n", attempt, maxRetries)
+		}
+
+		cmd := exec.CommandContext(ctx, "sh", "-c", e.config.TestCommand)
+		cmd.Dir = e.workDir
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		err := cmd.Run()
+		if err == nil {
+			return ProcessResult{Success: true}
+		}
+		lastErr = err
+
+		// Check if context was cancelled
+		if ctx.Err() != nil {
+			return ProcessResult{
+				Success: false,
+				Error:   "test run cancelled",
+			}
+		}
+	}
+
+	return ProcessResult{
+		Success:     false,
+		TestsFailed: true,
+		Error:       fmt.Sprintf("tests failed after %d attempts: %v", maxRetries, lastErr),
 	}
 }
 
@@ -296,8 +445,6 @@ func (e *Engineer) handleFailure(mr *beads.Issue, result ProcessResult) {
 }
 
 // ProcessMRFromQueue processes a merge request from wisp queue.
-// Note: The Refinery agent primarily processes merges via git commands
-// in the role prompt, not via this Go code path.
 func (e *Engineer) ProcessMRFromQueue(ctx context.Context, mr *mrqueue.MR) ProcessResult {
 	// MR fields are directly on the struct (no parsing needed)
 	fmt.Fprintln(e.output, "[Engineer] Processing MR from queue:")
@@ -311,11 +458,8 @@ func (e *Engineer) ProcessMRFromQueue(ctx context.Context, mr *mrqueue.MR) Proce
 		fmt.Fprintf(e.output, "[Engineer] Warning: failed to log merge_started event: %v\n", err)
 	}
 
-	// This code path is not used in production - Refinery agent uses git commands
-	return ProcessResult{
-		Success: false,
-		Error:   "ProcessMRFromQueue: use Refinery agent's git-based merge flow instead",
-	}
+	// Use the shared merge logic
+	return e.doMerge(ctx, mr.Branch, mr.Target, mr.SourceIssue)
 }
 
 // handleSuccessFromQueue handles a successful merge from wisp queue.
