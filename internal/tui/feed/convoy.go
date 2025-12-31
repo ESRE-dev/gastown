@@ -2,6 +2,7 @@ package feed
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -16,6 +17,10 @@ import (
 
 // convoyIDPattern validates convoy IDs to prevent SQL injection
 var convoyIDPattern = regexp.MustCompile(`^hq-[a-zA-Z0-9-]+$`)
+
+// convoySubprocessTimeout is the timeout for bd and sqlite3 calls in the convoy panel.
+// Prevents TUI freezing if these commands hang.
+const convoySubprocessTimeout = 5 * time.Second
 
 // Convoy represents a convoy's status for the dashboard
 type Convoy struct {
@@ -85,7 +90,10 @@ func FetchConvoys(townRoot string) (*ConvoyState, error) {
 func listConvoys(beadsDir, status string) ([]convoyListItem, error) {
 	listArgs := []string{"list", "--type=convoy", "--status=" + status, "--json"}
 
-	cmd := exec.Command("bd", listArgs...)
+	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", listArgs...)
 	cmd.Dir = beadsDir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -156,9 +164,12 @@ func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
 
 	dbPath := filepath.Join(beadsDir, "beads.db")
 
+	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
+	defer cancel()
+
 	// Query tracked dependencies from SQLite
 	// convoyID is validated above to match ^hq-[a-zA-Z0-9-]+$
-	cmd := exec.Command("sqlite3", "-json", dbPath,
+	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath,
 		fmt.Sprintf(`SELECT depends_on_id FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, convoyID))
 
 	var stdout bytes.Buffer
@@ -196,7 +207,10 @@ func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
 
 // getIssueStatus fetches just the status of an issue
 func getIssueStatus(issueID string) string {
-	cmd := exec.Command("bd", "show", issueID, "--json")
+	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", "show", issueID, "--json")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
