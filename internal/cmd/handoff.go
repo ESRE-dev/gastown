@@ -322,13 +322,15 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// For respawn-pane, we:
 	// 1. cd to the right directory (role's canonical home)
 	// 2. export GT_ROLE and BD_ACTOR so role detection works correctly
-	// 3. run claude
-	// The SessionStart hook will run gt prime.
+	// 3. run claude with "gt prime" as initial prompt (triggers GUPP)
 	// Use exec to ensure clean process replacement.
+	// IMPORTANT: Passing "gt prime" as argument injects it as the first prompt,
+	// which triggers the agent to execute immediately. Without this, agents
+	// wait for user input despite all GUPP prompting in hooks.
 	if gtRole != "" {
-		return fmt.Sprintf("cd %s && export GT_ROLE=%s BD_ACTOR=%s GIT_AUTHOR_NAME=%s && exec claude --dangerously-skip-permissions", workDir, gtRole, gtRole, gtRole), nil
+		return fmt.Sprintf("cd %s && export GT_ROLE=%s BD_ACTOR=%s GIT_AUTHOR_NAME=%s && exec claude --dangerously-skip-permissions \"gt prime\"", workDir, gtRole, gtRole, gtRole), nil
 	}
-	return fmt.Sprintf("cd %s && exec claude --dangerously-skip-permissions", workDir), nil
+	return fmt.Sprintf("cd %s && exec claude --dangerously-skip-permissions \"gt prime\"", workDir), nil
 }
 
 // sessionWorkDir returns the correct working directory for a session.
