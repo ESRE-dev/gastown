@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // HandlerResult tracks the result of handling a protocol message.
@@ -148,6 +151,22 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 		// No wisp found - polecat may have been cleaned up already
 		result.Handled = true
 		result.Action = fmt.Sprintf("no cleanup wisp found for %s (may be already cleaned)", payload.PolecatName)
+		return result
+	}
+
+	// Verify the polecat's commit is actually on main before allowing nuke.
+	// This prevents work loss when MERGED signal is for a stale MR or the merge failed.
+	onMain, err := verifyCommitOnMain(workDir, rigName, payload.PolecatName)
+	if err != nil {
+		// Couldn't verify - log warning but continue with other checks
+		// The polecat may not exist anymore (already nuked) which is fine
+		result.Action = fmt.Sprintf("warning: couldn't verify commit on main for %s: %v", payload.PolecatName, err)
+	} else if !onMain {
+		// Commit is NOT on main - don't nuke!
+		result.Handled = true
+		result.WispCreated = wispID
+		result.Error = fmt.Errorf("polecat %s commit is NOT on main - MERGED signal may be stale, DO NOT NUKE", payload.PolecatName)
+		result.Action = fmt.Sprintf("BLOCKED: %s commit not verified on main, merge may have failed", payload.PolecatName)
 		return result
 	}
 
@@ -534,4 +553,44 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 	}
 
 	return nil
+}
+
+// verifyCommitOnMain checks if the polecat's current commit is on main.
+// This prevents nuking a polecat whose work wasn't actually merged.
+//
+// Returns:
+//   - true, nil: commit is verified on main
+//   - false, nil: commit is NOT on main (don't nuke!)
+//   - false, error: couldn't verify (treat as unsafe)
+func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
+	// Find town root from workDir
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		return false, fmt.Errorf("finding town root: %v", err)
+	}
+
+	// Construct polecat path: <townRoot>/<rigName>/polecats/<polecatName>
+	polecatPath := filepath.Join(townRoot, rigName, "polecats", polecatName)
+
+	// Get git for the polecat worktree
+	g := git.NewGit(polecatPath)
+
+	// Get the current HEAD commit SHA
+	commitSHA, err := g.Rev("HEAD")
+	if err != nil {
+		return false, fmt.Errorf("getting polecat HEAD: %w", err)
+	}
+
+	// Verify it's an ancestor of main (i.e., it's been merged)
+	// We use the polecat's git context to check main
+	isOnMain, err := g.IsAncestor(commitSHA, "origin/main")
+	if err != nil {
+		// Try without origin/ prefix in case remote isn't set up
+		isOnMain, err = g.IsAncestor(commitSHA, "main")
+		if err != nil {
+			return false, fmt.Errorf("checking if commit is on main: %w", err)
+		}
+	}
+
+	return isOnMain, nil
 }
