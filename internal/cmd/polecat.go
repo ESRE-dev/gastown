@@ -199,9 +199,11 @@ var (
 	polecatSyncFromMain bool
 	polecatStatusJSON   bool
 	polecatGitStateJSON bool
-	polecatGCDryRun     bool
-	polecatNukeAll      bool
-	polecatNukeDryRun   bool
+	polecatGCDryRun           bool
+	polecatNukeAll            bool
+	polecatNukeDryRun         bool
+	polecatNukeForce          bool
+	polecatCheckRecoveryJSON  bool
 )
 
 var polecatGCCmd = &cobra.Command{
@@ -266,6 +268,25 @@ Examples:
 	RunE: runPolecatGitState,
 }
 
+var polecatCheckRecoveryCmd = &cobra.Command{
+	Use:   "check-recovery <rig>/<polecat>",
+	Short: "Check if polecat needs recovery vs safe to nuke",
+	Long: `Check recovery status of a polecat based on cleanup_status in agent bead.
+
+Used by the Witness to determine appropriate cleanup action:
+  - SAFE_TO_NUKE: cleanup_status is 'clean' - no work at risk
+  - NEEDS_RECOVERY: cleanup_status indicates unpushed/uncommitted work
+
+This prevents accidental data loss when cleaning up dormant polecats.
+The Witness should escalate NEEDS_RECOVERY cases to the Mayor.
+
+Examples:
+  gt polecat check-recovery greenplace/Toast
+  gt polecat check-recovery greenplace/Toast --json`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPolecatCheckRecovery,
+}
+
 func init() {
 	// List flags
 	polecatListCmd.Flags().BoolVar(&polecatListJSON, "json", false, "Output as JSON")
@@ -291,6 +312,10 @@ func init() {
 	// Nuke flags
 	polecatNukeCmd.Flags().BoolVar(&polecatNukeAll, "all", false, "Nuke all polecats in the rig")
 	polecatNukeCmd.Flags().BoolVar(&polecatNukeDryRun, "dry-run", false, "Show what would be nuked without doing it")
+	polecatNukeCmd.Flags().BoolVarP(&polecatNukeForce, "force", "f", false, "Force nuke even if polecat has unpushed work")
+
+	// Check-recovery flags
+	polecatCheckRecoveryCmd.Flags().BoolVar(&polecatCheckRecoveryJSON, "json", false, "Output as JSON")
 
 	// Add subcommands
 	polecatCmd.AddCommand(polecatListCmd)
@@ -303,6 +328,7 @@ func init() {
 	polecatCmd.AddCommand(polecatSyncCmd)
 	polecatCmd.AddCommand(polecatStatusCmd)
 	polecatCmd.AddCommand(polecatGitStateCmd)
+	polecatCmd.AddCommand(polecatCheckRecoveryCmd)
 	polecatCmd.AddCommand(polecatGCCmd)
 	polecatCmd.AddCommand(polecatNukeCmd)
 
@@ -1054,6 +1080,122 @@ func getGitState(worktreePath string) (*GitState, error) {
 	return state, nil
 }
 
+// RecoveryStatus represents whether a polecat needs recovery or is safe to nuke.
+type RecoveryStatus struct {
+	Rig           string `json:"rig"`
+	Polecat       string `json:"polecat"`
+	CleanupStatus string `json:"cleanup_status"`
+	NeedsRecovery bool   `json:"needs_recovery"`
+	Verdict       string `json:"verdict"` // SAFE_TO_NUKE or NEEDS_RECOVERY
+	Branch        string `json:"branch,omitempty"`
+	Issue         string `json:"issue,omitempty"`
+}
+
+func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
+	rigName, polecatName, err := parseAddress(args[0])
+	if err != nil {
+		return err
+	}
+
+	mgr, r, err := getPolecatManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	// Verify polecat exists and get info
+	p, err := mgr.Get(polecatName)
+	if err != nil {
+		return fmt.Errorf("polecat '%s' not found in rig '%s'", polecatName, rigName)
+	}
+
+	// Get cleanup_status from agent bead
+	// We need to read it directly from beads since manager doesn't expose it
+	rigPath := r.Path
+	bd := beads.New(rigPath)
+	agentBeadID := beads.PolecatBeadID(rigName, polecatName)
+	_, fields, err := bd.GetAgentBead(agentBeadID)
+
+	status := RecoveryStatus{
+		Rig:     rigName,
+		Polecat: polecatName,
+		Branch:  p.Branch,
+		Issue:   p.Issue,
+	}
+
+	if err != nil || fields == nil {
+		// No agent bead or no cleanup_status - fall back to git check
+		// This handles polecats that haven't self-reported yet
+		gitState, gitErr := getGitState(p.ClonePath)
+		if gitErr != nil {
+			status.CleanupStatus = "unknown"
+			status.NeedsRecovery = true
+			status.Verdict = "NEEDS_RECOVERY"
+		} else if gitState.Clean {
+			status.CleanupStatus = "clean"
+			status.NeedsRecovery = false
+			status.Verdict = "SAFE_TO_NUKE"
+		} else if gitState.UnpushedCommits > 0 {
+			status.CleanupStatus = "has_unpushed"
+			status.NeedsRecovery = true
+			status.Verdict = "NEEDS_RECOVERY"
+		} else if gitState.StashCount > 0 {
+			status.CleanupStatus = "has_stash"
+			status.NeedsRecovery = true
+			status.Verdict = "NEEDS_RECOVERY"
+		} else {
+			status.CleanupStatus = "has_uncommitted"
+			status.NeedsRecovery = true
+			status.Verdict = "NEEDS_RECOVERY"
+		}
+	} else {
+		// Use cleanup_status from agent bead
+		status.CleanupStatus = fields.CleanupStatus
+		switch fields.CleanupStatus {
+		case "clean":
+			status.NeedsRecovery = false
+			status.Verdict = "SAFE_TO_NUKE"
+		case "has_uncommitted", "has_unpushed", "has_stash":
+			status.NeedsRecovery = true
+			status.Verdict = "NEEDS_RECOVERY"
+		default:
+			// Unknown or empty - be conservative
+			status.NeedsRecovery = true
+			status.Verdict = "NEEDS_RECOVERY"
+		}
+	}
+
+	// JSON output
+	if polecatCheckRecoveryJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(status)
+	}
+
+	// Human-readable output
+	fmt.Printf("%s\n\n", style.Bold.Render(fmt.Sprintf("Recovery Status: %s/%s", rigName, polecatName)))
+	fmt.Printf("  Cleanup Status:  %s\n", status.CleanupStatus)
+	if status.Branch != "" {
+		fmt.Printf("  Branch:          %s\n", status.Branch)
+	}
+	if status.Issue != "" {
+		fmt.Printf("  Issue:           %s\n", status.Issue)
+	}
+	fmt.Println()
+
+	if status.NeedsRecovery {
+		fmt.Printf("  Verdict:         %s\n", style.Error.Render("NEEDS_RECOVERY"))
+		fmt.Println()
+		fmt.Printf("  %s This polecat has unpushed/uncommitted work.\n", style.Warning.Render("⚠"))
+		fmt.Println("  Escalate to Mayor for recovery before cleanup.")
+	} else {
+		fmt.Printf("  Verdict:         %s\n", style.Success.Render("SAFE_TO_NUKE"))
+		fmt.Println()
+		fmt.Printf("  %s Safe to nuke - no work at risk.\n", style.Success.Render("✓"))
+	}
+
+	return nil
+}
+
 func runPolecatGC(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
@@ -1199,6 +1341,58 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Check recovery status for each polecat unless --force is set
+	// This prevents accidental data loss when nuking polecats with unpushed work
+	if !polecatNukeForce && !polecatNukeDryRun {
+		var needsRecovery []string
+		for _, p := range toNuke {
+			// Check cleanup_status from agent bead
+			bd := beads.New(p.r.Path)
+			agentBeadID := beads.PolecatBeadID(p.rigName, p.polecatName)
+			_, fields, err := bd.GetAgentBead(agentBeadID)
+
+			var recoveryNeeded bool
+			if err != nil || fields == nil {
+				// No agent bead - fall back to git check
+				polecatInfo, infoErr := p.mgr.Get(p.polecatName)
+				if infoErr == nil && polecatInfo != nil {
+					gitState, gitErr := getGitState(polecatInfo.ClonePath)
+					if gitErr != nil || !gitState.Clean {
+						recoveryNeeded = true
+					}
+				}
+			} else {
+				// Check cleanup_status from agent bead
+				switch fields.CleanupStatus {
+				case "clean":
+					recoveryNeeded = false
+				case "has_uncommitted", "has_unpushed", "has_stash", "unknown", "":
+					recoveryNeeded = true
+				default:
+					recoveryNeeded = true
+				}
+			}
+
+			if recoveryNeeded {
+				needsRecovery = append(needsRecovery, fmt.Sprintf("%s/%s", p.rigName, p.polecatName))
+			}
+		}
+
+		if len(needsRecovery) > 0 {
+			fmt.Printf("%s The following polecats have unpushed/uncommitted work:\n", style.Error.Render("Error:"))
+			for _, pc := range needsRecovery {
+				fmt.Printf("  - %s\n", pc)
+			}
+			fmt.Println()
+			fmt.Println("These polecats NEED RECOVERY before cleanup.")
+			fmt.Println("Options:")
+			fmt.Printf("  1. Escalate to Mayor: gt mail send mayor/ -s \"RECOVERY_NEEDED\" -m \"...\"\n")
+			fmt.Printf("  2. Force nuke (LOSES WORK): gt polecat nuke --force %s\n", strings.Join(needsRecovery, " "))
+			fmt.Println()
+			return fmt.Errorf("blocked: %d polecat(s) need recovery", len(needsRecovery))
+		}
+	}
+
 	// Nuke each polecat
 	t := tmux.NewTmux()
 	var nukeErrors []string
@@ -1214,7 +1408,11 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		fmt.Printf("Nuking %s/%s...\n", p.rigName, p.polecatName)
+		if polecatNukeForce {
+			fmt.Printf("%s Nuking %s/%s (--force)...\n", style.Warning.Render("⚠"), p.rigName, p.polecatName)
+		} else {
+			fmt.Printf("Nuking %s/%s...\n", p.rigName, p.polecatName)
+		}
 
 		// Step 1: Kill session (force mode - no graceful shutdown)
 		sessMgr := session.NewManager(t, p.r)

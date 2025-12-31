@@ -348,6 +348,55 @@ Requested at: %s`,
 	return msg.ID, nil
 }
 
+// RecoveryPayload contains data for RECOVERY_NEEDED escalation.
+type RecoveryPayload struct {
+	PolecatName   string
+	Rig           string
+	CleanupStatus string
+	Branch        string
+	IssueID       string
+	DetectedAt    time.Time
+}
+
+// EscalateRecoveryNeeded sends a RECOVERY_NEEDED escalation to the Mayor.
+// This is used when a dormant polecat has unpushed work that needs recovery
+// before cleanup. The Mayor should coordinate recovery (e.g., push the branch,
+// save the work) before authorizing cleanup.
+func EscalateRecoveryNeeded(router *mail.Router, rigName string, payload *RecoveryPayload) (string, error) {
+	msg := &mail.Message{
+		From:     fmt.Sprintf("%s/witness", rigName),
+		To:       "mayor/",
+		Subject:  fmt.Sprintf("RECOVERY_NEEDED %s/%s", rigName, payload.PolecatName),
+		Priority: mail.PriorityUrgent,
+		Body: fmt.Sprintf(`Polecat: %s/%s
+Cleanup Status: %s
+Branch: %s
+Issue: %s
+Detected: %s
+
+This polecat has unpushed/uncommitted work that will be lost if nuked.
+Please coordinate recovery before authorizing cleanup:
+1. Check if branch can be pushed to origin
+2. Review uncommitted changes for value
+3. Either recover the work or authorize force-nuke
+
+DO NOT nuke without --force after recovery.`,
+			rigName,
+			payload.PolecatName,
+			payload.CleanupStatus,
+			payload.Branch,
+			payload.IssueID,
+			payload.DetectedAt.Format(time.RFC3339),
+		),
+	}
+
+	if err := router.Send(msg); err != nil {
+		return "", err
+	}
+
+	return msg.ID, nil
+}
+
 // UpdateCleanupWispState updates a cleanup wisp's state label.
 func UpdateCleanupWispState(workDir, wispID, newState string) error {
 	// Get current labels to preserve other labels
