@@ -263,7 +263,7 @@ func (d *Daemon) ensureDeaconRunning() {
 	if beadErr == nil {
 		if beadState == "running" || beadState == "working" {
 			// Agent reports it's running - trust it
-			// Note: gt-2hzl4 will add timeout fallback for stale state
+			// Timeout fallback for stale state is in lifecycle.go
 			return
 		}
 	}

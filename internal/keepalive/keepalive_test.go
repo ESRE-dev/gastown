@@ -61,7 +61,6 @@ func TestStateAge(t *testing.T) {
 
 	// NOTE: IsFresh(), IsStale(), IsVeryStale() were removed as part of ZFC cleanup.
 	// Staleness classification belongs in Deacon molecule, not Go code.
-	// See gt-gaxo epic for rationale.
 }
 
 func TestDirectoryCreation(t *testing.T) {

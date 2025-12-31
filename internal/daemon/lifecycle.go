@@ -171,7 +171,7 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 		}
 	}
 
-	// Check if session exists (legacy tmux detection - to be removed per gt-psuw7)
+	// Check if session exists (tmux detection still needed for lifecycle actions)
 	running, err := d.tmux.HasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)

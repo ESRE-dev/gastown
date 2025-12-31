@@ -207,7 +207,7 @@ func TestSaveLoadState_Roundtrip(t *testing.T) {
 }
 
 // NOTE: TestIsWitnessSession removed - isWitnessSession function was deleted
-// as part of ZFC cleanup (gt-gaxo). Witness poking is now Deacon's responsibility.
+// as part of ZFC cleanup. Witness poking is now Deacon's responsibility.
 
 func TestLifecycleAction_Constants(t *testing.T) {
 	// Verify constants have expected string values
