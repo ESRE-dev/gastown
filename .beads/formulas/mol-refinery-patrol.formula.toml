@@ -102,9 +102,15 @@ description = """
 Review the queue built from MERGE_READY messages in inbox-check.
 
 ```bash
+# Always fetch with prune to clean stale tracking refs:
+git fetch --prune origin
+
 # For each queued merge request, verify the branch exists:
-git fetch origin
 git branch -r | grep <branch>
+
+# IMPORTANT: Before queuing, verify branch has unmerged commits:
+git log origin/main..origin/<branch> --oneline | head -1
+# If empty → branch already merged. Archive MERGE_READY, don't queue.
 ```
 
 If queue empty, skip to context-check step.
@@ -202,6 +208,16 @@ POLECAT WORKTREES ACCUMULATE INDEFINITELY AND THE LIFECYCLE BREAKS.
 
 **Step 3: Close MR Bead (REQUIRED - DO THIS IMMEDIATELY)**
 
+⚠️ **VERIFICATION BEFORE CLOSING**: Confirm the work is actually on main:
+```bash
+# Get the commit message/issue from the branch
+git log origin/main --oneline | grep "<issue-id>"
+# OR verify the commit SHA is on main:
+git branch --contains <commit-sha> | grep main
+```
+
+If work is NOT on main, DO NOT close the MR bead. Investigate first.
+
 ```bash
 bd close <mr-bead-id> --reason "Merged to main at $(git rev-parse --short HEAD)"
 ```
@@ -210,6 +226,9 @@ The MR bead ID was in the MERGE_READY message or find via:
 ```bash
 bd list --type=merge-request --status=open | grep <polecat-name>
 ```
+
+**VALIDATION**: The MR bead's source_issue should be a valid bead ID (gt-xxxxx),
+not a branch name. If source_issue contains a branch name, flag for investigation.
 
 **Step 4: Archive the MERGE_READY mail (REQUIRED)**
 ```bash
@@ -312,6 +331,25 @@ Look for messages that were processed but not archived:
 gt mail archive <message-id>
 ```
 
+**Step 3: Check for orphaned MR beads**
+
+Look for open MR beads with no corresponding branch:
+```bash
+bd list --type=merge-request --status=open
+```
+
+For each open MR bead:
+1. Check if branch exists: `git ls-remote origin refs/heads/<branch>`
+2. If branch gone, verify work is on main: `git log origin/main --oneline | grep "<source_issue>"`
+3. If work on main → close MR with reason "Merged (verified on main)"
+4. If work NOT on main → investigate before closing:
+   - Check source_issue validity (should be gt-xxxxx, not branch name)
+   - Search reflog/dangling commits if possible
+   - If unverifiable, close with reason "Unverifiable - no audit trail"
+   - File bead if this indicates lost work
+
+**NEVER close an MR bead without verifying the work landed or is unrecoverable.**
+
 **Goal**: Inbox should have ≤3 active messages at end of cycle.
 Keep only: pending MRs in queue."""
 
@@ -322,10 +360,37 @@ needs = ["patrol-cleanup"]
 description = """
 End of patrol cycle decision.
 
+**Step 1: Estimate remaining context**
+
+Ask yourself:
+- Have I processed many branches this cycle?
+- Is the conversation getting long?
+- Am I starting to lose track of earlier context?
+
+Rule of thumb: If you've done 3+ merges or processed significant cleanup work,
+it's time for a fresh session.
+
+**Step 2: Decision tree**
+
 If queue non-empty AND context LOW:
-- Burn this wisp, start fresh patrol
+- Squash this wisp to digest
+- Spawn fresh patrol wisp
 - Return to inbox-check
 
-If queue empty OR context HIGH:
-- Burn wisp with summary digest
-- Exit (daemon will respawn if needed)"""
+If queue empty OR context HIGH OR good stopping point:
+- Squash wisp with summary digest
+- Use `gt handoff` for clean session transition:
+
+```bash
+gt handoff -s "Patrol complete" -m "Merged X branches, Y tests passed.
+Queue: empty/N remaining
+Next: [any notes for successor]"
+```
+
+**Why gt handoff?**
+- Sends handoff mail to yourself with context
+- Respawns with fresh Claude instance
+- SessionStart hook runs gt prime
+- Successor picks up from your hook
+
+**DO NOT just exit.** Always use `gt handoff` for proper lifecycle."""
