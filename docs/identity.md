@@ -2,6 +2,19 @@
 
 > Canonical format for agent identity in Gas Town
 
+## Why Identity Matters
+
+When you deploy AI agents at scale, anonymous work creates real problems:
+
+- **Debugging:** "The AI broke it" isn't actionable. *Which* AI?
+- **Quality tracking:** You can't improve what you can't measure.
+- **Compliance:** Auditors ask "who approved this code?" - you need an answer.
+- **Performance management:** Some agents are better than others at certain tasks.
+
+Gas Town solves this with **universal attribution**: every action, every commit,
+every bead update is linked to a specific agent identity. This enables work
+history tracking, capability-based routing, and objective quality measurement.
+
 ## BD_ACTOR Format Convention
 
 The `BD_ACTOR` environment variable identifies agents in slash-separated path format.
@@ -200,8 +213,42 @@ bd cv steve@example.com
 # Discovers all towns, aggregates work, derives skills
 ```
 
-### Enterprise Framing
-
-"Work attribution for audit and compliance. Track which agents produce clean work. Enable cross-project visibility into developer productivity and skill development."
-
 See `~/gt/docs/hop/decisions/008-identity-model.md` for architectural rationale.
+
+## Enterprise Use Cases
+
+### Compliance and Audit
+
+```bash
+# Who touched this file in the last 90 days?
+git log --since="90 days ago" -- path/to/sensitive/file.go
+
+# All changes by a specific agent
+bd audit --actor=gastown/polecats/toast --since=2025-01-01
+```
+
+### Performance Tracking
+
+```bash
+# Completion rate by agent
+bd stats --group-by=actor
+
+# Average time to completion
+bd stats --actor=gastown/polecats/* --metric=cycle-time
+```
+
+### Model Comparison
+
+When agents use different underlying models, attribution enables A/B comparison:
+
+```bash
+# Tag agents by model
+# gastown/polecats/claude-1 uses Claude
+# gastown/polecats/gpt-1 uses GPT-4
+
+# Compare quality signals
+bd stats --actor=gastown/polecats/claude-* --metric=revision-count
+bd stats --actor=gastown/polecats/gpt-* --metric=revision-count
+```
+
+Lower revision counts suggest higher first-pass quality.

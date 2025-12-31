@@ -7,6 +7,19 @@
 Federation enables multiple Gas Town instances to reference each other's work,
 coordinate across organizations, and track distributed projects.
 
+## Why Federation?
+
+Real enterprise projects don't live in a single repo:
+
+- **Microservices:** 50 repos, tight dependencies, coordinated releases
+- **Platform teams:** Shared libraries used by dozens of downstream projects
+- **Contractors:** External teams working on components you need to track
+- **Acquisitions:** New codebases that need to integrate with existing work
+
+Traditional tools force you to choose: unified tracking (monorepo) or team
+autonomy (multi-repo with fragmented visibility). Federation provides both:
+each workspace is autonomous, but cross-workspace references are first-class.
+
 ## Entity Model
 
 ### Three Levels
@@ -217,3 +230,17 @@ Completion cascades up. Attribution preserved.
 3. **Git-native** - Federation uses git mechanics (remotes, refs)
 4. **Incremental** - Works standalone, gains power with federation
 5. **Privacy-preserving** - Each entity controls their chain visibility
+
+## Enterprise Benefits
+
+| Challenge | Without Federation | With Federation |
+|-----------|-------------------|-----------------|
+| Cross-repo dependencies | "Check with backend team" | Explicit dependency tracking |
+| Contractor visibility | Email updates, status calls | Live status, same tooling |
+| Release coordination | Spreadsheets, Slack threads | Unified timeline view |
+| Agent attribution | Per-repo, fragmented | Cross-workspace CV |
+| Compliance audit | Stitch together logs | Query across workspaces |
+
+Federation isn't just about connecting repos - it's about treating distributed
+engineering as a first-class concern, with the same visibility and tooling
+you'd expect from a monorepo, while preserving team autonomy.

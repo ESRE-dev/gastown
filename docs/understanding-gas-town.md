@@ -3,6 +3,19 @@
 This document provides a conceptual overview of Gas Town's architecture, focusing on
 the role taxonomy and how different agents interact.
 
+## Why Gas Town Exists
+
+As AI agents become central to engineering workflows, teams face new challenges:
+
+- **Accountability:** Who did what? Which agent introduced this bug?
+- **Quality:** Which agents are reliable? Which need tuning?
+- **Efficiency:** How do you route work to the right agent?
+- **Scale:** How do you coordinate agents across repos and teams?
+
+Gas Town is an orchestration layer that treats AI agent work as structured data.
+Every action is attributed. Every agent has a track record. Every piece of work
+has provenance. See [Why These Features](why-these-features.md) for the full rationale.
+
 ## Role Taxonomy
 
 Gas Town has several agent types, each with distinct responsibilities and lifecycles.
@@ -185,6 +198,27 @@ All Gas Town agents follow the same core principle:
 
 This applies regardless of role. The hook is your assignment. Execute it immediately
 without waiting for confirmation. Gas Town is a steam engine - agents are pistons.
+
+## Model Evaluation and A/B Testing
+
+Gas Town's attribution and work history features enable objective model comparison:
+
+```bash
+# Deploy different models on similar tasks
+gt sling gt-abc gastown --model=claude-sonnet
+gt sling gt-def gastown --model=gpt-4
+
+# Compare outcomes
+bd stats --actor=gastown/polecats/* --group-by=model
+```
+
+Because every task has completion time, quality signals, and revision count,
+you can make data-driven decisions about which models to deploy where.
+
+This is particularly valuable for:
+- **Model selection:** Which model handles your codebase best?
+- **Capability mapping:** Claude for architecture, GPT for tests?
+- **Cost optimization:** When is a smaller model sufficient?
 
 ## Common Mistakes
 
