@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
+
+// convoyIDPattern validates convoy IDs to prevent SQL injection
+var convoyIDPattern = regexp.MustCompile(`^hq-[a-zA-Z0-9-]+$`)
 
 // Convoy represents a convoy's status for the dashboard
 type Convoy struct {
@@ -145,9 +149,15 @@ type trackedStatus struct {
 
 // getTrackedIssueStatus queries tracked issues and their status
 func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
+	// Validate convoyID to prevent SQL injection
+	if !convoyIDPattern.MatchString(convoyID) {
+		return nil
+	}
+
 	dbPath := filepath.Join(beadsDir, "beads.db")
 
 	// Query tracked dependencies from SQLite
+	// convoyID is validated above to match ^hq-[a-zA-Z0-9-]+$
 	cmd := exec.Command("sqlite3", "-json", dbPath,
 		fmt.Sprintf(`SELECT depends_on_id FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, convoyID))
 

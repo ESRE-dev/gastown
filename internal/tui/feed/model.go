@@ -190,11 +190,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case convoyUpdateMsg:
 		if msg.state != nil {
+			// Fresh data arrived - update state and schedule next tick
 			m.convoyState = msg.state
 			m.updateViewContent()
+			cmds = append(cmds, m.convoyRefreshTick())
+		} else {
+			// Tick fired - fetch new data
+			cmds = append(cmds, m.fetchConvoys())
 		}
-		// Schedule next refresh
-		cmds = append(cmds, m.fetchConvoys(), m.convoyRefreshTick())
 
 	case tickMsg:
 		cmds = append(cmds, tick())
