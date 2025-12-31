@@ -199,8 +199,9 @@ type ProcessResult struct {
 	TestsFailed bool
 }
 
-// ProcessMR processes a single merge request.
-// This is a placeholder that will be fully implemented in gt-3x1.2.
+// ProcessMR processes a single merge request from a beads issue.
+// Note: The Refinery agent primarily processes merges via git commands
+// in the role prompt, not via this Go code path.
 func (e *Engineer) ProcessMR(ctx context.Context, mr *beads.Issue) ProcessResult {
 	// Parse MR fields from description
 	mrFields := beads.ParseMRFields(mr)
@@ -211,17 +212,16 @@ func (e *Engineer) ProcessMR(ctx context.Context, mr *beads.Issue) ProcessResult
 		}
 	}
 
-	// For now, just log what we would do
-	// Full implementation in gt-3x1.2: Fetch and conflict check
+	// Log what we would process
 	fmt.Fprintln(e.output, "[Engineer] Would process:")
 	fmt.Fprintf(e.output, "  Branch: %s\n", mrFields.Branch)
 	fmt.Fprintf(e.output, "  Target: %s\n", mrFields.Target)
 	fmt.Fprintf(e.output, "  Worker: %s\n", mrFields.Worker)
 
-	// Return failure for now - actual implementation in gt-3x1.2
+	// This code path is not used in production - Refinery agent uses git commands
 	return ProcessResult{
 		Success: false,
-		Error:   "ProcessMR not fully implemented (see gt-3x1.2)",
+		Error:   "ProcessMR: use Refinery agent's git-based merge flow instead",
 	}
 }
 
@@ -276,7 +276,7 @@ func (e *Engineer) handleSuccess(mr *beads.Issue, result ProcessResult) {
 }
 
 // handleFailure handles a failed merge request.
-// This is a placeholder that will be fully implemented in gt-3x1.4.
+// Reopens the MR for rework and logs the failure.
 func (e *Engineer) handleFailure(mr *beads.Issue, result ProcessResult) {
 	// Reopen the MR (back to open status for rework)
 	open := "open"
@@ -286,11 +286,11 @@ func (e *Engineer) handleFailure(mr *beads.Issue, result ProcessResult) {
 
 	// Log the failure
 	fmt.Fprintf(e.output, "[Engineer] ✗ Failed: %s - %s\n", mr.ID, result.Error)
-
-	// Full failure handling (assign back to worker, labels) in gt-3x1.4
 }
 
 // ProcessMRFromQueue processes a merge request from wisp queue.
+// Note: The Refinery agent primarily processes merges via git commands
+// in the role prompt, not via this Go code path.
 func (e *Engineer) ProcessMRFromQueue(ctx context.Context, mr *mrqueue.MR) ProcessResult {
 	// MR fields are directly on the struct (no parsing needed)
 	fmt.Fprintln(e.output, "[Engineer] Processing MR from queue:")
@@ -304,11 +304,10 @@ func (e *Engineer) ProcessMRFromQueue(ctx context.Context, mr *mrqueue.MR) Proce
 		fmt.Fprintf(e.output, "[Engineer] Warning: failed to log merge_started event: %v\n", err)
 	}
 
-	// TODO: Actual merge implementation
-	// For now, return failure - actual implementation in gt-3x1.2
+	// This code path is not used in production - Refinery agent uses git commands
 	return ProcessResult{
 		Success: false,
-		Error:   "ProcessMRFromQueue not fully implemented (see gt-3x1.2)",
+		Error:   "ProcessMRFromQueue: use Refinery agent's git-based merge flow instead",
 	}
 }
 
