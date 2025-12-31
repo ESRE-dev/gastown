@@ -1,0 +1,156 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+
+	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/style"
+)
+
+// Worktree command flags
+var (
+	worktreeNoCD bool
+)
+
+var worktreeCmd = &cobra.Command{
+	Use:     "worktree <rig>",
+	GroupID: GroupWorkspace,
+	Short:   "Create worktree in another rig for cross-rig work",
+	Long: `Create a git worktree in another rig for cross-rig work.
+
+This command is for crew workers who need to work on another rig's codebase
+while maintaining their identity. It creates a worktree in the target rig's
+crew/ directory with a name that identifies your source rig and identity.
+
+The worktree is created at: ~/gt/<target-rig>/crew/<source-rig>-<name>/
+
+For example, if you're gastown/crew/joe and run 'gt worktree beads':
+- Creates worktree at ~/gt/beads/crew/gastown-joe/
+- The worktree checks out main branch
+- Your identity (BD_ACTOR, GT_ROLE) remains gastown/crew/joe
+
+Use --no-cd to just print the path without printing shell commands.
+
+Examples:
+  gt worktree beads         # Create worktree in beads rig
+  gt worktree gastown       # Create worktree in gastown rig (from another rig)
+  gt worktree beads --no-cd # Just print the path`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWorktree,
+}
+
+func init() {
+	worktreeCmd.Flags().BoolVar(&worktreeNoCD, "no-cd", false, "Just print path (don't print cd command)")
+
+	rootCmd.AddCommand(worktreeCmd)
+}
+
+func runWorktree(cmd *cobra.Command, args []string) error {
+	targetRig := args[0]
+
+	// Detect current crew identity from cwd
+	detected, err := detectCrewFromCwd()
+	if err != nil {
+		return fmt.Errorf("must be in a crew workspace to use this command: %w", err)
+	}
+
+	sourceRig := detected.rigName
+	crewName := detected.crewName
+
+	// Cannot create worktree in your own rig
+	if targetRig == sourceRig {
+		return fmt.Errorf("already in rig '%s' - use gt worktree to work in a different rig", targetRig)
+	}
+
+	// Verify target rig exists
+	_, targetRigInfo, err := getRig(targetRig)
+	if err != nil {
+		return fmt.Errorf("rig '%s' not found - run 'gt rigs' to see available rigs", targetRig)
+	}
+
+	// Compute worktree path: ~/gt/<target-rig>/crew/<source-rig>-<name>/
+	worktreeName := fmt.Sprintf("%s-%s", sourceRig, crewName)
+	worktreePath := filepath.Join(constants.RigCrewPath(targetRigInfo.Path), worktreeName)
+
+	// Check if worktree already exists
+	if _, err := os.Stat(worktreePath); err == nil {
+		// Worktree exists
+		if worktreeNoCD {
+			fmt.Println(worktreePath)
+		} else {
+			fmt.Printf("%s Worktree already exists at %s\n", style.Success.Render("✓"), worktreePath)
+			fmt.Printf("cd %s\n", worktreePath)
+		}
+		return nil
+	}
+
+	// Get the source rig's git repository (the bare repo for worktrees)
+	// For cross-rig work, we need to use the target rig's repository
+	// The target rig's mayor/rig is the main clone we create worktrees from
+	targetMayorRig := constants.RigMayorPath(targetRigInfo.Path)
+	g := git.NewGit(targetMayorRig)
+
+	// Ensure crew directory exists in target rig
+	crewDir := constants.RigCrewPath(targetRigInfo.Path)
+	if err := os.MkdirAll(crewDir, 0755); err != nil {
+		return fmt.Errorf("creating crew directory: %w", err)
+	}
+
+	// Fetch latest from remote before creating worktree
+	if err := g.Fetch("origin"); err != nil {
+		// Non-fatal - continue with local state
+		fmt.Printf("%s Warning: could not fetch from origin: %v\n", style.Warning.Render("⚠"), err)
+	}
+
+	// Create the worktree on main branch
+	// Use WorktreeAddExisting to checkout an existing branch (main)
+	if err := g.WorktreeAddExisting(worktreePath, "main"); err != nil {
+		return fmt.Errorf("creating worktree: %w", err)
+	}
+
+	// Configure git author for identity preservation
+	worktreeGit := git.NewGit(worktreePath)
+	bdActor := fmt.Sprintf("%s/crew/%s", sourceRig, crewName)
+
+	// Set local git config for this worktree
+	if err := setGitConfig(worktreePath, "user.name", bdActor); err != nil {
+		fmt.Printf("%s Warning: could not set git author name: %v\n", style.Warning.Render("⚠"), err)
+	}
+
+	fmt.Printf("%s Created worktree for cross-rig work\n", style.Success.Render("✓"))
+	fmt.Printf("  Source: %s/crew/%s\n", sourceRig, crewName)
+	fmt.Printf("  Target: %s\n", worktreePath)
+	fmt.Printf("  Branch: main\n")
+	fmt.Println()
+
+	// Pull latest main in the new worktree
+	if err := worktreeGit.Pull("origin", "main"); err != nil {
+		fmt.Printf("%s Warning: could not pull latest: %v\n", style.Warning.Render("⚠"), err)
+	}
+
+	if worktreeNoCD {
+		fmt.Println(worktreePath)
+	} else {
+		fmt.Printf("To enter the worktree:\n")
+		fmt.Printf("  cd %s\n", worktreePath)
+		fmt.Println()
+		fmt.Printf("Environment variables to preserve your identity:\n")
+		fmt.Printf("  export BD_ACTOR=%s\n", bdActor)
+		fmt.Printf("  export GT_ROLE=crew\n")
+		fmt.Printf("  export GT_RIG=%s\n", sourceRig)
+		fmt.Printf("  export GT_CREW=%s\n", crewName)
+	}
+
+	return nil
+}
+
+// setGitConfig sets a git config value in the specified worktree.
+func setGitConfig(worktreePath, key, value string) error {
+	cmd := exec.Command("git", "-C", worktreePath, "config", key, value)
+	return cmd.Run()
+}
