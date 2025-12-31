@@ -551,6 +551,7 @@ type trackedIssueInfo struct {
 
 // getTrackedIssues queries SQLite directly to get issues tracked by a convoy.
 // This is needed because bd dep list doesn't properly show cross-rig external dependencies.
+// Uses batched lookup to avoid N+1 subprocess calls.
 func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 	dbPath := filepath.Join(townBeads, "beads.db")
 
@@ -572,7 +573,9 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 		return nil
 	}
 
-	var tracked []trackedIssueInfo
+	// First pass: collect all issue IDs (normalized from external refs)
+	issueIDs := make([]string, 0, len(deps))
+	idToDepType := make(map[string]string)
 	for _, dep := range deps {
 		issueID := dep.DependsOnID
 
@@ -584,14 +587,22 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 			}
 		}
 
-		// Try to get issue details from the appropriate rig
+		issueIDs = append(issueIDs, issueID)
+		idToDepType[issueID] = dep.Type
+	}
+
+	// Single batch call to get all issue details
+	detailsMap := getIssueDetailsBatch(issueIDs)
+
+	// Second pass: build result using the batch lookup
+	var tracked []trackedIssueInfo
+	for _, issueID := range issueIDs {
 		info := trackedIssueInfo{
 			ID:   issueID,
-			Type: dep.Type,
+			Type: idToDepType[issueID],
 		}
 
-		// Query issue status (try to find it in any known beads location)
-		if details := getIssueDetails(issueID); details != nil {
+		if details, ok := detailsMap[issueID]; ok {
 			info.Title = details.Title
 			info.Status = details.Status
 			info.IssueType = details.IssueType
@@ -614,7 +625,57 @@ type issueDetails struct {
 	IssueType string
 }
 
+// getIssueDetailsBatch fetches details for multiple issues in a single bd show call.
+// Returns a map from issue ID to details. Missing/invalid issues are omitted from the map.
+func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
+	result := make(map[string]*issueDetails)
+	if len(issueIDs) == 0 {
+		return result
+	}
+
+	// Build args: bd show id1 id2 id3 ... --json
+	args := append([]string{"show"}, issueIDs...)
+	args = append(args, "--json")
+
+	showCmd := exec.Command("bd", args...)
+	var stdout bytes.Buffer
+	showCmd.Stdout = &stdout
+
+	if err := showCmd.Run(); err != nil {
+		// Batch failed - fall back to individual lookups for robustness
+		// This handles cases where some IDs are invalid/missing
+		for _, id := range issueIDs {
+			if details := getIssueDetails(id); details != nil {
+				result[id] = details
+			}
+		}
+		return result
+	}
+
+	var issues []struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Status    string `json:"status"`
+		IssueType string `json:"issue_type"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return result
+	}
+
+	for _, issue := range issues {
+		result[issue.ID] = &issueDetails{
+			ID:        issue.ID,
+			Title:     issue.Title,
+			Status:    issue.Status,
+			IssueType: issue.IssueType,
+		}
+	}
+
+	return result
+}
+
 // getIssueDetails fetches issue details by trying to show it via bd.
+// Prefer getIssueDetailsBatch for multiple issues to avoid N+1 subprocess calls.
 func getIssueDetails(issueID string) *issueDetails {
 	// Use bd show with routing - it should find the issue in the right rig
 	showCmd := exec.Command("bd", "show", issueID, "--json")
