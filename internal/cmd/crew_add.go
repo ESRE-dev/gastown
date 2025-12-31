@@ -81,12 +81,9 @@ func runCrewAdd(cmd *cobra.Command, args []string) error {
 	// Create agent bead for the crew worker
 	rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
 	bd := beads.New(rigBeadsPath)
-	// Use the rig's configured prefix, defaulting to "gt" for backward compatibility
-	prefix := "gt"
-	if r.Config != nil && r.Config.Prefix != "" {
-		prefix = r.Config.Prefix
-	}
-	crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, name)
+	// Agent beads always use "gt-" prefix (required by beads validation)
+	// Only issue beads use rig-specific prefixes
+	crewID := beads.CrewBeadID(rigName, name)
 	if _, err := bd.Show(crewID); err != nil {
 		// Agent bead doesn't exist, create it
 		fields := &beads.AgentFields{

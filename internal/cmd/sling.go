@@ -842,10 +842,11 @@ func detectActor() string {
 }
 
 // agentIDToBeadID converts an agent ID to its corresponding agent bead ID.
-// Uses canonical naming: prefix-rig-role-name
-// The prefix is looked up from routes.jsonl based on the rig name.
+// Uses canonical naming: gt-rig-role-name
+// Agent beads always use "gt-" prefix (required by beads validation).
+// Only issue beads use rig-specific prefixes.
 func agentIDToBeadID(agentID string) string {
-	// Handle simple cases (town-level agents always use gt- prefix)
+	// Handle simple cases (town-level agents)
 	if agentID == "mayor" {
 		return beads.MayorBeadID()
 	}
@@ -861,21 +862,15 @@ func agentIDToBeadID(agentID string) string {
 
 	rig := parts[0]
 
-	// Look up the prefix for this rig from routes.jsonl
-	prefix := "gt" // default
-	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
-		prefix = beads.GetPrefixForRig(townRoot, rig)
-	}
-
 	switch {
 	case len(parts) == 2 && parts[1] == "witness":
-		return beads.WitnessBeadIDWithPrefix(prefix, rig)
+		return beads.WitnessBeadID(rig)
 	case len(parts) == 2 && parts[1] == "refinery":
-		return beads.RefineryBeadIDWithPrefix(prefix, rig)
+		return beads.RefineryBeadID(rig)
 	case len(parts) == 3 && parts[1] == "crew":
-		return beads.CrewBeadIDWithPrefix(prefix, rig, parts[2])
+		return beads.CrewBeadID(rig, parts[2])
 	case len(parts) == 3 && parts[1] == "polecats":
-		return beads.PolecatBeadIDWithPrefix(prefix, rig, parts[2])
+		return beads.PolecatBeadID(rig, parts[2])
 	default:
 		return ""
 	}
