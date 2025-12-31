@@ -257,7 +257,17 @@ gt handoff --shutdown        # Terminate (polecats)
 gt session stop <rig>/<agent>
 gt peek <agent>              # Check health
 gt nudge <agent> "message"   # Send message to agent
+gt seance                    # List discoverable predecessor sessions
+gt seance --talk <id>        # Talk to predecessor (full context)
+gt seance --talk <id> -p "Where is X?"  # One-shot question
 ```
+
+**Session Discovery**: Each session has a startup nudge that becomes searchable
+in Claude's `/resume` picker:
+```
+[GAS TOWN] recipient <- sender • timestamp • topic[:mol-id]
+```
+Example: `[GAS TOWN] gastown/crew/gus <- human • 2025-12-30T15:42 • restart`
 
 **IMPORTANT**: Always use `gt nudge` to send messages to Claude sessions.
 Never use raw `tmux send-keys` - it doesn't handle Claude's input correctly.

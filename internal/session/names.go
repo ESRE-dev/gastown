@@ -1,10 +1,7 @@
 // Package session provides polecat session lifecycle management.
 package session
 
-import (
-	"fmt"
-	"time"
-)
+import "fmt"
 
 // Prefix is the common prefix for all Gas Town tmux session names.
 const Prefix = "gt-"
@@ -37,25 +34,6 @@ func CrewSessionName(rig, name string) string {
 // PolecatSessionName returns the session name for a polecat in a rig.
 func PolecatSessionName(rig, name string) string {
 	return fmt.Sprintf("%s%s-%s", Prefix, rig, name)
-}
-
-// SessionBeacon generates an identity beacon message for Claude Code sessions.
-// This beacon becomes the session title in /resume picker, enabling workers to
-// find their predecessor sessions.
-//
-// Format: [GAS TOWN] <address> • <mol-id or "ready"> • <timestamp>
-//
-// Examples:
-//   - [GAS TOWN] gastown/crew/max • gt-abc12 • 2025-12-30T14:32
-//   - [GAS TOWN] gastown/polecats/Toast • ready • 2025-12-30T09:15
-//   - [GAS TOWN] deacon • patrol • 2025-12-30T08:00
-func SessionBeacon(address, molID string) string {
-	if molID == "" {
-		molID = "ready"
-	}
-	// Use local time in a compact format
-	timestamp := time.Now().Format("2006-01-02T15:04")
-	return fmt.Sprintf("[GAS TOWN] %s • %s • %s", address, molID, timestamp)
 }
 
 // PropulsionNudge generates the GUPP (Gas Town Universal Propulsion Principle) nudge.
