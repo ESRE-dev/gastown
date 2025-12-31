@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Worktree command flags
@@ -44,8 +46,26 @@ Examples:
 	RunE: runWorktree,
 }
 
+var worktreeListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all cross-rig worktrees owned by current crew member",
+	Long: `List all git worktrees created for cross-rig work.
+
+This command scans all rigs in the workspace and finds worktrees
+that belong to the current crew member. Each worktree is shown with
+its git status summary.
+
+Example output:
+  Cross-rig worktrees for gastown/crew/joe:
+
+    beads     ~/gt/beads/crew/gastown-joe/     (clean)
+    mayor     ~/gt/mayor/crew/gastown-joe/     (2 uncommitted)`,
+	RunE: runWorktreeList,
+}
+
 func init() {
 	worktreeCmd.Flags().BoolVar(&worktreeNoCD, "no-cd", false, "Just print path (don't print cd command)")
+	worktreeCmd.AddCommand(worktreeListCmd)
 
 	rootCmd.AddCommand(worktreeCmd)
 }
@@ -153,4 +173,90 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 func setGitConfig(worktreePath, key, value string) error {
 	cmd := exec.Command("git", "-C", worktreePath, "config", key, value)
 	return cmd.Run()
+}
+
+func runWorktreeList(cmd *cobra.Command, args []string) error {
+	// Detect current crew identity from cwd
+	detected, err := detectCrewFromCwd()
+	if err != nil {
+		return fmt.Errorf("must be in a crew workspace to use this command: %w", err)
+	}
+
+	sourceRig := detected.rigName
+	crewName := detected.crewName
+	worktreeName := fmt.Sprintf("%s-%s", sourceRig, crewName)
+
+	// Find town root
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load rigs config to list all rigs
+	rigsConfigPath := constants.MayorRigsPath(townRoot)
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return fmt.Errorf("loading rigs config: %w", err)
+	}
+
+	fmt.Printf("Cross-rig worktrees for %s/crew/%s:\n\n", sourceRig, crewName)
+
+	found := false
+	for rigName := range rigsConfig.Rigs {
+		// Skip our own rig - worktrees are for cross-rig work
+		if rigName == sourceRig {
+			continue
+		}
+
+		// Rig path is simply townRoot/<rigName>
+		rigPath := filepath.Join(townRoot, rigName)
+
+		// Check if worktree exists: <rig>/crew/<source-rig>-<name>/
+		worktreePath := filepath.Join(constants.RigCrewPath(rigPath), worktreeName)
+
+		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+			continue
+		}
+
+		// Worktree exists - get git status
+		statusSummary := getGitStatusSummary(worktreePath)
+
+		// Format the path for display (use ~ for home directory)
+		displayPath := worktreePath
+		if home, err := os.UserHomeDir(); err == nil {
+			if rel, err := filepath.Rel(home, worktreePath); err == nil && !filepath.IsAbs(rel) {
+				displayPath = "~/" + rel
+			}
+		}
+
+		fmt.Printf("  %-10s %s     (%s)\n", rigName, displayPath, statusSummary)
+		found = true
+	}
+
+	if !found {
+		fmt.Printf("  (none)\n")
+		fmt.Printf("\nCreate a worktree with: gt worktree <rig>\n")
+	}
+
+	return nil
+}
+
+// getGitStatusSummary returns a brief status summary for a git directory.
+func getGitStatusSummary(dir string) string {
+	g := git.NewGit(dir)
+
+	// Check for uncommitted changes
+	status, err := g.Status()
+	if err != nil {
+		return "error"
+	}
+
+	if status.Clean {
+		return "clean"
+	}
+
+	// Count uncommitted files (modified, added, deleted, untracked)
+	uncommitted := len(status.Modified) + len(status.Added) + len(status.Deleted) + len(status.Untracked)
+
+	return fmt.Sprintf("%d uncommitted", uncommitted)
 }
