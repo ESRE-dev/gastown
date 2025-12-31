@@ -140,3 +140,68 @@ git log --author="gastown/crew/joe"
 3. **Attribution is permanent** - Git commits preserve history
 4. **Format is parseable** - Enables programmatic analysis
 5. **Consistent across systems** - Same format in git, beads, events
+
+## CV and Skill Accumulation
+
+### Human Identity is Global
+
+The global identifier is your **email** - it's already in every git commit. No separate "entity bead" needed.
+
+```
+steve@example.com                ← global identity (from git author)
+├── Town A (home)                ← workspace
+│   ├── gastown/crew/joe         ← agent executor
+│   └── gastown/polecats/toast   ← agent executor
+└── Town B (work)                ← workspace
+    └── acme/polecats/nux        ← agent executor
+```
+
+### Agent vs Owner
+
+| Field | Scope | Purpose |
+|-------|-------|---------|
+| `BD_ACTOR` | Local (town) | Agent attribution for debugging |
+| `GIT_AUTHOR_EMAIL` | Global | Human identity for CV |
+| `created_by` | Local | Who created the bead |
+| `owner` | Global | Who owns the work |
+
+**Agents execute. Humans own.** The polecat name in `completed-by: gastown/polecats/toast` is executor attribution. The CV credits the human owner (`steve@example.com`).
+
+### Polecats Are Ephemeral
+
+Polecats are like K8s pods - ephemeral executors with no persistent identity:
+- Named pool for human convenience (furiosa, nux, slit)
+- Names are transient - reused after cleanup
+- No persistent polecat CV
+- Work credits the human owner
+
+### Skills Are Derived
+
+Your CV emerges from querying work evidence:
+
+```bash
+# All work by owner (across all agents)
+git log --author="steve@example.com"
+bd list --owner=steve@example.com
+
+# Skills derived from evidence
+# - .go files touched → Go skill
+# - issue tags → domain skills
+# - commit patterns → activity types
+```
+
+### Multi-Town Aggregation
+
+A human with multiple towns has one CV:
+
+```bash
+# Future: federated CV query
+bd cv steve@example.com
+# Discovers all towns, aggregates work, derives skills
+```
+
+### Enterprise Framing
+
+"Work attribution for audit and compliance. Track which agents produce clean work. Enable cross-project visibility into developer productivity and skill development."
+
+See `~/gt/docs/hop/decisions/008-identity-model.md` for architectural rationale.
