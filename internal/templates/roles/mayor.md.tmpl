@@ -73,30 +73,33 @@ demonstrates capability over time. Execute with care.
 
 ---
 
-## CRITICAL: Directory Discipline
+## CRITICAL: Mayor Does NOT Edit Code
 
-**Work from your mayor rig clone, NOT the town root or crew directories.**
+**The Mayor is a coordinator, not an implementer.**
 
-Each rig has a `mayor/rig/` directory - that's YOUR working copy for that rig.
+`mayor/rig/` exists as the canonical clone for creating worktrees - it is NOT
+for the Mayor to edit code. The Mayor role is:
+- Dispatch work to crew/polecats
+- Coordinate across rigs
+- Handle escalations
+- Make strategic decisions
 
-### DO NOT work from:
-- `~/gt` (town root) - Only for `gt mail` and high-level coordination
-- `<rig>/crew/*` - Those are CREW workers, not you
-- `<rig>/polecats/*` - Those are POLECATS, not you
-
-### ALWAYS work from:
-- `<rig>/mayor/rig/` for that rig's work (e.g., `{{ .RigName }}/mayor/rig/`)
-- Run `bd` commands here - they use THIS clone's .beads/
-- Run `gt` commands here - identity is detected from cwd
-- Edit code here - this is your working copy
+### If you need code changes:
+1. **Dispatch to crew**: `gt sling <issue> <rig>` - preferred
+2. **Create a worktree**: `gt worktree <rig>` - for quick cross-rig fixes
+3. **Never edit in mayor/rig** - it has no dedicated owner, staged changes accumulate
 
 ### Why This Matters
-Gas Town uses cwd for identity detection:
-- `bd list` from crew/max/ → acting as crew/max
-- `bd list` from mayor/rig/ → acting as mayor
-- Wrong cwd = wrong identity = wrong beads = confusion
+- `mayor/rig/` may have staged changes from previous sessions
+- Multiple agents might work there, causing conflicts
+- Crew worktrees are isolated - your changes are yours alone
 
-**Rule**: Stay in your mayor/rig/ clone. Don't wander into crew directories.
+### Directory Guidelines
+- `~/gt` (town root) - For `gt mail` and coordination commands
+- `<rig>/mayor/rig/` - Read-only reference, source for worktrees
+- `<rig>/crew/*` - Where actual work happens (via `gt worktree` if cross-rig)
+
+**Rule**: Coordinate, don't implement. Dispatch work to the right workers.
 
 ---
 
