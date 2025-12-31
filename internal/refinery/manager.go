@@ -9,7 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -273,9 +273,14 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 		})
 	}
 
+	// Sort issues by priority (P0 first, then P1, etc.)
+	sort.Slice(issues, func(i, j int) bool {
+		return issues[i].Priority < issues[j].Priority
+	})
+
 	// Convert beads issues to queue items
 	for _, issue := range issues {
-		mr := m.issueToBead(issue)
+		mr := m.issueToMR(issue)
 		if mr != nil {
 			// Skip if this is the currently processing MR
 			if ref.CurrentMR != nil && ref.CurrentMR.ID == mr.ID {
@@ -293,8 +298,8 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	return items, nil
 }
 
-// issueToBead converts a beads issue to a MergeRequest.
-func (m *Manager) issueToBead(issue *beads.Issue) *MergeRequest {
+// issueToMR converts a beads issue to a MergeRequest.
+func (m *Manager) issueToMR(issue *beads.Issue) *MergeRequest {
 	if issue == nil {
 		return nil
 	}
@@ -311,12 +316,18 @@ func (m *Manager) issueToBead(issue *beads.Issue) *MergeRequest {
 		}
 	}
 
+	// Default target to main if not specified
+	target := fields.Target
+	if target == "" {
+		target = "main"
+	}
+
 	return &MergeRequest{
 		ID:           issue.ID,
 		Branch:       fields.Branch,
 		Worker:       fields.Worker,
 		IssueID:      fields.SourceIssue,
-		TargetBranch: fields.Target,
+		TargetBranch: target,
 		Status:       MROpen,
 		CreatedAt:    parseTime(issue.CreatedAt),
 	}
@@ -324,62 +335,13 @@ func (m *Manager) issueToBead(issue *beads.Issue) *MergeRequest {
 
 // parseTime parses a time string, returning zero time on error.
 func parseTime(s string) time.Time {
+	// Try RFC3339 first (most common)
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		t, _ = time.Parse("2006-01-02T15:04:05Z", s)
+		// Try date-only format as fallback
+		t, _ = time.Parse("2006-01-02", s)
 	}
 	return t
-}
-
-// discoverWorkBranches finds branches that look like polecat work.
-func (m *Manager) discoverWorkBranches() ([]string, error) {
-	cmd := exec.Command("git", "branch", "-r", "--list", "origin/polecat/*")
-	cmd.Dir = m.workDir
-
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return nil, nil // No remote branches
-	}
-
-	var branches []string
-	for _, line := range strings.Split(stdout.String(), "\n") {
-		branch := strings.TrimSpace(line)
-		if branch != "" && !strings.Contains(branch, "->") {
-			// Remove origin/ prefix
-			branch = strings.TrimPrefix(branch, "origin/")
-			branches = append(branches, branch)
-		}
-	}
-
-	return branches, nil
-}
-
-// branchToMR converts a branch name to a merge request.
-func (m *Manager) branchToMR(branch string) *MergeRequest {
-	// Expected format: polecat/<worker>/<issue> or polecat/<worker>
-	pattern := regexp.MustCompile(`^polecat/([^/]+)(?:/(.+))?$`)
-	matches := pattern.FindStringSubmatch(branch)
-	if matches == nil {
-		return nil
-	}
-
-	worker := matches[1]
-	issueID := ""
-	if len(matches) > 2 {
-		issueID = matches[2]
-	}
-
-	return &MergeRequest{
-		ID:           fmt.Sprintf("mr-%s-%d", worker, time.Now().Unix()),
-		Branch:       branch,
-		Worker:       worker,
-		IssueID:      issueID,
-		TargetBranch: "main", // Default; swarm would use integration branch
-		CreatedAt:    time.Now(), // Would ideally get from git
-		Status:       MROpen,
-	}
 }
 
 // run is deprecated - foreground mode now just prints a message.
