@@ -52,6 +52,14 @@ title = "Assess current workspace state"
 description = """
 Capture current state before any changes.
 
+**0. Prime context (critical for fresh sessions):**
+```bash
+gt prime   # Load gt/mol context
+bd prime   # Load beads context
+```
+These ensure the agent has full system context, especially after session
+start, compaction, or context clear.
+
 **1. Check git status:**
 ```bash
 git status --porcelain
@@ -73,7 +81,7 @@ bd sync --status
 
 This information guides decisions in subsequent steps.
 
-**Exit criteria:** Starting state documented."""
+**Exit criteria:** Context primed, starting state documented."""
 
 [[steps]]
 id = "handle-dirty-state"
