@@ -115,6 +115,16 @@ func runDone(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cannot submit main/master branch to merge queue")
 		}
 
+		// Check for unpushed commits - branch must be pushed before MR creation
+		// Use BranchPushedToRemote which handles polecat branches without upstream tracking
+		pushed, unpushedCount, err := g.BranchPushedToRemote(branch, "origin")
+		if err != nil {
+			return fmt.Errorf("checking if branch is pushed: %w", err)
+		}
+		if !pushed {
+			return fmt.Errorf("branch has %d unpushed commit(s); run 'git push -u origin %s' first", unpushedCount, branch)
+		}
+
 		if issueID == "" {
 			return fmt.Errorf("cannot determine source issue from branch '%s'; use --issue to specify", branch)
 		}
