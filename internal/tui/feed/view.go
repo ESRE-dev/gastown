@@ -24,6 +24,10 @@ func (m *Model) render() string {
 	treePanel := m.renderTreePanel()
 	sections = append(sections, treePanel)
 
+	// Convoy panel (middle)
+	convoyPanel := m.renderConvoyPanel()
+	sections = append(sections, convoyPanel)
+
 	// Feed panel (bottom)
 	feedPanel := m.renderFeedPanel()
 	sections = append(sections, feedPanel)
@@ -298,8 +302,13 @@ func (m *Model) renderEvent(e Event) string {
 // renderStatusBar renders the bottom status bar
 func (m *Model) renderStatusBar() string {
 	// Panel indicator
-	panelName := "tree"
-	if m.focusedPanel == PanelFeed {
+	var panelName string
+	switch m.focusedPanel {
+	case PanelTree:
+		panelName = "tree"
+	case PanelConvoy:
+		panelName = "convoy"
+	case PanelFeed:
 		panelName = "feed"
 	}
 	panel := fmt.Sprintf("[%s]", panelName)

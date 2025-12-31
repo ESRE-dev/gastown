@@ -16,6 +16,7 @@ type Panel int
 
 const (
 	PanelTree Panel = iota
+	PanelConvoy
 	PanelFeed
 )
 
@@ -57,13 +58,16 @@ type Model struct {
 	height int
 
 	// Panels
-	focusedPanel Panel
-	treeViewport viewport.Model
-	feedViewport viewport.Model
+	focusedPanel   Panel
+	treeViewport   viewport.Model
+	convoyViewport viewport.Model
+	feedViewport   viewport.Model
 
 	// Data
-	rigs   map[string]*Rig
-	events []Event
+	rigs        map[string]*Rig
+	events      []Event
+	convoyState *ConvoyState
+	townRoot    string
 
 	// UI state
 	keys     KeyMap
@@ -83,27 +87,39 @@ func NewModel() *Model {
 	h.ShowAll = false
 
 	return &Model{
-		focusedPanel: PanelTree,
-		treeViewport: viewport.New(0, 0),
-		feedViewport: viewport.New(0, 0),
-		rigs:         make(map[string]*Rig),
-		events:       make([]Event, 0, 1000),
-		keys:         DefaultKeyMap(),
-		help:         h,
-		done:         make(chan struct{}),
+		focusedPanel:   PanelTree,
+		treeViewport:   viewport.New(0, 0),
+		convoyViewport: viewport.New(0, 0),
+		feedViewport:   viewport.New(0, 0),
+		rigs:           make(map[string]*Rig),
+		events:         make([]Event, 0, 1000),
+		keys:           DefaultKeyMap(),
+		help:           h,
+		done:           make(chan struct{}),
 	}
+}
+
+// SetTownRoot sets the town root for convoy fetching
+func (m *Model) SetTownRoot(townRoot string) {
+	m.townRoot = townRoot
 }
 
 // Init initializes the model
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.listenForEvents(),
+		m.fetchConvoys(),
 		tea.SetWindowTitle("GT Feed"),
 	)
 }
 
 // eventMsg is sent when a new event arrives
 type eventMsg Event
+
+// convoyUpdateMsg is sent when convoy data is refreshed
+type convoyUpdateMsg struct {
+	state *ConvoyState
+}
 
 // tickMsg is sent periodically to refresh the view
 type tickMsg time.Time
@@ -136,6 +152,25 @@ func tick() tea.Cmd {
 	})
 }
 
+// fetchConvoys returns a command that fetches convoy data
+func (m *Model) fetchConvoys() tea.Cmd {
+	if m.townRoot == "" {
+		return nil
+	}
+	townRoot := m.townRoot
+	return func() tea.Msg {
+		state, _ := FetchConvoys(townRoot)
+		return convoyUpdateMsg{state: state}
+	}
+}
+
+// convoyRefreshTick returns a command that schedules the next convoy refresh
+func (m *Model) convoyRefreshTick() tea.Cmd {
+	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
+		return convoyUpdateMsg{} // Empty state triggers a refresh
+	})
+}
+
 // Update handles messages
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -153,15 +188,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.addEvent(Event(msg))
 		cmds = append(cmds, m.listenForEvents())
 
+	case convoyUpdateMsg:
+		if msg.state != nil {
+			m.convoyState = msg.state
+			m.updateViewContent()
+		}
+		// Schedule next refresh
+		cmds = append(cmds, m.fetchConvoys(), m.convoyRefreshTick())
+
 	case tickMsg:
 		cmds = append(cmds, tick())
 	}
 
 	// Update viewports
 	var cmd tea.Cmd
-	if m.focusedPanel == PanelTree {
+	switch m.focusedPanel {
+	case PanelTree:
 		m.treeViewport, cmd = m.treeViewport.Update(msg)
-	} else {
+	case PanelConvoy:
+		m.convoyViewport, cmd = m.convoyViewport.Update(msg)
+	case PanelFeed:
 		m.feedViewport, cmd = m.feedViewport.Update(msg)
 	}
 	cmds = append(cmds, cmd)
@@ -182,9 +228,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Tab):
-		if m.focusedPanel == PanelTree {
+		// Cycle: Tree -> Convoy -> Feed -> Tree
+		switch m.focusedPanel {
+		case PanelTree:
+			m.focusedPanel = PanelConvoy
+		case PanelConvoy:
 			m.focusedPanel = PanelFeed
-		} else {
+		case PanelFeed:
 			m.focusedPanel = PanelTree
 		}
 		return m, nil
@@ -197,6 +247,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focusedPanel = PanelFeed
 		return m, nil
 
+	case key.Matches(msg, m.keys.FocusConvoy):
+		m.focusedPanel = PanelConvoy
+		return m, nil
+
 	case key.Matches(msg, m.keys.Refresh):
 		m.updateViewContent()
 		return m, nil
@@ -204,9 +258,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Pass to focused viewport
 	var cmd tea.Cmd
-	if m.focusedPanel == PanelTree {
+	switch m.focusedPanel {
+	case PanelTree:
 		m.treeViewport, cmd = m.treeViewport.Update(msg)
-	} else {
+	case PanelConvoy:
+		m.convoyViewport, cmd = m.convoyViewport.Update(msg)
+	case PanelFeed:
 		m.feedViewport, cmd = m.feedViewport.Update(msg)
 	}
 	return m, cmd
@@ -214,23 +271,35 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // updateViewportSizes recalculates viewport dimensions
 func (m *Model) updateViewportSizes() {
-	// Reserve space: header (1) + borders (4) + status bar (1) + help (1-2)
+	// Reserve space: header (1) + borders (6 for 3 panels) + status bar (1) + help (1-2)
 	headerHeight := 1
 	statusHeight := 1
 	helpHeight := 1
 	if m.showHelp {
 		helpHeight = 3
 	}
-	borderHeight := 4 // top and bottom borders for both panels
+	borderHeight := 6 // top and bottom borders for 3 panels
 
 	availableHeight := m.height - headerHeight - statusHeight - helpHeight - borderHeight
-	if availableHeight < 4 {
-		availableHeight = 4
+	if availableHeight < 6 {
+		availableHeight = 6
 	}
 
-	// Split 40% tree, 60% feed
-	treeHeight := availableHeight * 40 / 100
-	feedHeight := availableHeight - treeHeight
+	// Split: 30% tree, 25% convoy, 45% feed
+	treeHeight := availableHeight * 30 / 100
+	convoyHeight := availableHeight * 25 / 100
+	feedHeight := availableHeight - treeHeight - convoyHeight
+
+	// Ensure minimum heights
+	if treeHeight < 3 {
+		treeHeight = 3
+	}
+	if convoyHeight < 3 {
+		convoyHeight = 3
+	}
+	if feedHeight < 3 {
+		feedHeight = 3
+	}
 
 	contentWidth := m.width - 4 // borders and padding
 	if contentWidth < 20 {
@@ -239,15 +308,18 @@ func (m *Model) updateViewportSizes() {
 
 	m.treeViewport.Width = contentWidth
 	m.treeViewport.Height = treeHeight
+	m.convoyViewport.Width = contentWidth
+	m.convoyViewport.Height = convoyHeight
 	m.feedViewport.Width = contentWidth
 	m.feedViewport.Height = feedHeight
 
 	m.updateViewContent()
 }
 
-// updateViewContent refreshes the content of both viewports
+// updateViewContent refreshes the content of all viewports
 func (m *Model) updateViewContent() {
 	m.treeViewport.SetContent(m.renderTree())
+	m.convoyViewport.SetContent(m.renderConvoys())
 	m.feedViewport.SetContent(m.renderFeed())
 }
 

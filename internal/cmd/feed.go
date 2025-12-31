@@ -49,12 +49,14 @@ var feedCmd = &cobra.Command{
 
 By default, launches an interactive TUI dashboard with:
   - Agent tree (top): Shows all agents organized by role with latest activity
+  - Convoy panel (middle): Shows in-progress and recently landed convoys
   - Event stream (bottom): Chronological feed you can scroll through
-  - Vim-style navigation: j/k to scroll, tab to switch panels, q to quit
+  - Vim-style navigation: j/k to scroll, tab to switch panels, 1/2/3 for panels, q to quit
 
-The feed combines two event sources:
+The feed combines multiple event sources:
   - Beads activity: Issue creates, updates, completions (from bd activity)
   - GT events: Agent activity like patrol, sling, handoff (from .events.jsonl)
+  - Convoy status: In-progress and recently-landed convoys (refreshes every 10s)
 
 Use --plain for simple text output (wraps bd activity only).
 
@@ -229,6 +231,7 @@ func runFeedTUI(workDir string) error {
 	// Create model and connect event source
 	m := feed.NewModel()
 	m.SetEventChannel(multiSource.Events())
+	m.SetTownRoot(townRoot)
 
 	// Run the TUI
 	p := tea.NewProgram(m, tea.WithAltScreen())
