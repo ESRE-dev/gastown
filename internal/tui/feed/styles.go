@@ -1,7 +1,10 @@
 // Package feed provides a TUI for the Gas Town activity feed.
 package feed
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+	"github.com/steveyegge/gastown/internal/constants"
+)
 
 // Color palette
 var (
@@ -96,14 +99,14 @@ var (
 				BorderForeground(colorPrimary).
 				Padding(0, 1)
 
-	// Role icons
+	// Role icons - uses centralized emojis from constants package
 	RoleIcons = map[string]string{
-		"mayor":    "🎩",
-		"witness":  "👁",
-		"refinery": "🏭",
-		"crew":     "👷",
-		"polecat":  "😺",
-		"deacon":   "🔔",
+		constants.RoleMayor:    constants.EmojiMayor,
+		constants.RoleWitness:  constants.EmojiWitness,
+		constants.RoleRefinery: constants.EmojiRefinery,
+		constants.RoleCrew:     constants.EmojiCrew,
+		constants.RolePolecat:  constants.EmojiPolecat,
+		constants.RoleDeacon:   constants.EmojiDeacon,
 	}
 
 	// MQ event styles
@@ -130,7 +133,7 @@ var (
 		"delete":   "⊘",
 		"pin":      "📌",
 		// Witness patrol events
-		"patrol_started":  "👁",
+		"patrol_started":  constants.EmojiWitness,
 		"patrol_complete": "✓",
 		"polecat_checked": "·",
 		"polecat_nudged":  "⚡",

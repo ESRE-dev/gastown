@@ -70,7 +70,7 @@ Event symbols:
   ✓  completed         - Issue closed or step completed
   ✗  failed            - Step or issue failed
   ⊘  deleted           - Issue removed
-  👁  patrol_started   - Witness began patrol cycle
+  🦉  patrol_started   - Witness began patrol cycle
   ⚡  polecat_nudged   - Worker was nudged
   🎯  sling            - Work was slung to worker
   🤝  handoff          - Session handed off

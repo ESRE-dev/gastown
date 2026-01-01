@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/style"
@@ -871,7 +872,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		PatrolMolName:   "mol-witness-patrol",
 		BeadsDir:        ctx.WorkDir,
 		Assignee:        ctx.Rig + "/witness",
-		HeaderEmoji:     "👁",
+		HeaderEmoji:     constants.EmojiWitness,
 		HeaderTitle:     "Witness Patrol Status",
 		CheckInProgress: true,
 		WorkLoopSteps: []string{

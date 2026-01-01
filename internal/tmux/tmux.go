@@ -581,13 +581,19 @@ func (t *Tmux) ApplyTheme(session string, theme Theme) error {
 }
 
 // roleIcons maps role names to display icons for the status bar.
+// Uses centralized emojis from constants package.
+// Includes legacy keys ("coordinator", "health-check") for backwards compatibility.
 var roleIcons = map[string]string{
-	"coordinator": "🎩", // Mayor
-	"health-check": "🦉", // Deacon
-	"witness":     "👁",
-	"refinery":    "🏭",
-	"crew":        "👷",
-	"polecat":     "😺",
+	// Standard role names (from constants)
+	constants.RoleMayor:    constants.EmojiMayor,
+	constants.RoleDeacon:   constants.EmojiDeacon,
+	constants.RoleWitness:  constants.EmojiWitness,
+	constants.RoleRefinery: constants.EmojiRefinery,
+	constants.RoleCrew:     constants.EmojiCrew,
+	constants.RolePolecat:  constants.EmojiPolecat,
+	// Legacy names (for backwards compatibility)
+	"coordinator":  constants.EmojiMayor,
+	"health-check": constants.EmojiDeacon,
 }
 
 // SetStatusFormat configures the left side of the status bar.

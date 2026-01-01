@@ -125,6 +125,48 @@ const (
 	RoleDeacon = "deacon"
 )
 
+// Role emojis - centralized for easy customization.
+// These match the Gas Town visual identity (see ~/Desktop/Gas Town/ prompts).
+const (
+	// EmojiMayor is the mayor emoji (fox conductor).
+	EmojiMayor = "🎩"
+
+	// EmojiDeacon is the deacon emoji (wolf in the engine room).
+	EmojiDeacon = "🐺"
+
+	// EmojiWitness is the witness emoji (watchful owl).
+	EmojiWitness = "🦉"
+
+	// EmojiRefinery is the refinery emoji (industrial).
+	EmojiRefinery = "🏭"
+
+	// EmojiCrew is the crew emoji (established worker).
+	EmojiCrew = "👷"
+
+	// EmojiPolecat is the polecat emoji (transient worker).
+	EmojiPolecat = "😺"
+)
+
+// RoleEmoji returns the emoji for a given role name.
+func RoleEmoji(role string) string {
+	switch role {
+	case RoleMayor:
+		return EmojiMayor
+	case RoleDeacon:
+		return EmojiDeacon
+	case RoleWitness:
+		return EmojiWitness
+	case RoleRefinery:
+		return EmojiRefinery
+	case RoleCrew:
+		return EmojiCrew
+	case RolePolecat:
+		return EmojiPolecat
+	default:
+		return "❓"
+	}
+}
+
 // SupportedShells lists shell binaries that Gas Town can detect and work with.
 // Used to identify if a tmux pane is at a shell prompt vs running a command.
 var SupportedShells = []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}

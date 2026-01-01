@@ -316,16 +316,17 @@ func outputStatusText(status TownStatus) error {
 		fmt.Println()
 	}
 
-	// Role icons
+	// Role icons - uses centralized emojis from constants package
 	roleIcons := map[string]string{
-		"mayor":       "🎩",
-		"coordinator": "🎩",
-		"deacon":      "🔔",
-		"health-check": "🔔",
-		"witness":     "👁",
-		"refinery":    "🏭",
-		"crew":        "👷",
-		"polecat":     "😺",
+		constants.RoleMayor:    constants.EmojiMayor,
+		constants.RoleDeacon:   constants.EmojiDeacon,
+		constants.RoleWitness:  constants.EmojiWitness,
+		constants.RoleRefinery: constants.EmojiRefinery,
+		constants.RoleCrew:     constants.EmojiCrew,
+		constants.RolePolecat:  constants.EmojiPolecat,
+		// Legacy names for backwards compatibility
+		"coordinator":  constants.EmojiMayor,
+		"health-check": constants.EmojiDeacon,
 	}
 
 	// Global Agents (Mayor, Deacon)

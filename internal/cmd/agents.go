@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -47,13 +48,14 @@ var AgentTypeColors = map[AgentType]string{
 }
 
 // AgentTypeIcons maps agent types to display icons.
+// Uses centralized emojis from constants package.
 var AgentTypeIcons = map[AgentType]string{
-	AgentMayor:    "🎩",
-	AgentDeacon:   "🦉",
-	AgentWitness:  "👁",
-	AgentRefinery: "🏭",
-	AgentCrew:     "👷",
-	AgentPolecat:  "😺",
+	AgentMayor:    constants.EmojiMayor,
+	AgentDeacon:   constants.EmojiDeacon,
+	AgentWitness:  constants.EmojiWitness,
+	AgentRefinery: constants.EmojiRefinery,
+	AgentCrew:     constants.EmojiCrew,
+	AgentPolecat:  constants.EmojiPolecat,
 }
 
 var agentsCmd = &cobra.Command{
