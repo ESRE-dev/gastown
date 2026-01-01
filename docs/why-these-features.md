@@ -135,10 +135,10 @@ in different repos. Traditional tools don't track this.
 
 **The solution:** Explicit cross-project dependencies:
 
-```yaml
+```
 depends_on:
-  - beads://github/acme/backend/be-456  # Backend API
-  - beads://github/acme/shared/sh-789   # Shared types
+  beads://github/acme/backend/be-456  # Backend API
+  beads://github/acme/shared/sh-789   # Shared types
 ```
 
 **Why it matters:**

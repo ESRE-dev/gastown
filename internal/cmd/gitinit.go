@@ -109,7 +109,7 @@ const HQGitignore = `# Gas Town HQ .gitignore
 # Explicitly track (override above patterns)
 # =============================================================================
 # Note: .beads/ has its own .gitignore that handles SQLite files
-# and keeps issues.jsonl, metadata.json, config.yaml as source of truth
+# and keeps issues.jsonl, metadata.json, config file as source of truth
 `
 
 func runGitInit(cmd *cobra.Command, args []string) error {

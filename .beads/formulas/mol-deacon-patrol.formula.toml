@@ -323,7 +323,7 @@ needs = ["health-scan"]
 description = """
 Execute registered plugins.
 
-Scan ~/gt/plugins/ for plugin directories. Each plugin has a plugin.md with YAML frontmatter defining its gate (when to run) and instructions (what to do).
+Scan ~/gt/plugins/ for plugin directories. Each plugin has a plugin.md with TOML frontmatter defining its gate (when to run) and instructions (what to do).
 
 See docs/deacon-plugins.md for full documentation.
 

@@ -408,6 +408,7 @@ func (m *Manager) initAgentStates(rigPath string) error {
 // initBeads initializes the beads database at rig level.
 // The project's .beads/config.yaml determines sync-branch settings.
 // Use `bd doctor --fix` in the project to configure sync-branch if needed.
+// TODO(bd-yaml): beads config should migrate to JSON (see beads issue)
 func (m *Manager) initBeads(rigPath, prefix string) error {
 	beadsDir := filepath.Join(rigPath, ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
@@ -419,6 +420,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	cmd.Dir = rigPath
 	if err := cmd.Run(); err != nil {
 		// bd might not be installed or --no-agents not supported, create minimal structure
+		// Note: beads currently expects YAML format for config
 		configPath := filepath.Join(beadsDir, "config.yaml")
 		configContent := fmt.Sprintf("prefix: %s\n", prefix)
 		if writeErr := os.WriteFile(configPath, []byte(configContent), 0644); writeErr != nil {
@@ -747,7 +749,7 @@ This directory contains town-level plugins that run during Deacon patrol cycles.
 ## Plugin Structure
 
 Each plugin is a directory containing:
-- plugin.md - Plugin definition with YAML frontmatter
+- plugin.md - Plugin definition with TOML frontmatter
 
 ## Gate Types
 

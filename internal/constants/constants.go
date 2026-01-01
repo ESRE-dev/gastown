@@ -70,9 +70,6 @@ const (
 	// FileConfigJSON is the general config file.
 	FileConfigJSON = "config.json"
 
-	// FileConfigYAML is the beads config file.
-	FileConfigYAML = "config.yaml"
-
 	// FileAccountsJSON is the accounts configuration file in mayor/.
 	FileAccountsJSON = "accounts.json"
 )

@@ -273,8 +273,9 @@ func (c *BeadsSyncOrphanCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 		// Check if it's a code file
 		if strings.HasSuffix(f, ".go") || strings.HasSuffix(f, ".md") ||
+			strings.HasSuffix(f, ".toml") || strings.HasSuffix(f, ".json") ||
 			strings.HasSuffix(f, ".yaml") || strings.HasSuffix(f, ".yml") ||
-			strings.HasSuffix(f, ".json") || strings.HasSuffix(f, ".tmpl") {
+			strings.HasSuffix(f, ".tmpl") {
 			codeFiles = append(codeFiles, f)
 		}
 	}
