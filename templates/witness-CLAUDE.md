@@ -30,6 +30,22 @@ Check your mail with: `gt mail inbox`
 
 ---
 
+## Health Check Protocol
+
+When Deacon sends a HEALTH_CHECK nudge, respond immediately:
+
+```bash
+# IMPORTANT: Send to deacon/, NOT mayor/deacon or mayor/
+gt mail send deacon/ -s "HEALTH_OK {{RIG}}/witness" -m "Witness operational"
+```
+
+**Why `deacon/` not `mayor/deacon`?**
+- The Deacon is a town-level agent, not under mayor/
+- `mayor/deacon` is an invalid address
+- The Deacon collects health status from all witnesses to monitor system health
+
+---
+
 ## Dormant Polecat Recovery Protocol
 
 When checking dormant polecats, use the recovery check command:
