@@ -2,11 +2,14 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var unslingCmd = &cobra.Command{
@@ -84,25 +87,39 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Find beads directory
-	workDir, err := findLocalBeadsDir()
+	// Find town root and rig path for agent beads
+	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
-		return fmt.Errorf("not in a beads workspace: %w", err)
+		return fmt.Errorf("finding town root: %w", err)
 	}
 
-	b := beads.New(workDir)
-
-	// Find hooked bead for this agent
-	pinnedBeads, err := b.List(beads.ListOptions{
-		Status:   beads.StatusHooked,
-		Assignee: agentID,
-		Priority: -1,
-	})
-	if err != nil {
-		return fmt.Errorf("checking hooked beads: %w", err)
+	// Extract rig name from agent ID (e.g., "gastown/crew/joe" -> "gastown")
+	// For town-level agents like "mayor/", use town root
+	rigName := strings.Split(agentID, "/")[0]
+	var beadsPath string
+	if rigName == "mayor" || rigName == "deacon" {
+		beadsPath = townRoot
+	} else {
+		beadsPath = filepath.Join(townRoot, rigName)
 	}
 
-	if len(pinnedBeads) == 0 {
+	b := beads.New(beadsPath)
+
+	// Convert agent ID to agent bead ID and look up the agent bead
+	agentBeadID := agentIDToBeadID(agentID)
+	if agentBeadID == "" {
+		return fmt.Errorf("could not convert agent ID %s to bead ID", agentID)
+	}
+
+	// Get the agent bead to find current hook
+	agentBead, err := b.Show(agentBeadID)
+	if err != nil {
+		return fmt.Errorf("getting agent bead %s: %w", agentBeadID, err)
+	}
+
+	// Check if agent has work hooked (via hook_bead field)
+	hookedBeadID := agentBead.HookBead
+	if hookedBeadID == "" {
 		if targetAgent != "" {
 			fmt.Printf("%s No work hooked for %s\n", style.Dim.Render("ℹ"), agentID)
 		} else {
@@ -111,42 +128,51 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	pinned := pinnedBeads[0]
-
 	// If specific bead requested, verify it matches
-	if targetBeadID != "" && pinned.ID != targetBeadID {
-		return fmt.Errorf("bead %s is not hooked (current hook: %s)", targetBeadID, pinned.ID)
+	if targetBeadID != "" && hookedBeadID != targetBeadID {
+		return fmt.Errorf("bead %s is not hooked (current hook: %s)", targetBeadID, hookedBeadID)
+	}
+
+	// Get the hooked bead to check completion and show title
+	hookedBead, err := b.Show(hookedBeadID)
+	if err != nil {
+		// Bead might be deleted - still allow unsling with --force
+		if !unslingForce {
+			return fmt.Errorf("getting hooked bead %s: %w\n  Use --force to unsling anyway", hookedBeadID, err)
+		}
+		// Force mode - proceed without the bead details
+		hookedBead = &beads.Issue{ID: hookedBeadID, Title: "(unknown)"}
 	}
 
 	// Check if work is complete (warn if not, unless --force)
-	isComplete, _ := checkPinnedBeadComplete(b, pinned)
+	isComplete := hookedBead.Status == "closed"
 	if !isComplete && !unslingForce {
 		return fmt.Errorf("hooked work %s is incomplete (%s)\n  Use --force to unsling anyway",
-			pinned.ID, pinned.Title)
+			hookedBeadID, hookedBead.Title)
 	}
 
 	if targetAgent != "" {
-		fmt.Printf("%s Unslinging %s from %s...\n", style.Bold.Render("🪝"), pinned.ID, agentID)
+		fmt.Printf("%s Unslinging %s from %s...\n", style.Bold.Render("🪝"), hookedBeadID, agentID)
 	} else {
-		fmt.Printf("%s Unslinging %s...\n", style.Bold.Render("🪝"), pinned.ID)
+		fmt.Printf("%s Unslinging %s...\n", style.Bold.Render("🪝"), hookedBeadID)
 	}
 
 	if unslingDryRun {
-		fmt.Printf("Would run: bd update %s --status=open\n", pinned.ID)
+		fmt.Printf("Would clear hook_bead from agent bead %s\n", agentBeadID)
 		return nil
 	}
 
-	// Unpin by setting status back to open
-	status := "open"
-	if err := b.Update(pinned.ID, beads.UpdateOptions{Status: &status}); err != nil {
-		return fmt.Errorf("unhooking bead %s: %w", pinned.ID, err)
+	// Clear the hook by updating agent bead with empty hook_bead
+	emptyHook := ""
+	if err := b.UpdateAgentState(agentBeadID, "running", &emptyHook); err != nil {
+		return fmt.Errorf("clearing hook from agent bead %s: %w", agentBeadID, err)
 	}
 
 	// Log unhook event
-	_ = events.LogFeed(events.TypeUnhook, agentID, events.UnhookPayload(pinned.ID))
+	_ = events.LogFeed(events.TypeUnhook, agentID, events.UnhookPayload(hookedBeadID))
 
 	fmt.Printf("%s Work removed from hook\n", style.Bold.Render("✓"))
-	fmt.Printf("  Bead %s is now status=open\n", pinned.ID)
+	fmt.Printf("  Agent %s hook cleared (was: %s)\n", agentID, hookedBeadID)
 
 	return nil
 }

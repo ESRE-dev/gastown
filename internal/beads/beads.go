@@ -103,8 +103,9 @@ type Issue struct {
 	Labels      []string `json:"labels,omitempty"`
 
 	// Agent bead slots (type=agent only)
-	HookBead string `json:"hook_bead,omitempty"` // Current work attached to agent's hook
-	RoleBead string `json:"role_bead,omitempty"` // Role definition bead (shared)
+	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
+	RoleBead   string `json:"role_bead,omitempty"`   // Role definition bead (shared)
+	AgentState string `json:"agent_state,omitempty"` // Agent lifecycle state (spawning, working, done, stuck)
 
 	// Counts from list output
 	DependencyCount int `json:"dependency_count,omitempty"`

@@ -626,16 +626,22 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 
 			// Look up agent bead from preloaded map (O(1))
 			if issue, ok := allAgentBeads[d.beadID]; ok {
-				fields := beads.ParseAgentFields(issue.Description)
-				if fields != nil {
-					agent.HookBead = fields.HookBead
-					agent.State = fields.AgentState
-					if fields.HookBead != "" {
-						agent.HasWork = true
-						// Get hook title from preloaded map
-						if pinnedIssue, ok := allHookBeads[fields.HookBead]; ok {
-							agent.WorkTitle = pinnedIssue.Title
-						}
+				// Prefer SQLite columns over description parsing
+				// HookBead column is authoritative (cleared by unsling)
+				agent.HookBead = issue.HookBead
+				agent.State = issue.AgentState
+				if agent.HookBead != "" {
+					agent.HasWork = true
+					// Get hook title from preloaded map
+					if pinnedIssue, ok := allHookBeads[agent.HookBead]; ok {
+						agent.WorkTitle = pinnedIssue.Title
+					}
+				}
+				// Fallback to description for legacy beads without SQLite columns
+				if agent.State == "" {
+					fields := beads.ParseAgentFields(issue.Description)
+					if fields != nil {
+						agent.State = fields.AgentState
 					}
 				}
 			}
@@ -758,16 +764,22 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 
 			// Look up agent bead from preloaded map (O(1))
 			if issue, ok := allAgentBeads[d.beadID]; ok {
-				fields := beads.ParseAgentFields(issue.Description)
-				if fields != nil {
-					agent.HookBead = fields.HookBead
-					agent.State = fields.AgentState
-					if fields.HookBead != "" {
-						agent.HasWork = true
-						// Get hook title from preloaded map
-						if pinnedIssue, ok := allHookBeads[fields.HookBead]; ok {
-							agent.WorkTitle = pinnedIssue.Title
-						}
+				// Prefer SQLite columns over description parsing
+				// HookBead column is authoritative (cleared by unsling)
+				agent.HookBead = issue.HookBead
+				agent.State = issue.AgentState
+				if agent.HookBead != "" {
+					agent.HasWork = true
+					// Get hook title from preloaded map
+					if pinnedIssue, ok := allHookBeads[agent.HookBead]; ok {
+						agent.WorkTitle = pinnedIssue.Title
+					}
+				}
+				// Fallback to description for legacy beads without SQLite columns
+				if agent.State == "" {
+					fields := beads.ParseAgentFields(issue.Description)
+					if fields != nil {
+						agent.State = fields.AgentState
 					}
 				}
 			}
