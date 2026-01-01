@@ -11,6 +11,14 @@ Multi-agent orchestrator for Claude Code. Track work with convoys; sling to agen
 | 4-10 agents is chaotic | Comfortably scale to 20-30 agents |
 | Work state in agent memory | Work state in Beads (git-backed ledger) |
 
+## Prerequisites
+
+- **Go 1.23+** - [go.dev/dl](https://go.dev/dl/)
+- **Git 2.25+** - for worktree support
+- **beads (bd)** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads) - required for issue tracking
+- **tmux 3.0+** - for full stack mode (optional for minimal mode)
+- **Claude Code CLI** - [claude.ai/code](https://claude.ai/code)
+
 ## Quick Start
 
 ```bash
@@ -259,13 +267,6 @@ Molecules survive crashes - any agent can continue where another left off.
 | `burn` | Wisp → ∅ | Discard without record |
 
 ---
-
-## Prerequisites
-
-- **Go 1.23+**
-- **Git**
-- **tmux** (for full stack mode)
-- **Claude Code CLI**
 
 ## License
 
