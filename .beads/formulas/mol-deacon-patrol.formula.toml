@@ -3,6 +3,17 @@ Mayor's daemon patrol loop.
 
 The Deacon is the Mayor's background process that runs continuously, handling callbacks, monitoring rig health, and performing cleanup. Each patrol cycle runs these steps in sequence, then loops or exits.
 
+## Idle Town Principle
+
+**The Deacon should be silent/invisible when the town is healthy and idle.**
+
+- Skip HEALTH_CHECK nudges when no active work exists
+- Sleep 60+ seconds between patrol cycles (longer when idle)
+- Let the feed subscription wake agents on actual events
+- The daemon (10-minute heartbeat) is the safety net for dead sessions
+
+This prevents flooding idle agents with health checks every few seconds.
+
 ## Second-Order Monitoring
 
 Witnesses send WITNESS_PING messages to verify the Deacon is alive. This
@@ -251,6 +262,21 @@ needs = ["trigger-pending-spawns", "gate-evaluation", "fire-notifications"]
 description = """
 Check Witness and Refinery health for each rig.
 
+**IMPORTANT: Idle Town Protocol**
+Before sending health check nudges, check if the town is idle:
+```bash
+# Check for active work
+bd list --status=in_progress --limit=5
+```
+
+If NO active work (empty result or only patrol molecules):
+- **Skip HEALTH_CHECK nudges** - don't disturb idle agents
+- Just verify sessions exist via status commands
+- The town should be silent when healthy and idle
+
+If ACTIVE work exists:
+- Proceed with health check nudges below
+
 **ZFC Principle**: You (Claude) make the judgment call about what is "stuck" or "unresponsive" - there are no hardcoded thresholds in Go. Read the signals, consider context, and decide.
 
 For each rig, run:
@@ -258,7 +284,7 @@ For each rig, run:
 gt witness status <rig>
 gt refinery status <rig>
 
-# Health ping (clears backoff as side effect)
+# ONLY if active work exists - health ping (clears backoff as side effect)
 gt nudge <rig>/witness 'HEALTH_CHECK from deacon'
 gt nudge <rig>/refinery 'HEALTH_CHECK from deacon'
 ```
@@ -267,9 +293,7 @@ gt nudge <rig>/refinery 'HEALTH_CHECK from deacon'
 1. **Liveness verification** - Agent responds to prove it's alive
 2. **Backoff reset** - Any nudge resets agent's backoff to base interval
 
-This ensures patrol agents remain responsive even during quiet periods when the
-feed has no mutations. Deacon patrols every ~1-2 minutes, so maximum backoff
-is bounded by the ping interval.
+This ensures patrol agents remain responsive during active work periods.
 
 **Signals to assess:**
 
@@ -587,8 +611,15 @@ Burn and let daemon respawn, or exit if context high.
 Decision point at end of patrol cycle:
 
 If context is LOW:
-- Sleep briefly (avoid tight loop)
+- **Sleep 60 seconds minimum** before next patrol cycle
+- If town is idle (no in_progress work), sleep longer (2-5 minutes)
 - Return to inbox-check step
+
+**Why longer sleep?**
+- Idle agents should not be disturbed
+- Health checks every few seconds flood inboxes and waste context
+- The daemon (10-minute heartbeat) is the safety net for dead sessions
+- Active work triggers feed events, which wake agents naturally
 
 If context is HIGH:
 - Write state to persistent storage
