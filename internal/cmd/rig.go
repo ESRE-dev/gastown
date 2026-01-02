@@ -195,6 +195,34 @@ Examples:
 	RunE: runRigStatus,
 }
 
+var rigStopCmd = &cobra.Command{
+	Use:   "stop <rig>...",
+	Short: "Stop one or more rigs (shutdown semantics)",
+	Long: `Stop all agents in one or more rigs.
+
+This command is similar to 'gt rig shutdown' but supports multiple rigs.
+For each rig, it gracefully shuts down:
+- All polecat sessions
+- The refinery (if running)
+- The witness (if running)
+
+Before shutdown, checks all polecats for uncommitted work:
+- Uncommitted changes (modified/untracked files)
+- Stashes
+- Unpushed commits
+
+Use --force to skip graceful shutdown and kill immediately.
+Use --nuclear to bypass ALL safety checks (will lose work!).
+
+Examples:
+  gt rig stop gastown
+  gt rig stop gastown beads
+  gt rig stop --force gastown beads
+  gt rig stop --nuclear gastown  # DANGER: loses uncommitted work`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runRigStop,
+}
+
 // Flags
 var (
 	rigAddPrefix       string
@@ -205,6 +233,8 @@ var (
 	rigResetRole       string
 	rigShutdownForce   bool
 	rigShutdownNuclear bool
+	rigStopForce       bool
+	rigStopNuclear     bool
 )
 
 func init() {
@@ -218,6 +248,7 @@ func init() {
 	rigCmd.AddCommand(rigShutdownCmd)
 	rigCmd.AddCommand(rigStartCmd)
 	rigCmd.AddCommand(rigStatusCmd)
+	rigCmd.AddCommand(rigStopCmd)
 
 	rigAddCmd.Flags().StringVar(&rigAddPrefix, "prefix", "", "Beads issue prefix (default: derived from name)")
 
@@ -231,6 +262,9 @@ func init() {
 	rigShutdownCmd.Flags().BoolVar(&rigShutdownNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks (loses uncommitted work!)")
 
 	rigRebootCmd.Flags().BoolVarP(&rigShutdownForce, "force", "f", false, "Force immediate shutdown during reboot")
+
+	rigStopCmd.Flags().BoolVarP(&rigStopForce, "force", "f", false, "Force immediate shutdown")
+	rigStopCmd.Flags().BoolVar(&rigStopNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks (loses uncommitted work!)")
 }
 
 func runRigAdd(cmd *cobra.Command, args []string) error {
@@ -1025,6 +1059,135 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 
 			fmt.Printf("  %s %s: %s%s\n", sessionIcon, w.Name, branch, gitInfo)
 		}
+	}
+
+	return nil
+}
+
+func runRigStop(cmd *cobra.Command, args []string) error {
+	// Find workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load rigs config
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+
+	// Track results
+	var succeeded []string
+	var failed []string
+
+	// Process each rig
+	for _, rigName := range args {
+		r, err := rigMgr.GetRig(rigName)
+		if err != nil {
+			fmt.Printf("%s Rig '%s' not found\n", style.Warning.Render("⚠"), rigName)
+			failed = append(failed, rigName)
+			continue
+		}
+
+		// Check all polecats for uncommitted work (unless nuclear)
+		if !rigStopNuclear {
+			polecatGit := git.NewGit(r.Path)
+			polecatMgr := polecat.NewManager(r, polecatGit)
+			polecats, err := polecatMgr.List()
+			if err == nil && len(polecats) > 0 {
+				var problemPolecats []struct {
+					name   string
+					status *git.UncommittedWorkStatus
+				}
+
+				for _, p := range polecats {
+					pGit := git.NewGit(p.ClonePath)
+					status, err := pGit.CheckUncommittedWork()
+					if err == nil && !status.Clean() {
+						problemPolecats = append(problemPolecats, struct {
+							name   string
+							status *git.UncommittedWorkStatus
+						}{p.Name, status})
+					}
+				}
+
+				if len(problemPolecats) > 0 {
+					fmt.Printf("\n%s Cannot stop %s - polecats have uncommitted work:\n", style.Warning.Render("⚠"), rigName)
+					for _, pp := range problemPolecats {
+						fmt.Printf("  %s: %s\n", style.Bold.Render(pp.name), pp.status.String())
+					}
+					failed = append(failed, rigName)
+					continue
+				}
+			}
+		}
+
+		fmt.Printf("Stopping rig %s...\n", style.Bold.Render(rigName))
+
+		var errors []string
+
+		// 1. Stop all polecat sessions
+		t := tmux.NewTmux()
+		sessMgr := session.NewManager(t, r)
+		infos, err := sessMgr.List()
+		if err == nil && len(infos) > 0 {
+			fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
+			if err := sessMgr.StopAll(rigStopForce); err != nil {
+				errors = append(errors, fmt.Sprintf("polecat sessions: %v", err))
+			}
+		}
+
+		// 2. Stop the refinery
+		refMgr := refinery.NewManager(r)
+		refStatus, err := refMgr.Status()
+		if err == nil && refStatus.State == refinery.StateRunning {
+			fmt.Printf("  Stopping refinery...\n")
+			if err := refMgr.Stop(); err != nil {
+				errors = append(errors, fmt.Sprintf("refinery: %v", err))
+			}
+		}
+
+		// 3. Stop the witness
+		witMgr := witness.NewManager(r)
+		witStatus, err := witMgr.Status()
+		if err == nil && witStatus.State == witness.StateRunning {
+			fmt.Printf("  Stopping witness...\n")
+			if err := witMgr.Stop(); err != nil {
+				errors = append(errors, fmt.Sprintf("witness: %v", err))
+			}
+		}
+
+		if len(errors) > 0 {
+			fmt.Printf("%s Some agents in %s failed to stop:\n", style.Warning.Render("⚠"), rigName)
+			for _, e := range errors {
+				fmt.Printf("  - %s\n", e)
+			}
+			failed = append(failed, rigName)
+		} else {
+			fmt.Printf("%s Rig %s stopped\n", style.Success.Render("✓"), rigName)
+			succeeded = append(succeeded, rigName)
+		}
+	}
+
+	// Summary
+	if len(args) > 1 {
+		fmt.Println()
+		if len(succeeded) > 0 {
+			fmt.Printf("%s Stopped: %s\n", style.Success.Render("✓"), strings.Join(succeeded, ", "))
+		}
+		if len(failed) > 0 {
+			fmt.Printf("%s Failed: %s\n", style.Warning.Render("⚠"), strings.Join(failed, ", "))
+			fmt.Printf("\nUse %s to force shutdown (DANGER: will lose work!)\n", style.Bold.Render("--nuclear"))
+			return fmt.Errorf("some rigs failed to stop")
+		}
+	} else if len(failed) > 0 {
+		fmt.Printf("\nUse %s to force shutdown (DANGER: will lose work!)\n", style.Bold.Render("--nuclear"))
+		return fmt.Errorf("rig failed to stop")
 	}
 
 	return nil
