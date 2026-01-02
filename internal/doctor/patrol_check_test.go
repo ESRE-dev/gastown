@@ -253,3 +253,109 @@ func TestPatrolRolesHavePromptsCheck_FixHint(t *testing.T) {
 		t.Errorf("FixHint = %q, unexpected value", result.FixHint)
 	}
 }
+
+func TestPatrolRolesHavePromptsCheck_FixMultipleRigs(t *testing.T) {
+	tmpDir := t.TempDir()
+	setupRigConfig(t, tmpDir, []string{"project1", "project2", "project3"})
+
+	templatesDir1 := setupRigTemplatesDir(t, tmpDir, "project1")
+	for _, tmpl := range requiredRolePrompts {
+		if err := os.WriteFile(filepath.Join(templatesDir1, tmpl), []byte("existing"), 0644); err != nil {
+			t.Fatalf("write %s: %v", tmpl, err)
+		}
+	}
+
+	check := NewPatrolRolesHavePromptsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+	if result.Status != StatusWarning {
+		t.Fatalf("Initial Status = %v, want Warning", result.Status)
+	}
+	if len(check.missingByRig) != 2 {
+		t.Fatalf("missingByRig count = %d, want 2 (project2, project3)", len(check.missingByRig))
+	}
+
+	err := check.Fix(ctx)
+	if err != nil {
+		t.Fatalf("Fix() error = %v", err)
+	}
+
+	for _, rig := range []string{"project2", "project3"} {
+		templatesDir := filepath.Join(tmpDir, rig, "mayor", "rig", "internal", "templates", "roles")
+		for _, tmpl := range requiredRolePrompts {
+			path := filepath.Join(templatesDir, tmpl)
+			if _, err := os.Stat(path); err != nil {
+				t.Errorf("Fix() did not create %s for %s: %v", tmpl, rig, err)
+			}
+		}
+	}
+
+	result = check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Errorf("After Fix(), Status = %v, want OK", result.Status)
+	}
+}
+
+func TestPatrolRolesHavePromptsCheck_DetailsFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+	setupRigConfig(t, tmpDir, []string{"myproject"})
+
+	check := NewPatrolRolesHavePromptsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if len(result.Details) != 3 {
+		t.Fatalf("Details count = %d, want 3", len(result.Details))
+	}
+
+	for _, detail := range result.Details {
+		if detail[:10] != "myproject:" {
+			t.Errorf("Detail %q should be prefixed with 'myproject:'", detail)
+		}
+	}
+}
+
+func TestPatrolRolesHavePromptsCheck_MalformedRigsJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte("not valid json"), 0644); err != nil {
+		t.Fatalf("write rigs.json: %v", err)
+	}
+
+	check := NewPatrolRolesHavePromptsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("Status = %v, want Error for malformed rigs.json", result.Status)
+	}
+}
+
+func TestPatrolRolesHavePromptsCheck_EmptyRigsConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte(`{"rigs":{}}`), 0644); err != nil {
+		t.Fatalf("write rigs.json: %v", err)
+	}
+
+	check := NewPatrolRolesHavePromptsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("Status = %v, want OK for empty rigs config", result.Status)
+	}
+	if result.Message != "No rigs configured" {
+		t.Errorf("Message = %q, want 'No rigs configured'", result.Message)
+	}
+}
