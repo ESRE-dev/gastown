@@ -175,6 +175,11 @@ func (m *Manager) exists(name string) bool {
 	return err == nil
 }
 
+// AddOptions configures polecat creation.
+type AddOptions struct {
+	HookBead string // Bead ID to set as hook_bead at spawn time (atomic assignment)
+}
+
 // Add creates a new polecat as a git worktree from the repo base.
 // Uses the shared bare repo (.repo.git) if available, otherwise mayor/rig.
 // This is much faster than a full clone and shares objects with all worktrees.
@@ -184,6 +189,13 @@ func (m *Manager) exists(name string) bool {
 // This prevents drift issues from stale branches and ensures a clean starting state.
 // Old branches are ephemeral and never pushed to origin.
 func (m *Manager) Add(name string) (*Polecat, error) {
+	return m.AddWithOptions(name, AddOptions{})
+}
+
+// AddWithOptions creates a new polecat with the specified options.
+// This allows setting hook_bead atomically at creation time, avoiding
+// cross-beads routing issues when slinging work to new polecats.
+func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error) {
 	if m.exists(name) {
 		return nil, ErrPolecatExists
 	}
@@ -226,12 +238,14 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 
 	// Create agent bead for ZFC compliance (self-report state).
 	// State starts as "spawning" - will be updated to "working" when Claude starts.
+	// HookBead is set atomically at creation time if provided (avoids cross-beads routing issues).
 	agentID := m.agentBeadID(name)
 	_, err = m.beads.CreateAgentBead(agentID, agentID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
 		RoleBead:   "gt-polecat-role",
+		HookBead:   opts.HookBead, // Set atomically at spawn time
 	})
 	if err != nil {
 		// Non-fatal - log warning but continue
@@ -372,6 +386,12 @@ func (m *Manager) ReleaseName(name string) {
 // Branch naming: Each recreation gets a unique branch (polecat/<name>-<timestamp>).
 // Old branches are left for garbage collection - they're never pushed to origin.
 func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
+	return m.RecreateWithOptions(name, force, AddOptions{})
+}
+
+// RecreateWithOptions removes an existing polecat and creates a fresh worktree with options.
+// This allows setting hook_bead atomically at recreation time.
+func (m *Manager) RecreateWithOptions(name string, force bool, opts AddOptions) (*Polecat, error) {
 	if !m.exists(name) {
 		return nil, ErrPolecatNotFound
 	}
@@ -433,11 +453,13 @@ func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
 	}
 
 	// Create fresh agent bead for ZFC compliance
+	// HookBead is set atomically at recreation time if provided.
 	_, err = m.beads.CreateAgentBead(agentID, agentID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
 		RoleBead:   "gt-polecat-role",
+		HookBead:   opts.HookBead, // Set atomically at spawn time
 	})
 	if err != nil {
 		fmt.Printf("Warning: could not create agent bead: %v\n", err)

@@ -34,10 +34,11 @@ func (s *SpawnedPolecatInfo) AgentID() string {
 
 // SlingSpawnOptions contains options for spawning a polecat via sling.
 type SlingSpawnOptions struct {
-	Force   bool   // Force spawn even if polecat has uncommitted work
-	Naked   bool   // No-tmux mode: skip session creation
-	Account string // Claude Code account handle to use
-	Create  bool   // Create polecat if it doesn't exist (currently always true for sling)
+	Force    bool   // Force spawn even if polecat has uncommitted work
+	Naked    bool   // No-tmux mode: skip session creation
+	Account  string // Claude Code account handle to use
+	Create   bool   // Create polecat if it doesn't exist (currently always true for sling)
+	HookBead string // Bead ID to set as hook_bead at spawn time (atomic assignment)
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -77,6 +78,12 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 
 	// Check if polecat already exists (shouldn't, since we allocated fresh)
 	existingPolecat, err := polecatMgr.Get(polecatName)
+
+	// Build add options with hook_bead set atomically at spawn time
+	addOpts := polecat.AddOptions{
+		HookBead: opts.HookBead,
+	}
+
 	if err == nil {
 		// Exists - recreate with fresh worktree
 		// Check for uncommitted work first
@@ -89,13 +96,13 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 			}
 		}
 		fmt.Printf("Recreating polecat %s with fresh worktree...\n", polecatName)
-		if _, err = polecatMgr.Recreate(polecatName, opts.Force); err != nil {
+		if _, err = polecatMgr.RecreateWithOptions(polecatName, opts.Force, addOpts); err != nil {
 			return nil, fmt.Errorf("recreating polecat: %w", err)
 		}
 	} else if err == polecat.ErrPolecatNotFound {
 		// Create new polecat
 		fmt.Printf("Creating polecat %s...\n", polecatName)
-		if _, err = polecatMgr.Add(polecatName); err != nil {
+		if _, err = polecatMgr.AddWithOptions(polecatName, addOpts); err != nil {
 			return nil, fmt.Errorf("creating polecat: %w", err)
 		}
 	} else {

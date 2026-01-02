@@ -238,10 +238,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 				// Spawn a fresh polecat in the rig
 				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
 				spawnOpts := SlingSpawnOptions{
-					Force:   slingForce,
-					Naked:   slingNaked,
-					Account: slingAccount,
-					Create:  slingCreate,
+					Force:    slingForce,
+					Naked:    slingNaked,
+					Account:  slingAccount,
+					Create:   slingCreate,
+					HookBead: beadID, // Set atomically at spawn time
 				}
 				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
