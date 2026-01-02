@@ -174,6 +174,13 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, ErrRigExists
 	}
 
+	// Validate rig name: reject characters that break agent ID parsing
+	// Agent IDs use format <prefix>-<rig>-<role>[-<name>] with hyphens as delimiters
+	if strings.ContainsAny(opts.Name, "-. ") {
+		sanitized := strings.NewReplacer("-", "", ".", "", " ", "").Replace(opts.Name)
+		return nil, fmt.Errorf("rig name %q contains invalid characters (hyphens, dots, or spaces break agent ID parsing); use %q instead", opts.Name, sanitized)
+	}
+
 	rigPath := filepath.Join(m.townRoot, opts.Name)
 
 	// Check if directory already exists

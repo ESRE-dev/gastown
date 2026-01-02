@@ -3,6 +3,7 @@ package rig
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -163,6 +164,37 @@ func TestRemoveRigNotFound(t *testing.T) {
 	err := manager.RemoveRig("nonexistent")
 	if err != ErrRigNotFound {
 		t.Errorf("RemoveRig = %v, want ErrRigNotFound", err)
+	}
+}
+
+func TestAddRig_RejectsInvalidNames(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	tests := []struct {
+		name      string
+		wantError string
+	}{
+		{"op-baby", `rig name "op-baby" contains invalid characters`},
+		{"my.rig", `rig name "my.rig" contains invalid characters`},
+		{"my rig", `rig name "my rig" contains invalid characters`},
+		{"op-baby-test", `rig name "op-baby-test" contains invalid characters`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := manager.AddRig(AddRigOptions{
+				Name:   tt.name,
+				GitURL: "git@github.com:test/test.git",
+			})
+			if err == nil {
+				t.Errorf("AddRig(%q) succeeded, want error containing %q", tt.name, tt.wantError)
+				return
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Errorf("AddRig(%q) error = %q, want error containing %q", tt.name, err.Error(), tt.wantError)
+			}
+		})
 	}
 }
 
