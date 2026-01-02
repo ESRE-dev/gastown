@@ -148,9 +148,12 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	}
 
 	// CRITICAL: Set beads environment for worktree polecats (non-fatal: session works without)
-	// Polecats share the rig's beads directory (at rig root, not mayor/rig)
-	// BEADS_NO_DAEMON=1 prevents daemon from committing to wrong branch
-	beadsDir := filepath.Join(m.rig.Path, ".beads")
+	// Polecats need access to TOWN-level beads (parent of rig) for hooks and convoys.
+	// Town beads use hq- prefix and store hooks, mail, and cross-rig coordination.
+	// BEADS_NO_DAEMON=1 prevents daemon from committing to wrong branch.
+	// Using town-level beads ensures gt prime and bd commands can find hooked work.
+	townRoot := filepath.Dir(m.rig.Path) // Town root is parent of rig directory
+	beadsDir := filepath.Join(townRoot, ".beads")
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_DIR", beadsDir)
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1")
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/%s", m.rig.Name, polecat))
