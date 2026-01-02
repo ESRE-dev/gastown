@@ -24,24 +24,27 @@ This is a convenience command for polecats that:
 1. Submits the current branch to the merge queue
 2. Auto-detects issue ID from branch name
 3. Notifies the Witness with the exit outcome
+4. Optionally exits the Claude session (--exit flag)
 
-Exit types:
+Exit statuses:
   COMPLETED  - Work done, MR submitted (default)
   ESCALATED  - Hit blocker, needs human intervention
   DEFERRED   - Work paused, issue still open
 
 Examples:
-  gt done                       # Submit branch, notify COMPLETED
-  gt done --issue gt-abc        # Explicit issue ID
-  gt done --exit ESCALATED      # Signal blocker, skip MR
-  gt done --exit DEFERRED       # Pause work, skip MR`,
+  gt done                         # Submit branch, notify COMPLETED
+  gt done --exit                  # Submit and exit Claude session
+  gt done --issue gt-abc          # Explicit issue ID
+  gt done --status ESCALATED      # Signal blocker, skip MR
+  gt done --status DEFERRED       # Pause work, skip MR`,
 	RunE: runDone,
 }
 
 var (
 	doneIssue    string
 	donePriority int
-	doneExit     string
+	doneStatus   string
+	doneExit     bool
 )
 
 // Valid exit types for gt done
@@ -54,16 +57,17 @@ const (
 func init() {
 	doneCmd.Flags().StringVar(&doneIssue, "issue", "", "Source issue ID (default: parse from branch name)")
 	doneCmd.Flags().IntVarP(&donePriority, "priority", "p", -1, "Override priority (0-4, default: inherit from issue)")
-	doneCmd.Flags().StringVar(&doneExit, "exit", ExitCompleted, "Exit type: COMPLETED, ESCALATED, or DEFERRED")
+	doneCmd.Flags().StringVar(&doneStatus, "status", ExitCompleted, "Exit status: COMPLETED, ESCALATED, or DEFERRED")
+	doneCmd.Flags().BoolVar(&doneExit, "exit", false, "Exit Claude session after MR submission (self-terminate)")
 
 	rootCmd.AddCommand(doneCmd)
 }
 
 func runDone(cmd *cobra.Command, args []string) error {
-	// Validate exit type
-	exitType := strings.ToUpper(doneExit)
+	// Validate exit status
+	exitType := strings.ToUpper(doneStatus)
 	if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
-		return fmt.Errorf("invalid exit type '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneExit)
+		return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneStatus)
 	}
 
 	// Find workspace
@@ -276,6 +280,15 @@ func runDone(cmd *cobra.Command, args []string) error {
 
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
+
+	// Handle session self-termination if requested
+	if doneExit {
+		fmt.Println()
+		fmt.Printf("%s Session self-terminating (--exit flag)\n", style.Bold.Render("→"))
+		fmt.Printf("  Witness will handle worktree cleanup.\n")
+		fmt.Printf("  Goodbye!\n")
+		os.Exit(0)
+	}
 
 	return nil
 }

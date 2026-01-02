@@ -25,7 +25,7 @@ var handoffCmd = &cobra.Command{
 This is the canonical way to end any agent session. It handles all roles:
 
   - Mayor, Crew, Witness, Refinery, Deacon: Respawns with fresh Claude instance
-  - Polecats: Calls 'gt done --exit DEFERRED' (Witness handles lifecycle)
+  - Polecats: Calls 'gt done --status DEFERRED' (Witness handles lifecycle)
 
 When run without arguments, hands off the current session.
 When given a bead ID (gt-xxx, hq-xxx), hooks that work first, then restarts.
