@@ -262,7 +262,7 @@ func TestEnsureGitignoreEntry_AppendsToExisting(t *testing.T) {
 	}
 }
 
-func TestInitBeadsRetriesWithoutNoAgentsFlag(t *testing.T) {
+func TestInitBeadsWritesConfigOnFailure(t *testing.T) {
 	rigPath := t.TempDir()
 	beadsDir := filepath.Join(rigPath, ".beads")
 
@@ -271,14 +271,8 @@ set -e
 cmd="$1"
 shift
 if [[ "$cmd" == "init" ]]; then
-  for arg in "$@"; do
-    if [[ "$arg" == "--no-agents" ]]; then
-      echo "unknown flag: --no-agents" >&2
-      exit 1
-    fi
-  done
-  touch "$EXPECT_BEADS_DIR/created.db"
-  exit 0
+  echo "bd init failed" >&2
+  exit 1
 fi
 echo "unexpected command: $cmd" >&2
 exit 1
@@ -293,8 +287,13 @@ exit 1
 		t.Fatalf("initBeads: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(beadsDir, "created.db")); err != nil {
-		t.Fatalf("expected bd init to create db file: %v", err)
+	configPath := filepath.Join(beadsDir, "config.yaml")
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("reading config.yaml: %v", err)
+	}
+	if string(config) != "prefix: gt\n" {
+		t.Fatalf("config.yaml = %q, want %q", string(config), "prefix: gt\n")
 	}
 }
 

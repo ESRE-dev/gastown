@@ -418,7 +418,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	// Run bd init if available, with --no-agents to skip AGENTS.md creation
 	cmd := exec.Command("bd", "init", "--prefix", prefix, "--no-agents")
 	cmd.Dir = rigPath
-	output, err := cmd.CombinedOutput()
+	_, err := cmd.CombinedOutput()
 	if err != nil {
 		// bd might not be installed or failed, create minimal structure
 		// Note: beads currently expects YAML format for config
