@@ -730,18 +730,28 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // - Town sessions: Mayor ↔ Deacon
 // - Crew sessions: All crew members in the same rig
 //
+// IMPORTANT: These bindings are conditional - they only run gt cycle for
+// Gas Town sessions (those starting with "gt-"). For non-GT sessions,
+// the default tmux behavior (next-window/previous-window) is preserved.
+// See: https://github.com/steveyegge/gastown/issues/13
+//
 // IMPORTANT: We pass #{session_name} to the command because run-shell doesn't
 // reliably preserve the session context. tmux expands #{session_name} at binding
 // resolution time (when the key is pressed), giving us the correct session.
 func (t *Tmux) SetCycleBindings(session string) error {
-	// C-b n → gt cycle next (auto-detects session type)
+	// C-b n → gt cycle next for GT sessions, next-window otherwise
+	// The if-shell checks if session name starts with "gt-"
 	if _, err := t.run("bind-key", "-T", "prefix", "n",
-		"run-shell", "gt cycle next --session '#{session_name}'"); err != nil {
+		"if-shell", "echo '#{session_name}' | grep -q '^gt-'",
+		"run-shell 'gt cycle next --session #{session_name}'",
+		"next-window"); err != nil {
 		return err
 	}
-	// C-b p → gt cycle prev (auto-detects session type)
+	// C-b p → gt cycle prev for GT sessions, previous-window otherwise
 	if _, err := t.run("bind-key", "-T", "prefix", "p",
-		"run-shell", "gt cycle prev --session '#{session_name}'"); err != nil {
+		"if-shell", "echo '#{session_name}' | grep -q '^gt-'",
+		"run-shell 'gt cycle prev --session #{session_name}'",
+		"previous-window"); err != nil {
 		return err
 	}
 	return nil
@@ -750,11 +760,16 @@ func (t *Tmux) SetCycleBindings(session string) error {
 // SetFeedBinding configures C-b a to jump to the activity feed window.
 // This creates the feed window if it doesn't exist, or switches to it if it does.
 // Uses `gt feed --window` which handles both creation and switching.
+//
+// IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
+// (those starting with "gt-"). For non-GT sessions, a help message is shown.
+// See: https://github.com/steveyegge/gastown/issues/13
 func (t *Tmux) SetFeedBinding(session string) error {
-	// C-b a → gt feed --window (jump to activity feed window, creating if needed)
-	// The feed command detects the current session from tmux environment
+	// C-b a → gt feed --window for GT sessions, help message otherwise
 	_, err := t.run("bind-key", "-T", "prefix", "a",
-		"run-shell", "gt feed --window")
+		"if-shell", "echo '#{session_name}' | grep -q '^gt-'",
+		"run-shell 'gt feed --window'",
+		"display-message 'C-b a is for Gas Town sessions only'")
 	return err
 }
 
