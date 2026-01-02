@@ -236,16 +236,8 @@ func runSwarmCreate(cmd *cobra.Command, args []string) error {
 	beadsPath := r.BeadsPath()
 	checkCmd := exec.Command("bd", "show", swarmEpic, "--json")
 	checkCmd.Dir = beadsPath
-	if err := checkCmd.Run(); err == nil {
-		// Epic exists, update it to be a swarm molecule
-		updateArgs := []string{"update", swarmEpic, "--mol-type=swarm"}
-		updateCmd := exec.Command("bd", updateArgs...)
-		updateCmd.Dir = beadsPath
-		if err := updateCmd.Run(); err != nil {
-			return fmt.Errorf("updating epic to swarm molecule: %w", err)
-		}
-	} else {
-		// Create new swarm epic
+	if err := checkCmd.Run(); err != nil {
+		// Epic doesn't exist, create it as a swarm molecule
 		createArgs := []string{
 			"create",
 			"--type=epic",
