@@ -47,8 +47,16 @@ type Manager struct {
 
 // NewManager creates a new polecat manager.
 func NewManager(r *rig.Rig, g *git.Git) *Manager {
-	// Use the rig root for beads operations (rig-level beads at .beads/)
-	rigPath := r.Path
+	// Determine the canonical beads location:
+	// - If mayor/rig/.beads exists (source repo has beads tracked), use that
+	// - Otherwise use rig root .beads/ (created by initBeads during gt rig add)
+	// This matches the conditional logic in setupSharedBeads and route registration.
+	// For repos that have .beads/ tracked in git, the canonical database lives in mayor/rig/.
+	mayorRigBeads := filepath.Join(r.Path, "mayor", "rig", ".beads")
+	beadsPath := r.Path
+	if _, err := os.Stat(mayorRigBeads); err == nil {
+		beadsPath = filepath.Join(r.Path, "mayor", "rig")
+	}
 
 	// Try to load rig settings for namepool config
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
@@ -73,7 +81,7 @@ func NewManager(r *rig.Rig, g *git.Git) *Manager {
 	return &Manager{
 		rig:      r,
 		git:      g,
-		beads:    beads.New(rigPath),
+		beads:    beads.New(beadsPath),
 		namePool: pool,
 	}
 }
@@ -763,15 +771,41 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 //	  polecats/
 //	    <name>/
 //	      .beads/
-//	        redirect       <- Contains "../../.beads"
+//	        redirect       <- Contains "../../.beads" or "../../mayor/rig/.beads"
 //
 // IMPORTANT: If the polecat was created from a branch that had .beads/ tracked in git,
 // those files will be present. We must clean them out and replace with just the redirect.
+//
+// The redirect target is conditional: repos with .beads/ tracked in git have their canonical
+// database at mayor/rig/.beads, while fresh rigs use the database at rig root .beads/.
 func (m *Manager) setupSharedBeads(polecatPath string) error {
-	// Ensure rig root has .beads/ directory
-	rigBeadsDir := filepath.Join(m.rig.Path, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
-		return fmt.Errorf("creating rig .beads dir: %w", err)
+	// Determine the shared beads location:
+	// - If mayor/rig/.beads exists (source repo has beads tracked in git), use that
+	// - Otherwise fall back to rig/.beads (created by initBeads during gt rig add)
+	// This matches the crew manager's logic for consistency.
+	mayorRigBeads := filepath.Join(m.rig.Path, "mayor", "rig", ".beads")
+	rigRootBeads := filepath.Join(m.rig.Path, ".beads")
+
+	var sharedBeadsPath string
+	var redirectContent string
+
+	if _, err := os.Stat(mayorRigBeads); err == nil {
+		// Source repo has .beads/ tracked - use mayor/rig/.beads
+		sharedBeadsPath = mayorRigBeads
+		redirectContent = "../../mayor/rig/.beads\n"
+	} else {
+		// No beads in source repo - use rig root .beads (from initBeads)
+		sharedBeadsPath = rigRootBeads
+		redirectContent = "../../.beads\n"
+		// Ensure rig root has .beads/ directory
+		if err := os.MkdirAll(rigRootBeads, 0755); err != nil {
+			return fmt.Errorf("creating rig .beads dir: %w", err)
+		}
+	}
+
+	// Verify shared beads exists
+	if _, err := os.Stat(sharedBeadsPath); os.IsNotExist(err) {
+		return fmt.Errorf("no shared beads database found at %s", sharedBeadsPath)
 	}
 
 	// Clean up any existing .beads/ contents from the branch
@@ -790,12 +824,8 @@ func (m *Manager) setupSharedBeads(polecatPath string) error {
 		return fmt.Errorf("creating polecat .beads dir: %w", err)
 	}
 
-	// Create redirect file pointing to mayor/rig/.beads (the canonical beads location)
-	// Path is relative from polecats/<name>/.beads/ to mayor/rig/.beads/
-	// We go directly to mayor/rig/.beads, not through rig root, to match crew workers
+	// Create redirect file pointing to the shared beads location
 	redirectPath := filepath.Join(polecatBeadsDir, "redirect")
-	redirectContent := "../../mayor/rig/.beads\n"
-
 	if err := os.WriteFile(redirectPath, []byte(redirectContent), 0644); err != nil {
 		return fmt.Errorf("creating redirect file: %w", err)
 	}

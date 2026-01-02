@@ -317,11 +317,22 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving rigs config: %w", err)
 	}
 
-	// Add route to town-level routes.jsonl for prefix-based routing
+	// Add route to town-level routes.jsonl for prefix-based routing.
+	// Route points to the canonical beads location:
+	// - If source repo has .beads/ tracked in git, route to mayor/rig
+	// - Otherwise route to rig root (where initBeads creates the database)
+	// The conditional routing is necessary because initBeads creates the database at
+	// "<rig>/.beads", while repos with tracked beads have their database at mayor/rig/.beads.
 	if newRig.Config.Prefix != "" {
+		routePath := name
+		mayorRigBeads := filepath.Join(townRoot, name, "mayor", "rig", ".beads")
+		if _, err := os.Stat(mayorRigBeads); err == nil {
+			// Source repo has .beads/ tracked - route to mayor/rig
+			routePath = name + "/mayor/rig"
+		}
 		route := beads.Route{
 			Prefix: newRig.Config.Prefix + "-",
-			Path:   name + "/mayor/rig",
+			Path:   routePath,
 		}
 		if err := beads.AppendRoute(townRoot, route); err != nil {
 			// Non-fatal: routing will still work, just not from town root
