@@ -139,7 +139,7 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 	query := fmt.Sprintf(`
 		SELECT d.depends_on_id
 		FROM dependencies d
-		WHERE d.issue_id = '%s' AND d.dependency_type = 'tracks'
+		WHERE d.issue_id = '%s' AND d.type = 'tracks'
 	`, convoyID)
 
 	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, query)
