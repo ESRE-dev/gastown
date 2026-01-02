@@ -13,6 +13,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // Formula command flags
@@ -745,7 +747,7 @@ func runFormulaCreate(cmd *cobra.Command, args []string) error {
 func generateTaskTemplate(name string) string {
 	// Sanitize name for use in template
 	title := strings.ReplaceAll(name, "-", " ")
-	title = strings.Title(title)
+	title = cases.Title(language.English).String(title)
 
 	return fmt.Sprintf(`# Formula: %s
 # Type: task
@@ -784,7 +786,7 @@ Perform the main task work.
 
 func generateWorkflowTemplate(name string) string {
 	title := strings.ReplaceAll(name, "-", " ")
-	title = strings.Title(title)
+	title = cases.Title(language.English).String(title)
 
 	return fmt.Sprintf(`# Formula: %s
 # Type: workflow
@@ -859,7 +861,7 @@ required = true
 
 func generatePatrolTemplate(name string) string {
 	title := strings.ReplaceAll(name, "-", " ")
-	title = strings.Title(title)
+	title = cases.Title(language.English).String(title)
 
 	return fmt.Sprintf(`# Formula: %s
 # Type: patrol

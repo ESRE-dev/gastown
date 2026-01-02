@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/style"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // PatrolConfig holds role-specific patrol configuration.
@@ -207,7 +209,7 @@ func outputPatrolContext(cfg PatrolConfig) {
 	}
 
 	// Show patrol work loop instructions
-	fmt.Printf("**%s Patrol Work Loop:**\n", strings.Title(cfg.RoleName))
+	fmt.Printf("**%s Patrol Work Loop:**\n", cases.Title(language.English).String(cfg.RoleName))
 	for i, step := range cfg.WorkLoopSteps {
 		fmt.Printf("%d. %s\n", i+1, step)
 	}
