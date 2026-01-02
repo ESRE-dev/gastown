@@ -321,7 +321,11 @@ func runSynthesisClose(cmd *cobra.Command, args []string) error {
 	}
 
 	// Close the convoy
-	closeCmd := exec.Command("bd", "close", convoyID, "--reason=synthesis complete")
+	closeArgs := []string{"close", convoyID, "--reason=synthesis complete"}
+	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+		closeArgs = append(closeArgs, "--session="+sessionID)
+	}
+	closeCmd := exec.Command("bd", closeArgs...)
 	closeCmd.Dir = townBeads
 	closeCmd.Stderr = os.Stderr
 

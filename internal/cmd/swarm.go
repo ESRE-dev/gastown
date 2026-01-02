@@ -816,7 +816,11 @@ func runSwarmLand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Close the swarm epic in beads
-	closeCmd := exec.Command("bd", "close", swarmID, "--reason", "Swarm landed to main")
+	closeArgs := []string{"close", swarmID, "--reason", "Swarm landed to main"}
+	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+		closeArgs = append(closeArgs, "--session="+sessionID)
+	}
+	closeCmd := exec.Command("bd", closeArgs...)
 	closeCmd.Dir = foundRig.BeadsPath()
 	if err := closeCmd.Run(); err != nil {
 		style.PrintWarning("couldn't close swarm epic in beads: %v", err)
@@ -871,7 +875,11 @@ func runSwarmCancel(cmd *cobra.Command, args []string) error {
 	}
 
 	// Close the swarm epic in beads with cancelled reason
-	closeCmd := exec.Command("bd", "close", swarmID, "--reason", "Swarm cancelled")
+	closeArgs := []string{"close", swarmID, "--reason", "Swarm cancelled"}
+	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+		closeArgs = append(closeArgs, "--session="+sessionID)
+	}
+	closeCmd := exec.Command("bd", closeArgs...)
 	closeCmd.Dir = foundRig.BeadsPath()
 	if err := closeCmd.Run(); err != nil {
 		return fmt.Errorf("closing swarm: %w", err)

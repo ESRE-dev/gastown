@@ -90,7 +90,11 @@ func runCrewRemove(cmd *cobra.Command, args []string) error {
 		}
 		prefix := beads.GetPrefixForRig(townRoot, r.Name)
 		agentBeadID := beads.CrewBeadIDWithPrefix(prefix, r.Name, name)
-		closeCmd := exec.Command("bd", "close", agentBeadID, "--reason=Crew workspace removed")
+		closeArgs := []string{"close", agentBeadID, "--reason=Crew workspace removed"}
+		if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+			closeArgs = append(closeArgs, "--session="+sessionID)
+		}
+		closeCmd := exec.Command("bd", closeArgs...)
 		closeCmd.Dir = r.Path // Run from rig directory for proper beads resolution
 		if output, err := closeCmd.CombinedOutput(); err != nil {
 			// Non-fatal: bead might not exist or already be closed

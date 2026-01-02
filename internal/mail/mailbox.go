@@ -313,7 +313,12 @@ func (m *Mailbox) markReadBeads(id string) error {
 
 // closeInDir closes a message in a specific beads directory.
 func (m *Mailbox) closeInDir(id, beadsDir string) error {
-	cmd := exec.Command("bd", "close", id)
+	args := []string{"close", id}
+	// Pass session ID for work attribution if available
+	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+		args = append(args, "--session="+sessionID)
+	}
+	cmd := exec.Command("bd", args...)
 	cmd.Dir = m.workDir
 	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 

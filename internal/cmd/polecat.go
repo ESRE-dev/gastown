@@ -1573,7 +1573,11 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 
 		// Step 5: Close agent bead (if exists)
 		agentBeadID := beads.PolecatBeadID(p.rigName, p.polecatName)
-		closeCmd := exec.Command("bd", "close", agentBeadID, "--reason=nuked")
+		closeArgs := []string{"close", agentBeadID, "--reason=nuked"}
+		if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+			closeArgs = append(closeArgs, "--session="+sessionID)
+		}
+		closeCmd := exec.Command("bd", closeArgs...)
 		closeCmd.Dir = filepath.Join(p.r.Path, "mayor", "rig")
 		if err := closeCmd.Run(); err != nil {
 			// Non-fatal - agent bead might not exist

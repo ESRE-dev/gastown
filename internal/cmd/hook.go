@@ -143,8 +143,12 @@ func runHook(cmd *cobra.Command, args []string) error {
 			if !hookDryRun {
 				if hasAttachment {
 					// Close completed molecule bead (use bd close --force for pinned)
-					closeCmd := exec.Command("bd", "close", existing.ID, "--force",
-						"--reason=Auto-replaced by gt hook (molecule complete)")
+					closeArgs := []string{"close", existing.ID, "--force",
+						"--reason=Auto-replaced by gt hook (molecule complete)"}
+					if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+						closeArgs = append(closeArgs, "--session="+sessionID)
+					}
+					closeCmd := exec.Command("bd", closeArgs...)
 					closeCmd.Stderr = os.Stderr
 					if err := closeCmd.Run(); err != nil {
 						return fmt.Errorf("closing completed bead %s: %w", existing.ID, err)
