@@ -513,8 +513,103 @@ func (e *Engineer) handleFailureFromQueue(mr *mrqueue.MR, result ProcessResult) 
 		fmt.Fprintf(e.output, "[Engineer] Warning: failed to log merge_failed event: %v\n", err)
 	}
 
+	// If this was a conflict, create a conflict-resolution task for dispatch
+	if result.Conflict {
+		if err := e.createConflictResolutionTask(mr, result); err != nil {
+			fmt.Fprintf(e.output, "[Engineer] Warning: failed to create conflict resolution task: %v\n", err)
+		}
+	}
+
 	// MR stays in queue for retry - no action needed on the file
 	// Log the failure
 	fmt.Fprintf(e.output, "[Engineer] ✗ Failed: %s - %s\n", mr.ID, result.Error)
 	fmt.Fprintln(e.output, "[Engineer] MR remains in queue for retry")
+}
+
+// createConflictResolutionTask creates a dispatchable task for resolving merge conflicts.
+// This task will be picked up by bd ready and can be dispatched to an available polecat.
+//
+// Task format:
+//   Title: Resolve merge conflicts: <original-issue-title>
+//   Type: task
+//   Priority: inherit from original + boost (P2 -> P1)
+//   Parent: original MR bead
+//   Description: metadata including branch, conflict SHA, etc.
+func (e *Engineer) createConflictResolutionTask(mr *mrqueue.MR, result ProcessResult) error {
+	// Get the current main SHA for conflict tracking
+	mainSHA, err := e.git.Rev("origin/" + mr.Target)
+	if err != nil {
+		mainSHA = "unknown-sha"
+	}
+
+	// Get the original issue title if we have a source issue
+	originalTitle := mr.SourceIssue
+	if mr.SourceIssue != "" {
+		if sourceIssue, err := e.beads.Show(mr.SourceIssue); err == nil && sourceIssue != nil {
+			originalTitle = sourceIssue.Title
+		}
+	}
+
+	// Priority boost: decrease priority number (lower = higher priority)
+	// P2 -> P1, P1 -> P0, P0 stays P0
+	boostedPriority := mr.Priority - 1
+	if boostedPriority < 0 {
+		boostedPriority = 0
+	}
+
+	// Increment retry count for tracking
+	retryCount := mr.RetryCount + 1
+
+	// Build the task description with metadata
+	description := fmt.Sprintf(`Resolve merge conflicts for branch %s
+
+## Metadata
+- Original MR: %s
+- Branch: %s
+- Conflict with: %s@%s
+- Original issue: %s
+- Retry count: %d
+
+## Instructions
+1. Check out the branch: git checkout %s
+2. Rebase onto target: git rebase origin/%s
+3. Resolve conflicts in your editor
+4. Complete the rebase: git add . && git rebase --continue
+5. Force-push the resolved branch: git push -f
+6. Close this task: bd close <this-task-id>
+
+The Refinery will automatically retry the merge after you force-push.`,
+		mr.Branch,
+		mr.ID,
+		mr.Branch,
+		mr.Target, mainSHA[:8],
+		mr.SourceIssue,
+		retryCount,
+		mr.Branch,
+		mr.Target,
+	)
+
+	// Create the conflict resolution task
+	taskTitle := fmt.Sprintf("Resolve merge conflicts: %s", originalTitle)
+	task, err := e.beads.Create(beads.CreateOptions{
+		Title:       taskTitle,
+		Type:        "task",
+		Priority:    boostedPriority,
+		Description: description,
+		Actor:       e.rig.Name + "/refinery",
+	})
+	if err != nil {
+		return fmt.Errorf("creating conflict resolution task: %w", err)
+	}
+
+	// Add dependency: the conflict task depends on nothing, but the MR depends on the task
+	// Note: We don't add the task as parent of the MR since MRs are ephemeral in the queue
+	// The task itself serves as the dispatchable work unit
+
+	fmt.Fprintf(e.output, "[Engineer] Created conflict resolution task: %s (P%d)\n", task.ID, task.Priority)
+
+	// Update the MR's retry count for priority scoring
+	mr.RetryCount = retryCount
+
+	return nil
 }
