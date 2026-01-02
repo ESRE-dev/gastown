@@ -101,17 +101,26 @@ needs = ["inbox-check"]
 description = """
 Check the beads merge queue - this is the SOURCE OF TRUTH for pending merges.
 
+**Parallel Refinery Support**: When multiple refinery workers run in parallel,
+each must claim an MR before processing to avoid double-processing. Use the
+claiming commands to coordinate.
+
 ```bash
 git fetch --prune origin
+
+# List UNCLAIMED MRs (excludes those being processed by other workers)
+gt refinery unclaimed
+
+# Or list all MRs (includes claimed):
 gt mq list <rig>
 ```
 
 The beads MQ tracks all pending merge requests. Do NOT rely on `git branch -r | grep polecat`
 as branches may exist without MR beads, or MR beads may exist for already-merged work.
 
-If queue empty, skip to context-check step.
+If queue empty (no unclaimed MRs), skip to context-check step.
 
-For each MR in the queue, verify the branch still exists:
+For each MR in the unclaimed queue, verify the branch still exists:
 ```bash
 git branch -r | grep <branch>
 ```
@@ -127,8 +136,18 @@ id = "process-branch"
 title = "Process next branch"
 needs = ["queue-scan"]
 description = """
-Pick next branch from queue. Rebase on current main.
+Pick next branch from queue. **Claim it first** to prevent other workers from
+processing it simultaneously.
 
+**Step 1: Claim the MR**
+```bash
+# Claim before processing (prevents double-processing by parallel workers)
+gt refinery claim <mr-id>
+```
+
+If claim fails (already claimed by another worker), skip to next MR in queue.
+
+**Step 2: Rebase on current main**
 ```bash
 git checkout -b temp origin/<polecat-branch>
 git rebase origin/main
@@ -137,7 +156,11 @@ git rebase origin/main
 If rebase conflicts and unresolvable:
 - git rebase --abort
 - Notify polecat/witness to fix and resubmit
-- Skip to loop-check for next branch"""
+- **Release the claim** so another worker can retry later: `gt refinery release <mr-id>`
+- Skip to loop-check for next branch
+
+**Note**: The claim automatically expires after 10 minutes if not processed
+(for crash recovery). But always release explicitly on failure for faster retry."""
 
 [[steps]]
 id = "run-tests"
@@ -166,6 +189,7 @@ If tests FAILED:
 2. If branch caused it:
    - Abort merge
    - Notify polecat: "Tests failing. Please fix and resubmit."
+   - **Release the claim**: `gt refinery release <mr-id>`
    - Skip to loop-check
 3. If pre-existing on main:
    - Option A: Fix it yourself (you're the Engineer!)
@@ -176,7 +200,9 @@ If tests FAILED:
 - Fix committed, OR
 - Bead filed for the failure
 
-This is non-negotiable. Never disavow. Never "note and proceed." """
+This is non-negotiable. Never disavow. Never "note and proceed."
+
+**Note**: Always release the claim on failure so other workers can retry later."""
 
 [[steps]]
 id = "merge-push"

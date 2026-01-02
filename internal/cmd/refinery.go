@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/mrqueue"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
@@ -115,6 +116,57 @@ Examples:
 	RunE: runRefineryRestart,
 }
 
+var refineryClaimCmd = &cobra.Command{
+	Use:   "claim <mr-id>",
+	Short: "Claim an MR for processing",
+	Long: `Claim a merge request for processing by this refinery worker.
+
+When running multiple refinery workers in parallel, each worker must claim
+an MR before processing to prevent double-processing. Claims expire after
+10 minutes if not processed (for crash recovery).
+
+The worker ID is automatically determined from the GT_REFINERY_WORKER
+environment variable, or defaults to "refinery-1".
+
+Examples:
+  gt refinery claim gt-abc123
+  GT_REFINERY_WORKER=refinery-2 gt refinery claim gt-abc123`,
+	Args: cobra.ExactArgs(1),
+	RunE: runRefineryClaim,
+}
+
+var refineryReleaseCmd = &cobra.Command{
+	Use:   "release <mr-id>",
+	Short: "Release a claimed MR back to the queue",
+	Long: `Release a claimed merge request back to the queue.
+
+Called when processing fails and the MR should be retried by another worker.
+This clears the claim so other workers can pick up the MR.
+
+Examples:
+  gt refinery release gt-abc123`,
+	Args: cobra.ExactArgs(1),
+	RunE: runRefineryRelease,
+}
+
+var refineryUnclaimedCmd = &cobra.Command{
+	Use:   "unclaimed [rig]",
+	Short: "List unclaimed MRs available for processing",
+	Long: `List merge requests that are available for claiming.
+
+Shows MRs that are not currently claimed by any worker, or have stale
+claims (worker may have crashed). Useful for parallel refinery workers
+to find work.
+
+Examples:
+  gt refinery unclaimed
+  gt refinery unclaimed --json`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runRefineryUnclaimed,
+}
+
+var refineryUnclaimedJSON bool
+
 func init() {
 	// Start flags
 	refineryStartCmd.Flags().BoolVar(&refineryForeground, "foreground", false, "Run in foreground (default: background)")
@@ -125,6 +177,9 @@ func init() {
 	// Queue flags
 	refineryQueueCmd.Flags().BoolVar(&refineryQueueJSON, "json", false, "Output as JSON")
 
+	// Unclaimed flags
+	refineryUnclaimedCmd.Flags().BoolVar(&refineryUnclaimedJSON, "json", false, "Output as JSON")
+
 	// Add subcommands
 	refineryCmd.AddCommand(refineryStartCmd)
 	refineryCmd.AddCommand(refineryStopCmd)
@@ -132,6 +187,9 @@ func init() {
 	refineryCmd.AddCommand(refineryStatusCmd)
 	refineryCmd.AddCommand(refineryQueueCmd)
 	refineryCmd.AddCommand(refineryAttachCmd)
+	refineryCmd.AddCommand(refineryClaimCmd)
+	refineryCmd.AddCommand(refineryReleaseCmd)
+	refineryCmd.AddCommand(refineryUnclaimedCmd)
 
 	rootCmd.AddCommand(refineryCmd)
 }
@@ -421,5 +479,94 @@ func runRefineryRestart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Refinery restarted for %s\n", style.Bold.Render("✓"), rigName)
 	fmt.Printf("  %s\n", style.Dim.Render("Use 'gt refinery attach' to connect"))
+	return nil
+}
+
+// getWorkerID returns the refinery worker ID from environment or default.
+func getWorkerID() string {
+	if id := os.Getenv("GT_REFINERY_WORKER"); id != "" {
+		return id
+	}
+	return "refinery-1"
+}
+
+func runRefineryClaim(cmd *cobra.Command, args []string) error {
+	mrID := args[0]
+	workerID := getWorkerID()
+
+	// Find the queue from current working directory
+	q, err := mrqueue.NewFromWorkdir(".")
+	if err != nil {
+		return fmt.Errorf("finding merge queue: %w", err)
+	}
+
+	if err := q.Claim(mrID, workerID); err != nil {
+		if err == mrqueue.ErrNotFound {
+			return fmt.Errorf("MR %s not found in queue", mrID)
+		}
+		if err == mrqueue.ErrAlreadyClaimed {
+			return fmt.Errorf("MR %s is already claimed by another worker", mrID)
+		}
+		return fmt.Errorf("claiming MR: %w", err)
+	}
+
+	fmt.Printf("%s Claimed %s for %s\n", style.Bold.Render("✓"), mrID, workerID)
+	return nil
+}
+
+func runRefineryRelease(cmd *cobra.Command, args []string) error {
+	mrID := args[0]
+
+	q, err := mrqueue.NewFromWorkdir(".")
+	if err != nil {
+		return fmt.Errorf("finding merge queue: %w", err)
+	}
+
+	if err := q.Release(mrID); err != nil {
+		return fmt.Errorf("releasing MR: %w", err)
+	}
+
+	fmt.Printf("%s Released %s back to queue\n", style.Bold.Render("✓"), mrID)
+	return nil
+}
+
+func runRefineryUnclaimed(cmd *cobra.Command, args []string) error {
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
+
+	_, r, rigName, err := getRefineryManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	q := mrqueue.New(r.Path)
+	unclaimed, err := q.ListUnclaimed()
+	if err != nil {
+		return fmt.Errorf("listing unclaimed MRs: %w", err)
+	}
+
+	// JSON output
+	if refineryUnclaimedJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(unclaimed)
+	}
+
+	// Human-readable output
+	fmt.Printf("%s Unclaimed MRs for '%s':\n\n", style.Bold.Render("📋"), rigName)
+
+	if len(unclaimed) == 0 {
+		fmt.Printf("  %s\n", style.Dim.Render("(none available)"))
+		return nil
+	}
+
+	for i, mr := range unclaimed {
+		priority := fmt.Sprintf("P%d", mr.Priority)
+		fmt.Printf("  %d. [%s] %s → %s\n", i+1, priority, mr.Branch, mr.Target)
+		fmt.Printf("     ID: %s  Worker: %s\n", mr.ID, mr.Worker)
+	}
+
 	return nil
 }
