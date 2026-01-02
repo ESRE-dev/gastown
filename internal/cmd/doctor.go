@@ -101,6 +101,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewDaemonCheck())
 	d.Register(doctor.NewBootHealthCheck())
 	d.Register(doctor.NewBeadsDatabaseCheck())
+	d.Register(doctor.NewBdDaemonCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
 	d.Register(doctor.NewRoutesCheck())
 	d.Register(doctor.NewOrphanSessionCheck())
