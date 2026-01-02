@@ -259,16 +259,26 @@ func runSling(cmd *cobra.Command, args []string) error {
 		} else {
 			// Slinging to an existing agent
 			// Skip pane lookup if --naked (agent may be terminated)
-			targetAgent, targetPane, _, err = resolveTargetAgent(target, slingNaked)
+			var targetWorkDir string
+			targetAgent, targetPane, targetWorkDir, err = resolveTargetAgent(target, slingNaked)
 			if err != nil {
 				return fmt.Errorf("resolving target: %w", err)
+			}
+			// Use target's working directory for bd commands (needed for redirect-based routing)
+			if targetWorkDir != "" {
+				hookWorkDir = targetWorkDir
 			}
 		}
 	} else {
 		// Slinging to self
-		targetAgent, targetPane, _, err = resolveSelfTarget()
+		var selfWorkDir string
+		targetAgent, targetPane, selfWorkDir, err = resolveSelfTarget()
 		if err != nil {
 			return err
+		}
+		// Use self's working directory for bd commands
+		if selfWorkDir != "" {
+			hookWorkDir = selfWorkDir
 		}
 	}
 
@@ -738,17 +748,22 @@ func runSlingFormula(args []string) error {
 		} else {
 			// Slinging to an existing agent
 			// Skip pane lookup if --naked (agent may be terminated)
-			targetAgent, targetPane, _, err = resolveTargetAgent(target, slingNaked)
+			var targetWorkDir string
+			targetAgent, targetPane, targetWorkDir, err = resolveTargetAgent(target, slingNaked)
 			if err != nil {
 				return fmt.Errorf("resolving target: %w", err)
 			}
+			// Use target's working directory for bd commands (needed for redirect-based routing)
+			_ = targetWorkDir // Formula sling doesn't need hookWorkDir
 		}
 	} else {
 		// Slinging to self
-		targetAgent, targetPane, _, err = resolveSelfTarget()
+		var selfWorkDir string
+		targetAgent, targetPane, selfWorkDir, err = resolveSelfTarget()
 		if err != nil {
 			return err
 		}
+		_ = selfWorkDir // Formula sling doesn't need hookWorkDir
 	}
 
 	fmt.Printf("%s Slinging formula %s to %s...\n", style.Bold.Render("🎯"), formulaName, targetAgent)
