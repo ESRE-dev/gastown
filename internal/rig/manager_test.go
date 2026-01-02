@@ -21,6 +21,16 @@ func setupTestTown(t *testing.T) (string, *config.RigsConfig) {
 	return root, rigsConfig
 }
 
+func writeFakeBD(t *testing.T, script string) string {
+	t.Helper()
+	binDir := t.TempDir()
+	scriptPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake bd: %v", err)
+	}
+	return binDir
+}
+
 func createTestRig(t *testing.T, root, name string) {
 	t.Helper()
 
@@ -249,5 +259,106 @@ func TestEnsureGitignoreEntry_AppendsToExisting(t *testing.T) {
 	expected := "node_modules/\n*.log\n.test-entry/\n"
 	if string(content) != expected {
 		t.Errorf("content = %q, want %q", string(content), expected)
+	}
+}
+
+func TestInitBeadsWritesConfigOnFailure(t *testing.T) {
+	rigPath := t.TempDir()
+	beadsDir := filepath.Join(rigPath, ".beads")
+
+	script := `#!/usr/bin/env bash
+set -e
+cmd="$1"
+shift
+if [[ "$cmd" == "init" ]]; then
+  echo "bd init failed" >&2
+  exit 1
+fi
+echo "unexpected command: $cmd" >&2
+exit 1
+`
+
+	binDir := writeFakeBD(t, script)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("EXPECT_BEADS_DIR", beadsDir)
+
+	manager := &Manager{}
+	if err := manager.initBeads(rigPath, "gt"); err != nil {
+		t.Fatalf("initBeads: %v", err)
+	}
+
+	configPath := filepath.Join(beadsDir, "config.yaml")
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("reading config.yaml: %v", err)
+	}
+	if string(config) != "prefix: gt\n" {
+		t.Fatalf("config.yaml = %q, want %q", string(config), "prefix: gt\n")
+	}
+}
+
+func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
+	rigPath := t.TempDir()
+	beadsDir := filepath.Join(rigPath, ".beads")
+	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
+
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir beads dir: %v", err)
+	}
+	if err := os.MkdirAll(mayorRigPath, 0755); err != nil {
+		t.Fatalf("mkdir mayor rig: %v", err)
+	}
+
+	script := `#!/usr/bin/env bash
+set -e
+if [[ "$1" == "--no-daemon" ]]; then
+  shift
+fi
+cmd="$1"
+shift
+case "$cmd" in
+  show)
+    if [[ "$BEADS_DIR" != "$EXPECT_BEADS_DIR" ]]; then
+      echo "BEADS_DIR mismatch" >&2
+      exit 1
+    fi
+    echo "[]"
+    ;;
+  create)
+    if [[ "$BEADS_DIR" != "$EXPECT_BEADS_DIR" ]]; then
+      echo "BEADS_DIR mismatch" >&2
+      exit 1
+    fi
+    id=""
+    title=""
+    for arg in "$@"; do
+      case "$arg" in
+        --id=*) id="${arg#--id=}" ;;
+        --title=*) title="${arg#--title=}" ;;
+      esac
+    done
+    printf '{"id":"%s","title":"%s","description":"","issue_type":"agent"}' "$id" "$title"
+    ;;
+  slot)
+    if [[ "$BEADS_DIR" != "$EXPECT_BEADS_DIR" ]]; then
+      echo "BEADS_DIR mismatch" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "unexpected command: $cmd" >&2
+    exit 1
+    ;;
+esac
+`
+
+	binDir := writeFakeBD(t, script)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("EXPECT_BEADS_DIR", beadsDir)
+	t.Setenv("BEADS_DIR", "")
+
+	manager := &Manager{}
+	if err := manager.initAgentBeads(rigPath, "demo", "gt", false); err != nil {
+		t.Fatalf("initAgentBeads: %v", err)
 	}
 }
