@@ -138,6 +138,15 @@ func runDone(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("branch has %d unpushed commit(s); run 'git push -u origin %s' first", unpushedCount, branch)
 		}
 
+		// Check that branch has commits ahead of main (prevents submitting stale branches)
+		aheadCount, err := g.CommitsAhead("main", branch)
+		if err != nil {
+			return fmt.Errorf("checking commits ahead of main: %w", err)
+		}
+		if aheadCount == 0 {
+			return fmt.Errorf("branch '%s' has 0 commits ahead of main; nothing to merge", branch)
+		}
+
 		if issueID == "" {
 			return fmt.Errorf("cannot determine source issue from branch '%s'; use --issue to specify", branch)
 		}
