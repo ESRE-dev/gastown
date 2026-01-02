@@ -5,6 +5,22 @@ All notable changes to the Gas Town project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.1.1] - 2026-01-02
+
+### Fixed
+
+- **Tmux keybindings scoped to Gas Town sessions** - C-b n/p no longer override default tmux behavior in non-GT sessions (#13)
+
+### Added
+
+- **OSS project files** - CHANGELOG.md, .golangci.yml, RELEASING.md
+- **Version bump script** - `scripts/bump-version.sh` for releases
+- **Documentation fixes** - Corrected `gt rig add` and `gt crew add` CLI syntax (#6)
+- **Rig prefix routing** - Agent beads now use correct rig-specific prefixes (#11)
+- **Beads init fix** - Rig beads initialization targets correct database (#9)
+
 ## [0.1.0] - 2026-01-02
 
 ### Added
