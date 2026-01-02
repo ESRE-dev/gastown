@@ -28,6 +28,11 @@ type MR struct {
 	CreatedAt   time.Time `json:"created_at"`
 	AgentBead   string    `json:"agent_bead,omitempty"` // Agent bead ID that created this MR (for traceability)
 
+	// Priority scoring fields
+	RetryCount      int        `json:"retry_count,omitempty"`       // Conflict retry count for priority penalty
+	ConvoyID        string     `json:"convoy_id,omitempty"`         // Parent convoy ID if part of a convoy
+	ConvoyCreatedAt *time.Time `json:"convoy_created_at,omitempty"` // Convoy creation time for starvation prevention
+
 	// Claiming fields for parallel refinery workers
 	ClaimedBy string     `json:"claimed_by,omitempty"` // Worker ID that claimed this MR
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"` // When the MR was claimed
@@ -102,6 +107,7 @@ func (q *Queue) Submit(mr *MR) error {
 }
 
 // List returns all pending MRs, sorted by priority then creation time.
+// Deprecated: Use ListByScore for priority-aware ordering.
 func (q *Queue) List() ([]*MR, error) {
 	entries, err := os.ReadDir(q.dir)
 	if err != nil {
@@ -130,6 +136,43 @@ func (q *Queue) List() ([]*MR, error) {
 			return mrs[i].Priority < mrs[j].Priority
 		}
 		return mrs[i].CreatedAt.Before(mrs[j].CreatedAt)
+	})
+
+	return mrs, nil
+}
+
+// ListByScore returns all pending MRs sorted by priority score (highest first).
+// Uses the ScoreMR function which considers:
+//   - Convoy age (prevents starvation)
+//   - Issue priority (P0-P4)
+//   - Retry count (prevents thrashing)
+//   - MR age (FIFO tiebreaker)
+func (q *Queue) ListByScore() ([]*MR, error) {
+	entries, err := os.ReadDir(q.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // Empty queue
+		}
+		return nil, fmt.Errorf("reading mq directory: %w", err)
+	}
+
+	now := time.Now()
+	var mrs []*MR
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+
+		mr, err := q.load(filepath.Join(q.dir, entry.Name()))
+		if err != nil {
+			continue // Skip malformed files
+		}
+		mrs = append(mrs, mr)
+	}
+
+	// Sort by score (higher first = higher priority)
+	sort.Slice(mrs, func(i, j int) bool {
+		return mrs[i].ScoreAt(now) > mrs[j].ScoreAt(now)
 	})
 
 	return mrs, nil
