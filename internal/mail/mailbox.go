@@ -5,14 +5,20 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 )
+
+// timeNow is a function that returns the current time. It can be overridden in tests.
+var timeNow = time.Now
 
 // Common errors
 var (
@@ -360,6 +366,57 @@ func (m *Mailbox) markReadLegacy(id string) error {
 	return m.rewriteLegacy(messages)
 }
 
+// MarkUnread marks a message as unread (reopens in beads).
+func (m *Mailbox) MarkUnread(id string) error {
+	if m.legacy {
+		return m.markUnreadLegacy(id)
+	}
+	return m.markUnreadBeads(id)
+}
+
+func (m *Mailbox) markUnreadBeads(id string) error {
+	cmd := exec.Command("bd", "reopen", id)
+	cmd.Dir = m.workDir
+	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+m.beadsDir)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if strings.Contains(errMsg, "not found") {
+			return ErrMessageNotFound
+		}
+		if errMsg != "" {
+			return errors.New(errMsg)
+		}
+		return err
+	}
+
+	return nil
+}
+
+func (m *Mailbox) markUnreadLegacy(id string) error {
+	messages, err := m.List()
+	if err != nil {
+		return err
+	}
+
+	found := false
+	for _, msg := range messages {
+		if msg.ID == id {
+			msg.Read = false
+			found = true
+		}
+	}
+
+	if !found {
+		return ErrMessageNotFound
+	}
+
+	return m.rewriteLegacy(messages)
+}
+
 // Delete removes a message.
 func (m *Mailbox) Delete(id string) error {
 	if m.legacy {
@@ -389,6 +446,237 @@ func (m *Mailbox) deleteLegacy(id string) error {
 	}
 
 	return m.rewriteLegacy(filtered)
+}
+
+// Archive moves a message to the archive file and removes it from inbox.
+func (m *Mailbox) Archive(id string) error {
+	// Get the message first
+	msg, err := m.Get(id)
+	if err != nil {
+		return err
+	}
+
+	// Append to archive file
+	if err := m.appendToArchive(msg); err != nil {
+		return err
+	}
+
+	// Delete from inbox
+	return m.Delete(id)
+}
+
+// ArchivePath returns the path to the archive file.
+func (m *Mailbox) ArchivePath() string {
+	if m.legacy {
+		return m.path + ".archive"
+	}
+	// For beads, use archive.jsonl in the same directory as beads
+	return filepath.Join(m.beadsDir, "archive.jsonl")
+}
+
+func (m *Mailbox) appendToArchive(msg *Message) error {
+	archivePath := m.ArchivePath()
+
+	// Ensure directory exists
+	dir := filepath.Dir(archivePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	// Open for append
+	file, err := os.OpenFile(archivePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	_, err = file.WriteString(string(data) + "\n")
+	return err
+}
+
+// ListArchived returns all messages in the archive file.
+func (m *Mailbox) ListArchived() ([]*Message, error) {
+	archivePath := m.ArchivePath()
+
+	file, err := os.Open(archivePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	var messages []*Message
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var msg Message
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue // Skip malformed lines
+		}
+		messages = append(messages, &msg)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return messages, nil
+}
+
+// PurgeArchive removes messages from the archive, optionally filtering by age.
+// If olderThanDays is 0, removes all archived messages.
+func (m *Mailbox) PurgeArchive(olderThanDays int) (int, error) {
+	messages, err := m.ListArchived()
+	if err != nil {
+		return 0, err
+	}
+
+	if len(messages) == 0 {
+		return 0, nil
+	}
+
+	// If no age filter, remove all
+	if olderThanDays <= 0 {
+		if err := os.Remove(m.ArchivePath()); err != nil && !os.IsNotExist(err) {
+			return 0, err
+		}
+		return len(messages), nil
+	}
+
+	// Filter by age
+	cutoff := timeNow().AddDate(0, 0, -olderThanDays)
+	var keep []*Message
+	purged := 0
+
+	for _, msg := range messages {
+		if msg.Timestamp.Before(cutoff) {
+			purged++
+		} else {
+			keep = append(keep, msg)
+		}
+	}
+
+	// Rewrite archive with remaining messages
+	if len(keep) == 0 {
+		if err := os.Remove(m.ArchivePath()); err != nil && !os.IsNotExist(err) {
+			return 0, err
+		}
+	} else {
+		if err := m.rewriteArchive(keep); err != nil {
+			return 0, err
+		}
+	}
+
+	return purged, nil
+}
+
+func (m *Mailbox) rewriteArchive(messages []*Message) error {
+	archivePath := m.ArchivePath()
+	tmpPath := archivePath + ".tmp"
+
+	file, err := os.Create(tmpPath)
+	if err != nil {
+		return err
+	}
+
+	for _, msg := range messages {
+		data, err := json.Marshal(msg)
+		if err != nil {
+			_ = file.Close()
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		_, _ = file.WriteString(string(data) + "\n")
+	}
+
+	if err := file.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	return os.Rename(tmpPath, archivePath)
+}
+
+// SearchOptions specifies search parameters.
+type SearchOptions struct {
+	Query       string // Regex pattern to search for
+	FromFilter  string // Optional: only match messages from this sender
+	SubjectOnly bool   // Only search subject
+	BodyOnly    bool   // Only search body
+}
+
+// Search finds messages matching the given criteria.
+// Returns messages from both inbox and archive.
+func (m *Mailbox) Search(opts SearchOptions) ([]*Message, error) {
+	// Compile regex
+	re, err := regexp.Compile("(?i)" + opts.Query) // Case-insensitive
+	if err != nil {
+		return nil, fmt.Errorf("invalid search pattern: %w", err)
+	}
+
+	var fromRe *regexp.Regexp
+	if opts.FromFilter != "" {
+		fromRe, err = regexp.Compile("(?i)" + opts.FromFilter)
+		if err != nil {
+			return nil, fmt.Errorf("invalid from pattern: %w", err)
+		}
+	}
+
+	// Get inbox messages
+	inbox, err := m.List()
+	if err != nil {
+		return nil, err
+	}
+
+	// Get archived messages
+	archived, err := m.ListArchived()
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	// Combine and search
+	all := append(inbox, archived...)
+	var matches []*Message
+
+	for _, msg := range all {
+		// Apply from filter
+		if fromRe != nil && !fromRe.MatchString(msg.From) {
+			continue
+		}
+
+		// Search in specified fields
+		matched := false
+		if opts.SubjectOnly {
+			matched = re.MatchString(msg.Subject)
+		} else if opts.BodyOnly {
+			matched = re.MatchString(msg.Body)
+		} else {
+			// Search in both subject and body
+			matched = re.MatchString(msg.Subject) || re.MatchString(msg.Body)
+		}
+
+		if matched {
+			matches = append(matches, msg)
+		}
+	}
+
+	// Sort by timestamp (newest first)
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Timestamp.After(matches[j].Timestamp)
+	})
+
+	return matches, nil
 }
 
 // Count returns the total and unread message counts.

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
@@ -42,9 +43,22 @@ var (
 	mailCheckInject   bool
 	mailCheckJSON     bool
 	mailCheckIdentity string
-	mailThreadJSON    bool
-	mailReplySubject  string
-	mailReplyMessage  string
+	mailThreadJSON       bool
+	mailReplySubject     string
+	mailReplyMessage     string
+	mailMarkRead         bool
+	mailMarkUnread       bool
+	mailDeleteForce      bool
+	mailArchiveOlderThan int
+	mailArchiveAllRead   bool
+	mailArchiveDryRun    bool
+	mailPurgeOlderThan   int
+	mailPurgeDryRun      bool
+	mailPurgeForce       bool
+	mailSearchFrom       string
+	mailSearchSubject    bool
+	mailSearchBody       bool
+	mailSearchJSON       bool
 )
 
 var mailCmd = &cobra.Command{
@@ -182,12 +196,19 @@ This closes the message in beads.`,
 }
 
 var mailArchiveCmd = &cobra.Command{
-	Use:   "archive <message-id>",
-	Short: "Archive a message",
-	Long: `Archive a message (alias for delete).
+	Use:   "archive [message-id]",
+	Short: "Archive messages",
+	Long: `Archive messages from your inbox.
 
-Removes the message from your inbox by closing it in beads.`,
-	Args: cobra.ExactArgs(1),
+Archives a single message by ID, or archives messages in bulk using filters.
+Archived messages are stored in an archive file for later retrieval or purging.
+
+Examples:
+  gt mail archive msg-abc123              # Archive a single message
+  gt mail archive --all-read              # Archive all read messages
+  gt mail archive --older-than 7          # Archive messages older than 7 days
+  gt mail archive --older-than 30 --dry-run  # Preview what would be archived`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runMailArchive,
 }
 
@@ -318,6 +339,52 @@ Examples:
 	RunE: runMailClear,
 }
 
+var mailMarkCmd = &cobra.Command{
+	Use:   "mark <message-id>",
+	Short: "Change message read status",
+	Long: `Mark a message as read or unread.
+
+Examples:
+  gt mail mark msg-abc123 --read
+  gt mail mark msg-abc123 --unread`,
+	Args: cobra.ExactArgs(1),
+	RunE: runMailMark,
+}
+
+var mailPurgeCmd = &cobra.Command{
+	Use:   "purge",
+	Short: "Permanently delete archived messages",
+	Long: `Permanently delete messages from the archive.
+
+This removes archived messages that are no longer needed.
+Use with caution - purged messages cannot be recovered.
+
+Examples:
+  gt mail purge                    # Delete all archived messages (with confirmation)
+  gt mail purge --older-than 30    # Delete archived messages older than 30 days
+  gt mail purge --dry-run          # Preview what would be deleted
+  gt mail purge --force            # Delete without confirmation`,
+	RunE: runMailPurge,
+}
+
+var mailSearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "Search messages by content",
+	Long: `Search messages in inbox and archive by content.
+
+Supports regex patterns for flexible searching.
+Searches both subject and body by default.
+
+Examples:
+  gt mail search "error"                  # Find messages containing "error"
+  gt mail search "deploy.*prod"           # Regex pattern
+  gt mail search "urgent" --subject       # Search only in subject
+  gt mail search "stack trace" --body     # Search only in body
+  gt mail search "bug" --from mayor/      # Filter by sender`,
+	Args: cobra.ExactArgs(1),
+	RunE: runMailSearch,
+}
+
 func init() {
 	// Send flags
 	mailSendCmd.Flags().StringVarP(&mailSubject, "subject", "s", "", "Message subject (required)")
@@ -357,6 +424,29 @@ func init() {
 	mailReplyCmd.Flags().StringVarP(&mailReplyMessage, "message", "m", "", "Reply message body (required)")
 	mailReplyCmd.MarkFlagRequired("message")
 
+	// Delete flags
+	mailDeleteCmd.Flags().BoolVarP(&mailDeleteForce, "force", "f", false, "Delete without confirmation")
+
+	// Archive flags
+	mailArchiveCmd.Flags().IntVar(&mailArchiveOlderThan, "older-than", 0, "Archive messages older than N days")
+	mailArchiveCmd.Flags().BoolVar(&mailArchiveAllRead, "all-read", false, "Archive all read messages")
+	mailArchiveCmd.Flags().BoolVar(&mailArchiveDryRun, "dry-run", false, "Show what would be archived without archiving")
+
+	// Mark flags
+	mailMarkCmd.Flags().BoolVar(&mailMarkRead, "read", false, "Mark message as read")
+	mailMarkCmd.Flags().BoolVar(&mailMarkUnread, "unread", false, "Mark message as unread")
+
+	// Purge flags
+	mailPurgeCmd.Flags().IntVar(&mailPurgeOlderThan, "older-than", 0, "Only purge messages older than N days")
+	mailPurgeCmd.Flags().BoolVar(&mailPurgeDryRun, "dry-run", false, "Show what would be purged without purging")
+	mailPurgeCmd.Flags().BoolVarP(&mailPurgeForce, "force", "f", false, "Purge without confirmation")
+
+	// Search flags
+	mailSearchCmd.Flags().StringVar(&mailSearchFrom, "from", "", "Filter by sender (regex)")
+	mailSearchCmd.Flags().BoolVar(&mailSearchSubject, "subject", false, "Search only in subject")
+	mailSearchCmd.Flags().BoolVar(&mailSearchBody, "body", false, "Search only in body")
+	mailSearchCmd.Flags().BoolVar(&mailSearchJSON, "json", false, "Output as JSON")
+
 	// Add subcommands
 	mailCmd.AddCommand(mailSendCmd)
 	mailCmd.AddCommand(mailInboxCmd)
@@ -370,6 +460,9 @@ func init() {
 	mailCmd.AddCommand(mailClaimCmd)
 	mailCmd.AddCommand(mailReleaseCmd)
 	mailCmd.AddCommand(mailClearCmd)
+	mailCmd.AddCommand(mailMarkCmd)
+	mailCmd.AddCommand(mailPurgeCmd)
+	mailCmd.AddCommand(mailSearchCmd)
 
 	rootCmd.AddCommand(mailCmd)
 }
@@ -734,6 +827,28 @@ func runMailDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting mailbox: %w", err)
 	}
 
+	// Confirmation unless --force
+	if !mailDeleteForce {
+		// Get message for display
+		msg, err := mailbox.Get(msgID)
+		if err != nil {
+			return fmt.Errorf("getting message: %w", err)
+		}
+
+		fmt.Printf("Delete message: %s\n", msg.Subject)
+		fmt.Printf("  From: %s\n", msg.From)
+		fmt.Printf("  ID: %s\n", style.Dim.Render(msg.ID))
+		fmt.Printf("\nDelete this message? [y/N] ")
+
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(strings.ToLower(response))
+		if response != "y" && response != "yes" {
+			fmt.Println("Delete cancelled.")
+			return nil
+		}
+	}
+
 	if err := mailbox.Delete(msgID); err != nil {
 		return fmt.Errorf("deleting message: %w", err)
 	}
@@ -743,8 +858,6 @@ func runMailDelete(cmd *cobra.Command, args []string) error {
 }
 
 func runMailArchive(cmd *cobra.Command, args []string) error {
-	msgID := args[0]
-
 	// Determine which inbox
 	address := detectSender()
 
@@ -761,11 +874,86 @@ func runMailArchive(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting mailbox: %w", err)
 	}
 
-	if err := mailbox.Delete(msgID); err != nil {
-		return fmt.Errorf("archiving message: %w", err)
+	// Single message archive
+	if len(args) == 1 {
+		msgID := args[0]
+		if mailArchiveDryRun {
+			msg, err := mailbox.Get(msgID)
+			if err != nil {
+				return fmt.Errorf("getting message: %w", err)
+			}
+			fmt.Printf("Would archive: %s (%s)\n", msg.Subject, msg.ID)
+			return nil
+		}
+		if err := mailbox.Archive(msgID); err != nil {
+			return fmt.Errorf("archiving message: %w", err)
+		}
+		fmt.Printf("%s Message archived\n", style.Bold.Render("✓"))
+		return nil
 	}
 
-	fmt.Printf("%s Message archived\n", style.Bold.Render("✓"))
+	// Batch archive - need at least one filter
+	if mailArchiveOlderThan == 0 && !mailArchiveAllRead {
+		return fmt.Errorf("must specify a message ID or use --older-than or --all-read")
+	}
+
+	// Get all messages
+	messages, err := mailbox.List()
+	if err != nil {
+		return fmt.Errorf("listing messages: %w", err)
+	}
+
+	// Filter messages
+	var toArchive []*mail.Message
+	cutoff := time.Now().AddDate(0, 0, -mailArchiveOlderThan)
+
+	for _, msg := range messages {
+		matches := true
+
+		// Apply --older-than filter
+		if mailArchiveOlderThan > 0 && !msg.Timestamp.Before(cutoff) {
+			matches = false
+		}
+
+		// Apply --all-read filter (in beads, all inbox messages are "unread")
+		// For legacy mode, only archive read messages
+		if mailArchiveAllRead && !msg.Read {
+			matches = false
+		}
+
+		if matches {
+			toArchive = append(toArchive, msg)
+		}
+	}
+
+	if len(toArchive) == 0 {
+		fmt.Println("No messages match the criteria")
+		return nil
+	}
+
+	// Dry run - just show what would be archived
+	if mailArchiveDryRun {
+		fmt.Printf("Would archive %d message(s):\n", len(toArchive))
+		for _, msg := range toArchive {
+			fmt.Printf("  - %s: %s (%s)\n",
+				style.Dim.Render(msg.Timestamp.Format("2006-01-02")),
+				msg.Subject,
+				style.Dim.Render(msg.ID))
+		}
+		return nil
+	}
+
+	// Archive messages
+	archived := 0
+	for _, msg := range toArchive {
+		if err := mailbox.Archive(msg.ID); err != nil {
+			fmt.Printf("Warning: failed to archive %s: %v\n", msg.ID, err)
+			continue
+		}
+		archived++
+	}
+
+	fmt.Printf("%s Archived %d message(s)\n", style.Bold.Render("✓"), archived)
 	return nil
 }
 
@@ -1575,6 +1763,197 @@ func releaseMessage(townRoot, messageID, queueAssignee, actor string) error {
 			return fmt.Errorf("%s", errMsg)
 		}
 		return err
+	}
+
+	return nil
+}
+
+func runMailMark(cmd *cobra.Command, args []string) error {
+	msgID := args[0]
+
+	// Require exactly one flag
+	if mailMarkRead == mailMarkUnread {
+		return fmt.Errorf("must specify either --read or --unread")
+	}
+
+	// Determine which inbox
+	address := detectSender()
+
+	// All mail uses town beads
+	workDir, err := findMailWorkDir()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Get mailbox
+	router := mail.NewRouter(workDir)
+	mailbox, err := router.GetMailbox(address)
+	if err != nil {
+		return fmt.Errorf("getting mailbox: %w", err)
+	}
+
+	if mailMarkRead {
+		if err := mailbox.MarkRead(msgID); err != nil {
+			return fmt.Errorf("marking as read: %w", err)
+		}
+		fmt.Printf("%s Message marked as read\n", style.Bold.Render("✓"))
+	} else {
+		if err := mailbox.MarkUnread(msgID); err != nil {
+			return fmt.Errorf("marking as unread: %w", err)
+		}
+		fmt.Printf("%s Message marked as unread\n", style.Bold.Render("✓"))
+	}
+
+	return nil
+}
+
+func runMailPurge(cmd *cobra.Command, args []string) error {
+	// Determine which inbox
+	address := detectSender()
+
+	// All mail uses town beads
+	workDir, err := findMailWorkDir()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Get mailbox
+	router := mail.NewRouter(workDir)
+	mailbox, err := router.GetMailbox(address)
+	if err != nil {
+		return fmt.Errorf("getting mailbox: %w", err)
+	}
+
+	// Get archived messages
+	archived, err := mailbox.ListArchived()
+	if err != nil {
+		return fmt.Errorf("listing archived messages: %w", err)
+	}
+
+	if len(archived) == 0 {
+		fmt.Println("No archived messages to purge")
+		return nil
+	}
+
+	// Filter by age if specified
+	var toPurge []*mail.Message
+	if mailPurgeOlderThan > 0 {
+		cutoff := time.Now().AddDate(0, 0, -mailPurgeOlderThan)
+		for _, msg := range archived {
+			if msg.Timestamp.Before(cutoff) {
+				toPurge = append(toPurge, msg)
+			}
+		}
+	} else {
+		toPurge = archived
+	}
+
+	if len(toPurge) == 0 {
+		fmt.Println("No archived messages match the criteria")
+		return nil
+	}
+
+	// Dry run
+	if mailPurgeDryRun {
+		fmt.Printf("Would purge %d archived message(s):\n", len(toPurge))
+		for _, msg := range toPurge {
+			fmt.Printf("  - %s: %s (%s)\n",
+				style.Dim.Render(msg.Timestamp.Format("2006-01-02")),
+				msg.Subject,
+				style.Dim.Render(msg.ID))
+		}
+		return nil
+	}
+
+	// Confirmation unless --force
+	if !mailPurgeForce {
+		fmt.Printf("This will permanently delete %d archived message(s).\n", len(toPurge))
+		fmt.Print("Are you sure? [y/N] ")
+
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(strings.ToLower(response))
+		if response != "y" && response != "yes" {
+			fmt.Println("Purge cancelled.")
+			return nil
+		}
+	}
+
+	// Perform purge
+	purged, err := mailbox.PurgeArchive(mailPurgeOlderThan)
+	if err != nil {
+		return fmt.Errorf("purging archive: %w", err)
+	}
+
+	fmt.Printf("%s Purged %d archived message(s)\n", style.Bold.Render("✓"), purged)
+	return nil
+}
+
+func runMailSearch(cmd *cobra.Command, args []string) error {
+	query := args[0]
+
+	// Validate flags
+	if mailSearchSubject && mailSearchBody {
+		return fmt.Errorf("cannot use both --subject and --body")
+	}
+
+	// Determine which inbox
+	address := detectSender()
+
+	// All mail uses town beads
+	workDir, err := findMailWorkDir()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Get mailbox
+	router := mail.NewRouter(workDir)
+	mailbox, err := router.GetMailbox(address)
+	if err != nil {
+		return fmt.Errorf("getting mailbox: %w", err)
+	}
+
+	// Search
+	opts := mail.SearchOptions{
+		Query:       query,
+		FromFilter:  mailSearchFrom,
+		SubjectOnly: mailSearchSubject,
+		BodyOnly:    mailSearchBody,
+	}
+
+	matches, err := mailbox.Search(opts)
+	if err != nil {
+		return fmt.Errorf("searching: %w", err)
+	}
+
+	// JSON output
+	if mailSearchJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(matches)
+	}
+
+	// Human-readable output
+	if len(matches) == 0 {
+		fmt.Println("No messages found")
+		return nil
+	}
+
+	fmt.Printf("%s Found %d message(s) matching \"%s\":\n\n",
+		style.Bold.Render("🔍"), len(matches), query)
+
+	for _, msg := range matches {
+		statusMarker := "●" // inbox
+		if msg.Read {
+			statusMarker = "○" // archived
+		}
+
+		fmt.Printf("  %s %s\n", statusMarker, msg.Subject)
+		fmt.Printf("    %s from %s\n",
+			style.Dim.Render(msg.ID),
+			msg.From)
+		fmt.Printf("    %s\n",
+			style.Dim.Render(msg.Timestamp.Format("2006-01-02 15:04")))
 	}
 
 	return nil
