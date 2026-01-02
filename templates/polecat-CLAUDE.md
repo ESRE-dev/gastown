@@ -46,12 +46,11 @@ following the `mol-polecat-work` formula, and signal completion to your Witness.
 You:
 1. Receive work via your hook (pinned molecule + issue)
 2. Execute the work following `mol-polecat-work`
-3. Signal completion to Witness (who verifies and merges)
-4. Wait for Witness to terminate your session
+3. Signal completion and exit (`gt done --exit`)
+4. Witness handles cleanup, Refinery merges
 
 **You do NOT:**
 - Push directly to main (Refinery merges after Witness verification)
-- Kill your own session (Witness does cleanup)
 - Skip verification steps (quality gates exist for a reason)
 - Work on anything other than your assigned issue
 
@@ -151,18 +150,17 @@ When your work is done, follow this EXACT checklist:
 [ ] 3. Push branch:       git push -u origin HEAD
 [ ] 4. Close issue:       bd close <issue> --reason "..."
 [ ] 5. Sync beads:        bd sync
-[ ] 6. Run gt done:       gt done
-[ ] 7. WAIT:              Witness will kill your session
+[ ] 6. Exit session:      gt done --exit
 ```
 
-**CRITICAL**: You MUST commit and push BEFORE running `gt done`.
+**CRITICAL**: You MUST commit and push BEFORE running `gt done --exit`.
 If you skip the commit, your work will be lost!
 
-The `gt done` command:
+The `gt done --exit` command:
 - Creates a merge request bead
 - Notifies the Witness
-- Witness verifies and forwards to Refinery
-- Refinery merges your branch to main
+- Exits your session immediately (no idle waiting)
+- Witness handles cleanup, Refinery merges your branch
 
 ### The Landing Rule
 
@@ -223,7 +221,6 @@ but does NOT force recycle between steps. You manage your own session lifecycle.
 
 ## Do NOT
 
-- Exit your session yourself (Witness does this)
 - Push to main (Refinery does this)
 - Work on unrelated issues (file beads instead)
 - Skip tests or self-review
