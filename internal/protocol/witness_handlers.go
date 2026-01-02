@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/witness"
 )
 
 // DefaultWitnessHandler provides the default implementation for Witness protocol handlers.
@@ -59,10 +60,18 @@ func (h *DefaultWitnessHandler) HandleMerged(payload *MergedPayload) error {
 		// Continue - notification is best-effort
 	}
 
-	// Initiate polecat cleanup
-	// Note: Actual cleanup is done by a separate process/molecule
-	// This handler just records that cleanup is needed
-	fmt.Fprintf(h.Output, "[Witness] ✓ Polecat %s work merged, cleanup can proceed\n", payload.Polecat)
+	// Initiate polecat cleanup using AutoNukeIfClean
+	// This verifies cleanup_status before nuking to prevent work loss.
+	nukeResult := witness.AutoNukeIfClean(h.WorkDir, h.Rig, payload.Polecat)
+	if nukeResult.Nuked {
+		fmt.Fprintf(h.Output, "[Witness] ✓ Auto-nuked polecat %s: %s\n", payload.Polecat, nukeResult.Reason)
+	} else if nukeResult.Skipped {
+		fmt.Fprintf(h.Output, "[Witness] ⚠ Cleanup skipped for %s: %s\n", payload.Polecat, nukeResult.Reason)
+	} else if nukeResult.Error != nil {
+		fmt.Fprintf(h.Output, "[Witness] ✗ Cleanup failed for %s: %v\n", payload.Polecat, nukeResult.Error)
+	} else {
+		fmt.Fprintf(h.Output, "[Witness] ✓ Polecat %s work merged, cleanup can proceed\n", payload.Polecat)
+	}
 
 	return nil
 }
