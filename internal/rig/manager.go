@@ -437,8 +437,8 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
 func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig bool) error {
-	// Run bd commands from mayor/rig which has the beads database
-	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
+	// Run bd commands from rig root where .beads/ was initialized
+	// Set BEADS_DIR explicitly to ensure bd finds the database
 	beadsDir := filepath.Join(rigPath, ".beads")
 	prevBeadsDir, hadBeadsDir := os.LookupEnv("BEADS_DIR")
 	if err := os.Setenv("BEADS_DIR", beadsDir); err != nil {
@@ -451,7 +451,7 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig boo
 			_ = os.Unsetenv("BEADS_DIR")
 		}
 	}()
-	bd := beads.New(mayorRigPath)
+	bd := beads.New(rigPath)
 
 	// Define agents to create
 	type agentDef struct {

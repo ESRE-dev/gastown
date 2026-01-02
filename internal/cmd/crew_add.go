@@ -56,9 +56,8 @@ func runCrewAdd(cmd *cobra.Command, args []string) error {
 	crewGit := git.NewGit(r.Path)
 	crewMgr := crew.NewManager(r, crewGit)
 
-	// Beads for agent bead creation
-	rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
-	bd := beads.New(rigBeadsPath)
+	// Beads for agent bead creation (use rig root where .beads/ lives)
+	bd := beads.New(r.Path)
 
 	// Track results
 	var created []string
