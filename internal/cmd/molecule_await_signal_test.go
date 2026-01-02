@@ -12,6 +12,7 @@ func TestCalculateEffectiveTimeout(t *testing.T) {
 		backoffBase string
 		backoffMult int
 		backoffMax  string
+		idleCycles  int
 		want        time.Duration
 		wantErr     bool
 	}{
@@ -26,17 +27,36 @@ func TestCalculateEffectiveTimeout(t *testing.T) {
 			want:    5 * time.Minute,
 		},
 		{
-			name:        "backoff base only",
+			name:        "backoff base only, idle=0",
 			timeout:     "60s",
 			backoffBase: "30s",
+			idleCycles:  0,
 			want:        30 * time.Second,
 		},
 		{
-			name:        "backoff with max",
+			name:        "backoff with idle=1, mult=2",
 			timeout:     "60s",
 			backoffBase: "30s",
-			backoffMax:  "10m",
-			want:        30 * time.Second,
+			backoffMult: 2,
+			idleCycles:  1,
+			want:        60 * time.Second,
+		},
+		{
+			name:        "backoff with idle=2, mult=2",
+			timeout:     "60s",
+			backoffBase: "30s",
+			backoffMult: 2,
+			idleCycles:  2,
+			want:        2 * time.Minute,
+		},
+		{
+			name:        "backoff with max cap",
+			timeout:     "60s",
+			backoffBase: "30s",
+			backoffMult: 2,
+			backoffMax:  "5m",
+			idleCycles:  10, // Would be 30s * 2^10 = ~8.5h but capped at 5m
+			want:        5 * time.Minute,
 		},
 		{
 			name:        "backoff base exceeds max",
@@ -76,7 +96,7 @@ func TestCalculateEffectiveTimeout(t *testing.T) {
 			}
 			awaitSignalBackoffMax = tt.backoffMax
 
-			got, err := calculateEffectiveTimeout()
+			got, err := calculateEffectiveTimeout(tt.idleCycles)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("calculateEffectiveTimeout() error = %v, wantErr %v", err, tt.wantErr)
 				return

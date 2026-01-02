@@ -20,6 +20,7 @@ var (
 	awaitSignalBackoffMult int
 	awaitSignalBackoffMax  string
 	awaitSignalQuiet       bool
+	awaitSignalAgentBead   string
 )
 
 var moleculeAwaitSignalCmd = &cobra.Command{
@@ -39,9 +40,11 @@ exponential wait patterns.
 
 BACKOFF MODE:
 When backoff parameters are provided, the effective timeout is calculated as:
-  min(base * multiplier^iteration, max)
+  min(base * multiplier^idle_cycles, max)
 
-This is useful for patrol loops where you want to back off during quiet periods.
+The idle_cycles value is read from the agent bead's "idle" label, enabling
+exponential backoff that persists across invocations. When a signal is
+received, the caller should reset idle:0 on the agent bead.
 
 EXIT CODES:
   0 - Signal received or timeout (check output for which)
@@ -51,8 +54,12 @@ EXAMPLES:
   # Simple wait with 60s timeout
   gt mol await-signal --timeout 60s
 
-  # Backoff mode: start at 30s, double each iteration, max 10m
-  gt mol await-signal --backoff-base 30s --backoff-mult 2 --backoff-max 10m
+  # Backoff mode with agent bead tracking:
+  gt mol await-signal --agent-bead gt-gastown-witness \
+    --backoff-base 30s --backoff-mult 2 --backoff-max 5m
+
+  # On timeout, the agent bead's idle:N label is auto-incremented
+  # On signal, caller should reset: gt agent state gt-gastown-witness --set idle=0
 
   # Quiet mode (no output, for scripting)
   gt mol await-signal --timeout 30s --quiet`,
@@ -61,9 +68,10 @@ EXAMPLES:
 
 // AwaitSignalResult is the result of an await-signal operation.
 type AwaitSignalResult struct {
-	Reason  string        `json:"reason"`  // "signal" or "timeout"
-	Elapsed time.Duration `json:"elapsed"` // how long we waited
-	Signal  string        `json:"signal"`  // the line that woke us (if signal)
+	Reason     string        `json:"reason"`               // "signal" or "timeout"
+	Elapsed    time.Duration `json:"elapsed"`              // how long we waited
+	Signal     string        `json:"signal,omitempty"`     // the line that woke us (if signal)
+	IdleCycles int           `json:"idle_cycles,omitempty"` // current idle cycle count (after update)
 }
 
 func init() {
@@ -75,6 +83,8 @@ func init() {
 		"Multiplier for exponential backoff (default: 2)")
 	moleculeAwaitSignalCmd.Flags().StringVar(&awaitSignalBackoffMax, "backoff-max", "",
 		"Maximum interval cap for backoff (e.g., 10m)")
+	moleculeAwaitSignalCmd.Flags().StringVar(&awaitSignalAgentBead, "agent-bead", "",
+		"Agent bead ID for tracking idle cycles (reads/writes idle:N label)")
 	moleculeAwaitSignalCmd.Flags().BoolVar(&awaitSignalQuiet, "quiet", false,
 		"Suppress output (for scripting)")
 	moleculeAwaitSignalCmd.Flags().BoolVar(&moleculeJSON, "json", false,
@@ -84,21 +94,45 @@ func init() {
 }
 
 func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
-	// Calculate effective timeout
-	timeout, err := calculateEffectiveTimeout()
-	if err != nil {
-		return fmt.Errorf("invalid timeout configuration: %w", err)
-	}
-
 	// Find beads directory
 	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
 
+	beadsDir := beads.ResolveBeadsDir(workDir)
+
+	// Read current idle cycles from agent bead (if specified)
+	var idleCycles int
+	if awaitSignalAgentBead != "" {
+		labels, err := getAgentLabels(awaitSignalAgentBead, beadsDir)
+		if err != nil {
+			// Agent bead might not exist yet - that's OK, start at 0
+			if !awaitSignalQuiet {
+				fmt.Printf("%s Could not read agent bead (starting at idle=0): %v\n",
+					style.Dim.Render("⚠"), err)
+			}
+		} else if idleStr, ok := labels["idle"]; ok {
+			if n, err := parseIntSimple(idleStr); err == nil {
+				idleCycles = n
+			}
+		}
+	}
+
+	// Calculate effective timeout (uses idle cycles if backoff mode)
+	timeout, err := calculateEffectiveTimeout(idleCycles)
+	if err != nil {
+		return fmt.Errorf("invalid timeout configuration: %w", err)
+	}
+
 	if !awaitSignalQuiet && !moleculeJSON {
-		fmt.Printf("%s Awaiting signal (timeout: %v)...\n",
-			style.Dim.Render("⏳"), timeout)
+		if awaitSignalAgentBead != "" {
+			fmt.Printf("%s Awaiting signal (timeout: %v, idle: %d)...\n",
+				style.Dim.Render("⏳"), timeout, idleCycles)
+		} else {
+			fmt.Printf("%s Awaiting signal (timeout: %v)...\n",
+				style.Dim.Render("⏳"), timeout)
+		}
 	}
 
 	startTime := time.Now()
@@ -113,6 +147,22 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 	}
 
 	result.Elapsed = time.Since(startTime)
+
+	// On timeout, increment idle cycles on agent bead
+	if result.Reason == "timeout" && awaitSignalAgentBead != "" {
+		newIdleCycles := idleCycles + 1
+		if err := setAgentIdleCycles(awaitSignalAgentBead, beadsDir, newIdleCycles); err != nil {
+			if !awaitSignalQuiet {
+				fmt.Printf("%s Failed to update agent bead idle count: %v\n",
+					style.Dim.Render("⚠"), err)
+			}
+		} else {
+			result.IdleCycles = newIdleCycles
+		}
+	} else if result.Reason == "signal" && awaitSignalAgentBead != "" {
+		// On signal, report current idle cycles (caller should reset)
+		result.IdleCycles = idleCycles
+	}
 
 	// Output result
 	if moleculeJSON {
@@ -135,8 +185,13 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  %s\n", style.Dim.Render(sig))
 			}
 		case "timeout":
-			fmt.Printf("%s Timeout after %v (no activity)\n",
-				style.Dim.Render("⏱"), result.Elapsed.Round(time.Millisecond))
+			if awaitSignalAgentBead != "" {
+				fmt.Printf("%s Timeout after %v (idle cycle: %d)\n",
+					style.Dim.Render("⏱"), result.Elapsed.Round(time.Millisecond), result.IdleCycles)
+			} else {
+				fmt.Printf("%s Timeout after %v (no activity)\n",
+					style.Dim.Render("⏱"), result.Elapsed.Round(time.Millisecond))
+			}
 		}
 	}
 
@@ -144,9 +199,10 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 }
 
 // calculateEffectiveTimeout determines the timeout based on flags.
-// If backoff parameters are provided, uses backoff calculation.
+// If backoff parameters are provided, uses exponential backoff formula:
+//   min(base * multiplier^idleCycles, max)
 // Otherwise uses the simple --timeout value.
-func calculateEffectiveTimeout() (time.Duration, error) {
+func calculateEffectiveTimeout(idleCycles int) (time.Duration, error) {
 	// If backoff base is set, use backoff mode
 	if awaitSignalBackoffBase != "" {
 		base, err := time.ParseDuration(awaitSignalBackoffBase)
@@ -154,10 +210,11 @@ func calculateEffectiveTimeout() (time.Duration, error) {
 			return 0, fmt.Errorf("invalid backoff-base: %w", err)
 		}
 
-		// For now, use base as timeout
-		// A more sophisticated implementation would track iteration count
-		// and apply exponential backoff
+		// Apply exponential backoff: base * multiplier^idleCycles
 		timeout := base
+		for i := 0; i < idleCycles; i++ {
+			timeout *= time.Duration(awaitSignalBackoffMult)
+		}
 
 		// Apply max cap if specified
 		if awaitSignalBackoffMax != "" {
@@ -245,4 +302,57 @@ func GetCurrentStepBackoff(workDir string) (*beads.BackoffConfig, error) {
 	_ = b
 
 	return nil, nil
+}
+
+// parseIntSimple parses a string to int without using strconv.
+func parseIntSimple(s string) (int, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty string")
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, fmt.Errorf("invalid integer: %s", s)
+		}
+		n = n*10 + int(s[i]-'0')
+	}
+	return n, nil
+}
+
+// setAgentIdleCycles sets the idle:N label on an agent bead.
+// Uses read-modify-write pattern to update only the idle label.
+func setAgentIdleCycles(agentBead, beadsDir string, cycles int) error {
+	// Read all current labels
+	allLabels, err := getAllAgentLabels(agentBead, beadsDir)
+	if err != nil {
+		return err
+	}
+
+	// Build new label list: keep non-idle labels, add new idle value
+	var newLabels []string
+	for _, label := range allLabels {
+		// Skip any existing idle:* label
+		if len(label) > 5 && label[:5] == "idle:" {
+			continue
+		}
+		newLabels = append(newLabels, label)
+	}
+
+	// Add new idle value
+	newLabels = append(newLabels, fmt.Sprintf("idle:%d", cycles))
+
+	// Use bd update with --set-labels to replace all labels
+	args := []string{"update", agentBead}
+	for _, label := range newLabels {
+		args = append(args, "--set-labels="+label)
+	}
+
+	cmd := exec.Command("bd", args...)
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("setting idle label: %w", err)
+	}
+
+	return nil
 }
