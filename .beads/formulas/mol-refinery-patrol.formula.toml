@@ -33,7 +33,7 @@ Witness                    Refinery                      Git
 After successful merge, Refinery sends MERGED mail back to Witness so it can
 complete cleanup (nuke the polecat worktree)."""
 formula = "mol-refinery-patrol"
-version = 3
+version = 4
 
 [[steps]]
 id = "inbox-check"
@@ -124,20 +124,79 @@ Track verified MR list for this cycle."""
 
 [[steps]]
 id = "process-branch"
-title = "Process next branch"
+title = "Mechanical rebase"
 needs = ["queue-scan"]
 description = """
-Pick next branch from queue. Rebase on current main.
+Pick next branch from queue. Attempt mechanical rebase on current main.
 
+**Step 1: Checkout and attempt rebase**
 ```bash
 git checkout -b temp origin/<polecat-branch>
 git rebase origin/main
 ```
 
-If rebase conflicts and unresolvable:
-- git rebase --abort
-- Notify polecat/witness to fix and resubmit
-- Skip to loop-check for next branch"""
+**Step 2: Check rebase result**
+
+The rebase exits with:
+- Exit code 0: Success - proceed to run-tests
+- Exit code 1 (conflicts): Conflict detected - proceed to Step 3
+
+To detect conflict state after rebase fails:
+```bash
+# Check if we're in a conflicted rebase state
+ls .git/rebase-merge 2>/dev/null && echo "CONFLICT_STATE"
+```
+
+**Step 3: Handle conflicts (if any)**
+
+If rebase SUCCEEDED (exit code 0):
+- Skip to run-tests step (continue normal merge flow)
+
+If rebase FAILED with conflicts:
+
+1. **Abort the rebase** (DO NOT leave repo in conflicted state):
+```bash
+git rebase --abort
+```
+
+2. **Record conflict metadata**:
+```bash
+# Capture main SHA for reference
+MAIN_SHA=$(git rev-parse origin/main)
+BRANCH_SHA=$(git rev-parse origin/<polecat-branch>)
+```
+
+3. **Create conflict-resolution task**:
+```bash
+bd create --type=task --priority=1 \
+  --title="Resolve merge conflicts: <original-issue-title>" \
+  --description="## Conflict Resolution Required
+
+Original MR: <mr-bead-id>
+Branch: <polecat-branch>
+Original Issue: <issue-id>
+Conflict with main at: ${MAIN_SHA}
+Branch SHA: ${BRANCH_SHA}
+
+## Instructions
+1. Clone/checkout the branch
+2. Rebase on current main: git rebase origin/main
+3. Resolve conflicts
+4. Force push: git push -f origin <branch>
+5. Close this task when done
+
+The MR will be re-queued for processing after conflicts are resolved."
+```
+
+4. **Skip this MR** (do NOT delete branch or close MR bead):
+- Leave branch intact for conflict resolution
+- Leave MR bead open (will be re-processed after resolution)
+- Continue to loop-check for next branch
+
+**CRITICAL**: Never delete a branch that has conflicts. The branch contains
+the original work and must be preserved for conflict resolution.
+
+Track: rebase result (success/conflict), conflict task ID if created."""
 
 [[steps]]
 id = "run-tests"
@@ -259,10 +318,19 @@ needs = ["merge-push"]
 description = """
 More branches to process?
 
+**Entry paths:**
+- Normal: After successful merge-push
+- Conflict-skip: After process-branch created conflict-resolution task
+
 If yes: Return to process-branch with next branch.
 If no: Continue to generate-summary.
 
-Track: branches processed, branches skipped (with reasons)."""
+**Track for this cycle:**
+- branches_merged: count and names of successfully merged branches
+- branches_conflict: count and names of branches skipped due to conflicts
+- conflict_tasks: IDs of conflict-resolution tasks created
+
+This tracking feeds into generate-summary for the patrol digest."""
 
 [[steps]]
 id = "generate-summary"
@@ -279,14 +347,18 @@ Summarize this patrol cycle.
 If any notifications or archiving were missed, do them now!
 
 Include in summary:
-- Branches processed (count, names)
-- MERGED mails sent (count - should match branches processed)
-- MR beads closed (count - should match branches processed)
-- MERGE_READY mails archived (count - should match branches processed)
+- Branches merged (count, names)
+- MERGED mails sent (count - should match branches merged)
+- MR beads closed (count - should match branches merged)
+- MERGE_READY mails archived (count - should match branches merged)
 - Test results (pass/fail)
+- Branches with conflicts (count, names)
+- Conflict-resolution tasks created (IDs)
 - Issues filed (if any)
-- Branches skipped (with reasons)
 - Any escalations sent
+
+**Conflict tracking is important** for monitoring MQ health. If many branches
+conflict, it may indicate main is moving too fast or branches are too stale.
 
 This becomes the digest when the patrol is squashed."""
 
