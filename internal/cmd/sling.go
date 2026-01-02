@@ -191,6 +191,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine target agent (self or specified)
 	var targetAgent string
 	var targetPane string
+	var hookWorkDir string // Working directory for running bd hook commands
 	var err error
 
 	if len(args) > 1 {
@@ -250,6 +251,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 				}
 				targetAgent = spawnInfo.AgentID()
 				targetPane = spawnInfo.Pane
+				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
 
 				// Wake witness and refinery to monitor the new polecat
 				wakeRigAgents(rigName)
@@ -394,8 +396,20 @@ func runSling(cmd *cobra.Command, args []string) error {
 		beadID = wispRootID
 	}
 
-	// Hook the bead using bd update (discovery-based approach)
+	// Hook the bead using bd update
+	// Run from polecat's worktree if available (for redirect-based routing),
+	// otherwise from town root (for prefix-based routing via routes.jsonl)
 	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+	if hookWorkDir != "" {
+		hookCmd.Dir = hookWorkDir
+	} else {
+		// Fallback to town root for non-rig targets
+		townRoot, err := workspace.FindFromCwd()
+		if err != nil {
+			return fmt.Errorf("finding town root for bead routing: %w", err)
+		}
+		hookCmd.Dir = townRoot
+	}
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking bead: %w", err)
@@ -408,7 +422,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	_ = events.LogFeed(events.TypeSling, actor, events.SlingPayload(beadID, targetAgent))
 
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
-	updateAgentHookBead(targetAgent, beadID)
+	updateAgentHookBead(targetAgent, beadID, hookWorkDir)
 
 	// Store args in bead description (no-tmux mode: beads as data plane)
 	if slingArgs != "" {
@@ -786,7 +800,13 @@ func runSlingFormula(args []string) error {
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispResult.RootID)
 
 	// Step 3: Hook the wisp bead using bd update (discovery-based approach)
+	// Run from town root to enable prefix-based routing via routes.jsonl
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root for bead routing: %w", err)
+	}
 	hookCmd := exec.Command("bd", "update", wispResult.RootID, "--status=hooked", "--assignee="+targetAgent)
+	hookCmd.Dir = townRoot
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking wisp bead: %w", err)
@@ -800,7 +820,8 @@ func runSlingFormula(args []string) error {
 	_ = events.LogFeed(events.TypeSling, actor, payload)
 
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
-	updateAgentHookBead(targetAgent, wispResult.RootID)
+	// Note: formula slinging uses town root as workDir (no polecat-specific path)
+	updateAgentHookBead(targetAgent, wispResult.RootID, "")
 
 	// Store args in wisp bead if provided (no-tmux mode: beads as data plane)
 	if slingArgs != "" {
@@ -838,11 +859,11 @@ func runSlingFormula(args []string) error {
 // updateAgentHookBead updates the agent bead's hook_bead field when work is slung.
 // This enables the witness to see what each agent is working on.
 //
-// IMPORTANT: Uses town root for routing so cross-beads references work.
-// The agent bead (e.g., gt-gastown-polecat-nux) may be in rig beads,
-// while the hook bead (e.g., hq-oosxt) may be in town beads.
-// Running from town root gives access to routes.jsonl for proper resolution.
-func updateAgentHookBead(agentID, beadID string) {
+// If workDir is provided (e.g., polecat's clone path), bd commands run from there
+// to access the correct beads database via redirect. Otherwise falls back to town root.
+// Running from the polecat's worktree is important because it has a .beads/redirect file
+// that points to the correct canonical database for redirect-based routing.
+func updateAgentHookBead(agentID, beadID, workDir string) {
 	// Convert agent ID to agent bead ID
 	// Format examples (canonical: prefix-rig-role-name):
 	//   greenplace/crew/max -> gt-greenplace-crew-max
@@ -854,17 +875,21 @@ func updateAgentHookBead(agentID, beadID string) {
 		return
 	}
 
-	// Use town root for routing - this ensures cross-beads references work.
-	// Town beads (hq-*) and rig beads (gt-*) are resolved via routes.jsonl
-	// which lives at town root.
-	townRoot, err := workspace.FindFromCwd()
-	if err != nil {
-		// Not in a Gas Town workspace - can't update agent bead
-		fmt.Fprintf(os.Stderr, "Warning: couldn't find town root to update agent hook: %v\n", err)
-		return
+	// Determine the directory to run bd commands from:
+	// - If workDir is provided (polecat's clone path), use it for redirect-based routing
+	// - Otherwise fall back to town root for prefix-based routing via routes.jsonl
+	bdWorkDir := workDir
+	if bdWorkDir == "" {
+		townRoot, err := workspace.FindFromCwd()
+		if err != nil {
+			// Not in a Gas Town workspace - can't update agent bead
+			fmt.Fprintf(os.Stderr, "Warning: couldn't find town root to update agent hook: %v\n", err)
+			return
+		}
+		bdWorkDir = townRoot
 	}
 
-	bd := beads.New(townRoot)
+	bd := beads.New(bdWorkDir)
 	if err := bd.UpdateAgentState(agentBeadID, "running", &beadID); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't update agent %s hook to %s: %v\n", agentBeadID, beadID, err)
