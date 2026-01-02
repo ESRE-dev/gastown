@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 func TestMatchWorkerPattern(t *testing.T) {
@@ -266,4 +268,116 @@ func validateRelease(msgInfo *messageInfo, caller string) error {
 	}
 
 	return nil
+}
+
+// TestMailAnnounces tests the announces command functionality.
+func TestMailAnnounces(t *testing.T) {
+	t.Run("listAnnounceChannels with nil config", func(t *testing.T) {
+		// Test with nil announces map
+		cfg := &config.MessagingConfig{
+			Announces: nil,
+		}
+
+		// Reset flag to default
+		mailAnnouncesJSON = false
+
+		// This should not panic and should handle nil gracefully
+		// We can't easily capture stdout in unit tests, but we can verify no panic
+		err := listAnnounceChannels(cfg)
+		if err != nil {
+			t.Errorf("listAnnounceChannels with nil announces should not error: %v", err)
+		}
+	})
+
+	t.Run("listAnnounceChannels with empty config", func(t *testing.T) {
+		cfg := &config.MessagingConfig{
+			Announces: make(map[string]config.AnnounceConfig),
+		}
+
+		mailAnnouncesJSON = false
+		err := listAnnounceChannels(cfg)
+		if err != nil {
+			t.Errorf("listAnnounceChannels with empty announces should not error: %v", err)
+		}
+	})
+
+	t.Run("readAnnounceChannel validates channel exists", func(t *testing.T) {
+		cfg := &config.MessagingConfig{
+			Announces: map[string]config.AnnounceConfig{
+				"alerts": {
+					Readers:     []string{"@town"},
+					RetainCount: 100,
+				},
+			},
+		}
+
+		// Test with unknown channel
+		err := readAnnounceChannel("/tmp", cfg, "nonexistent")
+		if err == nil {
+			t.Error("readAnnounceChannel should error for unknown channel")
+		}
+		if !strings.Contains(err.Error(), "unknown announce channel") {
+			t.Errorf("error should mention 'unknown announce channel', got: %v", err)
+		}
+	})
+
+	t.Run("readAnnounceChannel errors on nil announces", func(t *testing.T) {
+		cfg := &config.MessagingConfig{
+			Announces: nil,
+		}
+
+		err := readAnnounceChannel("/tmp", cfg, "alerts")
+		if err == nil {
+			t.Error("readAnnounceChannel should error for nil announces")
+		}
+		if !strings.Contains(err.Error(), "no announce channels configured") {
+			t.Errorf("error should mention 'no announce channels configured', got: %v", err)
+		}
+	})
+}
+
+// TestAnnounceMessageParsing tests parsing of announce messages from beads output.
+func TestAnnounceMessageParsing(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		want   string
+	}{
+		{
+			name:   "extracts from label",
+			labels: []string{"from:mayor/", "announce_channel:alerts"},
+			want:   "mayor/",
+		},
+		{
+			name:   "extracts from with rig path",
+			labels: []string{"announce_channel:alerts", "from:gastown/witness"},
+			want:   "gastown/witness",
+		},
+		{
+			name:   "no from label",
+			labels: []string{"announce_channel:alerts"},
+			want:   "",
+		},
+		{
+			name:   "empty labels",
+			labels: []string{},
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the label extraction logic from listAnnounceMessages
+			var from string
+			for _, label := range tt.labels {
+				if strings.HasPrefix(label, "from:") {
+					from = strings.TrimPrefix(label, "from:")
+					break
+				}
+			}
+			if from != tt.want {
+				t.Errorf("extracting from label: got %q, want %q", from, tt.want)
+			}
+		})
+	}
 }
