@@ -431,15 +431,25 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 	if len(tracked) > 0 {
 		fmt.Printf("\n  %s\n", style.Bold.Render("Tracked Issues:"))
 		for _, t := range tracked {
+			// Status symbol: ✓ closed, ▶ in_progress/hooked, ○ other
 			status := "○"
-			if t.Status == "closed" {
+			switch t.Status {
+			case "closed":
 				status = "✓"
+			case "in_progress", "hooked":
+				status = "▶"
 			}
-			issueType := t.IssueType
-			if issueType == "" {
-				issueType = "task"
+
+			// Show assignee in brackets (extract short name from path like gastown/polecats/goose -> goose)
+			bracketContent := t.IssueType
+			if t.Assignee != "" {
+				parts := strings.Split(t.Assignee, "/")
+				bracketContent = parts[len(parts)-1] // Last part of path
+			} else if bracketContent == "" {
+				bracketContent = "unassigned"
 			}
-			line := fmt.Sprintf("    %s %s: %s [%s]", status, t.ID, t.Title, issueType)
+
+			line := fmt.Sprintf("    %s %s: %s [%s]", status, t.ID, t.Title, bracketContent)
 			if t.Worker != "" {
 				workerDisplay := "@" + t.Worker
 				if t.WorkerAge != "" {
@@ -572,7 +582,8 @@ type trackedIssueInfo struct {
 	Status    string `json:"status"`
 	Type      string `json:"dependency_type"`
 	IssueType string `json:"issue_type"`
-	Worker    string `json:"worker,omitempty"`    // Worker currently assigned (e.g., gastown/nux)
+	Assignee  string `json:"assignee,omitempty"`   // Assigned agent (e.g., gastown/polecats/goose)
+	Worker    string `json:"worker,omitempty"`     // Worker currently assigned (e.g., gastown/nux)
 	WorkerAge string `json:"worker_age,omitempty"` // How long worker has been on this issue
 }
 
@@ -644,6 +655,7 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 			info.Title = details.Title
 			info.Status = details.Status
 			info.IssueType = details.IssueType
+			info.Assignee = details.Assignee
 		} else {
 			info.Title = "(external)"
 			info.Status = "unknown"
@@ -667,6 +679,7 @@ type issueDetails struct {
 	Title     string
 	Status    string
 	IssueType string
+	Assignee  string
 }
 
 // getIssueDetailsBatch fetches details for multiple issues in a single bd show call.
@@ -701,6 +714,7 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 		Title     string `json:"title"`
 		Status    string `json:"status"`
 		IssueType string `json:"issue_type"`
+		Assignee  string `json:"assignee"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
 		return result
@@ -712,6 +726,7 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 			Title:     issue.Title,
 			Status:    issue.Status,
 			IssueType: issue.IssueType,
+			Assignee:  issue.Assignee,
 		}
 	}
 
@@ -735,6 +750,7 @@ func getIssueDetails(issueID string) *issueDetails {
 		Title     string `json:"title"`
 		Status    string `json:"status"`
 		IssueType string `json:"issue_type"`
+		Assignee  string `json:"assignee"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil || len(issues) == 0 {
 		return nil
@@ -745,6 +761,7 @@ func getIssueDetails(issueID string) *issueDetails {
 		Title:     issues[0].Title,
 		Status:    issues[0].Status,
 		IssueType: issues[0].IssueType,
+		Assignee:  issues[0].Assignee,
 	}
 }
 
