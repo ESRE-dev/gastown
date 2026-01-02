@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/session"
@@ -15,10 +16,12 @@ import (
 )
 
 var nudgeMessageFlag string
+var nudgeForceFlag bool
 
 func init() {
 	rootCmd.AddCommand(nudgeCmd)
 	nudgeCmd.Flags().StringVarP(&nudgeMessageFlag, "message", "m", "", "Message to send")
+	nudgeCmd.Flags().BoolVarP(&nudgeForceFlag, "force", "f", false, "Send even if target has DND enabled")
 }
 
 var nudgeCmd = &cobra.Command{
@@ -45,6 +48,10 @@ Channel syntax:
   channel:<name>  Nudges all members of a named channel defined in
                   ~/gt/config/messaging.json under "nudge_channels".
                   Patterns like "gastown/polecats/*" are expanded.
+
+DND (Do Not Disturb):
+  If the target has DND enabled (gt dnd on), the nudge is skipped.
+  Use --force to override DND and send anyway.
 
 Examples:
   gt nudge greenplace/furiosa "Check your mail and start working"
@@ -99,6 +106,17 @@ func runNudge(cmd *cobra.Command, args []string) error {
 
 	// Prefix message with sender
 	message = fmt.Sprintf("[from %s] %s", sender, message)
+
+	// Check DND status for target (unless force flag or channel target)
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" && !nudgeForceFlag && !strings.HasPrefix(target, "channel:") {
+		shouldSend, level, _ := shouldNudgeTarget(townRoot, target, nudgeForceFlag)
+		if !shouldSend {
+			fmt.Printf("%s Target has DND enabled (%s) - nudge skipped\n", style.Dim.Render("○"), level)
+			fmt.Printf("  Use %s to override\n", style.Bold.Render("--force"))
+			return nil
+		}
+	}
 
 	t := tmux.NewTmux()
 
@@ -398,4 +416,75 @@ func resolveNudgePattern(pattern string, agents []*AgentSession) []string {
 	}
 
 	return results
+}
+
+// shouldNudgeTarget checks if a nudge should be sent based on the target's notification level.
+// Returns (shouldSend bool, level string, err error).
+// If force is true, always returns true.
+// If the agent bead cannot be found, returns true (fail-open for backward compatibility).
+func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string, error) {
+	if force {
+		return true, "", nil
+	}
+
+	// Try to determine agent bead ID from address
+	agentBeadID := addressToAgentBeadID(targetAddress)
+	if agentBeadID == "" {
+		// Can't determine agent bead, allow the nudge
+		return true, "", nil
+	}
+
+	bd := beads.New(townRoot)
+	level, err := bd.GetAgentNotificationLevel(agentBeadID)
+	if err != nil {
+		// Agent bead might not exist, allow the nudge
+		return true, "", nil
+	}
+
+	// Allow nudge if level is not muted
+	return level != beads.NotifyMuted, level, nil
+}
+
+// addressToAgentBeadID converts a target address to an agent bead ID.
+// Examples:
+//   - "mayor" -> "gt-mayor" (or similar)
+//   - "gastown/witness" -> "gt-gastown-witness"
+//   - "gastown/alpha" -> "gt-gastown-polecat-alpha"
+//
+// Returns empty string if the address cannot be converted.
+func addressToAgentBeadID(address string) string {
+	// Handle special cases
+	switch address {
+	case "mayor":
+		return "gt-mayor"
+	case "deacon":
+		return "gt-deacon"
+	}
+
+	// Parse rig/role format
+	if !strings.Contains(address, "/") {
+		return ""
+	}
+
+	parts := strings.SplitN(address, "/", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+
+	rig := parts[0]
+	role := parts[1]
+
+	switch role {
+	case "witness":
+		return fmt.Sprintf("gt-%s-witness", rig)
+	case "refinery":
+		return fmt.Sprintf("gt-%s-refinery", rig)
+	default:
+		// Assume polecat
+		if strings.HasPrefix(role, "crew/") {
+			crewName := strings.TrimPrefix(role, "crew/")
+			return fmt.Sprintf("gt-%s-crew-%s", rig, crewName)
+		}
+		return fmt.Sprintf("gt-%s-polecat-%s", rig, role)
+	}
 }

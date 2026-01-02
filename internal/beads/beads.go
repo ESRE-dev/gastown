@@ -770,14 +770,22 @@ func (b *Beads) IsBeadsRepo() bool {
 // AgentFields holds structured fields for agent beads.
 // These are stored as "key: value" lines in the description.
 type AgentFields struct {
-	RoleType      string // polecat, witness, refinery, deacon, mayor
-	Rig           string // Rig name (empty for global agents like mayor/deacon)
-	AgentState    string // spawning, working, done, stuck
-	HookBead      string // Currently pinned work bead ID
-	RoleBead      string // Role definition bead ID (canonical location; may not exist yet)
-	CleanupStatus string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
-	ActiveMR      string // Currently active merge request bead ID (for traceability)
+	RoleType          string // polecat, witness, refinery, deacon, mayor
+	Rig               string // Rig name (empty for global agents like mayor/deacon)
+	AgentState        string // spawning, working, done, stuck
+	HookBead          string // Currently pinned work bead ID
+	RoleBead          string // Role definition bead ID (canonical location; may not exist yet)
+	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
+	ActiveMR          string // Currently active merge request bead ID (for traceability)
+	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
 }
+
+// Notification level constants
+const (
+	NotifyVerbose = "verbose" // All notifications (mail, convoy events, etc.)
+	NotifyNormal  = "normal"  // Important events only (default)
+	NotifyMuted   = "muted"   // Silent/DND mode - batch for later
+)
 
 // FormatAgentDescription creates a description string from agent fields.
 func FormatAgentDescription(title string, fields *AgentFields) string {
@@ -822,6 +830,12 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, "active_mr: null")
 	}
 
+	if fields.NotificationLevel != "" {
+		lines = append(lines, fmt.Sprintf("notification_level: %s", fields.NotificationLevel))
+	} else {
+		lines = append(lines, "notification_level: null")
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -861,6 +875,8 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.CleanupStatus = value
 		case "active_mr":
 			fields.ActiveMR = value
+		case "notification_level":
+			fields.NotificationLevel = value
 		}
 	}
 
@@ -993,6 +1009,47 @@ func (b *Beads) UpdateAgentActiveMR(id string, activeMR string) error {
 	description := FormatAgentDescription(issue.Title, fields)
 
 	return b.Update(id, UpdateOptions{Description: &description})
+}
+
+// UpdateAgentNotificationLevel updates the notification_level field in an agent bead.
+// Valid levels: verbose, normal, muted (DND mode).
+// Pass empty string to reset to default (normal).
+func (b *Beads) UpdateAgentNotificationLevel(id string, level string) error {
+	// Validate level
+	if level != "" && level != NotifyVerbose && level != NotifyNormal && level != NotifyMuted {
+		return fmt.Errorf("invalid notification level %q: must be verbose, normal, or muted", level)
+	}
+
+	// First get current issue to preserve other fields
+	issue, err := b.Show(id)
+	if err != nil {
+		return err
+	}
+
+	// Parse existing fields
+	fields := ParseAgentFields(issue.Description)
+	fields.NotificationLevel = level
+
+	// Format new description
+	description := FormatAgentDescription(issue.Title, fields)
+
+	return b.Update(id, UpdateOptions{Description: &description})
+}
+
+// GetAgentNotificationLevel returns the notification level for an agent.
+// Returns "normal" if not set (the default).
+func (b *Beads) GetAgentNotificationLevel(id string) (string, error) {
+	_, fields, err := b.GetAgentBead(id)
+	if err != nil {
+		return "", err
+	}
+	if fields == nil {
+		return NotifyNormal, nil
+	}
+	if fields.NotificationLevel == "" {
+		return NotifyNormal, nil
+	}
+	return fields.NotificationLevel, nil
 }
 
 // DeleteAgentBead permanently deletes an agent bead.
