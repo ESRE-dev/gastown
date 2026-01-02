@@ -418,7 +418,19 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	// Run bd init if available, with --no-agents to skip AGENTS.md creation
 	cmd := exec.Command("bd", "init", "--prefix", prefix, "--no-agents")
 	cmd.Dir = rigPath
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		lower := strings.ToLower(string(output))
+		if strings.Contains(lower, "no-agents") &&
+			(strings.Contains(lower, "unknown flag") ||
+				strings.Contains(lower, "unknown option") ||
+				strings.Contains(lower, "flag provided but not defined")) {
+			retry := exec.Command("bd", "init", "--prefix", prefix)
+			retry.Dir = rigPath
+			if retryErr := retry.Run(); retryErr == nil {
+				return nil
+			}
+		}
 		// bd might not be installed or --no-agents not supported, create minimal structure
 		// Note: beads currently expects YAML format for config
 		configPath := filepath.Join(beadsDir, "config.yaml")
@@ -438,6 +450,18 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig bool) error {
 	// Run bd commands from mayor/rig which has the beads database
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
+	beadsDir := filepath.Join(rigPath, ".beads")
+	prevBeadsDir, hadBeadsDir := os.LookupEnv("BEADS_DIR")
+	if err := os.Setenv("BEADS_DIR", beadsDir); err != nil {
+		return fmt.Errorf("setting BEADS_DIR: %w", err)
+	}
+	defer func() {
+		if hadBeadsDir {
+			_ = os.Setenv("BEADS_DIR", prevBeadsDir)
+		} else {
+			_ = os.Unsetenv("BEADS_DIR")
+		}
+	}()
 	bd := beads.New(mayorRigPath)
 
 	// Define agents to create
