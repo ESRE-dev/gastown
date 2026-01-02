@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
@@ -15,32 +16,38 @@ import (
 var resumeCmd = &cobra.Command{
 	Use:     "resume",
 	GroupID: GroupWork,
-	Short:   "Resume from parked work when gate clears",
-	Long: `Resume work that was parked on a gate.
+	Short:   "Resume from parked work or check for handoff messages",
+	Long: `Resume work that was parked on a gate, or check for handoff messages.
 
-This command checks if you have parked work and whether its gate has cleared.
-If the gate is closed, it restores your work context so you can continue.
+By default, this command checks for parked work (from 'gt park') and whether
+its gate has cleared. If the gate is closed, it restores your work context.
+
+With --handoff, it checks the inbox for handoff messages (messages with
+"HANDOFF" in the subject) and displays them formatted for easy continuation.
 
 The resume command:
-  1. Checks for parked work state
-  2. Verifies the gate has closed
+  1. Checks for parked work state (default) or handoff messages (--handoff)
+  2. For parked work: verifies gate has closed
   3. Restores the hook with your previous work
   4. Displays context notes to help you continue
 
 Examples:
   gt resume              # Check for and resume parked work
-  gt resume --status     # Just show parked work status without resuming`,
+  gt resume --status     # Just show parked work status without resuming
+  gt resume --handoff    # Check inbox for handoff messages`,
 	RunE: runResume,
 }
 
 var (
 	resumeStatusOnly bool
 	resumeJSON       bool
+	resumeHandoff    bool
 )
 
 func init() {
 	resumeCmd.Flags().BoolVar(&resumeStatusOnly, "status", false, "Just show parked work status")
 	resumeCmd.Flags().BoolVar(&resumeJSON, "json", false, "Output as JSON")
+	resumeCmd.Flags().BoolVar(&resumeHandoff, "handoff", false, "Check for handoff messages instead of parked work")
 	rootCmd.AddCommand(resumeCmd)
 }
 
@@ -54,6 +61,11 @@ type ResumeStatus struct {
 }
 
 func runResume(cmd *cobra.Command, args []string) error {
+	// If --handoff flag, check for handoff messages instead
+	if resumeHandoff {
+		return checkHandoffMessages()
+	}
+
 	// Detect agent identity
 	agentID, _, cloneRoot, err := resolveSelfTarget()
 	if err != nil {
@@ -207,4 +219,110 @@ func displayResumeStatus(status ResumeStatus, parked *ParkedWork) error {
 	}
 
 	return nil
+}
+
+// checkHandoffMessages checks the inbox for handoff messages and displays them.
+func checkHandoffMessages() error {
+	// Get inbox in JSON format
+	inboxCmd := exec.Command("gt", "mail", "inbox", "--json")
+	output, err := inboxCmd.Output()
+	if err != nil {
+		// Fallback to non-JSON if --json not supported
+		inboxCmd = exec.Command("gt", "mail", "inbox")
+		output, err = inboxCmd.Output()
+		if err != nil {
+			return fmt.Errorf("checking inbox: %w", err)
+		}
+		// Check for HANDOFF in output
+		outputStr := string(output)
+		if !containsHandoff(outputStr) {
+			fmt.Printf("%s No handoff messages in inbox\n", style.Dim.Render("○"))
+			fmt.Printf("  Handoff messages have 'HANDOFF' in the subject.\n")
+			return nil
+		}
+		fmt.Printf("%s Found handoff message(s):\n\n", style.Bold.Render("🤝"))
+		fmt.Println(outputStr)
+		fmt.Printf("\n%s Read with: gt mail read <id>\n", style.Bold.Render("→"))
+		return nil
+	}
+
+	// Parse JSON output to find handoff messages
+	var messages []struct {
+		ID      string `json:"id"`
+		Subject string `json:"subject"`
+		From    string `json:"from"`
+		Date    string `json:"date"`
+		Body    string `json:"body"`
+	}
+	if err := json.Unmarshal(output, &messages); err != nil {
+		// JSON parse failed, use plain text output
+		inboxCmd = exec.Command("gt", "mail", "inbox")
+		output, _ = inboxCmd.Output()
+		outputStr := string(output)
+		if containsHandoff(outputStr) {
+			fmt.Printf("%s Found handoff message(s):\n\n", style.Bold.Render("🤝"))
+			fmt.Println(outputStr)
+		} else {
+			fmt.Printf("%s No handoff messages in inbox\n", style.Dim.Render("○"))
+		}
+		return nil
+	}
+
+	// Find messages with HANDOFF in subject
+	type handoffMsg struct {
+		ID      string
+		Subject string
+		From    string
+		Date    string
+		Body    string
+	}
+	var handoffs []handoffMsg
+	for _, msg := range messages {
+		if containsHandoff(msg.Subject) {
+			handoffs = append(handoffs, handoffMsg{
+				ID:      msg.ID,
+				Subject: msg.Subject,
+				From:    msg.From,
+				Date:    msg.Date,
+				Body:    msg.Body,
+			})
+		}
+	}
+
+	if len(handoffs) == 0 {
+		fmt.Printf("%s No handoff messages in inbox\n", style.Dim.Render("○"))
+		fmt.Printf("  Handoff messages have 'HANDOFF' in the subject.\n")
+		fmt.Printf("  Use 'gt handoff -s \"...\"' to create one when handing off.\n")
+		return nil
+	}
+
+	fmt.Printf("%s Found %d handoff message(s):\n\n", style.Bold.Render("🤝"), len(handoffs))
+
+	for i, msg := range handoffs {
+		fmt.Printf("--- Handoff %d: %s ---\n", i+1, msg.ID)
+		fmt.Printf("Subject: %s\n", msg.Subject)
+		fmt.Printf("From: %s\n", msg.From)
+		if msg.Date != "" {
+			fmt.Printf("Date: %s\n", msg.Date)
+		}
+		if msg.Body != "" {
+			fmt.Printf("\n%s\n", msg.Body)
+		}
+		fmt.Println()
+	}
+
+	if len(handoffs) == 1 {
+		fmt.Printf("%s Read full message: gt mail read %s\n", style.Bold.Render("→"), handoffs[0].ID)
+	} else {
+		fmt.Printf("%s Read messages: gt mail read <id>\n", style.Bold.Render("→"))
+	}
+	fmt.Printf("%s Clear after reading: gt mail close <id>\n", style.Dim.Render("💡"))
+
+	return nil
+}
+
+// containsHandoff checks if a string contains "HANDOFF" (case-insensitive).
+func containsHandoff(s string) bool {
+	upper := strings.ToUpper(s)
+	return strings.Contains(upper, "HANDOFF")
 }

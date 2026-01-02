@@ -36,8 +36,13 @@ Examples:
   gt handoff gt-abc                   # Hook bead, then restart
   gt handoff gt-abc -s "Fix it"       # Hook with context, then restart
   gt handoff -s "Context" -m "Notes"  # Hand off with custom message
+  gt handoff -c                       # Collect state into handoff message
   gt handoff crew                     # Hand off crew session
   gt handoff mayor                    # Hand off mayor session
+
+The --collect (-c) flag gathers current state (hooked work, inbox, ready beads,
+in-progress items) and includes it in the handoff mail. This provides context
+for the next session without manual summarization.
 
 Any molecule on the hook will be auto-continued by the new session.
 The SessionStart hook runs 'gt prime' to restore context.`,
@@ -49,6 +54,7 @@ var (
 	handoffDryRun  bool
 	handoffSubject string
 	handoffMessage string
+	handoffCollect bool
 )
 
 func init() {
@@ -56,6 +62,7 @@ func init() {
 	handoffCmd.Flags().BoolVarP(&handoffDryRun, "dry-run", "n", false, "Show what would be done without executing")
 	handoffCmd.Flags().StringVarP(&handoffSubject, "subject", "s", "", "Subject for handoff mail (optional)")
 	handoffCmd.Flags().StringVarP(&handoffMessage, "message", "m", "", "Message body for handoff mail (optional)")
+	handoffCmd.Flags().BoolVarP(&handoffCollect, "collect", "c", false, "Auto-collect state (status, inbox, beads) into handoff message")
 	rootCmd.AddCommand(handoffCmd)
 }
 
@@ -71,6 +78,19 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		doneCmd.Stdout = os.Stdout
 		doneCmd.Stderr = os.Stderr
 		return doneCmd.Run()
+	}
+
+	// If --collect flag is set, auto-collect state into the message
+	if handoffCollect {
+		collected := collectHandoffState()
+		if handoffMessage == "" {
+			handoffMessage = collected
+		} else {
+			handoffMessage = handoffMessage + "\n\n---\n" + collected
+		}
+		if handoffSubject == "" {
+			handoffSubject = "Session handoff with context"
+		}
 	}
 
 	t := tmux.NewTmux()
@@ -605,4 +625,66 @@ func hookBeadForHandoff(beadID string) error {
 
 	fmt.Printf("%s Work attached to hook (pinned bead)\n", style.Bold.Render("✓"))
 	return nil
+}
+
+// collectHandoffState gathers current state for handoff context.
+// Collects: inbox summary, ready beads, hooked work.
+func collectHandoffState() string {
+	var parts []string
+
+	// Get hooked work
+	hookOutput, err := exec.Command("gt", "hook").Output()
+	if err == nil {
+		hookStr := strings.TrimSpace(string(hookOutput))
+		if hookStr != "" && !strings.Contains(hookStr, "Nothing on hook") {
+			parts = append(parts, "## Hooked Work\n"+hookStr)
+		}
+	}
+
+	// Get inbox summary (first few messages)
+	inboxOutput, err := exec.Command("gt", "mail", "inbox").Output()
+	if err == nil {
+		inboxStr := strings.TrimSpace(string(inboxOutput))
+		if inboxStr != "" && !strings.Contains(inboxStr, "Inbox empty") {
+			// Limit to first 10 lines for brevity
+			lines := strings.Split(inboxStr, "\n")
+			if len(lines) > 10 {
+				lines = append(lines[:10], "... (more messages)")
+			}
+			parts = append(parts, "## Inbox\n"+strings.Join(lines, "\n"))
+		}
+	}
+
+	// Get ready beads
+	readyOutput, err := exec.Command("bd", "ready").Output()
+	if err == nil {
+		readyStr := strings.TrimSpace(string(readyOutput))
+		if readyStr != "" && !strings.Contains(readyStr, "No issues ready") {
+			// Limit to first 10 lines
+			lines := strings.Split(readyStr, "\n")
+			if len(lines) > 10 {
+				lines = append(lines[:10], "... (more issues)")
+			}
+			parts = append(parts, "## Ready Work\n"+strings.Join(lines, "\n"))
+		}
+	}
+
+	// Get in-progress beads
+	inProgressOutput, err := exec.Command("bd", "list", "--status=in_progress").Output()
+	if err == nil {
+		ipStr := strings.TrimSpace(string(inProgressOutput))
+		if ipStr != "" && !strings.Contains(ipStr, "No issues") {
+			lines := strings.Split(ipStr, "\n")
+			if len(lines) > 5 {
+				lines = append(lines[:5], "... (more)")
+			}
+			parts = append(parts, "## In Progress\n"+strings.Join(lines, "\n"))
+		}
+	}
+
+	if len(parts) == 0 {
+		return "No active state to report."
+	}
+
+	return strings.Join(parts, "\n\n")
 }
