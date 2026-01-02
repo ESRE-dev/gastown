@@ -24,6 +24,14 @@ var doctorCmd = &cobra.Command{
 Doctor checks for common configuration issues, missing files,
 and other problems that could affect workspace operation.
 
+Workspace checks:
+  - town-config-exists       Check mayor/town.json exists
+  - town-config-valid        Check mayor/town.json is valid
+  - rigs-registry-exists     Check mayor/rigs.json exists (fixable)
+  - rigs-registry-valid      Check registered rigs exist (fixable)
+  - mayor-exists             Check mayor/ directory structure
+  - mayor-state-valid        Check mayor/state.json is valid (fixable)
+
 Infrastructure checks:
   - daemon                   Check if daemon is running (fixable)
   - boot-health              Check Boot watchdog health (vet mode)
@@ -84,6 +92,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Create doctor and register checks
 	d := doctor.NewDoctor()
+
+	// Register workspace-level checks first (fundamental)
+	d.RegisterAll(doctor.WorkspaceChecks()...)
 
 	// Register built-in checks
 	d.Register(doctor.NewTownGitCheck())
