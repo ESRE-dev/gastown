@@ -58,6 +58,9 @@ Rig checks (with --rig flag):
 Routing checks (fixable):
   - routes-config            Check beads routing configuration
 
+Session hook checks:
+  - session-hooks            Check settings.json use session-start.sh
+
 Patrol checks:
   - patrol-molecules-exist   Verify patrol molecules exist
   - patrol-hooks-wired       Verify daemon triggers patrols
@@ -128,6 +131,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Config architecture checks
 	d.Register(doctor.NewSettingsCheck())
+	d.Register(doctor.NewSessionHookCheck())
 	d.Register(doctor.NewRuntimeGitignoreCheck())
 	d.Register(doctor.NewLegacyGastownCheck())
 
