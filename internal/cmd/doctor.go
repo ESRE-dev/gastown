@@ -37,6 +37,15 @@ Clone divergence checks:
   - persistent-role-branches Detect crew/witness/refinery not on main
   - clone-divergence         Detect clones significantly behind origin/main
 
+Rig checks (with --rig flag):
+  - rig-is-git-repo          Verify rig is a valid git repository
+  - git-exclude-configured   Check .git/info/exclude has Gas Town dirs (fixable)
+  - witness-exists           Verify witness/ structure exists (fixable)
+  - refinery-exists          Verify refinery/ structure exists (fixable)
+  - mayor-clone-exists       Verify mayor/rig/ clone exists (fixable)
+  - polecat-clones-valid     Verify polecat directories are valid clones
+  - beads-config-valid       Verify beads configuration (fixable)
+
 Routing checks (fixable):
   - routes-config            Check beads routing configuration
 
@@ -118,6 +127,11 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewHookAttachmentValidCheck())
 	d.Register(doctor.NewHookSingletonCheck())
 	d.Register(doctor.NewOrphanedAttachmentsCheck())
+
+	// Rig-specific checks (only when --rig is specified)
+	if doctorRig != "" {
+		d.RegisterAll(doctor.RigChecks()...)
+	}
 
 	// Run checks
 	var report *doctor.Report
