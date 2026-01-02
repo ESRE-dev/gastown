@@ -132,7 +132,7 @@ Recent stashes may contain valuable WIP - preserve or commit.
 [[steps]]
 id = "sync-git"
 title = "Sync with git remote"
-needs = ["handle-dirty-state"]
+needs = ["cleanup-worktrees"]
 description = """
 Fetch and rebase onto current main.
 
@@ -374,7 +374,7 @@ However, they must be tracked.
 [[steps]]
 id = "cleanup-worktrees"
 title = "Clean up stale worktrees"
-needs = ["run-tests"]
+needs = ["handle-dirty-state"]
 description = """
 Remove orphaned worktrees from cross-rig work.
 
@@ -408,7 +408,7 @@ Check with `gt worktree list` if available.
 [[steps]]
 id = "generate-report"
 title = "Generate sync report"
-needs = ["cleanup-worktrees"]
+needs = ["run-tests"]
 description = """
 Summarize sync results for broadcast response.
 
