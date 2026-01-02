@@ -262,10 +262,15 @@ This is a convenience command that automatically:
 - Sets the reply-to field to the original message
 - Prefixes the subject with "Re: " (if not already present)
 - Sends to the original sender
+- Preserves the thread ID for conversation tracking
+
+If -m is not provided, opens $EDITOR to compose the reply.
+The editor template shows the original message for context.
 
 Examples:
   gt mail reply msg-abc123 -m "Thanks, working on it now"
-  gt mail reply msg-abc123 -s "Custom subject" -m "Reply body"`,
+  gt mail reply msg-abc123 -s "Custom subject" -m "Reply body"
+  gt mail reply msg-abc123                                      # Opens editor`,
 	Args: cobra.ExactArgs(1),
 	RunE: runMailReply,
 }
@@ -428,8 +433,7 @@ func init() {
 
 	// Reply flags
 	mailReplyCmd.Flags().StringVarP(&mailReplySubject, "subject", "s", "", "Override reply subject (default: Re: <original>)")
-	mailReplyCmd.Flags().StringVarP(&mailReplyMessage, "message", "m", "", "Reply message body (required)")
-	mailReplyCmd.MarkFlagRequired("message")
+	mailReplyCmd.Flags().StringVarP(&mailReplyMessage, "message", "m", "", "Reply message body (opens editor if not provided)")
 
 	// Delete flags
 	mailDeleteCmd.Flags().BoolVarP(&mailDeleteForce, "force", "f", false, "Delete without confirmation")
@@ -1378,12 +1382,26 @@ func runMailReply(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Get message body - from flag or open editor
+	body := mailReplyMessage
+	if body == "" {
+		// Open editor to compose reply
+		var err error
+		body, err = openEditorForReply(original, subject)
+		if err != nil {
+			return fmt.Errorf("opening editor: %w", err)
+		}
+		if body == "" {
+			return fmt.Errorf("reply message is empty, aborting")
+		}
+	}
+
 	// Create reply message
 	reply := &mail.Message{
 		From:     from,
 		To:       original.From, // Reply to sender
 		Subject:  subject,
-		Body:     mailReplyMessage,
+		Body:     body,
 		Type:     mail.TypeReply,
 		Priority: mail.PriorityNormal,
 		ReplyTo:  msgID,
@@ -1407,6 +1425,87 @@ func runMailReply(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// openEditorForReply opens the user's editor to compose a reply message.
+// It creates a temp file with context about the original message.
+func openEditorForReply(original *mail.Message, subject string) (string, error) {
+	// Create temp file with reply template
+	tmpFile, err := os.CreateTemp("", "gt-mail-reply-*.txt")
+	if err != nil {
+		return "", fmt.Errorf("creating temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Write template with original message for context
+	template := fmt.Sprintf(`
+# Reply to: %s
+# From: %s
+# Subject: %s
+# ---
+# Write your reply below. Lines starting with # are ignored.
+# Save and close the editor to send, or leave empty to abort.
+
+`, original.From, original.From, subject)
+
+	// Add quoted original message
+	if original.Body != "" {
+		template += "# Original message:\n"
+		for _, line := range strings.Split(original.Body, "\n") {
+			template += "# > " + line + "\n"
+		}
+		template += "\n"
+	}
+
+	if _, err := tmpFile.WriteString(template); err != nil {
+		tmpFile.Close()
+		return "", fmt.Errorf("writing template: %w", err)
+	}
+	tmpFile.Close()
+
+	// Determine editor
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
+	if editor == "" {
+		// Try common editors
+		for _, e := range []string{"vim", "vi", "nano", "emacs"} {
+			if _, err := exec.LookPath(e); err == nil {
+				editor = e
+				break
+			}
+		}
+	}
+	if editor == "" {
+		return "", fmt.Errorf("no editor found (set $EDITOR)")
+	}
+
+	// Open editor
+	editorCmd := exec.Command(editor, tmpFile.Name())
+	editorCmd.Stdin = os.Stdin
+	editorCmd.Stdout = os.Stdout
+	editorCmd.Stderr = os.Stderr
+
+	if err := editorCmd.Run(); err != nil {
+		return "", fmt.Errorf("running editor: %w", err)
+	}
+
+	// Read the edited content
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		return "", fmt.Errorf("reading edited file: %w", err)
+	}
+
+	// Filter out comment lines and trim
+	var lines []string
+	for _, line := range strings.Split(string(content), "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "#") {
+			lines = append(lines, line)
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(lines, "\n")), nil
 }
 
 // generateThreadID creates a random thread ID for new message threads.
