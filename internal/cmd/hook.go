@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -55,6 +57,29 @@ Examples:
 	RunE: runMoleculeStatus,
 }
 
+// hookShowCmd shows hook status in compact one-line format
+var hookShowCmd = &cobra.Command{
+	Use:   "show <agent>",
+	Short: "Show what's on an agent's hook (compact)",
+	Long: `Show what's on any agent's hook in compact one-line format.
+
+Use cases:
+- Mayor checking what polecats are working on
+- Witness checking polecat status
+- Debugging coordination issues
+- Quick status overview
+
+Examples:
+  gt hook show gastown/polecats/nux    # What's nux working on?
+  gt hook show gastown/witness         # What's the witness hooked to?
+  gt hook show mayor                   # What's the mayor working on?
+
+Output format (one line):
+  gastown/polecats/nux: gt-abc123 'Fix the widget bug' [in_progress]`,
+	Args: cobra.ExactArgs(1),
+	RunE: runHookShow,
+}
+
 var (
 	hookSubject string
 	hookMessage string
@@ -72,7 +97,9 @@ func init() {
 	// --json flag for status output (used when no args, i.e., gt hook --json)
 	hookCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON (for status)")
 	hookStatusCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
+	hookShowCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 	hookCmd.AddCommand(hookStatusCmd)
+	hookCmd.AddCommand(hookShowCmd)
 
 	rootCmd.AddCommand(hookCmd)
 }
@@ -235,4 +262,73 @@ func checkPinnedBeadComplete(b *beads.Beads, issue *beads.Issue) (isComplete boo
 	return progress.Complete, true
 }
 
+// runHookShow displays another agent's hook in compact one-line format.
+func runHookShow(cmd *cobra.Command, args []string) error {
+	target := args[0]
 
+	// Find beads directory
+	workDir, err := findLocalBeadsDir()
+	if err != nil {
+		return fmt.Errorf("not in a beads workspace: %w", err)
+	}
+
+	b := beads.New(workDir)
+
+	// Query for hooked beads assigned to the target
+	hookedBeads, err := b.List(beads.ListOptions{
+		Status:   beads.StatusHooked,
+		Assignee: target,
+		Priority: -1,
+	})
+	if err != nil {
+		return fmt.Errorf("listing hooked beads: %w", err)
+	}
+
+	// If nothing found, try scanning all rigs for town-level roles
+	if len(hookedBeads) == 0 && isTownLevelRole(target) {
+		townRoot, err := findTownRoot()
+		if err == nil && townRoot != "" {
+			hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
+		}
+	}
+
+	// JSON output
+	if moleculeJSON {
+		type compactInfo struct {
+			Agent  string `json:"agent"`
+			BeadID string `json:"bead_id,omitempty"`
+			Title  string `json:"title,omitempty"`
+			Status string `json:"status"`
+		}
+		info := compactInfo{Agent: target}
+		if len(hookedBeads) > 0 {
+			info.BeadID = hookedBeads[0].ID
+			info.Title = hookedBeads[0].Title
+			info.Status = hookedBeads[0].Status
+		} else {
+			info.Status = "empty"
+		}
+		enc := json.NewEncoder(os.Stdout)
+		return enc.Encode(info)
+	}
+
+	// Compact one-line output
+	if len(hookedBeads) == 0 {
+		fmt.Printf("%s: (empty)\n", target)
+		return nil
+	}
+
+	bead := hookedBeads[0]
+	fmt.Printf("%s: %s '%s' [%s]\n", target, bead.ID, bead.Title, bead.Status)
+	return nil
+}
+
+// findTownRoot finds the Gas Town root directory.
+func findTownRoot() (string, error) {
+	cmd := exec.Command("gt", "root")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
