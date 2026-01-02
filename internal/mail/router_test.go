@@ -719,3 +719,96 @@ func TestAgentBeadToAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandAnnounce(t *testing.T) {
+	// Create temp directory with messaging config
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write messaging.json with test announces
+	configContent := `{
+  "type": "messaging",
+  "version": 1,
+  "announces": {
+    "alerts": {"readers": ["@town"], "retain_count": 10},
+    "status/gastown": {"readers": ["gastown/witness", "mayor/"], "retain_count": 5}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(configDir, "messaging.json"), []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRouterWithTownRoot(tmpDir, tmpDir)
+
+	tests := []struct {
+		name         string
+		announceName string
+		wantReaders  []string
+		wantRetain   int
+		wantErr      bool
+		errString    string
+	}{
+		{
+			name:         "alerts announce",
+			announceName: "alerts",
+			wantReaders:  []string{"@town"},
+			wantRetain:   10,
+		},
+		{
+			name:         "status/gastown announce",
+			announceName: "status/gastown",
+			wantReaders:  []string{"gastown/witness", "mayor/"},
+			wantRetain:   5,
+		},
+		{
+			name:         "unknown announce",
+			announceName: "nonexistent",
+			wantErr:      true,
+			errString:    "unknown announce channel",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := r.expandAnnounce(tt.announceName)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expandAnnounce(%q) expected error, got nil", tt.announceName)
+				} else if tt.errString != "" && !contains(err.Error(), tt.errString) {
+					t.Errorf("expandAnnounce(%q) error = %v, want containing %q", tt.announceName, err, tt.errString)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("expandAnnounce(%q) unexpected error: %v", tt.announceName, err)
+				return
+			}
+			if len(got.Readers) != len(tt.wantReaders) {
+				t.Errorf("expandAnnounce(%q).Readers = %v, want %v", tt.announceName, got.Readers, tt.wantReaders)
+				return
+			}
+			for i, reader := range got.Readers {
+				if reader != tt.wantReaders[i] {
+					t.Errorf("expandAnnounce(%q).Readers[%d] = %q, want %q", tt.announceName, i, reader, tt.wantReaders[i])
+				}
+			}
+			if got.RetainCount != tt.wantRetain {
+				t.Errorf("expandAnnounce(%q).RetainCount = %d, want %d", tt.announceName, got.RetainCount, tt.wantRetain)
+			}
+		})
+	}
+}
+
+func TestExpandAnnounceNoTownRoot(t *testing.T) {
+	r := &Router{workDir: "/tmp", townRoot: ""}
+	_, err := r.expandAnnounce("alerts")
+	if err == nil {
+		t.Error("expandAnnounce with no townRoot should error")
+	}
+	if !contains(err.Error(), "no town root") {
+		t.Errorf("expandAnnounce error = %v, want containing 'no town root'", err)
+	}
+}
