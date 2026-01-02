@@ -695,6 +695,13 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		return fmt.Errorf("sending startup command: %w", err)
 	}
 
+	// Wait for Claude to start, then accept bypass permissions warning if it appears.
+	// This ensures automated restarts aren't blocked by the warning dialog.
+	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal - Claude might still start
+	}
+	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
+
 	return nil
 }
 
