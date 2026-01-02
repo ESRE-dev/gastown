@@ -9,9 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/checkpoint"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/lock"
@@ -133,6 +135,9 @@ func runPrime(cmd *cobra.Command, args []string) error {
 
 	// Output molecule context if working on a molecule step
 	outputMoleculeContext(ctx)
+
+	// Output previous session checkpoint for crash recovery
+	outputCheckpointContext(ctx)
 
 	// Run bd prime to output beads workflow context
 	runBdPrime(cwd)
@@ -1415,6 +1420,75 @@ func checkPendingEscalations(ctx RoleContext) {
 
 	fmt.Println("**Action required:** Review escalations with `bd list --tag=escalation`")
 	fmt.Println("Close resolved ones with `bd close <id> --reason \"resolution\"`")
+	fmt.Println()
+}
+
+// outputCheckpointContext reads and displays any previous session checkpoint.
+// This enables crash recovery by showing what the previous session was working on.
+func outputCheckpointContext(ctx RoleContext) {
+	// Only applies to polecats and crew workers
+	if ctx.Role != RolePolecat && ctx.Role != RoleCrew {
+		return
+	}
+
+	// Read checkpoint
+	cp, err := checkpoint.Read(ctx.WorkDir)
+	if err != nil {
+		// Silently ignore read errors
+		return
+	}
+	if cp == nil {
+		// No checkpoint exists
+		return
+	}
+
+	// Check if checkpoint is stale (older than 24 hours)
+	if cp.IsStale(24 * time.Hour) {
+		// Remove stale checkpoint
+		_ = checkpoint.Remove(ctx.WorkDir)
+		return
+	}
+
+	// Display checkpoint context
+	fmt.Println()
+	fmt.Printf("%s\n\n", style.Bold.Render("## 📌 Previous Session Checkpoint"))
+	fmt.Printf("A previous session left a checkpoint %s ago.\n\n", cp.Age().Round(time.Minute))
+
+	if cp.StepTitle != "" {
+		fmt.Printf("  **Working on:** %s\n", cp.StepTitle)
+	}
+	if cp.MoleculeID != "" {
+		fmt.Printf("  **Molecule:** %s\n", cp.MoleculeID)
+	}
+	if cp.CurrentStep != "" {
+		fmt.Printf("  **Step:** %s\n", cp.CurrentStep)
+	}
+	if cp.HookedBead != "" {
+		fmt.Printf("  **Hooked bead:** %s\n", cp.HookedBead)
+	}
+	if cp.Branch != "" {
+		fmt.Printf("  **Branch:** %s\n", cp.Branch)
+	}
+	if len(cp.ModifiedFiles) > 0 {
+		fmt.Printf("  **Modified files:** %d\n", len(cp.ModifiedFiles))
+		// Show first few files
+		maxShow := 5
+		if len(cp.ModifiedFiles) < maxShow {
+			maxShow = len(cp.ModifiedFiles)
+		}
+		for i := 0; i < maxShow; i++ {
+			fmt.Printf("    - %s\n", cp.ModifiedFiles[i])
+		}
+		if len(cp.ModifiedFiles) > maxShow {
+			fmt.Printf("    ... and %d more\n", len(cp.ModifiedFiles)-maxShow)
+		}
+	}
+	if cp.Notes != "" {
+		fmt.Printf("  **Notes:** %s\n", cp.Notes)
+	}
+	fmt.Println()
+
+	fmt.Println("Use this context to resume work. The checkpoint will be updated as you progress.")
 	fmt.Println()
 }
 
