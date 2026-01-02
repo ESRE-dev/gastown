@@ -523,8 +523,13 @@ func runPolecatRemove(cmd *cobra.Command, args []string) error {
 			})
 		}
 	} else {
-		// Multiple rig/polecat arguments
+		// Multiple rig/polecat arguments - require explicit rig/polecat format
 		for _, arg := range args {
+			// Validate format: must contain "/" to avoid misinterpreting rig names as polecat names
+			if !strings.Contains(arg, "/") {
+				return fmt.Errorf("invalid address '%s': must be in 'rig/polecat' format (e.g., 'gastown/Toast')", arg)
+			}
+
 			rigName, polecatName, err := parseAddress(arg)
 			if err != nil {
 				return fmt.Errorf("invalid address '%s': %w", arg, err)
@@ -1324,8 +1329,13 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			})
 		}
 	} else {
-		// Multiple rig/polecat arguments
+		// Multiple rig/polecat arguments - require explicit rig/polecat format
 		for _, arg := range args {
+			// Validate format: must contain "/" to avoid misinterpreting rig names as polecat names
+			if !strings.Contains(arg, "/") {
+				return fmt.Errorf("invalid address '%s': must be in 'rig/polecat' format (e.g., 'gastown/Toast')", arg)
+			}
+
 			rigName, polecatName, err := parseAddress(arg)
 			if err != nil {
 				return fmt.Errorf("invalid address '%s': %w", arg, err)
