@@ -599,11 +599,12 @@ func resolveSelfTarget() (agentID string, pane string, hookRoot string, err erro
 	}
 
 	// Build agent identity from role
+	// Town-level agents use trailing slash to match addressToIdentity() normalization
 	switch roleInfo.Role {
 	case RoleMayor:
-		agentID = "mayor"
+		agentID = "mayor/"
 	case RoleDeacon:
-		agentID = "deacon"
+		agentID = "deacon/"
 	case RoleWitness:
 		agentID = fmt.Sprintf("%s/witness", roleInfo.Rig)
 	case RoleRefinery:

@@ -111,45 +111,67 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 
 // listFromDir queries messages from a beads directory.
 // Returns messages where identity is the assignee OR a CC recipient.
+// Includes both open and hooked messages (hooked = auto-assigned handoff mail).
 func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
-	// Query 1: messages where identity is the primary recipient
-	directMsgs, err := m.queryMessages(beadsDir, "--assignee", m.identity)
-	if err != nil {
-		return nil, err
-	}
-
-	// Query 2: messages where identity is CC'd
-	ccMsgs, err := m.queryMessages(beadsDir, "--label", "cc:"+m.identity)
-	if err != nil {
-		// CC query failing is non-fatal, just use direct messages
-		return directMsgs, nil
-	}
-
-	// Merge and dedupe (a message could theoretically be in both if someone CCs the primary recipient)
 	seen := make(map[string]bool)
 	var messages []*Message
-	for _, msg := range directMsgs {
-		if !seen[msg.ID] {
-			seen[msg.ID] = true
-			messages = append(messages, msg)
+
+	// Get all identity variants to query (handles legacy vs normalized formats)
+	identities := m.identityVariants()
+
+	// Query for each identity variant in both open and hooked statuses
+	for _, identity := range identities {
+		for _, status := range []string{"open", "hooked"} {
+			msgs, err := m.queryMessages(beadsDir, "--assignee", identity, status)
+			if err == nil {
+				for _, msg := range msgs {
+					if !seen[msg.ID] {
+						seen[msg.ID] = true
+						messages = append(messages, msg)
+					}
+				}
+			}
 		}
 	}
-	for _, msg := range ccMsgs {
-		if !seen[msg.ID] {
-			seen[msg.ID] = true
-			messages = append(messages, msg)
+
+	// Query for CC'd messages (open only)
+	for _, identity := range identities {
+		ccMsgs, err := m.queryMessages(beadsDir, "--label", "cc:"+identity, "open")
+		if err == nil {
+			for _, msg := range ccMsgs {
+				if !seen[msg.ID] {
+					seen[msg.ID] = true
+					messages = append(messages, msg)
+				}
+			}
 		}
 	}
 
 	return messages, nil
 }
 
+// identityVariants returns all identity formats to query.
+// For town-level agents (mayor/, deacon/), also includes the variant without
+// trailing slash for backwards compatibility with legacy messages.
+func (m *Mailbox) identityVariants() []string {
+	variants := []string{m.identity}
+
+	// Town-level agents may have legacy messages without trailing slash
+	if m.identity == "mayor/" {
+		variants = append(variants, "mayor")
+	} else if m.identity == "deacon/" {
+		variants = append(variants, "deacon")
+	}
+
+	return variants
+}
+
 // queryMessages runs a bd list query with the given filter flag and value.
-func (m *Mailbox) queryMessages(beadsDir, filterFlag, filterValue string) ([]*Message, error) {
+func (m *Mailbox) queryMessages(beadsDir, filterFlag, filterValue, status string) ([]*Message, error) {
 	cmd := exec.Command("bd", "list",
 		"--type", "message",
 		filterFlag, filterValue,
-		"--status", "open",
+		"--status", status,
 		"--json",
 	)
 	cmd.Dir = m.workDir
