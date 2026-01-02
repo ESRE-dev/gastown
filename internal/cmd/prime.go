@@ -118,6 +118,9 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	// Emit session_start event for seance discovery
 	emitSessionEvent(ctx)
 
+	// Output session metadata for seance discovery
+	outputSessionMetadata(ctx)
+
 	// Output context
 	if err := outputPrimeContext(ctx); err != nil {
 		return err
@@ -1522,4 +1525,29 @@ func emitSessionEvent(ctx RoleContext) {
 	// Emit the event
 	payload := events.SessionPayload(sessionID, actor, topic, ctx.WorkDir)
 	events.LogFeed(events.TypeSessionStart, actor, payload)
+}
+
+// outputSessionMetadata prints a structured metadata line for seance discovery.
+// Format: [GAS TOWN] role:<role> pid:<pid> session:<session_id>
+// This enables gt seance to discover sessions from gt prime output.
+func outputSessionMetadata(ctx RoleContext) {
+	if ctx.Role == RoleUnknown {
+		return
+	}
+
+	// Get agent identity for the role field
+	actor := getAgentIdentity(ctx)
+	if actor == "" {
+		return
+	}
+
+	// Get session ID from environment (set by Claude Code hooks)
+	sessionID := os.Getenv("CLAUDE_SESSION_ID")
+	if sessionID == "" {
+		// Fall back to a generated identifier
+		sessionID = fmt.Sprintf("%s-%d", actor, os.Getpid())
+	}
+
+	// Output structured metadata line
+	fmt.Printf("[GAS TOWN] role:%s pid:%d session:%s\n", actor, os.Getpid(), sessionID)
 }
