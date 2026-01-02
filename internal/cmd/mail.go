@@ -42,6 +42,7 @@ var (
 	mailInboxIdentity string
 	mailCheckInject   bool
 	mailCheckJSON     bool
+	mailCheckQuiet    bool
 	mailCheckIdentity string
 	mailThreadJSON       bool
 	mailReplySubject     string
@@ -221,6 +222,10 @@ Exit codes (normal mode):
   0 - New mail available
   1 - No new mail
 
+Exit codes (--quiet mode):
+  0 - New mail available (outputs count)
+  1 - No new mail (silent)
+
 Exit codes (--inject mode):
   0 - Always (hooks should never block)
   Output: system-reminder if mail exists, silent if no mail
@@ -229,6 +234,7 @@ Use --identity for polecats to explicitly specify their identity.
 
 Examples:
   gt mail check                           # Simple check (auto-detect identity)
+  gt mail check --quiet                   # For scripts (only output if new mail)
   gt mail check --inject                  # For hooks
   gt mail check --identity greenplace/Toast  # Explicit polecat identity`,
 	RunE: runMailCheck,
@@ -413,6 +419,7 @@ func init() {
 	// Check flags
 	mailCheckCmd.Flags().BoolVar(&mailCheckInject, "inject", false, "Output format for Claude Code hooks")
 	mailCheckCmd.Flags().BoolVar(&mailCheckJSON, "json", false, "Output as JSON")
+	mailCheckCmd.Flags().BoolVarP(&mailCheckQuiet, "quiet", "q", false, "Only output if new mail (for scripts)")
 	mailCheckCmd.Flags().StringVar(&mailCheckIdentity, "identity", "", "Explicit identity for inbox (e.g., greenplace/Toast)")
 	mailCheckCmd.Flags().StringVar(&mailCheckIdentity, "address", "", "Alias for --identity")
 
@@ -1248,12 +1255,24 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Normal mode
+	// Normal mode (or quiet mode)
 	if unread > 0 {
-		fmt.Printf("%s %d unread message(s)\n", style.Bold.Render("📬"), unread)
-		return NewSilentExit(0)
+		if mailCheckQuiet {
+			fmt.Printf("%d new message(s)\n", unread)
+		} else {
+			fmt.Printf("%s %d unread message(s)\n", style.Bold.Render("📬"), unread)
+		}
+		return nil // Success - exit 0
+	}
+
+	// No mail case
+	if mailCheckQuiet {
+		// Quiet mode: silence usage output on non-zero exit
+		cmd.SilenceUsage = true
+		return NewSilentExit(1)
 	}
 	fmt.Println("No new mail")
+	cmd.SilenceUsage = true
 	return NewSilentExit(1)
 }
 
