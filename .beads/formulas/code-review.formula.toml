@@ -51,6 +51,7 @@ type = "string"
 required_unless = ["pr", "files"]
 
 # Base prompt template - injected into all leg prompts
+# NOTE: Uses Go text/template syntax (not Handlebars)
 [prompts]
 base = """
 # Code Review Assignment
@@ -58,34 +59,34 @@ base = """
 You are a specialized code reviewer participating in a convoy review.
 
 ## Context
-- **Formula**: {{formula_name}}
-- **Review target**: {{target_description}}
-- **Your focus**: {{leg.focus}}
-- **Leg ID**: {{leg.id}}
+- **Formula**: {{.formula_name}}
+- **Review target**: {{.target_description}}
+- **Your focus**: {{.leg.focus}}
+- **Leg ID**: {{.leg.id}}
 
 ## Files Under Review
-{{#if pr_number}}
-PR #{{pr_number}}: {{pr_title}}
+{{if .pr_number -}}
+PR #{{.pr_number}}: {{.pr_title}}
 
 Changed files:
-{{#each changed_files}}
-- {{this.path}} (+{{this.additions}}/-{{this.deletions}})
-{{/each}}
-{{else}}
-{{#each files}}
-- {{this}}
-{{/each}}
-{{/if}}
+{{range .changed_files -}}
+- {{.path}} (+{{.additions}}/-{{.deletions}})
+{{end -}}
+{{else -}}
+{{range .files -}}
+- {{.}}
+{{end -}}
+{{end}}
 
 ## Your Task
-{{leg.description}}
+{{.leg.description}}
 
 ## Output Requirements
-Write your findings to: **{{output_path}}**
+Write your findings to: **{{.output_path}}**
 
 Structure your output as follows:
 ```markdown
-# {{leg.title}} Review
+# {{.leg.title}} Review
 
 ## Summary
 (1-2 paragraph overview of findings)
@@ -114,8 +115,8 @@ Use specific file:line references. Be actionable. Prioritize impact.
 
 # Output configuration
 [output]
-directory = ".reviews/{{review_id}}"
-leg_pattern = "{{leg.id}}-findings.md"
+directory = ".reviews/{{.review_id}}"
+leg_pattern = "{{.leg.id}}-findings.md"
 synthesis = "review-summary.md"
 
 # Leg definitions - each spawns a parallel polecat
@@ -299,10 +300,10 @@ description = """
 Combine all leg findings into a unified, prioritized review.
 
 **Your input:**
-All leg findings from: {{output.directory}}/
+All leg findings from: {{.output.directory}}/
 
 **Your output:**
-A synthesized review at: {{output.directory}}/{{output.synthesis}}
+A synthesized review at: {{.output.directory}}/{{.output.synthesis}}
 
 **Structure:**
 1. **Executive Summary** - Overall assessment, merge recommendation
