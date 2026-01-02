@@ -493,6 +493,55 @@ func TestExpandQueueNoTownRoot(t *testing.T) {
 	}
 }
 
+// ============ Announce Address Tests ============
+
+func TestIsAnnounceAddress(t *testing.T) {
+	tests := []struct {
+		address string
+		want    bool
+	}{
+		{"announce:bulletin", true},
+		{"announce:gastown/updates", true},
+		{"announce:", true}, // Edge case: empty announce name (will fail on expand)
+		{"mayor/", false},
+		{"gastown/witness", false},
+		{"announcebulletin", false}, // Missing colon
+		{"list:oncall", false},
+		{"queue:work", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			got := isAnnounceAddress(tt.address)
+			if got != tt.want {
+				t.Errorf("isAnnounceAddress(%q) = %v, want %v", tt.address, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseAnnounceName(t *testing.T) {
+	tests := []struct {
+		address string
+		want    string
+	}{
+		{"announce:bulletin", "bulletin"},
+		{"announce:gastown/updates", "gastown/updates"},
+		{"announce:", ""},
+		{"announce:priority-alerts", "priority-alerts"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			got := parseAnnounceName(tt.address)
+			if got != tt.want {
+				t.Errorf("parseAnnounceName(%q) = %q, want %q", tt.address, got, tt.want)
+			}
+		})
+	}
+}
+
 // contains checks if s contains substr (helper for error checking)
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))

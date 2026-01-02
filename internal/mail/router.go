@@ -20,6 +20,9 @@ var ErrUnknownList = errors.New("unknown mailing list")
 // ErrUnknownQueue indicates a queue name was not found in configuration.
 var ErrUnknownQueue = errors.New("unknown queue")
 
+// ErrUnknownAnnounce indicates an announce channel name was not found in configuration.
+var ErrUnknownAnnounce = errors.New("unknown announce channel")
+
 // Router handles message delivery via beads.
 // It routes messages to the correct beads database based on address:
 // - Town-level (mayor/, deacon/) -> {townRoot}/.beads
@@ -71,6 +74,16 @@ func isQueueAddress(address string) bool {
 // parseQueueName extracts the queue name from a queue:name address.
 func parseQueueName(address string) string {
 	return strings.TrimPrefix(address, "queue:")
+}
+
+// isAnnounceAddress returns true if the address uses announce:name syntax.
+func isAnnounceAddress(address string) bool {
+	return strings.HasPrefix(address, "announce:")
+}
+
+// parseAnnounceName extracts the announce channel name from an announce:name address.
+func parseAnnounceName(address string) string {
+	return strings.TrimPrefix(address, "announce:")
 }
 
 // expandList returns the recipients for a mailing list.
