@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -438,7 +439,15 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 			if issueType == "" {
 				issueType = "task"
 			}
-			fmt.Printf("    %s %s: %s [%s]\n", status, t.ID, t.Title, issueType)
+			line := fmt.Sprintf("    %s %s: %s [%s]", status, t.ID, t.Title, issueType)
+			if t.Worker != "" {
+				workerDisplay := "@" + t.Worker
+				if t.WorkerAge != "" {
+					workerDisplay += fmt.Sprintf(" (%s)", t.WorkerAge)
+				}
+				line += fmt.Sprintf("  %s", style.Dim.Render(workerDisplay))
+			}
+			fmt.Println(line)
 		}
 	}
 
@@ -563,6 +572,8 @@ type trackedIssueInfo struct {
 	Status    string `json:"status"`
 	Type      string `json:"dependency_type"`
 	IssueType string `json:"issue_type"`
+	Worker    string `json:"worker,omitempty"`    // Worker currently assigned (e.g., gastown/nux)
+	WorkerAge string `json:"worker_age,omitempty"` // How long worker has been on this issue
 }
 
 // getTrackedIssues queries SQLite directly to get issues tracked by a convoy.
@@ -612,6 +623,15 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 	// Single batch call to get all issue details
 	detailsMap := getIssueDetailsBatch(issueIDs)
 
+	// Get workers for these issues (only for non-closed issues)
+	openIssueIDs := make([]string, 0, len(issueIDs))
+	for _, id := range issueIDs {
+		if details, ok := detailsMap[id]; ok && details.Status != "closed" {
+			openIssueIDs = append(openIssueIDs, id)
+		}
+	}
+	workersMap := getWorkersForIssues(openIssueIDs)
+
 	// Second pass: build result using the batch lookup
 	var tracked []trackedIssueInfo
 	for _, issueID := range issueIDs {
@@ -627,6 +647,12 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 		} else {
 			info.Title = "(external)"
 			info.Status = "unknown"
+		}
+
+		// Add worker info if available
+		if worker, ok := workersMap[issueID]; ok {
+			info.Worker = worker.Worker
+			info.WorkerAge = worker.Age
 		}
 
 		tracked = append(tracked, info)
@@ -720,6 +746,126 @@ func getIssueDetails(issueID string) *issueDetails {
 		Status:    issues[0].Status,
 		IssueType: issues[0].IssueType,
 	}
+}
+
+// workerInfo holds info about a worker assigned to an issue.
+type workerInfo struct {
+	Worker string // Agent identity (e.g., gastown/nux)
+	Age    string // How long assigned (e.g., "12m")
+}
+
+// getWorkersForIssues finds workers currently assigned to the given issues.
+// Returns a map from issue ID to worker info.
+func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
+	result := make(map[string]*workerInfo)
+	if len(issueIDs) == 0 {
+		return result
+	}
+
+	// Query agent beads where hook_bead matches one of our issues
+	// We need to check beads across all rigs, so query each potential rig
+
+	// Find town root
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return result
+	}
+
+	// Discover rigs
+	rigDirs, _ := filepath.Glob(filepath.Join(townRoot, "*", "polecats"))
+	for _, polecatsDir := range rigDirs {
+		rigDir := filepath.Dir(polecatsDir)
+		beadsDB := filepath.Join(rigDir, "mayor", "rig", ".beads", "beads.db")
+
+		// Check if beads.db exists
+		if _, err := os.Stat(beadsDB); err != nil {
+			continue
+		}
+
+		// Query for agent beads with matching hook_bead
+		for _, issueID := range issueIDs {
+			if _, ok := result[issueID]; ok {
+				continue // Already found a worker for this issue
+			}
+
+			// Query for agent bead with this hook_bead
+			safeID := strings.ReplaceAll(issueID, "'", "''")
+			query := fmt.Sprintf(
+				`SELECT id, hook_bead, last_activity FROM issues WHERE issue_type = 'agent' AND status = 'open' AND hook_bead = '%s' LIMIT 1`,
+				safeID)
+
+			queryCmd := exec.Command("sqlite3", "-json", beadsDB, query)
+			var stdout bytes.Buffer
+			queryCmd.Stdout = &stdout
+			if err := queryCmd.Run(); err != nil {
+				continue
+			}
+
+			var agents []struct {
+				ID           string `json:"id"`
+				HookBead     string `json:"hook_bead"`
+				LastActivity string `json:"last_activity"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &agents); err != nil || len(agents) == 0 {
+				continue
+			}
+
+			agent := agents[0]
+
+			// Parse agent ID to get worker identity
+			// Format: gt-<rig>-<role>-<name> or gt-<rig>-<name>
+			workerID := parseWorkerFromAgentBead(agent.ID)
+			if workerID == "" {
+				continue
+			}
+
+			// Calculate age from last_activity
+			age := ""
+			if agent.LastActivity != "" {
+				if t, err := time.Parse(time.RFC3339, agent.LastActivity); err == nil {
+					age = formatWorkerAge(time.Since(t))
+				}
+			}
+
+			result[issueID] = &workerInfo{
+				Worker: workerID,
+				Age:    age,
+			}
+		}
+	}
+
+	return result
+}
+
+// parseWorkerFromAgentBead extracts worker identity from agent bead ID.
+// Input: "gt-gastown-polecat-nux" -> Output: "gastown/nux"
+// Input: "gt-beads-crew-amber" -> Output: "beads/crew/amber"
+func parseWorkerFromAgentBead(agentID string) string {
+	// Remove prefix (gt-, bd-, etc.)
+	parts := strings.Split(agentID, "-")
+	if len(parts) < 3 {
+		return ""
+	}
+
+	// Skip prefix
+	parts = parts[1:]
+
+	// Reconstruct as path
+	return strings.Join(parts, "/")
+}
+
+// formatWorkerAge formats a duration as a short string (e.g., "5m", "2h", "1d")
+func formatWorkerAge(d time.Duration) string {
+	if d < time.Minute {
+		return "<1m"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
 // runConvoyTUI launches the interactive convoy TUI.
