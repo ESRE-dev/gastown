@@ -162,6 +162,18 @@ Examples:
 	RunE: runConvoyAdd,
 }
 
+var convoyCheckCmd = &cobra.Command{
+	Use:   "check",
+	Short: "Check and auto-close completed convoys",
+	Long: `Check all open convoys and auto-close any where all tracked issues are complete.
+
+This handles cross-rig convoy completion: convoys in town beads tracking issues
+in rig beads won't auto-close via bd close alone. This command bridges that gap.
+
+Can be run manually or by deacon patrol to ensure convoys close promptly.`,
+	RunE: runConvoyCheck,
+}
+
 func init() {
 	// Create flags
 	convoyCreateCmd.Flags().StringVar(&convoyMolecule, "molecule", "", "Associated molecule ID")
@@ -184,6 +196,7 @@ func init() {
 	convoyCmd.AddCommand(convoyStatusCmd)
 	convoyCmd.AddCommand(convoyListCmd)
 	convoyCmd.AddCommand(convoyAddCmd)
+	convoyCmd.AddCommand(convoyCheckCmd)
 
 	rootCmd.AddCommand(convoyCmd)
 }
@@ -364,6 +377,128 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runConvoyCheck(cmd *cobra.Command, args []string) error {
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return err
+	}
+
+	closed, err := checkAndCloseCompletedConvoys(townBeads)
+	if err != nil {
+		return err
+	}
+
+	if len(closed) == 0 {
+		fmt.Println("No convoys ready to close.")
+	} else {
+		fmt.Printf("%s Auto-closed %d convoy(s):\n", style.Bold.Render("✓"), len(closed))
+		for _, c := range closed {
+			fmt.Printf("  🚚 %s: %s\n", c.ID, c.Title)
+		}
+	}
+
+	return nil
+}
+
+// checkAndCloseCompletedConvoys finds open convoys where all tracked issues are closed
+// and auto-closes them. Returns the list of convoys that were closed.
+func checkAndCloseCompletedConvoys(townBeads string) ([]struct{ ID, Title string }, error) {
+	var closed []struct{ ID, Title string }
+
+	// List all open convoys
+	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
+	listCmd := exec.Command("bd", listArgs...)
+	listCmd.Dir = townBeads
+	var stdout bytes.Buffer
+	listCmd.Stdout = &stdout
+
+	if err := listCmd.Run(); err != nil {
+		return nil, fmt.Errorf("listing convoys: %w", err)
+	}
+
+	var convoys []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil {
+		return nil, fmt.Errorf("parsing convoy list: %w", err)
+	}
+
+	// Check each convoy
+	for _, convoy := range convoys {
+		tracked := getTrackedIssues(townBeads, convoy.ID)
+		if len(tracked) == 0 {
+			continue // No tracked issues, nothing to check
+		}
+
+		// Check if all tracked issues are closed
+		allClosed := true
+		for _, t := range tracked {
+			if t.Status != "closed" && t.Status != "tombstone" {
+				allClosed = false
+				break
+			}
+		}
+
+		if allClosed {
+			// Close the convoy
+			closeArgs := []string{"close", convoy.ID, "-r", "All tracked issues completed"}
+			closeCmd := exec.Command("bd", closeArgs...)
+			closeCmd.Dir = townBeads
+
+			if err := closeCmd.Run(); err != nil {
+				style.PrintWarning("couldn't close convoy %s: %v", convoy.ID, err)
+				continue
+			}
+
+			closed = append(closed, struct{ ID, Title string }{convoy.ID, convoy.Title})
+
+			// Check if convoy has notify address and send notification
+			notifyConvoyCompletion(townBeads, convoy.ID, convoy.Title)
+		}
+	}
+
+	return closed, nil
+}
+
+// notifyConvoyCompletion sends a notification if the convoy has a notify address.
+func notifyConvoyCompletion(townBeads, convoyID, title string) {
+	// Get convoy description to find notify address
+	showArgs := []string{"show", convoyID, "--json"}
+	showCmd := exec.Command("bd", showArgs...)
+	showCmd.Dir = townBeads
+	var stdout bytes.Buffer
+	showCmd.Stdout = &stdout
+
+	if err := showCmd.Run(); err != nil {
+		return
+	}
+
+	var convoys []struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil || len(convoys) == 0 {
+		return
+	}
+
+	// Parse notify address from description
+	desc := convoys[0].Description
+	for _, line := range strings.Split(desc, "\n") {
+		if strings.HasPrefix(line, "Notify: ") {
+			addr := strings.TrimPrefix(line, "Notify: ")
+			if addr != "" {
+				// Send notification via gt mail
+				mailArgs := []string{"mail", "send", addr,
+					"-s", fmt.Sprintf("🚚 Convoy landed: %s", title),
+					"-m", fmt.Sprintf("Convoy %s has completed.\n\nAll tracked issues are now closed.", convoyID)}
+				mailCmd := exec.Command("gt", mailArgs...)
+				_ = mailCmd.Run() // Best effort, ignore errors
+			}
+			break
+		}
+	}
 }
 
 func runConvoyStatus(cmd *cobra.Command, args []string) error {
