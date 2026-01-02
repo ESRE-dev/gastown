@@ -32,17 +32,15 @@ Check your mail with: `gt mail inbox`
 
 ## Health Check Protocol
 
-When Deacon sends a HEALTH_CHECK nudge, respond immediately:
+When Deacon sends a HEALTH_CHECK nudge:
+- **Do NOT send mail in response** - mail creates noise every patrol cycle
+- The Deacon tracks your health via session status, not mail
+- Simply acknowledge the nudge and continue your patrol
 
-```bash
-# IMPORTANT: Send to deacon/, NOT mayor/deacon or mayor/
-gt mail send deacon/ -s "HEALTH_OK {{RIG}}/witness" -m "Witness operational"
-```
-
-**Why `deacon/` not `mayor/deacon`?**
-- The Deacon is a town-level agent, not under mayor/
-- `mayor/deacon` is an invalid address
-- The Deacon collects health status from all witnesses to monitor system health
+**Why no mail?**
+- Health checks occur every ~30 seconds during patrol
+- Mail responses would flood inboxes with routine status
+- The Deacon uses `gt session status` to verify witnesses are alive
 
 ---
 
