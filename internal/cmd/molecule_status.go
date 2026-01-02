@@ -71,6 +71,10 @@ func buildAgentBeadID(identity string, role Role) string {
 		}
 		return ""
 	case RolePolecat:
+		// Handle both 2-part (rig/name) and 3-part (rig/polecats/name) formats
+		if len(parts) == 3 && parts[1] == "polecats" {
+			return beads.PolecatBeadID(parts[0], parts[2])
+		}
 		if len(parts) >= 2 {
 			return beads.PolecatBeadID(parts[0], parts[1])
 		}
@@ -423,6 +427,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 }
 
 // buildAgentIdentity constructs the agent identity string from role context.
+// Format matches session.AgentIdentity.Address() for consistency.
 func buildAgentIdentity(ctx RoleContext) string {
 	switch ctx.Role {
 	case RoleMayor:
@@ -434,7 +439,7 @@ func buildAgentIdentity(ctx RoleContext) string {
 	case RoleRefinery:
 		return ctx.Rig + "/refinery"
 	case RolePolecat:
-		return ctx.Rig + "/" + ctx.Polecat
+		return ctx.Rig + "/polecats/" + ctx.Polecat
 	case RoleCrew:
 		return ctx.Rig + "/crew/" + ctx.Polecat
 	default:
