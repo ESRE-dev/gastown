@@ -132,8 +132,8 @@ func (d *Daemon) Run() error {
 // recoveryHeartbeatInterval is the fixed interval for recovery-focused daemon.
 // Normal wake is handled by feed subscription (bd activity --follow).
 // The daemon is a safety net for dead sessions, GUPP violations, and orphaned work.
-// 10 minutes is long enough to avoid unnecessary overhead, short enough to catch issues.
-const recoveryHeartbeatInterval = 10 * time.Minute
+// 3 minutes is fast enough to detect stuck agents promptly while avoiding excessive overhead.
+const recoveryHeartbeatInterval = 3 * time.Minute
 
 // heartbeat performs one heartbeat cycle.
 // The daemon is recovery-focused: it ensures agents are running and detects failures.
