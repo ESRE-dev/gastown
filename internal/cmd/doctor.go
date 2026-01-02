@@ -34,6 +34,7 @@ Workspace checks:
 
 Infrastructure checks:
   - daemon                   Check if daemon is running (fixable)
+  - repo-fingerprint         Check database has valid repo fingerprint (fixable)
   - boot-health              Check Boot watchdog health (vet mode)
 
 Cleanup checks (fixable):
@@ -99,6 +100,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Register built-in checks
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewDaemonCheck())
+	d.Register(doctor.NewRepoFingerprintCheck())
 	d.Register(doctor.NewBootHealthCheck())
 	d.Register(doctor.NewBeadsDatabaseCheck())
 	d.Register(doctor.NewBdDaemonCheck())
