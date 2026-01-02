@@ -183,7 +183,59 @@ The Preservation Protocol:
    - Document the conflict
    - Proceed with sync on clean baseline
 
-**Refinery exception:** Must resolve conflicts inline (can't delegate).
+**Refinery-specific conflict resolution:**
+
+Unlike polecats who can file a bead and delegate, the Refinery MUST resolve
+conflicts inline. The Refinery processes the merge queue - if it can't resolve
+a conflict, the queue backs up and polecats' completed work never lands.
+
+**Refinery conflict protocol:**
+
+1. **Analyze the conflict:**
+   ```bash
+   git status                    # See conflicted files
+   git diff                      # Examine conflict markers
+   ```
+
+2. **Trivial conflicts (resolve immediately):**
+   - Import ordering changes
+   - Whitespace or formatting
+   - Non-overlapping additions in same file
+   - Version bumps or changelog entries
+
+   Resolution:
+   ```bash
+   # Edit conflicted files to resolve
+   git add <resolved-files>
+   git rebase --continue
+   ```
+
+3. **Semantic conflicts (assess carefully):**
+   - Both sides modified same function
+   - Deleted code that the other side modified
+   - Structural changes (renamed files, moved code)
+
+   If you can understand both intents and merge correctly:
+   ```bash
+   # Carefully merge the changes, preserving both intents
+   git add <resolved-files>
+   git rebase --continue
+   ```
+
+4. **Complex conflicts (abort and notify polecat):**
+   - Conflicting business logic changes
+   - Unclear which version is correct
+   - Risk of subtle bugs from incorrect merge
+
+   ```bash
+   git rebase --abort
+   gt mail send {{ rig }}/polecats/<worker> -s "Rebase needed" \
+     -m "Your branch conflicts with main in <files>. Please rebase and resubmit via gt done."
+   # Skip this branch, continue with queue
+   ```
+
+**The Refinery judgment call:** When in doubt, abort and notify rather than
+risk merging incorrectly. A resubmitted branch is better than a broken main.
 
 **Exit criteria:** Local branch matches or is cleanly ahead of origin/main."""
 
