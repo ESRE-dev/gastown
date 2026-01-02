@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -557,5 +558,181 @@ func restartCrewSession(rigName, crewName, clonePath string) error {
 	crewPrompt := "Read your mail, act on anything urgent, else await instructions."
 	_ = t.NudgeSession(sessionID, crewPrompt)
 
+	return nil
+}
+
+// runCrewStop stops one or more crew workers.
+// Supports: "name", "rig/name" formats, or --all to stop all.
+func runCrewStop(cmd *cobra.Command, args []string) error {
+	// Handle --all flag
+	if crewAll {
+		return runCrewStopAll()
+	}
+
+	var lastErr error
+	t := tmux.NewTmux()
+
+	for _, arg := range args {
+		name := arg
+		rigOverride := crewRig
+
+		// Parse rig/name format (e.g., "beads/emma" -> rig=beads, name=emma)
+		if rig, crewName, ok := parseRigSlashName(name); ok {
+			if rigOverride == "" {
+				rigOverride = rig
+			}
+			name = crewName
+		}
+
+		_, r, err := getCrewManager(rigOverride)
+		if err != nil {
+			fmt.Printf("Error stopping %s: %v\n", arg, err)
+			lastErr = err
+			continue
+		}
+
+		sessionID := crewSessionName(r.Name, name)
+
+		// Check if session exists
+		hasSession, _ := t.HasSession(sessionID)
+		if !hasSession {
+			fmt.Printf("No session found for %s/%s\n", r.Name, name)
+			continue
+		}
+
+		// Capture output before stopping (best effort)
+		var output string
+		if !crewForce {
+			output, _ = t.CapturePane(sessionID, 50)
+		}
+
+		// Kill the session
+		if err := t.KillSession(sessionID); err != nil {
+			fmt.Printf("  %s [%s] %s: %s\n",
+				style.ErrorPrefix,
+				r.Name, name,
+				style.Dim.Render(err.Error()))
+			lastErr = err
+			continue
+		}
+
+		fmt.Printf("  %s [%s] %s: stopped\n",
+			style.SuccessPrefix,
+			r.Name, name)
+
+		// Log kill event to town log
+		townRoot, _ := workspace.Find(r.Path)
+		if townRoot != "" {
+			agent := fmt.Sprintf("%s/crew/%s", r.Name, name)
+			logger := townlog.NewLogger(townRoot)
+			logger.Log(townlog.EventKill, agent, "gt crew stop")
+		}
+
+		// Log captured output (truncated)
+		if len(output) > 200 {
+			output = output[len(output)-200:]
+		}
+		if output != "" {
+			fmt.Printf("      %s\n", style.Dim.Render("(output captured)"))
+		}
+	}
+
+	return lastErr
+}
+
+// runCrewStopAll stops all running crew sessions.
+// If crewRig is set, only stops crew in that rig.
+func runCrewStopAll() error {
+	// Get all agent sessions (including polecats to find crew)
+	agents, err := getAgentSessions(true)
+	if err != nil {
+		return fmt.Errorf("listing sessions: %w", err)
+	}
+
+	// Filter to crew agents only
+	var targets []*AgentSession
+	for _, agent := range agents {
+		if agent.Type != AgentCrew {
+			continue
+		}
+		// Filter by rig if specified
+		if crewRig != "" && agent.Rig != crewRig {
+			continue
+		}
+		targets = append(targets, agent)
+	}
+
+	if len(targets) == 0 {
+		fmt.Println("No running crew sessions to stop.")
+		if crewRig != "" {
+			fmt.Printf("  (filtered by rig: %s)\n", crewRig)
+		}
+		return nil
+	}
+
+	// Dry run - just show what would be stopped
+	if crewDryRun {
+		fmt.Printf("Would stop %d crew session(s):\n\n", len(targets))
+		for _, agent := range targets {
+			fmt.Printf("  %s %s/crew/%s\n", AgentTypeIcons[AgentCrew], agent.Rig, agent.AgentName)
+		}
+		return nil
+	}
+
+	fmt.Printf("%s Stopping %d crew session(s)...\n\n",
+		style.Bold.Render("🛑"), len(targets))
+
+	t := tmux.NewTmux()
+	var succeeded, failed int
+	var failures []string
+
+	for _, agent := range targets {
+		agentName := fmt.Sprintf("%s/crew/%s", agent.Rig, agent.AgentName)
+		sessionID := agent.Name // agent.Name IS the tmux session name
+
+		// Capture output before stopping (best effort)
+		var output string
+		if !crewForce {
+			output, _ = t.CapturePane(sessionID, 50)
+		}
+
+		// Kill the session
+		if err := t.KillSession(sessionID); err != nil {
+			failed++
+			failures = append(failures, fmt.Sprintf("%s: %v", agentName, err))
+			fmt.Printf("  %s %s\n", style.ErrorPrefix, agentName)
+			continue
+		}
+
+		succeeded++
+		fmt.Printf("  %s %s\n", style.SuccessPrefix, agentName)
+
+		// Log kill event to town log
+		townRoot, _ := workspace.FindFromCwd()
+		if townRoot != "" {
+			logger := townlog.NewLogger(townRoot)
+			logger.Log(townlog.EventKill, agentName, "gt crew stop --all")
+		}
+
+		// Log captured output (truncated)
+		if len(output) > 200 {
+			output = output[len(output)-200:]
+		}
+		if output != "" {
+			fmt.Printf("      %s\n", style.Dim.Render("(output captured)"))
+		}
+	}
+
+	fmt.Println()
+	if failed > 0 {
+		fmt.Printf("%s Stop complete: %d succeeded, %d failed\n",
+			style.WarningPrefix, succeeded, failed)
+		for _, f := range failures {
+			fmt.Printf("  %s\n", style.Dim.Render(f))
+		}
+		return fmt.Errorf("%d stop(s) failed", failed)
+	}
+
+	fmt.Printf("%s Stop complete: %d crew session(s) stopped\n", style.SuccessPrefix, succeeded)
 	return nil
 }
