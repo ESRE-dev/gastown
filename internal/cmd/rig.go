@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
@@ -192,6 +193,11 @@ func init() {
 func runRigAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	gitURL := args[1]
+
+	// Ensure beads (bd) is available before proceeding
+	if err := deps.EnsureBeads(true); err != nil {
+		return fmt.Errorf("beads dependency check failed: %w", err)
+	}
 
 	// Find workspace
 	townRoot, err := workspace.FindFromCwdOrError()

@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -103,6 +104,13 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Check if inside an existing workspace
 	if existingRoot, _ := workspace.Find(absPath); existingRoot != "" && existingRoot != absPath {
 		style.PrintWarning("Creating HQ inside existing workspace at %s", existingRoot)
+	}
+
+	// Ensure beads (bd) is available before proceeding
+	if !installNoBeads {
+		if err := deps.EnsureBeads(true); err != nil {
+			return fmt.Errorf("beads dependency check failed: %w", err)
+		}
 	}
 
 	fmt.Printf("%s Creating Gas Town HQ at %s\n\n",
