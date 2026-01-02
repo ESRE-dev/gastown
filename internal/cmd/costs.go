@@ -2,11 +2,10 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
@@ -40,7 +39,7 @@ By default, shows live costs scraped from running tmux sessions.
 
 Examples:
   gt costs              # Live costs from running sessions
-  gt costs --today      # Today's total from ledger
+  gt costs --today      # Today's total from session events
   gt costs --week       # This week's total
   gt costs --by-role    # Breakdown by role (polecat, witness, etc.)
   gt costs --by-rig     # Breakdown by rig
@@ -50,12 +49,12 @@ Examples:
 
 var costsRecordCmd = &cobra.Command{
 	Use:   "record",
-	Short: "Record session cost to ledger (called by Stop hook)",
-	Long: `Record the final cost of a session to the cost ledger.
+	Short: "Record session cost as a bead event (called by Stop hook)",
+	Long: `Record the final cost of a session as a session.ended event in beads.
 
 This command is intended to be called from a Claude Code Stop hook.
-It captures the final cost from the tmux session and writes it to
-~/.gt/costs.jsonl.
+It captures the final cost from the tmux session and creates an event
+bead with the cost data.
 
 Examples:
   gt costs record --session gt-gastown-toast
@@ -66,8 +65,8 @@ Examples:
 func init() {
 	rootCmd.AddCommand(costsCmd)
 	costsCmd.Flags().BoolVar(&costsJSON, "json", false, "Output as JSON")
-	costsCmd.Flags().BoolVar(&costsToday, "today", false, "Show today's total from ledger")
-	costsCmd.Flags().BoolVar(&costsWeek, "week", false, "Show this week's total from ledger")
+	costsCmd.Flags().BoolVar(&costsToday, "today", false, "Show today's total from session events")
+	costsCmd.Flags().BoolVar(&costsWeek, "week", false, "Show this week's total from session events")
 	costsCmd.Flags().BoolVar(&costsByRole, "by-role", false, "Show breakdown by role")
 	costsCmd.Flags().BoolVar(&costsByRig, "by-rig", false, "Show breakdown by rig")
 
@@ -181,14 +180,15 @@ func runLiveCosts() error {
 }
 
 func runCostsFromLedger() error {
-	ledgerPath := getLedgerPath()
-	entries, err := readLedger(ledgerPath)
+	// Query session events from beads
+	entries, err := querySessionEvents()
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println(style.Dim.Render("No cost ledger found. Costs are recorded when sessions end."))
-			return nil
-		}
-		return fmt.Errorf("reading ledger: %w", err)
+		return fmt.Errorf("querying session events: %w", err)
+	}
+
+	if len(entries) == 0 {
+		fmt.Println(style.Dim.Render("No session events found. Costs are recorded when sessions end."))
+		return nil
 	}
 
 	// Filter entries by time period
@@ -251,6 +251,115 @@ func runCostsFromLedger() error {
 	}
 
 	return outputLedgerHuman(output, filtered)
+}
+
+// SessionEvent represents a session.ended event from beads.
+type SessionEvent struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	EventKind string    `json:"event_kind"`
+	Actor     string    `json:"actor"`
+	Target    string    `json:"target"`
+	Payload   string    `json:"payload"`
+}
+
+// SessionPayload represents the JSON payload of a session event.
+type SessionPayload struct {
+	CostUSD   float64 `json:"cost_usd"`
+	SessionID string  `json:"session_id"`
+	Role      string  `json:"role"`
+	Rig       string  `json:"rig"`
+	Worker    string  `json:"worker"`
+	EndedAt   string  `json:"ended_at"`
+}
+
+// EventListItem represents an event from bd list (minimal fields).
+type EventListItem struct {
+	ID string `json:"id"`
+}
+
+// querySessionEvents queries beads for session.ended events and converts them to CostEntry.
+func querySessionEvents() ([]CostEntry, error) {
+	// Step 1: Get list of event IDs
+	listArgs := []string{
+		"list",
+		"--type=event",
+		"--all",
+		"--limit=0",
+		"--json",
+	}
+
+	listCmd := exec.Command("bd", listArgs...)
+	listOutput, err := listCmd.Output()
+	if err != nil {
+		// If bd fails (e.g., no beads database), return empty list
+		return nil, nil
+	}
+
+	var listItems []EventListItem
+	if err := json.Unmarshal(listOutput, &listItems); err != nil {
+		return nil, fmt.Errorf("parsing event list: %w", err)
+	}
+
+	if len(listItems) == 0 {
+		return nil, nil
+	}
+
+	// Step 2: Get full details for all events using bd show
+	// (bd list doesn't include event_kind, actor, payload)
+	showArgs := []string{"show", "--json"}
+	for _, item := range listItems {
+		showArgs = append(showArgs, item.ID)
+	}
+
+	showCmd := exec.Command("bd", showArgs...)
+	showOutput, err := showCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("showing events: %w", err)
+	}
+
+	var events []SessionEvent
+	if err := json.Unmarshal(showOutput, &events); err != nil {
+		return nil, fmt.Errorf("parsing event details: %w", err)
+	}
+
+	var entries []CostEntry
+	for _, event := range events {
+		// Filter for session.ended events only
+		if event.EventKind != "session.ended" {
+			continue
+		}
+
+		// Parse payload
+		var payload SessionPayload
+		if event.Payload != "" {
+			if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+				continue // Skip malformed payloads
+			}
+		}
+
+		// Parse ended_at from payload, fall back to created_at
+		endedAt := event.CreatedAt
+		if payload.EndedAt != "" {
+			if parsed, err := time.Parse(time.RFC3339, payload.EndedAt); err == nil {
+				endedAt = parsed
+			}
+		}
+
+		entries = append(entries, CostEntry{
+			SessionID: payload.SessionID,
+			Role:      payload.Role,
+			Rig:       payload.Rig,
+			Worker:    payload.Worker,
+			CostUSD:   payload.CostUSD,
+			EndedAt:   endedAt,
+			WorkItem:  event.Target,
+		})
+	}
+
+	return entries, nil
 }
 
 // parseSessionName extracts role, rig, and worker from a session name.
@@ -319,63 +428,6 @@ func extractCost(content string) float64 {
 	return cost
 }
 
-// getLedgerPath returns the path to the cost ledger file.
-func getLedgerPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".gt", "costs.jsonl")
-}
-
-// readLedger reads all entries from the cost ledger.
-func readLedger(path string) ([]CostEntry, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var entries []CostEntry
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var entry CostEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue // Skip malformed lines
-		}
-		entries = append(entries, entry)
-	}
-
-	return entries, scanner.Err()
-}
-
-// WriteLedgerEntry appends a cost entry to the ledger.
-// This is called by the SessionEnd hook handler.
-func WriteLedgerEntry(entry CostEntry) error {
-	path := getLedgerPath()
-
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating ledger directory: %w", err)
-	}
-
-	// Open file for appending
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("opening ledger: %w", err)
-	}
-	defer file.Close()
-
-	// Write JSON line
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return fmt.Errorf("marshaling entry: %w", err)
-	}
-
-	_, err = file.Write(append(data, '\n'))
-	return err
-}
 
 func outputCostsJSON(output CostsOutput) error {
 	enc := json.NewEncoder(os.Stdout)
@@ -461,7 +513,7 @@ func outputLedgerHuman(output CostsOutput, entries []CostEntry) error {
 	return nil
 }
 
-// runCostsRecord captures the final cost from a session and writes to ledger.
+// runCostsRecord captures the final cost from a session and records it as a bead event.
 // This is called by the Claude Code Stop hook.
 func runCostsRecord(cmd *cobra.Command, args []string) error {
 	// Get session from flag or try to detect from environment
@@ -489,26 +541,66 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 	// Parse session name
 	role, rig, worker := parseSessionName(session)
 
-	// Create ledger entry
-	entry := CostEntry{
-		SessionID: session,
-		Role:      role,
-		Rig:       rig,
-		Worker:    worker,
-		CostUSD:   cost,
-		StartedAt: time.Time{}, // We don't have start time; could enhance later
-		EndedAt:   time.Now(),
-		WorkItem:  recordWorkItem,
+	// Build agent path for actor field
+	agentPath := buildAgentPath(role, rig, worker)
+
+	// Build event title
+	title := fmt.Sprintf("Session ended: %s", session)
+	if recordWorkItem != "" {
+		title = fmt.Sprintf("Session: %s completed %s", session, recordWorkItem)
 	}
 
-	// Write to ledger
-	if err := WriteLedgerEntry(entry); err != nil {
-		return fmt.Errorf("writing ledger: %w", err)
+	// Build payload JSON
+	payload := map[string]interface{}{
+		"cost_usd":   cost,
+		"session_id": session,
+		"role":       role,
+		"ended_at":   time.Now().Format(time.RFC3339),
 	}
+	if rig != "" {
+		payload["rig"] = rig
+	}
+	if worker != "" {
+		payload["worker"] = worker
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshaling payload: %w", err)
+	}
+
+	// Build bd create command
+	bdArgs := []string{
+		"create",
+		"--type=event",
+		"--title=" + title,
+		"--event-category=session.ended",
+		"--event-actor=" + agentPath,
+		"--event-payload=" + string(payloadJSON),
+		"--silent",
+	}
+
+	// Add work item as event target if specified
+	if recordWorkItem != "" {
+		bdArgs = append(bdArgs, "--event-target="+recordWorkItem)
+	}
+
+	// NOTE: We intentionally don't use --rig flag here because it causes
+	// event fields (event_kind, actor, payload) to not be stored properly.
+	// The bd command will auto-detect the correct rig from cwd.
+	// TODO: File beads bug about --rig flag losing event fields.
+
+	// Execute bd create
+	bdCmd := exec.Command("bd", bdArgs...)
+	output, err := bdCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("creating session event: %w\nOutput: %s", err, string(output))
+	}
+
+	eventID := strings.TrimSpace(string(output))
 
 	// Output confirmation (silent if cost is zero and no work item)
 	if cost > 0 || recordWorkItem != "" {
-		fmt.Printf("%s Recorded $%.2f for %s", style.Success.Render("✓"), cost, session)
+		fmt.Printf("%s Recorded $%.2f for %s (event: %s)", style.Success.Render("✓"), cost, session, eventID)
 		if recordWorkItem != "" {
 			fmt.Printf(" (work: %s)", recordWorkItem)
 		}
@@ -516,4 +608,42 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// buildAgentPath builds the agent path from role, rig, and worker.
+// Examples: "mayor", "gastown/witness", "gastown/polecats/toast"
+func buildAgentPath(role, rig, worker string) string {
+	switch role {
+	case constants.RoleMayor, constants.RoleDeacon:
+		return role
+	case constants.RoleWitness, constants.RoleRefinery:
+		if rig != "" {
+			return rig + "/" + role
+		}
+		return role
+	case constants.RolePolecat:
+		if rig != "" && worker != "" {
+			return rig + "/polecats/" + worker
+		}
+		if rig != "" {
+			return rig + "/polecat"
+		}
+		return "polecat/" + worker
+	case constants.RoleCrew:
+		if rig != "" && worker != "" {
+			return rig + "/crew/" + worker
+		}
+		if rig != "" {
+			return rig + "/crew"
+		}
+		return "crew/" + worker
+	default:
+		if rig != "" && worker != "" {
+			return rig + "/" + worker
+		}
+		if rig != "" {
+			return rig
+		}
+		return worker
+	}
 }
