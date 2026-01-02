@@ -352,6 +352,12 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 		Topic:     "patrol",
 	}) // Non-fatal
 
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Send the propulsion nudge to trigger autonomous patrol execution.
+	// Wait for beacon to be fully processed (needs to be separate prompt)
+	time.Sleep(2 * time.Second)
+	_ = t.NudgeSession(sessionName, session.PropulsionNudgeForRole("witness")) // Non-fatal
+
 	return true, nil
 }
 

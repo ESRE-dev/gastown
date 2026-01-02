@@ -43,3 +43,26 @@ func PolecatSessionName(rig, name string) string {
 func PropulsionNudge() string {
 	return "Run `gt hook` to check your hook and begin work."
 }
+
+// PropulsionNudgeForRole generates a role-specific GUPP nudge.
+// Different roles have different startup flows:
+// - polecat/crew: Check hook for slung work
+// - witness/refinery: Start patrol cycle
+// - deacon: Start heartbeat patrol
+// - mayor: Check mail for coordination work
+func PropulsionNudgeForRole(role string) string {
+	switch role {
+	case "polecat", "crew":
+		return PropulsionNudge()
+	case "witness":
+		return "Run `gt prime` to check patrol status and begin work."
+	case "refinery":
+		return "Run `gt prime` to check MQ status and begin patrol."
+	case "deacon":
+		return "Run `gt prime` to check patrol status and begin heartbeat cycle."
+	case "mayor":
+		return "Run `gt prime` to check mail and begin coordination."
+	default:
+		return PropulsionNudge()
+	}
+}

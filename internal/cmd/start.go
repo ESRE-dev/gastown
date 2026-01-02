@@ -339,13 +339,31 @@ func ensureRefinerySession(rigName string, r *rig.Rig) (bool, error) {
 	theme := tmux.AssignTheme(rigName)
 	_ = t.ConfigureGasTownSession(sessionName, theme, rigName, "refinery", "refinery")
 
-	// Launch Claude in a respawn loop
+	// Launch Claude directly (no respawn loop - daemon handles restart)
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	runtimeCmd := config.GetRuntimeCommand(r.Path)
-	loopCmd := `export GT_ROLE=refinery BD_ACTOR=` + bdActor + ` GIT_AUTHOR_NAME=` + bdActor + ` && while true; do echo "🛢️ Starting Refinery for ` + rigName + `..."; ` + runtimeCmd + `; echo ""; echo "Refinery exited. Restarting in 2s... (Ctrl-C to stop)"; sleep 2; done`
-	if err := t.SendKeysDelayed(sessionName, loopCmd, 200); err != nil {
+	if err := t.SendKeys(sessionName, config.BuildAgentStartupCommand("refinery", bdActor, "", "")); err != nil {
 		return false, fmt.Errorf("sending command: %w", err)
 	}
+
+	// Wait for Claude to start (non-fatal)
+	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal
+	}
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject startup nudge for predecessor discovery via /resume
+	address := fmt.Sprintf("%s/refinery", rigName)
+	_ = session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
+		Recipient: address,
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}) // Non-fatal
+
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Send the propulsion nudge to trigger autonomous patrol execution.
+	// Wait for beacon to be fully processed (needs to be separate prompt)
+	time.Sleep(2 * time.Second)
+	_ = t.NudgeSession(sessionName, session.PropulsionNudgeForRole("refinery")) // Non-fatal
 
 	return true, nil
 }
