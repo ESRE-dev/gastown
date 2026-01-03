@@ -76,6 +76,40 @@ func (t *Tmux) NewSession(name, workDir string) error {
 	return err
 }
 
+// EnsureSessionFresh ensures a session is available and healthy.
+// If the session exists but is a zombie (Claude not running), it kills the session first.
+// This prevents "session already exists" errors when trying to restart dead agents.
+//
+// A session is considered a zombie if:
+// - The tmux session exists
+// - But Claude (node process) is not running in it
+//
+// Returns nil if session was created successfully.
+func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
+	// Check if session already exists
+	exists, err := t.HasSession(name)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+
+	if exists {
+		// Session exists - check if it's a zombie
+		if !t.IsClaudeRunning(name) {
+			// Zombie session: tmux alive but Claude dead
+			// Kill it so we can create a fresh one
+			if err := t.KillSession(name); err != nil {
+				return fmt.Errorf("killing zombie session: %w", err)
+			}
+		} else {
+			// Session is healthy (Claude running) - nothing to do
+			return nil
+		}
+	}
+
+	// Create fresh session
+	return t.NewSession(name, workDir)
+}
+
 // KillSession terminates a tmux session.
 func (t *Tmux) KillSession(name string) error {
 	_, err := t.run("kill-session", "-t", name)
