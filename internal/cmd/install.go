@@ -242,7 +242,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  %d. Add a rig: %s\n", step, style.Dim.Render("gt rig add <name> <git-url>"))
 	step++
-	fmt.Printf("  %d. Start the Mayor: %s\n", step, style.Dim.Render("cd "+absPath+" && gt prime"))
+	fmt.Printf("  %d. Enter the Mayor's office: %s\n", step, style.Dim.Render("gt mayor attach"))
 
 	return nil
 }

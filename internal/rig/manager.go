@@ -266,6 +266,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Create shared bare repo as source of truth for refinery and polecats.
 	// This allows refinery to see polecat branches without pushing to remote.
 	// Mayor remains a separate clone (doesn't need branch visibility).
+	fmt.Printf("  Cloning repository (this may take a moment)...\n")
 	bareRepoPath := filepath.Join(rigPath, ".repo.git")
 	if localRepo != "" {
 		if err := m.git.CloneBareWithReference(opts.GitURL, bareRepoPath, localRepo); err != nil {
@@ -280,6 +281,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			return nil, fmt.Errorf("creating bare repo: %w", err)
 		}
 	}
+	fmt.Printf("   ✓ Created shared bare repo\n")
 	bareGit := git.NewGitWithDir(bareRepoPath, "")
 
 	// Detect default branch (main, master, etc.)
@@ -293,6 +295,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Create mayor as regular clone (separate from bare repo).
 	// Mayor doesn't need to see polecat branches - that's refinery's job.
 	// This also allows mayor to stay on the default branch without conflicting with refinery.
+	fmt.Printf("  Creating mayor clone...\n")
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
@@ -310,6 +313,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			return nil, fmt.Errorf("cloning for mayor: %w", err)
 		}
 	}
+	fmt.Printf("   ✓ Created mayor clone\n")
 
 	// Check if source repo has .beads/ with its own prefix - if so, use that prefix.
 	// This ensures we use the project's existing beads database instead of creating a new one.
@@ -347,6 +351,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Create refinery as worktree from bare repo on default branch.
 	// Refinery needs to see polecat branches (shared .repo.git) and merges them.
 	// Being on the default branch allows direct merge workflow.
+	fmt.Printf("  Creating refinery worktree...\n")
 	refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
 	if err := os.MkdirAll(filepath.Dir(refineryRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating refinery dir: %w", err)
@@ -354,6 +359,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := bareGit.WorktreeAddExisting(refineryRigPath, defaultBranch); err != nil {
 		return nil, fmt.Errorf("creating refinery worktree: %w", err)
 	}
+	fmt.Printf("   ✓ Created refinery worktree\n")
 	// Create refinery CLAUDE.md (overrides any from cloned repo)
 	if err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating refinery CLAUDE.md: %w", err)
@@ -414,9 +420,11 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	}
 
 	// Initialize beads at rig level
+	fmt.Printf("  Initializing beads database...\n")
 	if err := m.initBeads(rigPath, opts.BeadsPrefix); err != nil {
 		return nil, fmt.Errorf("initializing beads: %w", err)
 	}
+	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
 
 	// Create agent beads for this rig (witness, refinery) and
 	// global agents (deacon, mayor) if this is the first rig.
