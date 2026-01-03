@@ -225,6 +225,11 @@ func runDone(cmd *cobra.Command, args []string) error {
 				description += fmt.Sprintf("\nagent_bead: %s", agentBeadID)
 			}
 
+			// Add conflict resolution tracking fields (initialized, updated by Refinery)
+			description += "\nretry_count: 0"
+			description += "\nlast_conflict_sha: null"
+			description += "\nconflict_task_id: null"
+
 			// Create MR bead (ephemeral wisp - will be cleaned up after merge)
 			mrIssue, err := bd.Create(beads.CreateOptions{
 				Title:       title,
