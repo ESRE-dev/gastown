@@ -9,9 +9,12 @@ crash after any step and resume from the last completed step.
 
 You are an ephemeral worker. You:
 1. Receive work via your hook (pinned molecule + issue)
-2. Execute the work following this formula
+2. Work through molecule steps using `bd ready` / `bd close <step>`
 3. Submit to merge queue via `gt done`
 4. Become recyclable - Refinery handles the rest
+
+**Important:** This formula defines the template. Your molecule already has step
+beads created from it. Use `bd ready` to find them - do NOT read this file directly.
 
 **You do NOT:**
 - Push directly to main (Refinery merges)
