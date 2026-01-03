@@ -281,6 +281,10 @@ func ensureSession(t *tmux.Tmux, sessionName, workDir, role string) error {
 		if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 			// Non-fatal
 		}
+
+		// Accept bypass permissions warning dialog if it appears.
+		_ = t.AcceptBypassPermissionsWarning(sessionName)
+
 		time.Sleep(constants.ShutdownNotifyDelay)
 
 		// Inject startup nudge for predecessor discovery via /resume
@@ -330,6 +334,10 @@ func ensureWitness(t *tmux.Tmux, sessionName, rigPath, rigName string) error {
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal
 	}
+
+	// Accept bypass permissions warning dialog if it appears.
+	_ = t.AcceptBypassPermissionsWarning(sessionName)
+
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	// Inject startup nudge for predecessor discovery via /resume
@@ -557,6 +565,10 @@ func ensureCrewSession(t *tmux.Tmux, sessionName, crewPath, rigName, crewName st
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal
 	}
+
+	// Accept bypass permissions warning dialog if it appears.
+	_ = t.AcceptBypassPermissionsWarning(sessionName)
+
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	// Inject startup nudge for predecessor discovery via /resume
@@ -661,6 +673,10 @@ func ensurePolecatSession(t *tmux.Tmux, sessionName, polecatPath, rigName, polec
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal
 	}
+
+	// Accept bypass permissions warning dialog if it appears.
+	_ = t.AcceptBypassPermissionsWarning(sessionName)
+
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	// Inject startup nudge for predecessor discovery via /resume

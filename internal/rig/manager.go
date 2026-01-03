@@ -249,6 +249,35 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
 		return nil, fmt.Errorf("cloning for mayor: %w", err)
 	}
+
+	// Check if source repo has .beads/ with its own prefix - if so, use that prefix.
+	// This ensures we use the project's existing beads database instead of creating a new one.
+	// Without this, routing would fail when trying to access existing issues because the
+	// rig config would have a different prefix than what the issues actually use.
+	sourceBeadsConfig := filepath.Join(mayorRigPath, ".beads", "config.yaml")
+	if _, err := os.Stat(sourceBeadsConfig); err == nil {
+		if sourcePrefix := detectBeadsPrefixFromConfig(sourceBeadsConfig); sourcePrefix != "" {
+			fmt.Printf("  Detected existing beads prefix '%s' from source repo\n", sourcePrefix)
+			opts.BeadsPrefix = sourcePrefix
+			rigConfig.Beads.Prefix = sourcePrefix
+			// Re-save rig config with detected prefix
+			if err := m.saveRigConfig(rigPath, rigConfig); err != nil {
+				return nil, fmt.Errorf("updating rig config with detected prefix: %w", err)
+			}
+			// Initialize bd database with the detected prefix.
+			// beads.db is gitignored so it doesn't exist after clone - we need to create it.
+			// bd init --prefix will create the database and auto-import from issues.jsonl.
+			sourceBeadsDB := filepath.Join(mayorRigPath, ".beads", "beads.db")
+			if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
+				cmd := exec.Command("bd", "init", "--prefix", sourcePrefix)
+				cmd.Dir = mayorRigPath
+				if output, err := cmd.CombinedOutput(); err != nil {
+					fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
+				}
+			}
+		}
+	}
+
 	// Create mayor CLAUDE.md (overrides any from cloned repo)
 	if err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
@@ -453,9 +482,16 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
 func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig bool) error {
-	// Run bd commands from rig root where .beads/ was initialized
-	// Set BEADS_DIR explicitly to ensure bd finds the database
-	beadsDir := filepath.Join(rigPath, ".beads")
+	// Run bd commands from the canonical beads location.
+	// - If source repo has .beads/ tracked (mayor/rig/.beads exists), use that
+	// - Otherwise use rig root .beads/ (created by initBeads during rig add)
+	mayorRigBeads := filepath.Join(rigPath, "mayor", "rig", ".beads")
+	var beadsDir string
+	if _, err := os.Stat(mayorRigBeads); err == nil {
+		beadsDir = mayorRigBeads
+	} else {
+		beadsDir = filepath.Join(rigPath, ".beads")
+	}
 	prevBeadsDir, hadBeadsDir := os.LookupEnv("BEADS_DIR")
 	if err := os.Setenv("BEADS_DIR", beadsDir); err != nil {
 		return fmt.Errorf("setting BEADS_DIR: %w", err)
@@ -599,6 +635,73 @@ func deriveBeadsPrefix(name string) string {
 		return strings.ToLower(name)
 	}
 	return strings.ToLower(name[:2])
+}
+
+// detectBeadsPrefixFromConfig reads the issue prefix from a beads config.yaml file.
+// Returns empty string if the file doesn't exist or doesn't contain a prefix.
+// Falls back to detecting prefix from existing issues in issues.jsonl.
+//
+// When adding a rig from a source repo that has .beads/ tracked in git (like a project
+// that already uses beads for issue tracking), we need to use that project's existing
+// prefix instead of generating a new one. Otherwise, the rig would have a mismatched
+// prefix and routing would fail to find the existing issues.
+func detectBeadsPrefixFromConfig(configPath string) string {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+
+	// Parse YAML-style config (simple line-by-line parsing)
+	// Looking for "issue-prefix: <value>" or "prefix: <value>"
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Skip comments and empty lines
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Check for issue-prefix or prefix key
+		for _, key := range []string{"issue-prefix:", "prefix:"} {
+			if strings.HasPrefix(line, key) {
+				value := strings.TrimSpace(strings.TrimPrefix(line, key))
+				// Remove quotes if present
+				value = strings.Trim(value, `"'`)
+				if value != "" {
+					return value
+				}
+			}
+		}
+	}
+
+	// Fallback: try to detect prefix from existing issues in issues.jsonl
+	// Look for the first issue ID pattern like "gt-abc123"
+	beadsDir := filepath.Dir(configPath)
+	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
+	if issuesData, err := os.ReadFile(issuesPath); err == nil {
+		issuesLines := strings.Split(string(issuesData), "\n")
+		for _, line := range issuesLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			// Look for "id":"<prefix>-<hash>" pattern
+			if idx := strings.Index(line, `"id":"`); idx != -1 {
+				start := idx + 6 // len(`"id":"`)
+				if end := strings.Index(line[start:], `"`); end != -1 {
+					issueID := line[start : start+end]
+					// Extract prefix (everything before the last hyphen-hash part)
+					if dashIdx := strings.LastIndex(issueID, "-"); dashIdx > 0 {
+						prefix := issueID[:dashIdx]
+						// Handle prefixes like "gt" (from "gt-abc") - return without trailing hyphen
+						return prefix
+					}
+				}
+			}
+			break // Only check first issue
+		}
+	}
+
+	return ""
 }
 
 // RemoveRig unregisters a rig (does not delete files).

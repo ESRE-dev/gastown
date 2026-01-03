@@ -265,6 +265,46 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	return nil
 }
 
+// AcceptBypassPermissionsWarning dismisses the Claude Code bypass permissions warning dialog.
+// When Claude starts with --dangerously-skip-permissions, it shows a warning dialog that
+// requires pressing Down arrow to select "Yes, I accept" and then Enter to confirm.
+// This function checks if the warning is present before sending keys to avoid interfering
+// with sessions that don't show the warning (e.g., already accepted or different config).
+//
+// Call this after starting Claude and waiting for it to initialize (WaitForCommand),
+// but before sending any prompts.
+func (t *Tmux) AcceptBypassPermissionsWarning(session string) error {
+	// Wait for the dialog to potentially render
+	time.Sleep(1 * time.Second)
+
+	// Check if the bypass permissions warning is present
+	content, err := t.CapturePane(session, 30)
+	if err != nil {
+		return err
+	}
+
+	// Look for the characteristic warning text
+	if !strings.Contains(content, "Bypass Permissions mode") {
+		// Warning not present, nothing to do
+		return nil
+	}
+
+	// Press Down to select "Yes, I accept" (option 2)
+	if _, err := t.run("send-keys", "-t", session, "Down"); err != nil {
+		return err
+	}
+
+	// Small delay to let selection update
+	time.Sleep(200 * time.Millisecond)
+
+	// Press Enter to confirm
+	if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // GetPaneCommand returns the current command running in a pane.
 // Returns "bash", "zsh", "claude", "node", etc.
 func (t *Tmux) GetPaneCommand(session string) (string, error) {

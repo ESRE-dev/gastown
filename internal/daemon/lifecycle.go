@@ -364,6 +364,13 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 		return fmt.Errorf("sending startup command: %w", err)
 	}
 
+	// Wait for Claude to start, then accept bypass permissions warning if it appears.
+	// This ensures automated role starts aren't blocked by the warning dialog.
+	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal - Claude might still start
+	}
+	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
+
 	// Note: gt prime is handled by Claude's SessionStart hook, not injected here.
 	// Injecting it via SendKeysDelayed causes rogue text to appear in the terminal.
 
