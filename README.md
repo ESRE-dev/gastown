@@ -250,6 +250,36 @@ gt doctor                         # Health check
 gt doctor --fix                   # Auto-repair
 ```
 
+## Shell Completions
+
+Enable tab completion for `gt` commands:
+
+### Bash
+
+```bash
+# Add to ~/.bashrc
+source <(gt completion bash)
+
+# Or install permanently
+gt completion bash > /usr/local/etc/bash_completion.d/gt
+```
+
+### Zsh
+
+```bash
+# Add to ~/.zshrc (before compinit)
+source <(gt completion zsh)
+
+# Or install to fpath
+gt completion zsh > "${fpath[1]}/_gt"
+```
+
+### Fish
+
+```bash
+gt completion fish > ~/.config/fish/completions/gt.fish
+```
+
 ## Roles
 
 | Role | Scope | Job |
