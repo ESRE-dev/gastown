@@ -27,31 +27,42 @@ This is a convenience command for polecats that:
 4. Optionally exits the Claude session (--exit flag)
 
 Exit statuses:
-  COMPLETED  - Work done, MR submitted (default)
-  ESCALATED  - Hit blocker, needs human intervention
-  DEFERRED   - Work paused, issue still open
+  COMPLETED      - Work done, MR submitted (default)
+  ESCALATED      - Hit blocker, needs human intervention
+  DEFERRED       - Work paused, issue still open
+  PHASE_COMPLETE - Phase done, awaiting gate (use --phase-complete)
+
+Phase handoff workflow:
+  When a molecule has gate steps (async waits), use --phase-complete to signal
+  that the current phase is complete but work continues after the gate closes.
+  The Witness will recycle this polecat and dispatch a new one when the gate
+  resolves.
 
 Examples:
-  gt done                         # Submit branch, notify COMPLETED
-  gt done --exit                  # Submit and exit Claude session
-  gt done --issue gt-abc          # Explicit issue ID
-  gt done --status ESCALATED      # Signal blocker, skip MR
-  gt done --status DEFERRED       # Pause work, skip MR`,
+  gt done                              # Submit branch, notify COMPLETED
+  gt done --exit                       # Submit and exit Claude session
+  gt done --issue gt-abc               # Explicit issue ID
+  gt done --status ESCALATED           # Signal blocker, skip MR
+  gt done --status DEFERRED            # Pause work, skip MR
+  gt done --phase-complete --gate g-x  # Phase done, waiting on gate g-x`,
 	RunE: runDone,
 }
 
 var (
-	doneIssue    string
-	donePriority int
-	doneStatus   string
-	doneExit     bool
+	doneIssue         string
+	donePriority      int
+	doneStatus        string
+	doneExit          bool
+	donePhaseComplete bool
+	doneGate          string
 )
 
 // Valid exit types for gt done
 const (
-	ExitCompleted = "COMPLETED"
-	ExitEscalated = "ESCALATED"
-	ExitDeferred  = "DEFERRED"
+	ExitCompleted     = "COMPLETED"
+	ExitEscalated     = "ESCALATED"
+	ExitDeferred      = "DEFERRED"
+	ExitPhaseComplete = "PHASE_COMPLETE"
 )
 
 func init() {
@@ -59,15 +70,26 @@ func init() {
 	doneCmd.Flags().IntVarP(&donePriority, "priority", "p", -1, "Override priority (0-4, default: inherit from issue)")
 	doneCmd.Flags().StringVar(&doneStatus, "status", ExitCompleted, "Exit status: COMPLETED, ESCALATED, or DEFERRED")
 	doneCmd.Flags().BoolVar(&doneExit, "exit", false, "Exit Claude session after MR submission (self-terminate)")
+	doneCmd.Flags().BoolVar(&donePhaseComplete, "phase-complete", false, "Signal phase complete - await gate before continuing")
+	doneCmd.Flags().StringVar(&doneGate, "gate", "", "Gate bead ID to wait on (with --phase-complete)")
 
 	rootCmd.AddCommand(doneCmd)
 }
 
 func runDone(cmd *cobra.Command, args []string) error {
-	// Validate exit status
-	exitType := strings.ToUpper(doneStatus)
-	if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
-		return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneStatus)
+	// Handle --phase-complete flag (overrides --status)
+	var exitType string
+	if donePhaseComplete {
+		exitType = ExitPhaseComplete
+		if doneGate == "" {
+			return fmt.Errorf("--phase-complete requires --gate <gate-id>")
+		}
+	} else {
+		// Validate exit status
+		exitType = strings.ToUpper(doneStatus)
+		if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
+			return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneStatus)
+		}
 	}
 
 	// Find workspace
@@ -235,6 +257,24 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Priority: P%d\n", priority)
 		fmt.Println()
 		fmt.Printf("%s\n", style.Dim.Render("The Refinery will process your merge request."))
+	} else if exitType == ExitPhaseComplete {
+		// Phase complete - register as waiter on gate, then recycle
+		fmt.Printf("%s Phase complete, awaiting gate\n", style.Bold.Render("→"))
+		fmt.Printf("  Gate: %s\n", doneGate)
+		if issueID != "" {
+			fmt.Printf("  Issue: %s\n", issueID)
+		}
+		fmt.Printf("  Branch: %s\n", branch)
+		fmt.Println()
+		fmt.Printf("%s\n", style.Dim.Render("Witness will dispatch new polecat when gate closes."))
+
+		// Register this polecat as a waiter on the gate
+		bd := beads.New(cwd)
+		if err := bd.AddGateWaiter(doneGate, sender); err != nil {
+			style.PrintWarning("could not register as gate waiter: %v", err)
+		} else {
+			fmt.Printf("%s Registered as waiter on gate %s\n", style.Bold.Render("✓"), doneGate)
+		}
 	} else {
 		// For ESCALATED or DEFERRED, just print status
 		fmt.Printf("%s Signaling %s\n", style.Bold.Render("→"), exitType)
@@ -257,6 +297,9 @@ func runDone(cmd *cobra.Command, args []string) error {
 	}
 	if mrID != "" {
 		bodyLines = append(bodyLines, fmt.Sprintf("MR: %s", mrID))
+	}
+	if doneGate != "" {
+		bodyLines = append(bodyLines, fmt.Sprintf("Gate: %s", doneGate))
 	}
 	bodyLines = append(bodyLines, fmt.Sprintf("Branch: %s", branch))
 
@@ -298,6 +341,7 @@ func runDone(cmd *cobra.Command, args []string) error {
 //   - COMPLETED → "done"
 //   - ESCALATED → "stuck"
 //   - DEFERRED → "idle"
+//   - PHASE_COMPLETE → "awaiting-gate"
 //
 // Also self-reports cleanup_status for ZFC compliance (#10).
 func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
@@ -329,6 +373,8 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 		newState = "stuck"
 	case ExitDeferred:
 		newState = "idle"
+	case ExitPhaseComplete:
+		newState = "awaiting-gate"
 	default:
 		return
 	}

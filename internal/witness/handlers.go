@@ -28,6 +28,7 @@ type HandlerResult struct {
 
 // HandlePolecatDone processes a POLECAT_DONE message from a polecat.
 // For ESCALATED/DEFERRED exits (no pending MR), auto-nukes if clean.
+// For PHASE_COMPLETE exits, recycles the polecat (session ends, worktree kept).
 // For exits with pending MR, creates a cleanup wisp to wait for MERGED.
 func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResult {
 	result := &HandlerResult{
@@ -39,6 +40,18 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 	payload, err := ParsePolecatDone(msg.Subject, msg.Body)
 	if err != nil {
 		result.Error = fmt.Errorf("parsing POLECAT_DONE: %w", err)
+		return result
+	}
+
+	// Handle PHASE_COMPLETE: recycle polecat (session ends but worktree stays)
+	// The polecat is registered as a waiter on the gate and will be re-dispatched
+	// when the gate closes via gt gate wake.
+	if payload.Exit == "PHASE_COMPLETE" {
+		result.Handled = true
+		result.Action = fmt.Sprintf("phase-complete for %s (gate=%s) - session recycled, awaiting gate", payload.PolecatName, payload.Gate)
+		// Note: The polecat has already registered itself as a gate waiter via bd
+		// The gate wake mechanism (gt gate wake) will send mail when gate closes
+		// A new polecat will be dispatched to continue the molecule from the next step
 		return result
 	}
 
