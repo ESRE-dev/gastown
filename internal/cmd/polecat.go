@@ -1041,12 +1041,16 @@ func getGitState(worktreePath string) (*GitState, error) {
 	}
 
 	// Check for unpushed commits (git log origin/main..HEAD)
-	logCmd := exec.Command("git", "log", "origin/main..HEAD", "--oneline")
+	// We check commits first, then verify if content differs.
+	// After squash merge, commits may differ but content may be identical.
+	mainRef := "origin/main"
+	logCmd := exec.Command("git", "log", mainRef+"..HEAD", "--oneline")
 	logCmd.Dir = worktreePath
 	output, err = logCmd.Output()
 	if err != nil {
 		// origin/main might not exist - try origin/master
-		logCmd = exec.Command("git", "log", "origin/master..HEAD", "--oneline")
+		mainRef = "origin/master"
+		logCmd = exec.Command("git", "log", mainRef+"..HEAD", "--oneline")
 		logCmd.Dir = worktreePath
 		output, _ = logCmd.Output() // non-fatal: might be a new repo without remote tracking
 	}
@@ -1058,9 +1062,22 @@ func getGitState(worktreePath string) (*GitState, error) {
 				count++
 			}
 		}
-		state.UnpushedCommits = count
 		if count > 0 {
-			state.Clean = false
+			// Commits exist that aren't on main. But after squash merge,
+			// the content may actually be on main with different commit SHAs.
+			// Check if there's any actual diff between HEAD and main.
+			diffCmd := exec.Command("git", "diff", mainRef, "HEAD", "--quiet")
+			diffCmd.Dir = worktreePath
+			diffErr := diffCmd.Run()
+			if diffErr == nil {
+				// Exit code 0 means no diff - content IS on main (squash merged)
+				// Don't count these as unpushed
+				state.UnpushedCommits = 0
+			} else {
+				// Exit code 1 means there's a diff - truly unpushed work
+				state.UnpushedCommits = count
+				state.Clean = false
+			}
 		}
 	}
 
