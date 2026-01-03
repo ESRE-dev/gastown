@@ -471,14 +471,40 @@ func outputStatusText(status TownStatus) error {
 // renderAgentDetails renders full agent bead details
 func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string) {
 	// Line 1: Agent bead ID + status
-	statusStr := style.Success.Render("running")
-	if !agent.Running {
+	// Reconcile bead state with tmux session state to surface mismatches
+	// States: "running" (active), "idle" (waiting), "stopped", "dead", etc.
+	beadState := agent.State
+	sessionExists := agent.Running
+
+	// "idle" is a normal operational state (running but waiting for work)
+	// Treat it the same as "running" for reconciliation purposes
+	beadSaysRunning := beadState == "running" || beadState == "idle" || beadState == ""
+
+	var statusStr string
+	var stateInfo string
+
+	switch {
+	case beadSaysRunning && sessionExists:
+		// Normal running state - session exists and bead agrees
+		statusStr = style.Success.Render("running")
+	case beadSaysRunning && !sessionExists:
+		// Bead thinks running but session is gone - stale bead state
+		statusStr = style.Error.Render("running")
+		stateInfo = style.Warning.Render(" [dead]")
+	case !beadSaysRunning && sessionExists:
+		// Session exists but bead says stopped/dead - mismatch!
+		// This is the key case: tmux says alive, bead says dead/stopped
+		statusStr = style.Success.Render("running")
+		stateInfo = style.Warning.Render(" [bead: " + beadState + "]")
+	default:
+		// Both agree: stopped
 		statusStr = style.Error.Render("stopped")
 	}
 
-	stateInfo := ""
-	if agent.State != "" && agent.State != "idle" && agent.State != "running" {
-		stateInfo = style.Dim.Render(fmt.Sprintf(" [%s]", agent.State))
+	// Add agent state info if not already shown and state is interesting
+	// Skip "idle" and "running" as they're normal operational states
+	if stateInfo == "" && beadState != "" && beadState != "idle" && beadState != "running" {
+		stateInfo = style.Dim.Render(fmt.Sprintf(" [%s]", beadState))
 	}
 
 	// Build agent bead ID using canonical naming: prefix-rig-role-name
