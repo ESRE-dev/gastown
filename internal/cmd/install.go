@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/deps"
+	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
@@ -195,6 +196,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
 			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with hq- prefix)\n")
+
+			// Provision embedded formulas to .beads/formulas/
+			if count, err := formula.ProvisionFormulas(absPath); err != nil {
+				// Non-fatal: formulas are optional, just convenience
+				fmt.Printf("   %s Could not provision formulas: %v\n", style.Dim.Render("⚠"), err)
+			} else if count > 0 {
+				fmt.Printf("   ✓ Provisioned %d formulas\n", count)
+			}
 		}
 
 		// NOTE: Agent beads (gt-deacon, gt-mayor) are created by gt rig add,
