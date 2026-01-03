@@ -348,7 +348,8 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	}
 
 	// Create session
-	if err := d.tmux.NewSession(sessionName, workDir); err != nil {
+	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
+	if err := d.tmux.EnsureSessionFresh(sessionName, workDir); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
 

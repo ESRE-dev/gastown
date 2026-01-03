@@ -277,8 +277,9 @@ func (d *Daemon) ensureDeaconRunning() {
 	d.logger.Println("Deacon not running per agent bead, starting...")
 
 	// Create session in deacon directory (ensures correct CLAUDE.md is loaded)
+	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
 	deaconDir := filepath.Join(d.config.TownRoot, "deacon")
-	if err := d.tmux.NewSession(DeaconSessionName, deaconDir); err != nil {
+	if err := d.tmux.EnsureSessionFresh(DeaconSessionName, deaconDir); err != nil {
 		d.logger.Printf("Error creating Deacon session: %v", err)
 		return
 	}
@@ -374,8 +375,9 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	d.logger.Printf("Witness for %s not running per agent bead, starting...", rigName)
 
 	// Create session in witness directory
+	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
 	witnessDir := filepath.Join(d.config.TownRoot, rigName, "witness")
-	if err := d.tmux.NewSession(sessionName, witnessDir); err != nil {
+	if err := d.tmux.EnsureSessionFresh(sessionName, witnessDir); err != nil {
 		d.logger.Printf("Error creating witness session for %s: %v", rigName, err)
 		return
 	}
@@ -664,7 +666,8 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	d.syncWorkspace(workDir)
 
 	// Create new tmux session
-	if err := d.tmux.NewSession(sessionName, workDir); err != nil {
+	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
+	if err := d.tmux.EnsureSessionFresh(sessionName, workDir); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
