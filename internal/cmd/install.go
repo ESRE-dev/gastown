@@ -224,6 +224,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Provision town-level slash commands (.claude/commands/)
+	// All agents inherit these via Claude's directory traversal - no per-workspace copies needed.
+	if err := templates.ProvisionCommands(absPath); err != nil {
+		fmt.Printf("   %s Could not provision slash commands: %v\n", style.Dim.Render("⚠"), err)
+	} else {
+		fmt.Printf("   ✓ Created .claude/commands/ (slash commands for all agents)\n")
+	}
+
 	// Initialize git if requested (--git or --github implies --git)
 	if installGit || installGitHub != "" {
 		fmt.Println()

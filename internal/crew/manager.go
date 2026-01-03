@@ -11,7 +11,6 @@ import (
 
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -114,12 +113,8 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
-	// Provision .claude/commands/ with standard slash commands (e.g., /handoff)
-	// This ensures crew workers have Gas Town utilities even if source repo lacks them.
-	if err := templates.ProvisionCommands(crewPath); err != nil {
-		// Non-fatal - crew can still work, warn but don't fail
-		fmt.Printf("Warning: could not provision slash commands: %v\n", err)
-	}
+	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
+	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
 	// NOTE: We intentionally do NOT write to CLAUDE.md here.
 	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
