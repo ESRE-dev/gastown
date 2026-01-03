@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/mrqueue"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -273,14 +274,25 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 		})
 	}
 
-	// Sort issues by priority (P0 first, then P1, etc.)
-	sort.Slice(issues, func(i, j int) bool {
-		return issues[i].Priority < issues[j].Priority
+	// Score and sort issues by priority score (highest first)
+	now := time.Now()
+	type scoredIssue struct {
+		issue *beads.Issue
+		score float64
+	}
+	scored := make([]scoredIssue, 0, len(issues))
+	for _, issue := range issues {
+		score := m.calculateIssueScore(issue, now)
+		scored = append(scored, scoredIssue{issue: issue, score: score})
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
 	})
 
-	// Convert beads issues to queue items
-	for _, issue := range issues {
-		mr := m.issueToMR(issue)
+	// Convert scored issues to queue items
+	for _, s := range scored {
+		mr := m.issueToMR(s.issue)
 		if mr != nil {
 			// Skip if this is the currently processing MR
 			if ref.CurrentMR != nil && ref.CurrentMR.ID == mr.ID {
@@ -296,6 +308,39 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	}
 
 	return items, nil
+}
+
+// calculateIssueScore computes the priority score for an MR issue.
+// Higher scores mean higher priority (process first).
+func (m *Manager) calculateIssueScore(issue *beads.Issue, now time.Time) float64 {
+	fields := beads.ParseMRFields(issue)
+
+	// Parse MR creation time
+	mrCreatedAt := parseTime(issue.CreatedAt)
+	if mrCreatedAt.IsZero() {
+		mrCreatedAt = now // Fallback
+	}
+
+	// Build score input
+	input := mrqueue.ScoreInput{
+		Priority:    issue.Priority,
+		MRCreatedAt: mrCreatedAt,
+		Now:         now,
+	}
+
+	// Add fields from MR metadata if available
+	if fields != nil {
+		input.RetryCount = fields.RetryCount
+
+		// Parse convoy created at if available
+		if fields.ConvoyCreatedAt != "" {
+			if convoyTime := parseTime(fields.ConvoyCreatedAt); !convoyTime.IsZero() {
+				input.ConvoyCreatedAt = &convoyTime
+			}
+		}
+	}
+
+	return mrqueue.ScoreMRWithDefaults(input)
 }
 
 // issueToMR converts a beads issue to a MergeRequest.
