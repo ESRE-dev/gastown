@@ -65,6 +65,7 @@ var (
 	convoyListJSON    bool
 	convoyListStatus  string
 	convoyListAll     bool
+	convoyListTree    bool
 	convoyInteractive bool
 )
 
@@ -144,6 +145,7 @@ Examples:
   gt convoy list              # Open convoys only (default)
   gt convoy list --all        # All convoys (open + closed)
   gt convoy list --status=closed  # Recently landed
+  gt convoy list --tree       # Show convoy + child status tree
   gt convoy list --json`,
 	RunE: runConvoyList,
 }
@@ -187,6 +189,7 @@ func init() {
 	convoyListCmd.Flags().BoolVar(&convoyListJSON, "json", false, "Output as JSON")
 	convoyListCmd.Flags().StringVar(&convoyListStatus, "status", "", "Filter by status (open, closed)")
 	convoyListCmd.Flags().BoolVar(&convoyListAll, "all", false, "Show all convoys (open and closed)")
+	convoyListCmd.Flags().BoolVar(&convoyListTree, "tree", false, "Show convoy + child status tree")
 
 	// Interactive TUI flag (on parent command)
 	convoyCmd.Flags().BoolVarP(&convoyInteractive, "interactive", "i", false, "Interactive tree view")
@@ -729,12 +732,72 @@ func runConvoyList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Tree view: show convoys with their child issues
+	if convoyListTree {
+		return printConvoyTree(townBeads, convoys)
+	}
+
 	fmt.Printf("%s\n\n", style.Bold.Render("Convoys"))
 	for i, c := range convoys {
 		status := formatConvoyStatus(c.Status)
 		fmt.Printf("  %d. 🚚 %s: %s %s\n", i+1, c.ID, c.Title, status)
 	}
 	fmt.Printf("\nUse 'gt convoy status <id>' or 'gt convoy status <n>' for detailed view.\n")
+
+	return nil
+}
+
+// printConvoyTree displays convoys with their child issues in a tree format.
+func printConvoyTree(townBeads string, convoys []struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+}) error {
+	for _, c := range convoys {
+		// Get tracked issues for this convoy
+		tracked := getTrackedIssues(townBeads, c.ID)
+
+		// Count completed
+		completed := 0
+		for _, t := range tracked {
+			if t.Status == "closed" {
+				completed++
+			}
+		}
+
+		// Print convoy header with progress
+		total := len(tracked)
+		progress := ""
+		if total > 0 {
+			progress = fmt.Sprintf(" (%d/%d)", completed, total)
+		}
+		fmt.Printf("🚚 %s: %s%s\n", c.ID, c.Title, progress)
+
+		// Print tracked issues as tree children
+		for i, t := range tracked {
+			// Determine tree connector
+			isLast := i == len(tracked)-1
+			connector := "├──"
+			if isLast {
+				connector = "└──"
+			}
+
+			// Status symbol: ✓ closed, ▶ in_progress/hooked, ○ other
+			status := "○"
+			switch t.Status {
+			case "closed":
+				status = "✓"
+			case "in_progress", "hooked":
+				status = "▶"
+			}
+
+			fmt.Printf("%s %s %s: %s\n", connector, status, t.ID, t.Title)
+		}
+
+		// Add blank line between convoys
+		fmt.Println()
+	}
 
 	return nil
 }
