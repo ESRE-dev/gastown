@@ -117,15 +117,9 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 	// Determine current rig
 	rigName := detectCurrentRig()
 
-	// Get town name for session name comparison
-	var mayorSession, deaconSession string
-	townRoot, err := workspace.FindFromCwd()
-	if err == nil && townRoot != "" {
-		if townName, err := workspace.GetTownName(townRoot); err == nil {
-			mayorSession = session.MayorSessionName(townName)
-			deaconSession = session.DeaconSessionName(townName)
-		}
-	}
+	// Get session names for comparison
+	mayorSession := session.MayorSessionName()
+	deaconSession := session.DeaconSessionName()
 
 	// Apply to matching sessions
 	applied := 0

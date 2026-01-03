@@ -22,7 +22,6 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Daemon is the town-level background service.
@@ -198,13 +197,7 @@ const DeaconRole = "deacon"
 
 // getDeaconSessionName returns the Deacon session name for the daemon's town.
 func (d *Daemon) getDeaconSessionName() string {
-	townName, err := workspace.GetTownName(d.config.TownRoot)
-	if err != nil {
-		// Fallback to legacy name if town config can't be loaded
-		d.logger.Printf("Warning: failed to get town name: %v, using fallback", err)
-		return "gt-deacon"
-	}
-	return session.DeaconSessionName(townName)
+	return session.DeaconSessionName()
 }
 
 // ensureBootRunning spawns Boot to triage the Deacon.

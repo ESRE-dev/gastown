@@ -261,8 +261,8 @@ func createMayorCLAUDEmd(hqRoot, townRoot string) error {
 		TownRoot:      townRoot,
 		TownName:      townName,
 		WorkDir:       hqRoot,
-		MayorSession:  session.MayorSessionName(townName),
-		DeaconSession: session.DeaconSessionName(townName),
+		MayorSession:  session.MayorSessionName(),
+		DeaconSession: session.DeaconSessionName(),
 	}
 
 	content, err := tmpl.RenderRole("mayor", data)

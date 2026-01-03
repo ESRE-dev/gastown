@@ -21,7 +21,6 @@ const (
 // AgentIdentity represents a parsed Gas Town agent identity.
 type AgentIdentity struct {
 	Role Role   // mayor, deacon, witness, refinery, crew, polecat
-	Town string // town name (for mayor/deacon only)
 	Rig  string // rig name (empty for mayor/deacon)
 	Name string // crew/polecat name (empty for mayor/deacon/witness/refinery)
 }
@@ -29,8 +28,8 @@ type AgentIdentity struct {
 // ParseSessionName parses a tmux session name into an AgentIdentity.
 //
 // Session name formats:
-//   - gt-<town>-mayor → Role: mayor, Town: <town>
-//   - gt-<town>-deacon → Role: deacon, Town: <town>
+//   - gt-mayor → Role: mayor (one per machine)
+//   - gt-deacon → Role: deacon (one per machine)
 //   - gt-<rig>-witness → Role: witness, Rig: <rig>
 //   - gt-<rig>-refinery → Role: refinery, Rig: <rig>
 //   - gt-<rig>-crew-<name> → Role: crew, Rig: <rig>, Name: <name>
@@ -49,20 +48,18 @@ func ParseSessionName(session string) (*AgentIdentity, error) {
 		return nil, fmt.Errorf("invalid session name %q: empty after prefix", session)
 	}
 
-	// Parse into parts
-	parts := strings.Split(suffix, "-")
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid session name %q: expected town-role or rig-role format", session)
+	// Check for simple town-level roles (no rig qualifier)
+	if suffix == "mayor" {
+		return &AgentIdentity{Role: RoleMayor}, nil
+	}
+	if suffix == "deacon" {
+		return &AgentIdentity{Role: RoleDeacon}, nil
 	}
 
-	// Check for mayor/deacon (town-level roles with suffix marker)
-	if parts[len(parts)-1] == "mayor" {
-		town := strings.Join(parts[:len(parts)-1], "-")
-		return &AgentIdentity{Role: RoleMayor, Town: town}, nil
-	}
-	if parts[len(parts)-1] == "deacon" {
-		town := strings.Join(parts[:len(parts)-1], "-")
-		return &AgentIdentity{Role: RoleDeacon, Town: town}, nil
+	// Parse into parts for rig-level roles
+	parts := strings.Split(suffix, "-")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid session name %q: expected rig-role format", session)
 	}
 
 	// Check for witness/refinery (suffix markers)
@@ -97,9 +94,9 @@ func ParseSessionName(session string) (*AgentIdentity, error) {
 func (a *AgentIdentity) SessionName() string {
 	switch a.Role {
 	case RoleMayor:
-		return MayorSessionName(a.Town)
+		return MayorSessionName()
 	case RoleDeacon:
-		return DeaconSessionName(a.Town)
+		return DeaconSessionName()
 	case RoleWitness:
 		return WitnessSessionName(a.Rig)
 	case RoleRefinery:

@@ -10,7 +10,6 @@ import (
 
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // OrphanSessionCheck detects orphaned tmux sessions that don't match
@@ -57,12 +56,9 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 	// Get list of valid rigs
 	validRigs := c.getValidRigs(ctx.TownRoot)
 
-	// Get dynamic session names for mayor/deacon
-	var mayorSession, deaconSession string
-	if townName, err := workspace.GetTownName(ctx.TownRoot); err == nil {
-		mayorSession = session.MayorSessionName(townName)
-		deaconSession = session.DeaconSessionName(townName)
-	}
+	// Get session names for mayor/deacon
+	mayorSession := session.MayorSessionName()
+	deaconSession := session.DeaconSessionName()
 
 	// Check each session
 	var orphans []string

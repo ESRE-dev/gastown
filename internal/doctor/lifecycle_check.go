@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/session"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // LifecycleHygieneCheck detects and cleans up stale lifecycle state.
@@ -243,12 +242,7 @@ func (c *LifecycleHygieneCheck) isSessionHealthy(identity, townRoot string) bool
 func identityToSessionName(identity, townRoot string) string {
 	switch identity {
 	case "mayor":
-		if townRoot != "" {
-			if townName, err := workspace.GetTownName(townRoot); err == nil {
-				return session.MayorSessionName(townName)
-			}
-		}
-		return "" // Cannot generate session name without town root
+		return session.MayorSessionName()
 	default:
 		if strings.HasSuffix(identity, "-witness") ||
 			strings.HasSuffix(identity, "-refinery") ||

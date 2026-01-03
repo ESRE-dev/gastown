@@ -120,17 +120,11 @@ func runNudge(cmd *cobra.Command, args []string) error {
 
 	t := tmux.NewTmux()
 
-	// Get session names for this town
-	townName := ""
-	if townRoot != "" {
-		townName, _ = workspace.GetTownName(townRoot)
-	}
-
 	// Expand role shortcuts to session names
-	// These shortcuts let users type "mayor" instead of "gt-{town}-mayor"
+	// These shortcuts let users type "mayor" instead of "gt-mayor"
 	switch target {
 	case "mayor":
-		target = session.MayorSessionName(townName)
+		target = session.MayorSessionName()
 	case "witness", "refinery":
 		// These need the current rig
 		roleInfo, err := GetRole()
@@ -149,7 +143,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 
 	// Special case: "deacon" target maps to the Deacon session
 	if target == "deacon" {
-		deaconSession := session.DeaconSessionName(townName)
+		deaconSession := session.DeaconSessionName()
 		// Check if Deacon session exists
 		exists, err := t.HasSession(deaconSession)
 		if err != nil {
@@ -286,9 +280,6 @@ func runNudgeChannel(channelName, message string) error {
 	// Prefix message with sender
 	prefixedMessage := fmt.Sprintf("[from %s] %s", sender, message)
 
-	// Get town name for session names
-	townName, _ := workspace.GetTownName(townRoot)
-
 	// Get all running sessions for pattern matching
 	agents, err := getAgentSessions(true)
 	if err != nil {
@@ -300,7 +291,7 @@ func runNudgeChannel(channelName, message string) error {
 	seenTargets := make(map[string]bool)
 
 	for _, pattern := range patterns {
-		resolved := resolveNudgePattern(pattern, agents, townName)
+		resolved := resolveNudgePattern(pattern, agents)
 		for _, sessionName := range resolved {
 			if !seenTargets[sessionName] {
 				seenTargets[sessionName] = true
@@ -362,15 +353,15 @@ func runNudgeChannel(channelName, message string) error {
 //   - Role: "*/witness" → all witness sessions
 //   - Special: "mayor", "deacon" → gt-{town}-mayor, gt-{town}-deacon
 // townName is used to generate the correct session names for mayor/deacon.
-func resolveNudgePattern(pattern string, agents []*AgentSession, townName string) []string {
+func resolveNudgePattern(pattern string, agents []*AgentSession) []string {
 	var results []string
 
 	// Handle special cases
 	switch pattern {
 	case "mayor":
-		return []string{session.MayorSessionName(townName)}
+		return []string{session.MayorSessionName()}
 	case "deacon":
-		return []string{session.DeaconSessionName(townName)}
+		return []string{session.DeaconSessionName()}
 	}
 
 	// Parse pattern
@@ -438,11 +429,8 @@ func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string
 		return true, "", nil
 	}
 
-	// Get town name for session name generation
-	townName, _ := workspace.GetTownName(townRoot)
-
 	// Try to determine agent bead ID from address
-	agentBeadID := addressToAgentBeadID(targetAddress, townName)
+	agentBeadID := addressToAgentBeadID(targetAddress)
 	if agentBeadID == "" {
 		// Can't determine agent bead, allow the nudge
 		return true, "", nil
@@ -467,13 +455,13 @@ func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string
 //   - "gastown/alpha" -> "gt-gastown-polecat-alpha"
 //
 // Returns empty string if the address cannot be converted.
-func addressToAgentBeadID(address, townName string) string {
+func addressToAgentBeadID(address string) string {
 	// Handle special cases
 	switch address {
 	case "mayor":
-		return session.MayorSessionName(townName)
+		return session.MayorSessionName()
 	case "deacon":
-		return session.DeaconSessionName(townName)
+		return session.DeaconSessionName()
 	}
 
 	// Parse rig/role format

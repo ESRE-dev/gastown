@@ -14,18 +14,9 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-// getMayorSessionName returns the Mayor session name for the current workspace.
-// The session name includes the town name to avoid collisions between multiple HQs.
+// getMayorSessionName returns the Mayor session name.
 func getMayorSessionName() (string, error) {
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return "", fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-	townName, err := workspace.GetTownName(townRoot)
-	if err != nil {
-		return "", err
-	}
-	return session.MayorSessionName(townName), nil
+	return session.MayorSessionName(), nil
 }
 
 var mayorCmd = &cobra.Command{

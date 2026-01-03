@@ -315,8 +315,8 @@ func outputPrimeContext(ctx RoleContext) error {
 		TownName:      townName,
 		WorkDir:       ctx.WorkDir,
 		Polecat:       ctx.Polecat,
-		MayorSession:  session.MayorSessionName(townName),
-		DeaconSession: session.DeaconSessionName(townName),
+		MayorSession:  session.MayorSessionName(),
+		DeaconSession: session.DeaconSessionName(),
 	}
 
 	// Render and output

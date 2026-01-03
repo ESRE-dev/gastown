@@ -14,7 +14,6 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // BeadsMessage represents a message from gt mail inbox --json.
@@ -313,15 +312,9 @@ func (d *Daemon) identityToSession(identity string) string {
 	// Fallback: use default patterns based on role type
 	switch parsed.RoleType {
 	case "mayor":
-		if townName, err := workspace.GetTownName(d.config.TownRoot); err == nil {
-			return session.MayorSessionName(townName)
-		}
-		return ""
+		return session.MayorSessionName()
 	case "deacon":
-		if townName, err := workspace.GetTownName(d.config.TownRoot); err == nil {
-			return session.DeaconSessionName(townName)
-		}
-		return ""
+		return session.DeaconSessionName()
 	case "witness", "refinery":
 		return fmt.Sprintf("gt-%s-%s", parsed.RigName, parsed.RoleType)
 	case "crew":

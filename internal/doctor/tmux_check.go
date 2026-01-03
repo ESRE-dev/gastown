@@ -7,7 +7,6 @@ import (
 
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // LinkedPaneCheck detects tmux sessions that share panes,
@@ -86,11 +85,7 @@ func (c *LinkedPaneCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Cache for Fix (exclude mayor session since we don't want to kill it)
-	// Get dynamic mayor session name
-	var mayorSession string
-	if townName, err := workspace.GetTownName(ctx.TownRoot); err == nil {
-		mayorSession = session.MayorSessionName(townName)
-	}
+	mayorSession := session.MayorSessionName()
 
 	c.linkedSessions = nil
 	for sess := range linkedSessionSet {

@@ -90,8 +90,8 @@ const (
 )
 
 // Tmux session names.
-// Note: Mayor and Deacon session names are now dynamic (include town name).
-// Use session.MayorSessionName(townName) and session.DeaconSessionName(townName).
+// Mayor and Deacon use simple session names: gt-mayor, gt-deacon (one per machine).
+// Use session.MayorSessionName() and session.DeaconSessionName().
 const (
 	// SessionPrefix is the prefix for all Gas Town tmux sessions.
 	SessionPrefix = "gt-"

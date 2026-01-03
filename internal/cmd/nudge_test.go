@@ -5,10 +5,10 @@ import (
 )
 
 func TestResolveNudgePattern(t *testing.T) {
-	// Create test agent sessions
+	// Create test agent sessions (no Town field for mayor/deacon anymore)
 	agents := []*AgentSession{
-		{Name: "gt-ai-mayor", Type: AgentMayor, Town: "ai"},
-		{Name: "gt-ai-deacon", Type: AgentDeacon, Town: "ai"},
+		{Name: "gt-mayor", Type: AgentMayor},
+		{Name: "gt-deacon", Type: AgentDeacon},
 		{Name: "gt-gastown-witness", Type: AgentWitness, Rig: "gastown"},
 		{Name: "gt-gastown-refinery", Type: AgentRefinery, Rig: "gastown"},
 		{Name: "gt-gastown-crew-max", Type: AgentCrew, Rig: "gastown", AgentName: "max"},
@@ -27,12 +27,12 @@ func TestResolveNudgePattern(t *testing.T) {
 		{
 			name:     "mayor special case",
 			pattern:  "mayor",
-			expected: []string{"gt-ai-mayor"},
+			expected: []string{"gt-mayor"},
 		},
 		{
 			name:     "deacon special case",
 			pattern:  "deacon",
-			expected: []string{"gt-ai-deacon"},
+			expected: []string{"gt-deacon"},
 		},
 		{
 			name:     "specific witness",
@@ -86,10 +86,9 @@ func TestResolveNudgePattern(t *testing.T) {
 		},
 	}
 
-	townName := "ai"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveNudgePattern(tt.pattern, agents, townName)
+			got := resolveNudgePattern(tt.pattern, agents)
 
 			if len(got) != len(tt.expected) {
 				t.Errorf("resolveNudgePattern(%q) returned %d results, want %d: got %v, want %v",

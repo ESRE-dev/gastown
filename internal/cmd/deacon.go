@@ -21,18 +21,9 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-// getDeaconSessionName returns the Deacon session name for the current workspace.
-// The session name includes the town name to avoid collisions between multiple HQs.
+// getDeaconSessionName returns the Deacon session name.
 func getDeaconSessionName() (string, error) {
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return "", fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-	townName, err := workspace.GetTownName(townRoot)
-	if err != nil {
-		return "", err
-	}
-	return session.DeaconSessionName(townName), nil
+	return session.DeaconSessionName(), nil
 }
 
 var deaconCmd = &cobra.Command{
@@ -673,14 +664,8 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Get town name for session name generation
-	townName, err := workspace.GetTownName(townRoot)
-	if err != nil {
-		return fmt.Errorf("getting town name: %w", err)
-	}
-
 	// Get agent bead info before ping (for baseline)
-	beadID, sessionName, err := agentAddressToIDs(agent, townName)
+	beadID, sessionName, err := agentAddressToIDs(agent)
 	if err != nil {
 		return fmt.Errorf("invalid agent address: %w", err)
 	}
@@ -787,14 +772,8 @@ func runDeaconForceKill(cmd *cobra.Command, args []string) error {
 			agent, remaining.Round(time.Second))
 	}
 
-	// Get town name for session name generation
-	townName, err := workspace.GetTownName(townRoot)
-	if err != nil {
-		return fmt.Errorf("getting town name: %w", err)
-	}
-
 	// Get session name
-	_, sessionName, err := agentAddressToIDs(agent, townName)
+	_, sessionName, err := agentAddressToIDs(agent)
 	if err != nil {
 		return fmt.Errorf("invalid agent address: %w", err)
 	}
@@ -1154,14 +1133,13 @@ func notifyMayorOfWitnessFailure(townRoot string, zombies []zombieInfo) {
 
 // agentAddressToIDs converts an agent address to bead ID and session name.
 // Supports formats: "gastown/polecats/max", "gastown/witness", "deacon", "mayor"
-// The townName parameter is required for mayor/deacon to generate correct session names.
-func agentAddressToIDs(address, townName string) (beadID, sessionName string, err error) {
+func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 	switch address {
 	case "deacon":
-		sessName := session.DeaconSessionName(townName)
+		sessName := session.DeaconSessionName()
 		return sessName, sessName, nil
 	case "mayor":
-		sessName := session.MayorSessionName(townName)
+		sessName := session.MayorSessionName()
 		return sessName, sessName, nil
 	}
 
@@ -1227,11 +1205,7 @@ func sendMail(townRoot, to, subject, body string) {
 
 // updateAgentBeadState updates an agent bead's state.
 func updateAgentBeadState(townRoot, agent, state, reason string) {
-	townName, err := workspace.GetTownName(townRoot)
-	if err != nil {
-		return
-	}
-	beadID, _, err := agentAddressToIDs(agent, townName)
+	beadID, _, err := agentAddressToIDs(agent)
 	if err != nil {
 		return
 	}

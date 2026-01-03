@@ -6,38 +6,23 @@ import (
 
 func TestParseSessionName(t *testing.T) {
 	tests := []struct {
-		name        string
-		session     string
-		wantRole    Role
-		wantTown    string
-		wantRig     string
-		wantName    string
-		wantErr     bool
+		name     string
+		session  string
+		wantRole Role
+		wantRig  string
+		wantName string
+		wantErr  bool
 	}{
-		// Town-level roles (mayor/deacon with town name)
+		// Town-level roles (simple gt-mayor, gt-deacon)
 		{
-			name:     "mayor simple town",
-			session:  "gt-ai-mayor",
+			name:     "mayor",
+			session:  "gt-mayor",
 			wantRole: RoleMayor,
-			wantTown: "ai",
 		},
 		{
-			name:     "mayor hyphenated town",
-			session:  "gt-my-town-mayor",
-			wantRole: RoleMayor,
-			wantTown: "my-town",
-		},
-		{
-			name:     "deacon simple town",
-			session:  "gt-alpha-deacon",
+			name:     "deacon",
+			session:  "gt-deacon",
 			wantRole: RoleDeacon,
-			wantTown: "alpha",
-		},
-		{
-			name:     "deacon hyphenated town",
-			session:  "gt-my-town-deacon",
-			wantRole: RoleDeacon,
-			wantTown: "my-town",
 		},
 
 		// Witness (simple rig)
@@ -138,9 +123,6 @@ func TestParseSessionName(t *testing.T) {
 			if got.Role != tt.wantRole {
 				t.Errorf("ParseSessionName(%q).Role = %v, want %v", tt.session, got.Role, tt.wantRole)
 			}
-			if got.Town != tt.wantTown {
-				t.Errorf("ParseSessionName(%q).Town = %v, want %v", tt.session, got.Town, tt.wantTown)
-			}
 			if got.Rig != tt.wantRig {
 				t.Errorf("ParseSessionName(%q).Rig = %v, want %v", tt.session, got.Rig, tt.wantRig)
 			}
@@ -158,19 +140,14 @@ func TestAgentIdentity_SessionName(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "mayor with town",
-			identity: AgentIdentity{Role: RoleMayor, Town: "ai"},
-			want:     "gt-ai-mayor",
+			name:     "mayor",
+			identity: AgentIdentity{Role: RoleMayor},
+			want:     "gt-mayor",
 		},
 		{
-			name:     "mayor hyphenated town",
-			identity: AgentIdentity{Role: RoleMayor, Town: "my-town"},
-			want:     "gt-my-town-mayor",
-		},
-		{
-			name:     "deacon with town",
-			identity: AgentIdentity{Role: RoleDeacon, Town: "alpha"},
-			want:     "gt-alpha-deacon",
+			name:     "deacon",
+			identity: AgentIdentity{Role: RoleDeacon},
+			want:     "gt-deacon",
 		},
 		{
 			name:     "witness",
@@ -253,8 +230,8 @@ func TestAgentIdentity_Address(t *testing.T) {
 func TestParseSessionName_RoundTrip(t *testing.T) {
 	// Test that parsing then reconstructing gives the same result
 	sessions := []string{
-		"gt-ai-mayor",
-		"gt-alpha-deacon",
+		"gt-mayor",
+		"gt-deacon",
 		"gt-gastown-witness",
 		"gt-foo-bar-refinery",
 		"gt-gastown-crew-max",

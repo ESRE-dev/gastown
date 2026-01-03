@@ -184,9 +184,10 @@ func TestIdentityToSession_Mayor(t *testing.T) {
 	d, cleanup := testDaemonWithTown(t, "ai")
 	defer cleanup()
 
+	// Mayor session name is now fixed (one per machine, no town qualifier)
 	result := d.identityToSession("mayor")
-	if result != "gt-ai-mayor" {
-		t.Errorf("identityToSession('mayor') = %q, expected 'gt-ai-mayor'", result)
+	if result != "gt-mayor" {
+		t.Errorf("identityToSession('mayor') = %q, expected 'gt-mayor'", result)
 	}
 }
 
