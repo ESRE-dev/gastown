@@ -59,14 +59,15 @@ func looksLikeIssueID(s string) bool {
 
 // Convoy command flags
 var (
-	convoyMolecule    string
-	convoyNotify      string
-	convoyStatusJSON  bool
-	convoyListJSON    bool
-	convoyListStatus  string
-	convoyListAll     bool
-	convoyListTree    bool
-	convoyInteractive bool
+	convoyMolecule     string
+	convoyNotify       string
+	convoyStatusJSON   bool
+	convoyListJSON     bool
+	convoyListStatus   string
+	convoyListAll      bool
+	convoyListTree     bool
+	convoyInteractive  bool
+	convoyStrandedJSON bool
 )
 
 var convoyCmd = &cobra.Command{
@@ -176,6 +177,27 @@ Can be run manually or by deacon patrol to ensure convoys close promptly.`,
 	RunE: runConvoyCheck,
 }
 
+var convoyStrandedCmd = &cobra.Command{
+	Use:   "stranded",
+	Short: "Find stranded convoys with ready work but no workers",
+	Long: `Find convoys that have ready issues but no workers processing them.
+
+A convoy is "stranded" when:
+- Convoy is open
+- Has tracked issues where:
+  - status = open (not in_progress, not closed)
+  - not blocked (all dependencies met)
+  - no assignee OR assignee session is dead
+
+Use this to detect convoys that need feeding. The Deacon patrol runs this
+periodically and dispatches dogs to feed stranded convoys.
+
+Examples:
+  gt convoy stranded              # Show stranded convoys
+  gt convoy stranded --json       # Machine-readable output for automation`,
+	RunE: runConvoyStranded,
+}
+
 func init() {
 	// Create flags
 	convoyCreateCmd.Flags().StringVar(&convoyMolecule, "molecule", "", "Associated molecule ID")
@@ -194,12 +216,16 @@ func init() {
 	// Interactive TUI flag (on parent command)
 	convoyCmd.Flags().BoolVarP(&convoyInteractive, "interactive", "i", false, "Interactive tree view")
 
+	// Stranded flags
+	convoyStrandedCmd.Flags().BoolVar(&convoyStrandedJSON, "json", false, "Output as JSON")
+
 	// Add subcommands
 	convoyCmd.AddCommand(convoyCreateCmd)
 	convoyCmd.AddCommand(convoyStatusCmd)
 	convoyCmd.AddCommand(convoyListCmd)
 	convoyCmd.AddCommand(convoyAddCmd)
 	convoyCmd.AddCommand(convoyCheckCmd)
+	convoyCmd.AddCommand(convoyStrandedCmd)
 
 	rootCmd.AddCommand(convoyCmd)
 }
@@ -403,6 +429,179 @@ func runConvoyCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// strandedConvoyInfo holds info about a stranded convoy.
+type strandedConvoyInfo struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	ReadyCount  int      `json:"ready_count"`
+	ReadyIssues []string `json:"ready_issues"`
+}
+
+// readyIssueInfo holds info about a ready (stranded) issue.
+type readyIssueInfo struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Priority string `json:"priority"`
+}
+
+func runConvoyStranded(cmd *cobra.Command, args []string) error {
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return err
+	}
+
+	stranded, err := findStrandedConvoys(townBeads)
+	if err != nil {
+		return err
+	}
+
+	if convoyStrandedJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(stranded)
+	}
+
+	if len(stranded) == 0 {
+		fmt.Println("No stranded convoys found.")
+		return nil
+	}
+
+	fmt.Printf("%s Found %d stranded convoy(s):\n\n", style.Warning.Render("⚠"), len(stranded))
+	for _, s := range stranded {
+		fmt.Printf("  🚚 %s: %s\n", s.ID, s.Title)
+		fmt.Printf("     Ready issues: %d\n", s.ReadyCount)
+		for _, issueID := range s.ReadyIssues {
+			fmt.Printf("       • %s\n", issueID)
+		}
+		fmt.Println()
+	}
+
+	fmt.Println("To feed stranded convoys, run:")
+	for _, s := range stranded {
+		fmt.Printf("  gt sling mol-convoy-feed deacon/dogs --var convoy=%s\n", s.ID)
+	}
+
+	return nil
+}
+
+// findStrandedConvoys finds convoys with ready work but no workers.
+func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
+	var stranded []strandedConvoyInfo
+
+	// Get blocked issues (we need this to filter out blocked issues)
+	blockedIssues := getBlockedIssueIDs()
+
+	// List all open convoys
+	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
+	listCmd := exec.Command("bd", listArgs...)
+	listCmd.Dir = townBeads
+	var stdout bytes.Buffer
+	listCmd.Stdout = &stdout
+
+	if err := listCmd.Run(); err != nil {
+		return nil, fmt.Errorf("listing convoys: %w", err)
+	}
+
+	var convoys []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil {
+		return nil, fmt.Errorf("parsing convoy list: %w", err)
+	}
+
+	// Check each convoy for stranded state
+	for _, convoy := range convoys {
+		tracked := getTrackedIssues(townBeads, convoy.ID)
+		if len(tracked) == 0 {
+			continue
+		}
+
+		// Find ready issues (open, not blocked, no live assignee)
+		var readyIssues []string
+		for _, t := range tracked {
+			if isReadyIssue(t, blockedIssues) {
+				readyIssues = append(readyIssues, t.ID)
+			}
+		}
+
+		if len(readyIssues) > 0 {
+			stranded = append(stranded, strandedConvoyInfo{
+				ID:          convoy.ID,
+				Title:       convoy.Title,
+				ReadyCount:  len(readyIssues),
+				ReadyIssues: readyIssues,
+			})
+		}
+	}
+
+	return stranded, nil
+}
+
+// getBlockedIssueIDs returns a set of issue IDs that are currently blocked.
+func getBlockedIssueIDs() map[string]bool {
+	blocked := make(map[string]bool)
+
+	// Run bd blocked --json
+	blockedCmd := exec.Command("bd", "blocked", "--json")
+	var stdout bytes.Buffer
+	blockedCmd.Stdout = &stdout
+
+	if err := blockedCmd.Run(); err != nil {
+		return blocked // Return empty set on error
+	}
+
+	var issues []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return blocked
+	}
+
+	for _, issue := range issues {
+		blocked[issue.ID] = true
+	}
+
+	return blocked
+}
+
+// isReadyIssue checks if an issue is ready for dispatch (stranded).
+// An issue is ready if:
+// - status = "open" (not in_progress, closed, hooked)
+// - not in blocked set
+// - no assignee OR assignee session is dead
+func isReadyIssue(t trackedIssueInfo, blockedIssues map[string]bool) bool {
+	// Must be open status (not in_progress, closed, hooked)
+	if t.Status != "open" {
+		return false
+	}
+
+	// Must not be blocked
+	if blockedIssues[t.ID] {
+		return false
+	}
+
+	// Check assignee
+	if t.Assignee == "" {
+		return true // No assignee = ready
+	}
+
+	// Has assignee - check if session is alive
+	// Use the shared assigneeToSessionName from rig.go
+	sessionName, _ := assigneeToSessionName(t.Assignee)
+	if sessionName == "" {
+		return true // Can't determine session = treat as ready
+	}
+
+	// Check if tmux session exists
+	checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
+	if err := checkCmd.Run(); err != nil {
+		return true // Session doesn't exist = ready
+	}
+
+	return false // Session exists = not ready (worker is active)
 }
 
 // checkAndCloseCompletedConvoys finds open convoys where all tracked issues are closed
