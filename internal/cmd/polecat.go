@@ -90,71 +90,6 @@ Examples:
 	RunE: runPolecatRemove,
 }
 
-var polecatWakeCmd = &cobra.Command{
-	Use:   "wake <rig>/<polecat>",
-	Short: "(Deprecated) Resume a polecat to working state",
-	Long: `Resume a polecat to working state.
-
-DEPRECATED: In the transient model, polecats are created fresh for each task
-via 'gt sling'. This command is kept for backward compatibility.
-
-Transitions: done → working
-
-Example:
-  gt polecat wake greenplace/Toast`,
-	Args: cobra.ExactArgs(1),
-	RunE: runPolecatWake,
-}
-
-var polecatSleepCmd = &cobra.Command{
-	Use:   "sleep <rig>/<polecat>",
-	Short: "(Deprecated) Mark polecat as done",
-	Long: `Mark polecat as done.
-
-DEPRECATED: In the transient model, polecats use 'gt handoff' when complete,
-which triggers automatic cleanup by the Witness. This command is kept for
-backward compatibility.
-
-Transitions: working → done
-
-Example:
-  gt polecat sleep greenplace/Toast`,
-	Args: cobra.ExactArgs(1),
-	RunE: runPolecatSleep,
-}
-
-var polecatDoneCmd = &cobra.Command{
-	Use:     "done <rig>/<polecat>",
-	Aliases: []string{"finish"},
-	Short:   "Mark polecat as done with work and return to idle",
-	Long: `Mark polecat as done with work and return to idle.
-
-Transitions: working/done/stuck → idle
-Clears the assigned issue.
-Fails if session is running (stop first).
-
-Example:
-  gt polecat done greenplace/Toast
-  gt polecat finish greenplace/Toast`,
-	Args: cobra.ExactArgs(1),
-	RunE: runPolecatDone,
-}
-
-var polecatResetCmd = &cobra.Command{
-	Use:   "reset <rig>/<polecat>",
-	Short: "Force reset polecat to idle state",
-	Long: `Force reset polecat to idle state.
-
-Transitions: any state → idle
-Clears the assigned issue.
-Use when polecat is stuck in an unexpected state.
-Fails if session is running (stop first).
-
-Example:
-  gt polecat reset greenplace/Toast`,
-	Args: cobra.ExactArgs(1),
-	RunE: runPolecatReset,
-}
 
 var polecatSyncCmd = &cobra.Command{
 	Use:   "sync <rig>/<polecat>",
@@ -328,10 +263,6 @@ func init() {
 	polecatCmd.AddCommand(polecatListCmd)
 	polecatCmd.AddCommand(polecatAddCmd)
 	polecatCmd.AddCommand(polecatRemoveCmd)
-	polecatCmd.AddCommand(polecatWakeCmd)
-	polecatCmd.AddCommand(polecatSleepCmd)
-	polecatCmd.AddCommand(polecatDoneCmd)
-	polecatCmd.AddCommand(polecatResetCmd)
 	polecatCmd.AddCommand(polecatSyncCmd)
 	polecatCmd.AddCommand(polecatStatusCmd)
 	polecatCmd.AddCommand(polecatGitStateCmd)
@@ -596,112 +527,6 @@ func runPolecatRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%d removal(s) failed", len(removeErrors))
 	}
 
-	return nil
-}
-
-func runPolecatWake(cmd *cobra.Command, args []string) error {
-	fmt.Println(style.Warning.Render("DEPRECATED: Use 'gt sling' to create fresh polecats instead"))
-	fmt.Println()
-
-	rigName, polecatName, err := parseAddress(args[0])
-	if err != nil {
-		return err
-	}
-
-	mgr, _, err := getPolecatManager(rigName)
-	if err != nil {
-		return err
-	}
-
-	if err := mgr.Wake(polecatName); err != nil {
-		return fmt.Errorf("waking polecat: %w", err)
-	}
-
-	fmt.Printf("%s Polecat %s is now working.\n", style.SuccessPrefix, polecatName)
-	return nil
-}
-
-func runPolecatSleep(cmd *cobra.Command, args []string) error {
-	fmt.Println(style.Warning.Render("DEPRECATED: Use 'gt handoff' from within a polecat session instead"))
-	fmt.Println()
-
-	rigName, polecatName, err := parseAddress(args[0])
-	if err != nil {
-		return err
-	}
-
-	mgr, r, err := getPolecatManager(rigName)
-	if err != nil {
-		return err
-	}
-
-	// Check if session is running
-	t := tmux.NewTmux()
-	sessMgr := session.NewManager(t, r)
-	running, _ := sessMgr.IsRunning(polecatName)
-	if running {
-		return fmt.Errorf("session is running. Use 'gt handoff' from the polecat session, or stop it with: gt session stop %s/%s", rigName, polecatName)
-	}
-
-	if err := mgr.Sleep(polecatName); err != nil {
-		return fmt.Errorf("marking polecat as done: %w", err)
-	}
-
-	fmt.Printf("%s Polecat %s is now done.\n", style.SuccessPrefix, polecatName)
-	return nil
-}
-
-func runPolecatDone(cmd *cobra.Command, args []string) error {
-	rigName, polecatName, err := parseAddress(args[0])
-	if err != nil {
-		return err
-	}
-
-	mgr, r, err := getPolecatManager(rigName)
-	if err != nil {
-		return err
-	}
-
-	// Check if session is running
-	t := tmux.NewTmux()
-	sessMgr := session.NewManager(t, r)
-	running, _ := sessMgr.IsRunning(polecatName)
-	if running {
-		return fmt.Errorf("session is running. Stop it first with: gt session stop %s/%s", rigName, polecatName)
-	}
-
-	if err := mgr.Finish(polecatName); err != nil {
-		return fmt.Errorf("finishing polecat: %w", err)
-	}
-
-	fmt.Printf("%s Polecat %s is now idle.\n", style.SuccessPrefix, polecatName)
-	return nil
-}
-
-func runPolecatReset(cmd *cobra.Command, args []string) error {
-	rigName, polecatName, err := parseAddress(args[0])
-	if err != nil {
-		return err
-	}
-
-	mgr, r, err := getPolecatManager(rigName)
-	if err != nil {
-		return err
-	}
-
-	// Check if session is running
-	t := tmux.NewTmux()
-	sessMgr := session.NewManager(t, r)
-	running, _ := sessMgr.IsRunning(polecatName)
-	if running {
-		return fmt.Errorf("session is running. Stop it first with: gt session stop %s/%s", rigName, polecatName)
-	}
-
-	if err := mgr.Reset(polecatName); err != nil {
-		return fmt.Errorf("resetting polecat: %w", err)
-	}
-
-	fmt.Printf("%s Polecat %s has been reset to idle.\n", style.SuccessPrefix, polecatName)
 	return nil
 }
 
