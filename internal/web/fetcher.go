@@ -30,6 +30,7 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 	}, nil
 }
 
+
 // FetchConvoys fetches all open convoys with their activity data.
 func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 	// List all open convoy-type issues
@@ -91,11 +92,17 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 
 		// Calculate activity info from most recent worker activity
 		if !mostRecentActivity.IsZero() {
-			// Have active tmux session activity
+			// Have active tmux session activity from assigned workers
 			row.LastActivity = activity.Calculate(mostRecentActivity)
 		} else if !hasAssignee {
-			// No assignees - fall back to issue updated_at
-			if !mostRecentUpdated.IsZero() {
+			// No assignees found in beads - try fallback to any running polecat activity
+			// This handles cases where bd update --assignee didn't persist or wasn't returned
+			if polecatActivity := f.getAllPolecatActivity(); polecatActivity != nil {
+				info := activity.Calculate(*polecatActivity)
+				info.FormattedAge = info.FormattedAge + " (polecat active)"
+				row.LastActivity = info
+			} else if !mostRecentUpdated.IsZero() {
+				// Fall back to issue updated_at if no polecats running
 				info := activity.Calculate(mostRecentUpdated)
 				info.FormattedAge = info.FormattedAge + " (unassigned)"
 				row.LastActivity = info
@@ -349,4 +356,302 @@ func (f *LiveConvoyFetcher) getSessionActivityForAssignee(assignee string) *time
 
 	activity := time.Unix(activityUnix, 0)
 	return &activity
+}
+
+// getAllPolecatActivity returns the most recent activity from any running polecat session.
+// This is used as a fallback when no specific assignee activity can be determined.
+// Returns nil if no polecat sessions are running.
+func (f *LiveConvoyFetcher) getAllPolecatActivity() *time.Time {
+	// List all tmux sessions matching gt-*-* pattern (polecat sessions)
+	// Format: gt-{rig}-{polecat}
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+
+	var mostRecent time.Time
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		parts := strings.Split(line, "|")
+		if len(parts) < 2 {
+			continue
+		}
+
+		sessionName := parts[0]
+		// Check if it's a polecat session (gt-{rig}-{polecat}, not gt-{rig}-witness/refinery)
+		// Polecat sessions have exactly 3 parts when split by "-" and the middle part is the rig
+		nameParts := strings.Split(sessionName, "-")
+		if len(nameParts) < 3 || nameParts[0] != "gt" {
+			continue
+		}
+		// Skip witness, refinery, mayor, deacon sessions
+		lastPart := nameParts[len(nameParts)-1]
+		if lastPart == "witness" || lastPart == "refinery" || lastPart == "mayor" || lastPart == "deacon" {
+			continue
+		}
+
+		var activityUnix int64
+		if _, err := fmt.Sscanf(parts[1], "%d", &activityUnix); err != nil || activityUnix == 0 {
+			continue
+		}
+
+		activityTime := time.Unix(activityUnix, 0)
+		if activityTime.After(mostRecent) {
+			mostRecent = activityTime
+		}
+	}
+
+	if mostRecent.IsZero() {
+		return nil
+	}
+	return &mostRecent
+}
+
+// FetchMergeQueue fetches open PRs from configured repos.
+func (f *LiveConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
+	// Repos to query for PRs
+	repos := []struct {
+		Full  string // Full repo path for gh CLI
+		Short string // Short name for display
+	}{
+		{"michaellady/roxas", "roxas"},
+		{"michaellady/gastown", "gastown"},
+	}
+
+	var result []MergeQueueRow
+
+	for _, repo := range repos {
+		prs, err := f.fetchPRsForRepo(repo.Full, repo.Short)
+		if err != nil {
+			// Non-fatal: continue with other repos
+			continue
+		}
+		result = append(result, prs...)
+	}
+
+	return result, nil
+}
+
+// prResponse represents the JSON response from gh pr list.
+type prResponse struct {
+	Number            int    `json:"number"`
+	Title             string `json:"title"`
+	URL               string `json:"url"`
+	Mergeable         string `json:"mergeable"`
+	StatusCheckRollup []struct {
+		State      string `json:"state"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+	} `json:"statusCheckRollup"`
+}
+
+// fetchPRsForRepo fetches open PRs for a single repo.
+func (f *LiveConvoyFetcher) fetchPRsForRepo(repoFull, repoShort string) ([]MergeQueueRow, error) {
+	// #nosec G204 -- gh is a trusted CLI, repo is from hardcoded list
+	cmd := exec.Command("gh", "pr", "list",
+		"--repo", repoFull,
+		"--state", "open",
+		"--json", "number,title,url,mergeable,statusCheckRollup")
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("fetching PRs for %s: %w", repoFull, err)
+	}
+
+	var prs []prResponse
+	if err := json.Unmarshal(stdout.Bytes(), &prs); err != nil {
+		return nil, fmt.Errorf("parsing PRs for %s: %w", repoFull, err)
+	}
+
+	result := make([]MergeQueueRow, 0, len(prs))
+	for _, pr := range prs {
+		row := MergeQueueRow{
+			Number: pr.Number,
+			Repo:   repoShort,
+			Title:  pr.Title,
+			URL:    pr.URL,
+		}
+
+		// Determine CI status from statusCheckRollup
+		row.CIStatus = determineCIStatus(pr.StatusCheckRollup)
+
+		// Determine mergeable status
+		row.Mergeable = determineMergeableStatus(pr.Mergeable)
+
+		// Determine color class based on overall status
+		row.ColorClass = determineColorClass(row.CIStatus, row.Mergeable)
+
+		result = append(result, row)
+	}
+
+	return result, nil
+}
+
+// determineCIStatus evaluates the overall CI status from status checks.
+func determineCIStatus(checks []struct {
+	State      string `json:"state"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}) string {
+	if len(checks) == 0 {
+		return "pending"
+	}
+
+	hasFailure := false
+	hasPending := false
+
+	for _, check := range checks {
+		// Check conclusion first (for completed checks)
+		switch check.Conclusion {
+		case "failure", "cancelled", "timed_out", "action_required":
+			hasFailure = true
+		case "success", "skipped", "neutral":
+			// Pass
+		default:
+			// Check status for in-progress checks
+			switch check.Status {
+			case "queued", "in_progress", "waiting", "pending", "requested":
+				hasPending = true
+			}
+			// Also check state field
+			switch check.State {
+			case "FAILURE", "ERROR":
+				hasFailure = true
+			case "PENDING", "EXPECTED":
+				hasPending = true
+			}
+		}
+	}
+
+	if hasFailure {
+		return "fail"
+	}
+	if hasPending {
+		return "pending"
+	}
+	return "pass"
+}
+
+// determineMergeableStatus converts GitHub's mergeable field to display value.
+func determineMergeableStatus(mergeable string) string {
+	switch strings.ToUpper(mergeable) {
+	case "MERGEABLE":
+		return "ready"
+	case "CONFLICTING":
+		return "conflict"
+	default:
+		return "pending"
+	}
+}
+
+// determineColorClass determines the row color based on CI and merge status.
+func determineColorClass(ciStatus, mergeable string) string {
+	if ciStatus == "fail" || mergeable == "conflict" {
+		return "mq-red"
+	}
+	if ciStatus == "pending" || mergeable == "pending" {
+		return "mq-yellow"
+	}
+	if ciStatus == "pass" && mergeable == "ready" {
+		return "mq-green"
+	}
+	return "mq-yellow"
+}
+
+// FetchPolecats fetches all running polecat sessions with activity data.
+func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
+	// Query all tmux sessions
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		// tmux not running or no sessions
+		return nil, nil
+	}
+
+	var polecats []PolecatRow
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		parts := strings.Split(line, "|")
+		if len(parts) < 2 {
+			continue
+		}
+
+		sessionName := parts[0]
+
+		// Filter for gt-<rig>-<polecat> pattern
+		if !strings.HasPrefix(sessionName, "gt-") {
+			continue
+		}
+
+		// Parse session name: gt-roxas-dag -> rig=roxas, polecat=dag
+		nameParts := strings.SplitN(sessionName, "-", 3)
+		if len(nameParts) != 3 {
+			continue
+		}
+		rig := nameParts[1]
+		polecat := nameParts[2]
+
+		// Skip non-polecat sessions (refinery, witness, mayor, deacon, boot)
+		if polecat == "refinery" || polecat == "witness" || polecat == "mayor" || polecat == "deacon" || polecat == "boot" {
+			continue
+		}
+
+		// Parse activity timestamp
+		var activityUnix int64
+		if _, err := fmt.Sscanf(parts[1], "%d", &activityUnix); err != nil || activityUnix == 0 {
+			continue
+		}
+		activityTime := time.Unix(activityUnix, 0)
+
+		// Get status hint from last line of pane
+		statusHint := f.getPolecatStatusHint(sessionName)
+
+		polecats = append(polecats, PolecatRow{
+			Name:         polecat,
+			Rig:          rig,
+			SessionID:    sessionName,
+			LastActivity: activity.Calculate(activityTime),
+			StatusHint:   statusHint,
+		})
+	}
+
+	return polecats, nil
+}
+
+// getPolecatStatusHint captures the last non-empty line from a polecat's pane.
+func (f *LiveConvoyFetcher) getPolecatStatusHint(sessionName string) string {
+	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-J")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+
+	// Get last non-empty line
+	lines := strings.Split(stdout.String(), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
+			// Truncate long lines
+			if len(line) > 60 {
+				line = line[:57] + "..."
+			}
+			return line
+		}
+	}
+	return ""
 }
