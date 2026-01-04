@@ -526,6 +526,10 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 		session = deriveSessionName()
 	}
 	if session == "" {
+		// Try to detect current tmux session (works when running inside tmux)
+		session = detectCurrentTmuxSession()
+	}
+	if session == "" {
 		return fmt.Errorf("--session flag required (or set GT_SESSION env var, or GT_RIG/GT_ROLE)")
 	}
 
@@ -646,6 +650,28 @@ func deriveSessionName() string {
 		return fmt.Sprintf("gt-%s-%s", rig, role)
 	}
 
+	return ""
+}
+
+// detectCurrentTmuxSession returns the current tmux session name if running inside tmux.
+// Uses `tmux display-message -p '#S'` which prints the session name.
+func detectCurrentTmuxSession() string {
+	// Check if we're inside tmux
+	if os.Getenv("TMUX") == "" {
+		return ""
+	}
+
+	cmd := exec.Command("tmux", "display-message", "-p", "#S")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	session := strings.TrimSpace(string(output))
+	// Only return if it looks like a Gas Town session
+	if strings.HasPrefix(session, constants.SessionPrefix) {
+		return session
+	}
 	return ""
 }
 
