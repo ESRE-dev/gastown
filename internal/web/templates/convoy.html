@@ -211,6 +211,19 @@
             font-size: 0.875rem;
         }
 
+        .empty-state-inline {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-secondary);
+            background: var(--bg-card);
+            border-radius: 8px;
+        }
+
+        .empty-state-inline p {
+            font-size: 0.875rem;
+            margin: 0;
+        }
+
         .status-hint {
             color: var(--text-secondary);
             font-size: 0.875rem;
@@ -362,8 +375,8 @@
         </div>
         {{end}}
 
-        {{if .MergeQueue}}
         <h2 class="section-header">🔀 Refinery Merge Queue</h2>
+        {{if .MergeQueue}}
         <table class="convoy-table">
             <thead>
                 <tr>
@@ -406,6 +419,10 @@
                 {{end}}
             </tbody>
         </table>
+        {{else}}
+        <div class="empty-state-inline">
+            <p>No PRs in queue</p>
+        </div>
         {{end}}
 
         {{if .Polecats}}
