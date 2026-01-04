@@ -331,6 +331,16 @@ func ensureRepoFingerprint(beadsPath string) error {
 //
 // These beads are stored in town beads (~/gt/.beads/) and are shared across all rigs.
 // Rig-level agent beads (witness, refinery) are created by gt rig add in rig beads.
+//
+// ERROR HANDLING ASYMMETRY:
+// Agent beads (Mayor, Deacon) use hard fail - installation aborts if creation fails.
+// Role beads use soft fail - logs warning and continues if creation fails.
+//
+// Rationale: Agent beads are identity beads that track agent state, hooks, and
+// form the foundation of the CV/reputation ledger. Without them, agents cannot
+// be properly tracked or coordinated. Role beads are documentation templates
+// that define role characteristics but are not required for agent operation -
+// agents can function without their role bead existing.
 func initTownAgentBeads(townPath string) error {
 	bd := beads.New(townPath)
 
