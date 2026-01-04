@@ -385,20 +385,24 @@ func (m *Manager) ReleaseName(name string) {
 	_ = m.namePool.Save() // non-fatal: state file update
 }
 
-// Recreate removes an existing polecat and creates a fresh worktree.
-// This ensures the polecat starts with the latest code from the base branch.
-// The name is preserved (not released to pool) since we're recreating immediately.
+// RepairWorktree repairs a stale polecat by removing it and creating a fresh worktree.
+// This is NOT for normal operation - it handles reconciliation when AllocateName
+// returns a name that unexpectedly already exists (stale state recovery).
+//
+// The polecat starts with the latest code from origin/<default-branch>.
+// The name is preserved (not released to pool) since we're repairing immediately.
 // force controls whether to bypass uncommitted changes check.
 //
-// Branch naming: Each recreation gets a unique branch (polecat/<name>-<timestamp>).
+// Branch naming: Each repair gets a unique branch (polecat/<name>-<timestamp>).
 // Old branches are left for garbage collection - they're never pushed to origin.
-func (m *Manager) Recreate(name string, force bool) (*Polecat, error) {
-	return m.RecreateWithOptions(name, force, AddOptions{})
+func (m *Manager) RepairWorktree(name string, force bool) (*Polecat, error) {
+	return m.RepairWorktreeWithOptions(name, force, AddOptions{})
 }
 
-// RecreateWithOptions removes an existing polecat and creates a fresh worktree with options.
-// This allows setting hook_bead atomically at recreation time.
-func (m *Manager) RecreateWithOptions(name string, force bool, opts AddOptions) (*Polecat, error) {
+// RepairWorktreeWithOptions repairs a stale polecat and creates a fresh worktree with options.
+// This is NOT for normal operation - see RepairWorktree for context.
+// Allows setting hook_bead atomically at repair time.
+func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOptions) (*Polecat, error) {
 	if !m.exists(name) {
 		return nil, ErrPolecatNotFound
 	}

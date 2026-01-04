@@ -147,8 +147,8 @@ var polecatGCCmd = &cobra.Command{
 	Long: `Garbage collect stale polecat branches in a rig.
 
 Polecats use unique timestamped branches (polecat/<name>-<timestamp>) to
-prevent drift issues. Over time, these branches accumulate as polecats
-are recreated.
+prevent drift issues. Over time, these branches accumulate when stale
+polecats are repaired.
 
 This command removes orphaned branches:
   - Branches for polecats that no longer exist
