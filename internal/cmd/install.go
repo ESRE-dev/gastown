@@ -344,44 +344,6 @@ func ensureRepoFingerprint(beadsPath string) error {
 func initTownAgentBeads(townPath string) error {
 	bd := beads.New(townPath)
 
-	// Town-level agent beads
-	agentDefs := []struct {
-		id       string
-		roleType string
-		title    string
-	}{
-		{
-			id:       beads.MayorBeadIDTown(),
-			roleType: "mayor",
-			title:    "Mayor - global coordinator, handles cross-rig communication and escalations.",
-		},
-		{
-			id:       beads.DeaconBeadIDTown(),
-			roleType: "deacon",
-			title:    "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring.",
-		},
-	}
-
-	for _, agent := range agentDefs {
-		// Check if already exists
-		if _, err := bd.Show(agent.id); err == nil {
-			continue // Already exists
-		}
-
-		fields := &beads.AgentFields{
-			RoleType:   agent.roleType,
-			Rig:        "", // Town-level agents have no rig
-			AgentState: "idle",
-			HookBead:   "",
-			RoleBead:   beads.RoleBeadIDTown(agent.roleType),
-		}
-
-		if _, err := bd.CreateAgentBead(agent.id, agent.title, fields); err != nil {
-			return fmt.Errorf("creating %s: %w", agent.id, err)
-		}
-		fmt.Printf("   ✓ Created agent bead: %s\n", agent.id)
-	}
-
 	// Role beads (global templates)
 	roleDefs := []struct {
 		id    string
@@ -446,6 +408,56 @@ func initTownAgentBeads(townPath string) error {
 			continue
 		}
 		fmt.Printf("   ✓ Created role bead: %s\n", role.id)
+	}
+
+	// Town-level agent beads
+	agentDefs := []struct {
+		id       string
+		roleType string
+		title    string
+	}{
+		{
+			id:       beads.MayorBeadIDTown(),
+			roleType: "mayor",
+			title:    "Mayor - global coordinator, handles cross-rig communication and escalations.",
+		},
+		{
+			id:       beads.DeaconBeadIDTown(),
+			roleType: "deacon",
+			title:    "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring.",
+		},
+	}
+
+	existingAgents, err := bd.List(beads.ListOptions{
+		Status:   "all",
+		Type:     "agent",
+		Priority: -1,
+	})
+	if err != nil {
+		return fmt.Errorf("listing existing agent beads: %w", err)
+	}
+	existingAgentIDs := make(map[string]struct{}, len(existingAgents))
+	for _, issue := range existingAgents {
+		existingAgentIDs[issue.ID] = struct{}{}
+	}
+
+	for _, agent := range agentDefs {
+		if _, ok := existingAgentIDs[agent.id]; ok {
+			continue
+		}
+
+		fields := &beads.AgentFields{
+			RoleType:   agent.roleType,
+			Rig:        "", // Town-level agents have no rig
+			AgentState: "idle",
+			HookBead:   "",
+			RoleBead:   beads.RoleBeadIDTown(agent.roleType),
+		}
+
+		if _, err := bd.CreateAgentBead(agent.id, agent.title, fields); err != nil {
+			return fmt.Errorf("creating %s: %w", agent.id, err)
+		}
+		fmt.Printf("   ✓ Created agent bead: %s\n", agent.id)
 	}
 
 	return nil
