@@ -12,7 +12,6 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -48,16 +47,12 @@ type Manager struct {
 
 // NewManager creates a new polecat manager.
 func NewManager(r *rig.Rig, g *git.Git) *Manager {
-	// Determine the canonical beads location:
-	// - If mayor/rig/.beads exists (source repo has beads tracked), use that
-	// - Otherwise use rig root .beads/ (created by initBeads during gt rig add)
-	// This matches the conditional logic in setupSharedBeads and route registration.
-	// For repos that have .beads/ tracked in git, the canonical database lives in mayor/rig/.
-	mayorRigBeads := filepath.Join(r.Path, "mayor", "rig", ".beads")
-	beadsPath := r.Path
-	if _, err := os.Stat(mayorRigBeads); err == nil {
-		beadsPath = filepath.Join(r.Path, "mayor", "rig")
-	}
+	// Always use mayor/rig as the beads path.
+	// This matches routes.jsonl which maps prefixes to <rig>/mayor/rig.
+	// The rig root .beads/ only contains config.yaml (no database),
+	// so running bd from there causes it to walk up and find town beads
+	// with the wrong prefix (e.g., 'gm' instead of the rig's prefix).
+	beadsPath := filepath.Join(r.Path, "mayor", "rig")
 
 	// Try to load rig settings for namepool config
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
@@ -245,12 +240,8 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
-	// Provision .claude/commands/ with standard slash commands (e.g., /handoff)
-	// This ensures polecats have Gas Town utilities even if source repo lacks them.
-	if err := templates.ProvisionCommands(polecatPath); err != nil {
-		// Non-fatal - polecat can still work, warn but don't fail
-		fmt.Printf("Warning: could not provision slash commands: %v\n", err)
-	}
+	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
+	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
 	// Create agent bead for ZFC compliance (self-report state).
 	// State starts as "spawning" - will be updated to "working" when Claude starts.
@@ -451,13 +442,21 @@ func (m *Manager) RecreateWithOptions(name string, force bool, opts AddOptions) 
 	// Fetch latest from origin to ensure we have fresh commits (non-fatal: may be offline)
 	_ = repoGit.Fetch("origin")
 
-	// Create fresh worktree with unique branch name
+	// Determine the start point for the new worktree
+	// Use origin/<default-branch> to ensure we start from latest fetched commits
+	defaultBranch := "main"
+	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
+
+	// Create fresh worktree with unique branch name, starting from origin's default branch
 	// Old branches are left behind - they're ephemeral (never pushed to origin)
 	// and will be cleaned up by garbage collection
 	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
 	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
-	if err := repoGit.WorktreeAdd(polecatPath, branchName); err != nil {
-		return nil, fmt.Errorf("creating fresh worktree: %w", err)
+	if err := repoGit.WorktreeAddFromRef(polecatPath, branchName, startPoint); err != nil {
+		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
 
 	// NOTE: We intentionally do NOT write to CLAUDE.md here.
@@ -468,10 +467,7 @@ func (m *Manager) RecreateWithOptions(name string, force bool, opts AddOptions) 
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
-	// Provision .claude/commands/ with standard slash commands (e.g., /handoff)
-	if err := templates.ProvisionCommands(polecatPath); err != nil {
-		fmt.Printf("Warning: could not provision slash commands: %v\n", err)
-	}
+	// NOTE: Slash commands inherited from town level - no per-workspace copies needed.
 
 	// Create fresh agent bead for ZFC compliance
 	// HookBead is set atomically at recreation time if provided.
