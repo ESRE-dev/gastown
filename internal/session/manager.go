@@ -395,6 +395,21 @@ func (m *Manager) Capture(polecat string, lines int) (string, error) {
 	return m.tmux.CapturePane(sessionID, lines)
 }
 
+// CaptureSession returns the recent output from a session by raw session ID.
+// Use this for crew workers or other non-polecat sessions where the session
+// name doesn't follow the standard gt-{rig}-{polecat} pattern.
+func (m *Manager) CaptureSession(sessionID string, lines int) (string, error) {
+	running, err := m.tmux.HasSession(sessionID)
+	if err != nil {
+		return "", fmt.Errorf("checking session: %w", err)
+	}
+	if !running {
+		return "", ErrSessionNotFound
+	}
+
+	return m.tmux.CapturePane(sessionID, lines)
+}
+
 // Inject sends a message to a polecat session.
 // Uses a longer debounce delay for large messages to ensure paste completes.
 func (m *Manager) Inject(polecat, message string) error {
