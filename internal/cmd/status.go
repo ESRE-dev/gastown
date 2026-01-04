@@ -170,6 +170,37 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Pre-fetch agent beads across all rig-specific beads DBs.
 	allAgentBeads := make(map[string]*beads.Issue)
 	allHookBeads := make(map[string]*beads.Issue)
+
+	// Fetch town-level agent beads (Mayor, Deacon) from town beads
+	townBeadsPath := beads.GetTownBeadsPath(townRoot)
+	townBeadsClient := beads.New(townBeadsPath)
+	townAgentBeads, _ := townBeadsClient.ListAgentBeads()
+	for id, issue := range townAgentBeads {
+		allAgentBeads[id] = issue
+	}
+
+	// Fetch hook beads from town beads
+	var townHookIDs []string
+	for _, issue := range townAgentBeads {
+		hookID := issue.HookBead
+		if hookID == "" {
+			fields := beads.ParseAgentFields(issue.Description)
+			if fields != nil {
+				hookID = fields.HookBead
+			}
+		}
+		if hookID != "" {
+			townHookIDs = append(townHookIDs, hookID)
+		}
+	}
+	if len(townHookIDs) > 0 {
+		townHookBeads, _ := townBeadsClient.ShowMultiple(townHookIDs)
+		for id, issue := range townHookBeads {
+			allHookBeads[id] = issue
+		}
+	}
+
+	// Fetch rig-level agent beads
 	for _, r := range rigs {
 		rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
 		rigBeads := beads.New(rigBeadsPath)
@@ -650,6 +681,7 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 	deaconSession := getDeaconSessionName()
 
 	// Define agents to discover
+	// Note: Mayor and Deacon are town-level agents with hq- prefix bead IDs
 	agentDefs := []struct {
 		name    string
 		address string
@@ -657,8 +689,8 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 		role    string
 		beadID  string
 	}{
-		{"mayor", "mayor/", mayorSession, "coordinator", mayorSession},
-		{"deacon", "deacon/", deaconSession, "health-check", deaconSession},
+		{"mayor", "mayor/", mayorSession, "coordinator", beads.MayorBeadIDTown()},
+		{"deacon", "deacon/", deaconSession, "health-check", beads.DeaconBeadIDTown()},
 	}
 
 	agents := make([]AgentRuntime, len(agentDefs))

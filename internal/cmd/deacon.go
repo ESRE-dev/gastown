@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
@@ -1118,14 +1119,13 @@ func notifyMayorOfWitnessFailure(townRoot string, zombies []zombieInfo) {
 
 // agentAddressToIDs converts an agent address to bead ID and session name.
 // Supports formats: "gastown/polecats/max", "gastown/witness", "deacon", "mayor"
+// Note: Town-level agents (Mayor, Deacon) use hq- prefix bead IDs stored in town beads.
 func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 	switch address {
 	case "deacon":
-		sessName := session.DeaconSessionName()
-		return sessName, sessName, nil
+		return beads.DeaconBeadIDTown(), session.DeaconSessionName(), nil
 	case "mayor":
-		sessName := session.MayorSessionName()
-		return sessName, sessName, nil
+		return beads.MayorBeadIDTown(), session.MayorSessionName(), nil
 	}
 
 	parts := strings.Split(address, "/")
