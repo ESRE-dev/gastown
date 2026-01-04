@@ -389,6 +389,11 @@ func initTownAgentBeads(townPath string) error {
 			desc:  "Role definition for Deacon agents. Daemon beacon for heartbeats and monitoring.",
 		},
 		{
+			id:    beads.DogRoleBeadIDTown(),
+			title: "Dog Role",
+			desc:  "Role definition for Dog agents. Town-level workers for cross-rig tasks.",
+		},
+		{
 			id:    beads.WitnessRoleBeadIDTown(),
 			title: "Witness Role",
 			desc:  "Role definition for Witness agents. Per-rig worker monitor with progressive nudging.",
