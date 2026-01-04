@@ -424,12 +424,22 @@ func initTownAgentBeads(townPath string) error {
 		},
 	}
 
+	existingAgents, err := bd.List(beads.ListOptions{
+		Status:   "all",
+		Type:     "agent",
+		Priority: -1,
+	})
+	if err != nil {
+		return fmt.Errorf("listing existing agent beads: %w", err)
+	}
+	existingAgentIDs := make(map[string]struct{}, len(existingAgents))
+	for _, issue := range existingAgents {
+		existingAgentIDs[issue.ID] = struct{}{}
+	}
+
 	for _, agent := range agentDefs {
-		// Check if already exists (exact ID + agent type).
-		if issue, err := bd.Show(agent.id); err == nil {
-			if issue.ID == agent.id && issue.Type == "agent" {
-				continue
-			}
+		if _, ok := existingAgentIDs[agent.id]; ok {
+			continue
 		}
 
 		fields := &beads.AgentFields{

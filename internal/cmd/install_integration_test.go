@@ -342,9 +342,12 @@ func assertSlotValue(t *testing.T, townRoot, issueID, slot, want string) {
 	t.Helper()
 	cmd := exec.Command("bd", "--no-daemon", "--json", "slot", "show", issueID)
 	cmd.Dir = townRoot
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("bd slot show %s failed: %v\nOutput: %s", issueID, err, output)
+		debugCmd := exec.Command("bd", "--no-daemon", "--json", "slot", "show", issueID)
+		debugCmd.Dir = townRoot
+		combined, _ := debugCmd.CombinedOutput()
+		t.Fatalf("bd slot show %s failed: %v\nOutput: %s", issueID, err, combined)
 	}
 
 	var parsed struct {
