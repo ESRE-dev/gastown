@@ -512,6 +512,49 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	return &issue, nil
 }
 
+// CreateWithID creates an issue with a specific ID.
+// This is useful for agent beads, role beads, and other beads that need
+// deterministic IDs rather than auto-generated ones.
+func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
+	args := []string{"create", "--json", "--id=" + id}
+
+	if opts.Title != "" {
+		args = append(args, "--title="+opts.Title)
+	}
+	if opts.Type != "" {
+		args = append(args, "--type="+opts.Type)
+	}
+	if opts.Priority >= 0 {
+		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
+	}
+	if opts.Description != "" {
+		args = append(args, "--description="+opts.Description)
+	}
+	if opts.Parent != "" {
+		args = append(args, "--parent="+opts.Parent)
+	}
+	// Default Actor from BD_ACTOR env var if not specified
+	actor := opts.Actor
+	if actor == "" {
+		actor = os.Getenv("BD_ACTOR")
+	}
+	if actor != "" {
+		args = append(args, "--actor="+actor)
+	}
+
+	out, err := b.run(args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var issue Issue
+	if err := json.Unmarshal(out, &issue); err != nil {
+		return nil, fmt.Errorf("parsing bd create output: %w", err)
+	}
+
+	return &issue, nil
+}
+
 // Update updates an existing issue.
 func (b *Beads) Update(id string, opts UpdateOptions) error {
 	args := []string{"update", id}
@@ -1144,6 +1187,36 @@ func DogBeadID(name string) string {
 // DogRoleBeadID returns the Dog role bead ID.
 func DogRoleBeadID() string {
 	return RoleBeadID("dog")
+}
+
+// Town-level agent bead ID helpers (hq- prefix, stored in town beads).
+// These are the canonical IDs for the two-level beads architecture:
+// - Town-level agents (Mayor, Deacon, Dogs) → ~/gt/.beads/ with hq- prefix
+// - Rig-level agents (Witness, Refinery, Polecats) → <rig>/.beads/ with rig prefix
+
+// MayorBeadIDTown returns the town-level Mayor agent bead ID.
+// Deprecated: Use MayorBeadID() which still returns gt-mayor for compatibility.
+// After migration to two-level architecture, this will become the canonical ID.
+func MayorBeadIDTown() string {
+	return "hq-mayor"
+}
+
+// DeaconBeadIDTown returns the town-level Deacon agent bead ID.
+// Deprecated: Use DeaconBeadID() which still returns gt-deacon for compatibility.
+// After migration to two-level architecture, this will become the canonical ID.
+func DeaconBeadIDTown() string {
+	return "hq-deacon"
+}
+
+// DogBeadIDTown returns a town-level Dog agent bead ID.
+func DogBeadIDTown(name string) string {
+	return "hq-dog-" + name
+}
+
+// RoleBeadIDTown returns a town-level role definition bead ID.
+// Role beads are global templates stored in town beads.
+func RoleBeadIDTown(role string) string {
+	return "hq-" + role + "-role"
 }
 
 // CreateDogAgentBead creates an agent bead for a dog.
