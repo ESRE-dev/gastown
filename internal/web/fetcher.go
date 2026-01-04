@@ -155,8 +155,8 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 	// Batch fetch issue details
 	details := f.getIssueDetailsBatch(issueIDs)
 
-	// Get worker info for activity timestamps
-	workers := f.getWorkersForIssues(issueIDs)
+	// Get worker activity from tmux sessions based on assignees
+	workers := f.getWorkersFromAssignees(details)
 
 	// Build result
 	result := make([]trackedIssueInfo, 0, len(issueIDs))
@@ -236,62 +236,83 @@ type workerDetail struct {
 	LastActivity *time.Time
 }
 
-// getWorkersForIssues finds workers and their last activity for issues.
-func (f *LiveConvoyFetcher) getWorkersForIssues(issueIDs []string) map[string]*workerDetail {
+// getWorkersFromAssignees gets worker activity from tmux sessions based on issue assignees.
+// Assignees are in format "rigname/polecats/polecatname" which maps to tmux session "gt-rigname-polecatname".
+func (f *LiveConvoyFetcher) getWorkersFromAssignees(details map[string]*issueDetail) map[string]*workerDetail {
 	result := make(map[string]*workerDetail)
-	if len(issueIDs) == 0 {
+
+	// Collect unique assignees and map them to issue IDs
+	assigneeToIssues := make(map[string][]string)
+	for issueID, detail := range details {
+		if detail == nil || detail.Assignee == "" {
+			continue
+		}
+		assigneeToIssues[detail.Assignee] = append(assigneeToIssues[detail.Assignee], issueID)
+	}
+
+	if len(assigneeToIssues) == 0 {
 		return result
 	}
 
-	townRoot, _ := workspace.FindFromCwd()
-	if townRoot == "" {
-		return result
-	}
+	// For each unique assignee, look up tmux session activity
+	for assignee, issueIDs := range assigneeToIssues {
+		activity := f.getSessionActivityForAssignee(assignee)
+		if activity == nil {
+			continue
+		}
 
-	// Find all rig beads databases
-	rigDirs, _ := filepath.Glob(filepath.Join(townRoot, "*", "mayor", "rig", ".beads", "beads.db"))
-
-	for _, dbPath := range rigDirs {
+		// Apply this activity to all issues assigned to this worker
 		for _, issueID := range issueIDs {
-			if _, ok := result[issueID]; ok {
-				continue
+			result[issueID] = &workerDetail{
+				Worker:       assignee,
+				LastActivity: activity,
 			}
-
-			safeID := strings.ReplaceAll(issueID, "'", "''")
-			query := fmt.Sprintf(
-				`SELECT id, hook_bead, last_activity FROM issues WHERE issue_type = 'agent' AND status = 'open' AND hook_bead = '%s' LIMIT 1`,
-				safeID)
-
-			queryCmd := exec.Command("sqlite3", "-json", dbPath, query)
-			var stdout bytes.Buffer
-			queryCmd.Stdout = &stdout
-			if err := queryCmd.Run(); err != nil {
-				continue
-			}
-
-			var agents []struct {
-				ID           string `json:"id"`
-				HookBead     string `json:"hook_bead"`
-				LastActivity string `json:"last_activity"`
-			}
-			if err := json.Unmarshal(stdout.Bytes(), &agents); err != nil || len(agents) == 0 {
-				continue
-			}
-
-			agent := agents[0]
-			detail := &workerDetail{
-				Worker: agent.ID,
-			}
-
-			if agent.LastActivity != "" {
-				if t, err := time.Parse(time.RFC3339, agent.LastActivity); err == nil {
-					detail.LastActivity = &t
-				}
-			}
-
-			result[issueID] = detail
 		}
 	}
 
 	return result
+}
+
+// getSessionActivityForAssignee looks up tmux session activity for an assignee.
+// Assignee format: "rigname/polecats/polecatname" -> session "gt-rigname-polecatname"
+func (f *LiveConvoyFetcher) getSessionActivityForAssignee(assignee string) *time.Time {
+	// Parse assignee: "roxas/polecats/dag" -> rig="roxas", polecat="dag"
+	parts := strings.Split(assignee, "/")
+	if len(parts) != 3 || parts[1] != "polecats" {
+		return nil
+	}
+	rig := parts[0]
+	polecat := parts[2]
+
+	// Construct session name
+	sessionName := fmt.Sprintf("gt-%s-%s", rig, polecat)
+
+	// Query tmux for session activity
+	// Format: session_activity returns unix timestamp
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}",
+		"-f", fmt.Sprintf("#{==:#{session_name},%s}", sessionName))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	if output == "" {
+		return nil
+	}
+
+	// Parse output: "gt-roxas-dag|1704312345"
+	outputParts := strings.Split(output, "|")
+	if len(outputParts) < 2 {
+		return nil
+	}
+
+	var activityUnix int64
+	if _, err := fmt.Sscanf(outputParts[1], "%d", &activityUnix); err != nil || activityUnix == 0 {
+		return nil
+	}
+
+	activity := time.Unix(activityUnix, 0)
+	return &activity
 }
