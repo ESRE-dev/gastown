@@ -750,6 +750,10 @@ func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
 // verifyCommitOnMain checks if the polecat's current commit is on the default branch.
 // This prevents nuking a polecat whose work wasn't actually merged.
 //
+// In multi-remote setups, the code may live on a remote other than "origin"
+// (e.g., "gastown" for gastown.git). This function checks ALL remotes to find
+// the one containing the default branch with the merged commit.
+//
 // Returns:
 //   - true, nil: commit is verified on default branch
 //   - false, nil: commit is NOT on default branch (don't nuke!)
@@ -779,16 +783,33 @@ func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 		return false, fmt.Errorf("getting polecat HEAD: %w", err)
 	}
 
-	// Verify it's an ancestor of default branch (i.e., it's been merged)
-	// We use the polecat's git context to check
-	isOnDefaultBranch, err := g.IsAncestor(commitSHA, "origin/"+defaultBranch)
+	// Get all configured remotes and check each one for the commit
+	// This handles multi-remote setups where code may be on a remote other than "origin"
+	remotes, err := g.Remotes()
 	if err != nil {
-		// Try without origin/ prefix in case remote isn't set up
-		isOnDefaultBranch, err = g.IsAncestor(commitSHA, defaultBranch)
+		// If we can't list remotes, fall back to checking just the local branch
+		isOnDefaultBranch, err := g.IsAncestor(commitSHA, defaultBranch)
 		if err != nil {
 			return false, fmt.Errorf("checking if commit is on %s: %w", defaultBranch, err)
 		}
+		return isOnDefaultBranch, nil
 	}
 
-	return isOnDefaultBranch, nil
+	// Try each remote/<defaultBranch> until we find one where commit is an ancestor
+	for _, remote := range remotes {
+		remoteBranch := remote + "/" + defaultBranch
+		isOnRemote, err := g.IsAncestor(commitSHA, remoteBranch)
+		if err == nil && isOnRemote {
+			return true, nil
+		}
+	}
+
+	// Also try the local default branch (in case we're not tracking a remote)
+	isOnDefaultBranch, err := g.IsAncestor(commitSHA, defaultBranch)
+	if err == nil && isOnDefaultBranch {
+		return true, nil
+	}
+
+	// Commit is not on any remote's default branch
+	return false, nil
 }

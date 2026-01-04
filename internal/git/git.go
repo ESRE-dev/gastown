@@ -299,6 +299,18 @@ func (g *Git) RemoteURL(remote string) (string, error) {
 	return g.run("remote", "get-url", remote)
 }
 
+// Remotes returns the list of configured remote names.
+func (g *Git) Remotes() ([]string, error) {
+	out, err := g.run("remote")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 // Merge merges the given branch into the current branch.
 func (g *Git) Merge(branch string) error {
 	_, err := g.run("merge", branch)
