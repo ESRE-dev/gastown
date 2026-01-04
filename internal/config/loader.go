@@ -642,6 +642,8 @@ func LoadOrCreateMessagingConfig(path string) (*MessagingConfig, error) {
 // LoadRuntimeConfig loads the RuntimeConfig from a rig's settings.
 // Falls back to defaults if settings don't exist or don't specify runtime config.
 // rigPath should be the path to the rig directory (e.g., ~/gt/gastown).
+//
+// Deprecated: Use ResolveAgentConfig for full agent resolution with town settings.
 func LoadRuntimeConfig(rigPath string) *RuntimeConfig {
 	settingsPath := filepath.Join(rigPath, "settings", "config.json")
 	settings, err := LoadRigSettings(settingsPath)
@@ -662,15 +664,139 @@ func LoadRuntimeConfig(rigPath string) *RuntimeConfig {
 	return rc
 }
 
+// TownSettingsPath returns the path to town settings file.
+func TownSettingsPath(townRoot string) string {
+	return filepath.Join(townRoot, "settings", "config.json")
+}
+
+// RigSettingsPath returns the path to rig settings file.
+func RigSettingsPath(rigPath string) string {
+	return filepath.Join(rigPath, "settings", "config.json")
+}
+
+// LoadOrCreateTownSettings loads town settings or creates defaults if missing.
+func LoadOrCreateTownSettings(path string) (*TownSettings, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		if os.IsNotExist(err) {
+			return NewTownSettings(), nil
+		}
+		return nil, err
+	}
+
+	var settings TownSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// ResolveAgentConfig resolves the agent configuration for a rig.
+// It looks up the agent by name in town settings (custom agents) and built-in presets.
+//
+// Resolution order:
+//  1. If rig has Runtime set directly, use it (backwards compatibility)
+//  2. If rig has Agent set, look it up in:
+//     a. Town's custom agents (from TownSettings.Agents)
+//     b. Built-in presets (claude, gemini, codex)
+//  3. If rig has no Agent set, use town's default_agent
+//  4. Fall back to claude defaults
+//
+// townRoot is the path to the town directory (e.g., ~/gt).
+// rigPath is the path to the rig directory (e.g., ~/gt/gastown).
+func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
+	// Load rig settings
+	rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath))
+	if err != nil {
+		rigSettings = nil
+	}
+
+	// Backwards compatibility: if Runtime is set directly, use it
+	if rigSettings != nil && rigSettings.Runtime != nil {
+		rc := rigSettings.Runtime
+		return fillRuntimeDefaults(rc)
+	}
+
+	// Load town settings for agent lookup
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	// Load custom agent registry if it exists
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+
+	// Determine which agent name to use
+	agentName := ""
+	if rigSettings != nil && rigSettings.Agent != "" {
+		agentName = rigSettings.Agent
+	} else if townSettings.DefaultAgent != "" {
+		agentName = townSettings.DefaultAgent
+	} else {
+		agentName = "claude" // ultimate fallback
+	}
+
+	// Look up the agent configuration
+	return lookupAgentConfig(agentName, townSettings)
+}
+
+// lookupAgentConfig looks up an agent by name.
+// First checks town's custom agents, then built-in presets from agents.go.
+func lookupAgentConfig(name string, townSettings *TownSettings) *RuntimeConfig {
+	// First check town's custom agents
+	if townSettings != nil && townSettings.Agents != nil {
+		if custom, ok := townSettings.Agents[name]; ok && custom != nil {
+			return fillRuntimeDefaults(custom)
+		}
+	}
+
+	// Check built-in presets from agents.go
+	if preset := GetAgentPresetByName(name); preset != nil {
+		return RuntimeConfigFromPreset(AgentPreset(name))
+	}
+
+	// Fallback to claude defaults
+	return DefaultRuntimeConfig()
+}
+
+// fillRuntimeDefaults fills in default values for empty RuntimeConfig fields.
+func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
+	if rc == nil {
+		return DefaultRuntimeConfig()
+	}
+	// Create a copy to avoid modifying the original
+	result := &RuntimeConfig{
+		Command:       rc.Command,
+		Args:          rc.Args,
+		InitialPrompt: rc.InitialPrompt,
+	}
+	if result.Command == "" {
+		result.Command = "claude"
+	}
+	if result.Args == nil {
+		result.Args = []string{"--dangerously-skip-permissions"}
+	}
+	return result
+}
+
 // GetRuntimeCommand is a convenience function that returns the full command string
-// for starting an LLM session. It loads the config and builds the command.
+// for starting an LLM session. It resolves the agent config and builds the command.
 func GetRuntimeCommand(rigPath string) string {
-	return LoadRuntimeConfig(rigPath).BuildCommand()
+	if rigPath == "" {
+		return DefaultRuntimeConfig().BuildCommand()
+	}
+	// Derive town root from rig path (rig is typically ~/gt/<rigname>)
+	townRoot := filepath.Dir(rigPath)
+	return ResolveAgentConfig(townRoot, rigPath).BuildCommand()
 }
 
 // GetRuntimeCommandWithPrompt returns the full command with an initial prompt.
 func GetRuntimeCommandWithPrompt(rigPath, prompt string) string {
-	return LoadRuntimeConfig(rigPath).BuildCommandWithPrompt(prompt)
+	if rigPath == "" {
+		return DefaultRuntimeConfig().BuildCommandWithPrompt(prompt)
+	}
+	townRoot := filepath.Dir(rigPath)
+	return ResolveAgentConfig(townRoot, rigPath).BuildCommandWithPrompt(prompt)
 }
 
 // BuildStartupCommand builds a full startup command with environment exports.
@@ -680,7 +806,9 @@ func GetRuntimeCommandWithPrompt(rigPath, prompt string) string {
 func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) string {
 	var rc *RuntimeConfig
 	if rigPath != "" {
-		rc = LoadRuntimeConfig(rigPath)
+		// Derive town root from rig path
+		townRoot := filepath.Dir(rigPath)
+		rc = ResolveAgentConfig(townRoot, rigPath)
 	} else {
 		rc = DefaultRuntimeConfig()
 	}
