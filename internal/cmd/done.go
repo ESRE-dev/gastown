@@ -393,8 +393,15 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 	}
 
 	// Update agent bead with new state and clear hook_bead (work is done)
-	// Use town root for routing - ensures cross-beads references work
-	bd := beads.New(townRoot)
+	// Use rig path for slot commands - bd slot doesn't route from town root
+	var beadsPath string
+	switch ctx.Role {
+	case RoleMayor, RoleDeacon:
+		beadsPath = townRoot
+	default:
+		beadsPath = filepath.Join(townRoot, ctx.Rig)
+	}
+	bd := beads.New(beadsPath)
 	emptyHook := ""
 	if err := bd.UpdateAgentState(agentBeadID, newState, &emptyHook); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
