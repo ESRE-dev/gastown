@@ -252,6 +252,7 @@ Examples:
 var (
 	rigAddPrefix       string
 	rigAddLocalRepo    string
+	rigAddBranch       string
 	rigResetHandoff    bool
 	rigResetMail       bool
 	rigResetStale      bool
@@ -281,6 +282,7 @@ func init() {
 
 	rigAddCmd.Flags().StringVar(&rigAddPrefix, "prefix", "", "Beads issue prefix (default: derived from name)")
 	rigAddCmd.Flags().StringVar(&rigAddLocalRepo, "local-repo", "", "Local repo path to share git objects (optional)")
+	rigAddCmd.Flags().StringVar(&rigAddBranch, "branch", "", "Default branch name (default: auto-detected from remote)")
 
 	rigResetCmd.Flags().BoolVar(&rigResetHandoff, "handoff", false, "Clear handoff content")
 	rigResetCmd.Flags().BoolVar(&rigResetMail, "mail", false, "Clear stale mail messages")
@@ -340,10 +342,11 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 
 	// Add the rig
 	newRig, err := mgr.AddRig(rig.AddRigOptions{
-		Name:        name,
-		GitURL:      gitURL,
-		BeadsPrefix: rigAddPrefix,
-		LocalRepo:   rigAddLocalRepo,
+		Name:          name,
+		GitURL:        gitURL,
+		BeadsPrefix:   rigAddPrefix,
+		LocalRepo:     rigAddLocalRepo,
+		DefaultBranch: rigAddBranch,
 	})
 	if err != nil {
 		return fmt.Errorf("adding rig: %w", err)

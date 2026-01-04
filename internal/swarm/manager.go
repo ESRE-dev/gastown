@@ -88,7 +88,7 @@ func (m *Manager) LoadSwarm(epicID string) (*Swarm, error) {
 		EpicID:       epicID,
 		BaseCommit:   baseCommit,
 		Integration:  fmt.Sprintf("swarm/%s", epicID),
-		TargetBranch: "main",
+		TargetBranch: m.rig.DefaultBranch(),
 		State:        state,
 		Workers:      []string{}, // Discovered from active tasks
 		Tasks:        []SwarmTask{},

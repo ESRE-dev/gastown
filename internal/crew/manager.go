@@ -85,7 +85,7 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	}
 
 	crewGit := git.NewGit(crewPath)
-	branchName := "main"
+	branchName := m.rig.DefaultBranch()
 
 	// Optionally create a working branch
 	if createBranch {

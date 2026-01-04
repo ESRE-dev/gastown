@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -10,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -147,11 +149,17 @@ func runDone(cmd *cobra.Command, args []string) error {
 		agentBeadID = getAgentBeadID(ctx)
 	}
 
-	// For COMPLETED, we need an issue ID and branch must not be main
+	// Get configured default branch for this rig
+	defaultBranch := "main" // fallback
+	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+
+	// For COMPLETED, we need an issue ID and branch must not be the default branch
 	var mrID string
 	if exitType == ExitCompleted {
-		if branch == "main" || branch == "master" {
-			return fmt.Errorf("cannot submit main/master branch to merge queue")
+		if branch == defaultBranch || branch == "master" {
+			return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
 		}
 
 		// Check for unpushed commits - branch must be pushed before MR creation
@@ -163,9 +171,6 @@ func runDone(cmd *cobra.Command, args []string) error {
 		if !pushed {
 			return fmt.Errorf("branch has %d unpushed commit(s); run 'git push -u origin %s' first", unpushedCount, branch)
 		}
-
-		// Detect the repo's default branch (main vs master)
-		defaultBranch := g.RemoteDefaultBranch()
 
 		// Check that branch has commits ahead of default branch (prevents submitting stale branches)
 		aheadCount, err := g.CommitsAhead(defaultBranch, branch)
