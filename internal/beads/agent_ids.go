@@ -3,6 +3,10 @@ package beads
 
 import "fmt"
 
+// TownBeadsPrefix is the prefix used for town-level agent beads stored in ~/gt/.beads/.
+// This distinguishes them from rig-level beads (which use project prefixes like "gt-").
+const TownBeadsPrefix = "hq"
+
 // Town-level agent bead IDs use the "hq-" prefix and are stored in town beads.
 // These are global agents that operate at the town level (mayor, deacon, dogs).
 //
@@ -14,26 +18,26 @@ import "fmt"
 // MayorBeadIDTown returns the Mayor agent bead ID for town-level beads.
 // This uses the "hq-" prefix for town-level storage.
 func MayorBeadIDTown() string {
-	return "hq-mayor"
+	return TownBeadsPrefix + "-mayor"
 }
 
 // DeaconBeadIDTown returns the Deacon agent bead ID for town-level beads.
 // This uses the "hq-" prefix for town-level storage.
 func DeaconBeadIDTown() string {
-	return "hq-deacon"
+	return TownBeadsPrefix + "-deacon"
 }
 
 // DogBeadIDTown returns a Dog agent bead ID for town-level beads.
 // Dogs are town-level agents, so they follow the pattern: hq-dog-<name>
 func DogBeadIDTown(name string) string {
-	return fmt.Sprintf("hq-dog-%s", name)
+	return fmt.Sprintf("%s-dog-%s", TownBeadsPrefix, name)
 }
 
 // RoleBeadIDTown returns the role bead ID for town-level storage.
 // Role beads define lifecycle configuration for each agent type.
 // Uses "hq-" prefix for town-level storage: hq-<role>-role
 func RoleBeadIDTown(role string) string {
-	return fmt.Sprintf("hq-%s-role", role)
+	return fmt.Sprintf("%s-%s-role", TownBeadsPrefix, role)
 }
 
 // MayorRoleBeadIDTown returns the Mayor role bead ID for town-level storage.
