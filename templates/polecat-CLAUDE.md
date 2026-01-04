@@ -182,6 +182,9 @@ to the merge queue. Without this step:
 
 ## Self-Managed Session Lifecycle
 
+> See [Polecat Lifecycle](docs/polecat-lifecycle.md) for the full three-layer architecture
+> (session/sandbox/slot).
+
 **You own your session cadence.** The Witness monitors but doesn't force recycles.
 
 ### Closing Steps (for Activity Feed)
