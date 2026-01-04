@@ -594,8 +594,8 @@ func determineColorClass(ciStatus, mergeable string) string {
 
 // FetchPolecats fetches all running polecat and refinery sessions with activity data.
 func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
-	// Query all tmux sessions
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}")
+	// Query all tmux sessions with window_activity for more accurate timing
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
