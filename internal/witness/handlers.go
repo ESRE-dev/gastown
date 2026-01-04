@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -645,6 +646,28 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 // This kills the tmux session, removes the worktree, and cleans up beads.
 // Should only be called after all safety checks pass.
 func NukePolecat(workDir, rigName, polecatName string) error {
+	// CRITICAL: Kill the tmux session FIRST and unconditionally.
+	// The session name follows the pattern gt-<rig>-<polecat>.
+	// We do this explicitly here because gt polecat nuke may fail to kill the
+	// session due to rig loading issues or race conditions with IsRunning checks.
+	// See: gt-g9ft5 - sessions were piling up because nuke wasn't killing them.
+	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	t := tmux.NewTmux()
+
+	// Check if session exists and kill it
+	if running, _ := t.HasSession(sessionName); running {
+		// Try graceful shutdown first (Ctrl-C), then force kill
+		_ = t.SendKeysRaw(sessionName, "C-c")
+		// Brief delay for graceful handling
+		time.Sleep(100 * time.Millisecond)
+		// Force kill the session
+		if err := t.KillSession(sessionName); err != nil {
+			// Log but continue - session might already be dead
+			// The important thing is we tried
+		}
+	}
+
+	// Now run gt polecat nuke to clean up worktree, branch, and beads
 	address := fmt.Sprintf("%s/%s", rigName, polecatName)
 
 	cmd := exec.Command("gt", "polecat", "nuke", address) //nolint:gosec // G204: address is constructed from validated internal data
