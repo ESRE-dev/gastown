@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 )
 
 // AgentPreset identifies a supported LLM agent runtime.
@@ -126,12 +128,22 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	},
 }
 
-// globalRegistry is the merged registry of built-in and user-defined agents.
-var globalRegistry *AgentRegistry
+// Registry state with proper synchronization.
+var (
+	// registryMu protects all registry state.
+	registryMu sync.RWMutex
+	// globalRegistry is the merged registry of built-in and user-defined agents.
+	globalRegistry *AgentRegistry
+	// loadedPaths tracks which config files have been loaded to avoid redundant reads.
+	loadedPaths = make(map[string]bool)
+	// registryInitialized tracks if builtins have been copied.
+	registryInitialized bool
+)
 
 // initRegistry initializes the global registry with built-in presets.
-func initRegistry() {
-	if globalRegistry != nil {
+// Caller must hold registryMu write lock.
+func initRegistryLocked() {
+	if registryInitialized {
 		return
 	}
 	globalRegistry = &AgentRegistry{
@@ -142,17 +154,35 @@ func initRegistry() {
 	for name, preset := range builtinPresets {
 		globalRegistry.Agents[string(name)] = preset
 	}
+	registryInitialized = true
+}
+
+// ensureRegistry ensures the registry is initialized for read operations.
+func ensureRegistry() {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	initRegistryLocked()
 }
 
 // LoadAgentRegistry loads agent definitions from a JSON file and merges with built-ins.
 // User-defined agents override built-in presets with the same name.
+// This function caches loaded paths to avoid redundant file reads.
 func LoadAgentRegistry(path string) error {
-	initRegistry()
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	initRegistryLocked()
+
+	// Check if already loaded from this path
+	if loadedPaths[path] {
+		return nil
+	}
 
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from config
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil // No custom config, use built-ins only
+			loadedPaths[path] = true // Mark as "loaded" (no file)
+			return nil               // No custom config, use built-ins only
 		}
 		return err
 	}
@@ -168,6 +198,7 @@ func LoadAgentRegistry(path string) error {
 		globalRegistry.Agents[name] = preset
 	}
 
+	loadedPaths[path] = true
 	return nil
 }
 
@@ -180,20 +211,26 @@ func DefaultAgentRegistryPath(townRoot string) string {
 // GetAgentPreset returns the preset info for a given agent name.
 // Returns nil if the preset is not found.
 func GetAgentPreset(name AgentPreset) *AgentPresetInfo {
-	initRegistry()
+	ensureRegistry()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	return globalRegistry.Agents[string(name)]
 }
 
 // GetAgentPresetByName returns the preset info by string name.
 // Returns nil if not found, allowing caller to fall back to defaults.
 func GetAgentPresetByName(name string) *AgentPresetInfo {
-	initRegistry()
+	ensureRegistry()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	return globalRegistry.Agents[name]
 }
 
 // ListAgentPresets returns all known agent preset names.
 func ListAgentPresets() []string {
-	initRegistry()
+	ensureRegistry()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	names := make([]string, 0, len(globalRegistry.Agents))
 	for name := range globalRegistry.Agents {
 		names = append(names, name)
@@ -220,6 +257,52 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		Command: info.Command,
 		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
 	}
+}
+
+// BuildResumeCommand builds a command to resume an agent session.
+// Returns the full command string including any YOLO/autonomous flags.
+// If sessionID is empty or the agent doesn't support resume, returns empty string.
+func BuildResumeCommand(agentName, sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+
+	info := GetAgentPresetByName(agentName)
+	if info == nil || info.ResumeFlag == "" {
+		return ""
+	}
+
+	// Build base command with args
+	args := append([]string(nil), info.Args...)
+
+	// Add resume based on style
+	switch info.ResumeStyle {
+	case "subcommand":
+		// e.g., "codex resume <session_id> --yolo"
+		return info.Command + " " + info.ResumeFlag + " " + sessionID + " " + strings.Join(args, " ")
+	case "flag":
+		fallthrough
+	default:
+		// e.g., "claude --dangerously-skip-permissions --resume <session_id>"
+		args = append(args, info.ResumeFlag, sessionID)
+		return info.Command + " " + strings.Join(args, " ")
+	}
+}
+
+// SupportsSessionResume checks if an agent supports session resumption.
+func SupportsSessionResume(agentName string) bool {
+	info := GetAgentPresetByName(agentName)
+	return info != nil && info.ResumeFlag != ""
+}
+
+// GetSessionIDEnvVar returns the environment variable name for storing session IDs
+// for a given agent. Returns empty string if the agent doesn't use env vars for this.
+func GetSessionIDEnvVar(agentName string) string {
+	info := GetAgentPresetByName(agentName)
+	if info == nil {
+		return ""
+	}
+	return info.SessionIDEnv
 }
 
 // MergeWithPreset applies preset defaults to a RuntimeConfig.
@@ -254,7 +337,9 @@ func (rc *RuntimeConfig) MergeWithPreset(preset AgentPreset) *RuntimeConfig {
 
 // IsKnownPreset checks if a string is a known agent preset name.
 func IsKnownPreset(name string) bool {
-	initRegistry()
+	ensureRegistry()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	_, ok := globalRegistry.Agents[name]
 	return ok
 }
@@ -293,4 +378,14 @@ func NewExampleAgentRegistry() *AgentRegistry {
 			},
 		},
 	}
+}
+
+// ResetRegistryForTesting clears all registry state.
+// This is intended for use in tests only to ensure test isolation.
+func ResetRegistryForTesting() {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	globalRegistry = nil
+	loadedPaths = make(map[string]bool)
+	registryInitialized = false
 }

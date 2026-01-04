@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -124,8 +125,8 @@ func TestLoadAgentRegistry(t *testing.T) {
 		t.Fatalf("failed to write test config: %v", err)
 	}
 
-	// Reset global registry for test
-	globalRegistry = nil
+	// Reset global registry for test isolation
+	ResetRegistryForTesting()
 
 	// Load the custom registry
 	if err := LoadAgentRegistry(configPath); err != nil {
@@ -148,7 +149,7 @@ func TestLoadAgentRegistry(t *testing.T) {
 	}
 
 	// Reset for other tests
-	globalRegistry = nil
+	ResetRegistryForTesting()
 }
 
 func TestAgentPresetYOLOFlags(t *testing.T) {
@@ -213,5 +214,106 @@ func TestMergeWithPreset(t *testing.T) {
 
 	if merged.Command != "gemini" {
 		t.Errorf("empty config merge should get preset command, got %s", merged.Command)
+	}
+}
+
+func TestBuildResumeCommand(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentName string
+		sessionID string
+		wantEmpty bool
+		contains  []string // strings that should appear in result
+	}{
+		{
+			name:      "claude with session",
+			agentName: "claude",
+			sessionID: "session-123",
+			wantEmpty: false,
+			contains:  []string{"claude", "--dangerously-skip-permissions", "--resume", "session-123"},
+		},
+		{
+			name:      "gemini with session",
+			agentName: "gemini",
+			sessionID: "gemini-sess-456",
+			wantEmpty: false,
+			contains:  []string{"gemini", "--approval-mode", "yolo", "--resume", "gemini-sess-456"},
+		},
+		{
+			name:      "codex subcommand style",
+			agentName: "codex",
+			sessionID: "codex-sess-789",
+			wantEmpty: false,
+			contains:  []string{"codex", "resume", "codex-sess-789", "--yolo"},
+		},
+		{
+			name:      "empty session ID",
+			agentName: "claude",
+			sessionID: "",
+			wantEmpty: true,
+		},
+		{
+			name:      "unknown agent",
+			agentName: "unknown-agent",
+			sessionID: "session-123",
+			wantEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := BuildResumeCommand(tt.agentName, tt.sessionID)
+			if tt.wantEmpty {
+				if result != "" {
+					t.Errorf("BuildResumeCommand(%s, %s) = %q, want empty", tt.agentName, tt.sessionID, result)
+				}
+				return
+			}
+			for _, s := range tt.contains {
+				if !strings.Contains(result, s) {
+					t.Errorf("BuildResumeCommand(%s, %s) = %q, missing %q", tt.agentName, tt.sessionID, result, s)
+				}
+			}
+		})
+	}
+}
+
+func TestSupportsSessionResume(t *testing.T) {
+	tests := []struct {
+		agentName string
+		want      bool
+	}{
+		{"claude", true},
+		{"gemini", true},
+		{"codex", true},
+		{"unknown", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agentName, func(t *testing.T) {
+			if got := SupportsSessionResume(tt.agentName); got != tt.want {
+				t.Errorf("SupportsSessionResume(%s) = %v, want %v", tt.agentName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetSessionIDEnvVar(t *testing.T) {
+	tests := []struct {
+		agentName string
+		want      string
+	}{
+		{"claude", "CLAUDE_SESSION_ID"},
+		{"gemini", "GEMINI_SESSION_ID"},
+		{"codex", ""}, // Codex uses JSONL output instead
+		{"unknown", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agentName, func(t *testing.T) {
+			if got := GetSessionIDEnvVar(tt.agentName); got != tt.want {
+				t.Errorf("GetSessionIDEnvVar(%s) = %q, want %q", tt.agentName, got, tt.want)
+			}
+		})
 	}
 }
