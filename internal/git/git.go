@@ -523,6 +523,13 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 	return err
 }
 
+// WorktreeAddFromRef creates a new worktree at the given path with a new branch
+// starting from the specified ref (e.g., "origin/main").
+func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
+	_, err := g.run("worktree", "add", "-b", branch, path, startPoint)
+	return err
+}
+
 // WorktreeAddDetached creates a new worktree at the given path with a detached HEAD.
 func (g *Git) WorktreeAddDetached(path, ref string) error {
 	_, err := g.run("worktree", "add", "--detach", path, ref)

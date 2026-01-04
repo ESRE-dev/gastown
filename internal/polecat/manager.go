@@ -446,13 +446,21 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Fetch latest from origin to ensure we have fresh commits (non-fatal: may be offline)
 	_ = repoGit.Fetch("origin")
 
-	// Create fresh worktree with unique branch name
+	// Determine the start point for the new worktree
+	// Use origin/<default-branch> to ensure we start from latest fetched commits
+	defaultBranch := "main"
+	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
+
+	// Create fresh worktree with unique branch name, starting from origin's default branch
 	// Old branches are left behind - they're ephemeral (never pushed to origin)
 	// and will be cleaned up by garbage collection
 	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
 	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
-	if err := repoGit.WorktreeAdd(polecatPath, branchName); err != nil {
-		return nil, fmt.Errorf("creating fresh worktree: %w", err)
+	if err := repoGit.WorktreeAddFromRef(polecatPath, branchName, startPoint); err != nil {
+		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
 
 	// NOTE: We intentionally do NOT write to CLAUDE.md here.
