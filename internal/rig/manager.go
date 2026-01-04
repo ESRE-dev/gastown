@@ -423,8 +423,7 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 
 	// Create rig-level agent beads (witness, refinery) in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
-	isFirstRig := len(m.config.Rigs) == 0 // Kept for backward compatibility
-	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix, isFirstRig); err != nil {
+	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix); err != nil {
 		// Non-fatal: log warning but continue
 		fmt.Printf("  Warning: Could not create agent beads: %v\n", err)
 	}
@@ -536,7 +535,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 // Format: <prefix>-<rig>-<role> (e.g., gt-gastown-witness)
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
-func (m *Manager) initAgentBeads(_, rigName, _ string, isFirstRig bool) error { // rigPath and prefix unused until Phase 2
+func (m *Manager) initAgentBeads(_, rigName, _ string) error { // rigPath and prefix unused until Phase 2
 	// TEMPORARY (gt-4r1ph): Currently all agent beads go in town beads.
 	// After Phase 2, only Mayor/Deacon will be here; Witness/Refinery go to rig beads.
 	townBeadsDir := filepath.Join(m.townRoot, ".beads")
@@ -568,8 +567,6 @@ func (m *Manager) initAgentBeads(_, rigName, _ string, isFirstRig bool) error { 
 	}
 
 	// Note: Mayor and Deacon are now created by gt install in town beads.
-	// isFirstRig parameter is kept for backward compatibility but no longer used.
-	_ = isFirstRig
 
 	for _, agent := range agents {
 		// Check if already exists
