@@ -28,6 +28,38 @@ type MayorConfig struct {
 	DefaultCrewName string           `json:"default_crew_name,omitempty"` // default crew name for new rigs
 }
 
+// CurrentTownSettingsVersion is the current schema version for TownSettings.
+const CurrentTownSettingsVersion = 1
+
+// TownSettings represents town-level behavioral configuration (settings/config.json).
+// This contains agent configuration that applies to all rigs unless overridden.
+type TownSettings struct {
+	Type    string `json:"type"`    // "town-settings"
+	Version int    `json:"version"` // schema version
+
+	// DefaultAgent is the name of the agent preset to use by default.
+	// Can be a built-in preset ("claude", "gemini", "codex")
+	// or a custom agent name defined in settings/agents.json.
+	// Default: "claude"
+	DefaultAgent string `json:"default_agent,omitempty"`
+
+	// Agents defines custom agent configurations or overrides.
+	// Keys are agent names that can be referenced by DefaultAgent or rig settings.
+	// Values override or extend the built-in presets.
+	// Example: {"gemini": {"command": "/custom/path/to/gemini"}}
+	Agents map[string]*RuntimeConfig `json:"agents,omitempty"`
+}
+
+// NewTownSettings creates a new TownSettings with defaults.
+func NewTownSettings() *TownSettings {
+	return &TownSettings{
+		Type:         "town-settings",
+		Version:      CurrentTownSettingsVersion,
+		DefaultAgent: "claude",
+		Agents:       make(map[string]*RuntimeConfig),
+	}
+}
+
 // DaemonConfig represents daemon process settings.
 type DaemonConfig struct {
 	HeartbeatInterval string `json:"heartbeat_interval,omitempty"` // e.g., "30s"
@@ -98,7 +130,14 @@ type RigSettings struct {
 	Theme      *ThemeConfig      `json:"theme,omitempty"`       // tmux theme settings
 	Namepool   *NamepoolConfig   `json:"namepool,omitempty"`    // polecat name pool settings
 	Crew       *CrewConfig       `json:"crew,omitempty"`        // crew startup settings
-	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings
+	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
+
+	// Agent selects which agent preset to use for this rig.
+	// Can be a built-in preset ("claude", "gemini", "codex")
+	// or a custom agent defined in settings/agents.json.
+	// If empty, uses the town's default_agent setting.
+	// Takes precedence over Runtime if both are set.
+	Agent string `json:"agent,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.
