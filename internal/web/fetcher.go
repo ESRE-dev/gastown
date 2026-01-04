@@ -513,7 +513,7 @@ func determineCIStatus(checks []struct {
 	for _, check := range checks {
 		// Check conclusion first (for completed checks)
 		switch check.Conclusion {
-		case "failure", "cancelled", "timed_out", "action_required":
+		case "failure", "cancelled", "timed_out", "action_required": //nolint:misspell // GitHub API returns "cancelled" (British spelling)
 			hasFailure = true
 		case "success", "skipped", "neutral":
 			// Pass
