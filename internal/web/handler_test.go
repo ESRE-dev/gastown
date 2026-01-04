@@ -2,6 +2,7 @@ package web
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -592,6 +593,354 @@ func TestConvoyHandler_FullDashboard(t *testing.T) {
 	}
 	if !strings.Contains(body, "worker1") {
 		t.Error("Response should contain polecat data")
+	}
+}
+
+// =============================================================================
+// End-to-End Tests with httptest.Server
+// =============================================================================
+
+// TestE2E_Server_FullDashboard tests the full dashboard using a real HTTP server.
+func TestE2E_Server_FullDashboard(t *testing.T) {
+	mock := &MockConvoyFetcher{
+		Convoys: []ConvoyRow{
+			{
+				ID:           "hq-cv-e2e",
+				Title:        "E2E Test Convoy",
+				Status:       "open",
+				WorkStatus:   "active",
+				Progress:     "2/4",
+				Completed:    2,
+				Total:        4,
+				LastActivity: activity.Calculate(time.Now().Add(-45 * time.Second)),
+			},
+		},
+		MergeQueue: []MergeQueueRow{
+			{
+				Number:     101,
+				Repo:       "roxas",
+				Title:      "E2E Test PR",
+				URL:        "https://github.com/test/roxas/pull/101",
+				CIStatus:   "pass",
+				Mergeable:  "ready",
+				ColorClass: "mq-green",
+			},
+		},
+		Polecats: []PolecatRow{
+			{
+				Name:         "furiosa",
+				Rig:          "roxas",
+				SessionID:    "gt-roxas-furiosa",
+				LastActivity: activity.Calculate(time.Now().Add(-30 * time.Second)),
+				StatusHint:   "Running E2E tests",
+			},
+		},
+	}
+
+	handler, err := NewConvoyHandler(mock)
+	if err != nil {
+		t.Fatalf("NewConvoyHandler() error = %v", err)
+	}
+
+	// Create a real HTTP server
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	// Make HTTP request to the server
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatalf("HTTP GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Verify status code
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	// Verify content type
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", contentType)
+	}
+
+	// Read and verify body
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Failed to read response body: %v", err)
+	}
+	body := string(bodyBytes)
+
+	// Verify all three sections render
+	checks := []struct {
+		name    string
+		content string
+	}{
+		{"Convoy section header", "Gas Town Convoys"},
+		{"Convoy ID", "hq-cv-e2e"},
+		{"Convoy title", "E2E Test Convoy"},
+		{"Convoy progress", "2/4"},
+		{"Merge queue section", "Refinery Merge Queue"},
+		{"PR number", "#101"},
+		{"PR repo", "roxas"},
+		{"Polecat section", "Polecat Workers"},
+		{"Polecat name", "furiosa"},
+		{"Polecat status", "Running E2E tests"},
+		{"HTMX auto-refresh", `hx-trigger="every 10s"`},
+	}
+
+	for _, check := range checks {
+		if !strings.Contains(body, check.content) {
+			t.Errorf("%s: should contain %q", check.name, check.content)
+		}
+	}
+}
+
+// TestE2E_Server_ActivityColors tests activity color rendering via HTTP server.
+func TestE2E_Server_ActivityColors(t *testing.T) {
+	tests := []struct {
+		name      string
+		age       time.Duration
+		wantClass string
+	}{
+		{"green for recent", 20 * time.Second, "activity-green"},
+		{"yellow for stale", 3 * time.Minute, "activity-yellow"},
+		{"red for stuck", 8 * time.Minute, "activity-red"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &MockConvoyFetcher{
+				Polecats: []PolecatRow{
+					{
+						Name:         "test-worker",
+						Rig:          "test-rig",
+						SessionID:    "gt-test-rig-test-worker",
+						LastActivity: activity.Calculate(time.Now().Add(-tt.age)),
+						StatusHint:   "Testing",
+					},
+				},
+			}
+
+			handler, err := NewConvoyHandler(mock)
+			if err != nil {
+				t.Fatalf("NewConvoyHandler() error = %v", err)
+			}
+
+			server := httptest.NewServer(handler)
+			defer server.Close()
+
+			resp, err := http.Get(server.URL)
+			if err != nil {
+				t.Fatalf("HTTP GET failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			body := string(bodyBytes)
+
+			if !strings.Contains(body, tt.wantClass) {
+				t.Errorf("Should contain activity class %q for age %v", tt.wantClass, tt.age)
+			}
+		})
+	}
+}
+
+// TestE2E_Server_MergeQueueEmpty tests that empty merge queue shows message.
+func TestE2E_Server_MergeQueueEmpty(t *testing.T) {
+	mock := &MockConvoyFetcher{
+		Convoys:    []ConvoyRow{},
+		MergeQueue: []MergeQueueRow{},
+		Polecats:   []PolecatRow{},
+	}
+
+	handler, err := NewConvoyHandler(mock)
+	if err != nil {
+		t.Fatalf("NewConvoyHandler() error = %v", err)
+	}
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatalf("HTTP GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	body := string(bodyBytes)
+
+	// Section header should always be visible
+	if !strings.Contains(body, "Refinery Merge Queue") {
+		t.Error("Merge queue section should always be visible")
+	}
+
+	// Empty state message
+	if !strings.Contains(body, "No PRs in queue") {
+		t.Error("Should show 'No PRs in queue' when empty")
+	}
+}
+
+// TestE2E_Server_MergeQueueStatuses tests all PR status combinations.
+func TestE2E_Server_MergeQueueStatuses(t *testing.T) {
+	tests := []struct {
+		name       string
+		ciStatus   string
+		mergeable  string
+		colorClass string
+		wantCI     string
+		wantMerge  string
+	}{
+		{"green when ready", "pass", "ready", "mq-green", "ci-pass", "merge-ready"},
+		{"red when CI fails", "fail", "ready", "mq-red", "ci-fail", "merge-ready"},
+		{"red when conflict", "pass", "conflict", "mq-red", "ci-pass", "merge-conflict"},
+		{"yellow when pending", "pending", "pending", "mq-yellow", "ci-pending", "merge-pending"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &MockConvoyFetcher{
+				MergeQueue: []MergeQueueRow{
+					{
+						Number:     42,
+						Repo:       "test",
+						Title:      "Test PR",
+						URL:        "https://github.com/test/test/pull/42",
+						CIStatus:   tt.ciStatus,
+						Mergeable:  tt.mergeable,
+						ColorClass: tt.colorClass,
+					},
+				},
+			}
+
+			handler, err := NewConvoyHandler(mock)
+			if err != nil {
+				t.Fatalf("NewConvoyHandler() error = %v", err)
+			}
+
+			server := httptest.NewServer(handler)
+			defer server.Close()
+
+			resp, err := http.Get(server.URL)
+			if err != nil {
+				t.Fatalf("HTTP GET failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			body := string(bodyBytes)
+
+			if !strings.Contains(body, tt.colorClass) {
+				t.Errorf("Should contain row class %q", tt.colorClass)
+			}
+			if !strings.Contains(body, tt.wantCI) {
+				t.Errorf("Should contain CI class %q", tt.wantCI)
+			}
+			if !strings.Contains(body, tt.wantMerge) {
+				t.Errorf("Should contain merge class %q", tt.wantMerge)
+			}
+		})
+	}
+}
+
+// TestE2E_Server_HTMLStructure validates HTML document structure.
+func TestE2E_Server_HTMLStructure(t *testing.T) {
+	mock := &MockConvoyFetcher{Convoys: []ConvoyRow{}}
+
+	handler, err := NewConvoyHandler(mock)
+	if err != nil {
+		t.Fatalf("NewConvoyHandler() error = %v", err)
+	}
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatalf("HTTP GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	body := string(bodyBytes)
+
+	// Validate HTML structure
+	elements := []string{
+		"<!DOCTYPE html>",
+		"<html",
+		"<head>",
+		"<title>Gas Town Dashboard</title>",
+		"htmx.org",
+		"<body>",
+		"</body>",
+		"</html>",
+	}
+
+	for _, elem := range elements {
+		if !strings.Contains(body, elem) {
+			t.Errorf("Should contain HTML element %q", elem)
+		}
+	}
+
+	// Validate CSS variables for theming
+	cssVars := []string{"--bg-dark", "--green", "--yellow", "--red"}
+	for _, v := range cssVars {
+		if !strings.Contains(body, v) {
+			t.Errorf("Should contain CSS variable %q", v)
+		}
+	}
+}
+
+// TestE2E_Server_RefineryInPolecats tests that refinery appears in polecat workers.
+func TestE2E_Server_RefineryInPolecats(t *testing.T) {
+	mock := &MockConvoyFetcher{
+		Polecats: []PolecatRow{
+			{
+				Name:         "refinery",
+				Rig:          "roxas",
+				SessionID:    "gt-roxas-refinery",
+				LastActivity: activity.Calculate(time.Now().Add(-10 * time.Second)),
+				StatusHint:   "Idle - Waiting for PRs",
+			},
+			{
+				Name:         "dag",
+				Rig:          "roxas",
+				SessionID:    "gt-roxas-dag",
+				LastActivity: activity.Calculate(time.Now().Add(-30 * time.Second)),
+				StatusHint:   "Working on feature",
+			},
+		},
+	}
+
+	handler, err := NewConvoyHandler(mock)
+	if err != nil {
+		t.Fatalf("NewConvoyHandler() error = %v", err)
+	}
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatalf("HTTP GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	body := string(bodyBytes)
+
+	// Refinery should appear in polecat workers
+	if !strings.Contains(body, "refinery") {
+		t.Error("Refinery should appear in polecat workers section")
+	}
+	if !strings.Contains(body, "Idle - Waiting for PRs") {
+		t.Error("Refinery idle status should be shown")
+	}
+
+	// Regular polecats should also appear
+	if !strings.Contains(body, "dag") {
+		t.Error("Regular polecat 'dag' should appear")
 	}
 }
 
