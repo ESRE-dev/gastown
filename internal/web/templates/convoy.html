@@ -104,6 +104,41 @@
             background: var(--green);
         }
 
+        /* Work status badges */
+        .work-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .work-complete .work-status {
+            background: var(--green);
+            color: var(--bg-dark);
+        }
+
+        .work-active .work-status {
+            background: var(--green);
+            color: var(--bg-dark);
+        }
+
+        .work-stale .work-status {
+            background: var(--yellow);
+            color: var(--bg-dark);
+        }
+
+        .work-stuck .work-status {
+            background: var(--red);
+            color: var(--bg-dark);
+        }
+
+        .work-waiting .work-status {
+            background: var(--text-secondary);
+            color: var(--bg-dark);
+        }
+
         /* Activity colors */
         .activity-dot {
             display: inline-block;
@@ -296,10 +331,9 @@
             </thead>
             <tbody>
                 {{range .Convoys}}
-                <tr class="{{statusClass .Status}}">
+                <tr class="{{workStatusClass .WorkStatus}}">
                     <td>
-                        <span class="status-indicator"></span>
-                        {{if eq .Status "open"}}●{{else}}✓{{end}}
+                        <span class="work-status">{{.WorkStatus}}</span>
                     </td>
                     <td>
                         <span class="convoy-id">{{.ID}}</span>

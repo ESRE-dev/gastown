@@ -120,6 +120,9 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 			}
 		}
 
+		// Calculate work status based on progress and activity
+		row.WorkStatus = calculateWorkStatus(row.Completed, row.Total, row.LastActivity.ColorClass)
+
 		// Get tracked issues for expandable view
 		row.TrackedIssues = make([]TrackedIssue, len(tracked))
 		for i, t := range tracked {
@@ -415,6 +418,27 @@ func (f *LiveConvoyFetcher) getAllPolecatActivity() *time.Time {
 	return &mostRecent
 }
 
+// calculateWorkStatus determines the work status based on progress and activity.
+// Returns: "complete", "active", "stale", "stuck", or "waiting"
+func calculateWorkStatus(completed, total int, activityColor string) string {
+	// Check if all work is done
+	if total > 0 && completed == total {
+		return "complete"
+	}
+
+	// Determine status based on activity color
+	switch activityColor {
+	case activity.ColorGreen:
+		return "active"
+	case activity.ColorYellow:
+		return "stale"
+	case activity.ColorRed:
+		return "stuck"
+	default:
+		return "waiting"
+	}
+}
+
 // FetchMergeQueue fetches open PRs from configured repos.
 func (f *LiveConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
 	// Repos to query for PRs
@@ -568,7 +592,7 @@ func determineColorClass(ciStatus, mergeable string) string {
 	return "mq-yellow"
 }
 
-// FetchPolecats fetches all running polecat sessions with activity data.
+// FetchPolecats fetches all running polecat and refinery sessions with activity data.
 func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 	// Query all tmux sessions
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}")
@@ -578,6 +602,9 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		// tmux not running or no sessions
 		return nil, nil
 	}
+
+	// Pre-fetch merge queue count to determine refinery idle status
+	mergeQueueCount := f.getMergeQueueCount()
 
 	var polecats []PolecatRow
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -607,8 +634,9 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		rig := nameParts[1]
 		polecat := nameParts[2]
 
-		// Skip non-polecat sessions (refinery, witness, mayor, deacon, boot)
-		if polecat == "refinery" || polecat == "witness" || polecat == "mayor" || polecat == "deacon" || polecat == "boot" {
+		// Skip non-worker sessions (witness, mayor, deacon, boot)
+		// Note: refinery is included to show idle/processing status
+		if polecat == "witness" || polecat == "mayor" || polecat == "deacon" || polecat == "boot" {
 			continue
 		}
 
@@ -619,8 +647,13 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		}
 		activityTime := time.Unix(activityUnix, 0)
 
-		// Get status hint from last line of pane
-		statusHint := f.getPolecatStatusHint(sessionName)
+		// Get status hint - special handling for refinery
+		var statusHint string
+		if polecat == "refinery" {
+			statusHint = f.getRefineryStatusHint(mergeQueueCount)
+		} else {
+			statusHint = f.getPolecatStatusHint(sessionName)
+		}
 
 		polecats = append(polecats, PolecatRow{
 			Name:         polecat,
@@ -656,4 +689,24 @@ func (f *LiveConvoyFetcher) getPolecatStatusHint(sessionName string) string {
 		}
 	}
 	return ""
+}
+
+// getMergeQueueCount returns the total number of open PRs across all repos.
+func (f *LiveConvoyFetcher) getMergeQueueCount() int {
+	mergeQueue, err := f.FetchMergeQueue()
+	if err != nil {
+		return 0
+	}
+	return len(mergeQueue)
+}
+
+// getRefineryStatusHint returns appropriate status for refinery based on merge queue.
+func (f *LiveConvoyFetcher) getRefineryStatusHint(mergeQueueCount int) string {
+	if mergeQueueCount == 0 {
+		return "Idle - Waiting for PRs"
+	}
+	if mergeQueueCount == 1 {
+		return "Processing 1 PR"
+	}
+	return fmt.Sprintf("Processing %d PRs", mergeQueueCount)
 }

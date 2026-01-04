@@ -43,7 +43,8 @@ type MergeQueueRow struct {
 type ConvoyRow struct {
 	ID            string
 	Title         string
-	Status        string // "open" or "closed"
+	Status        string // "open" or "closed" (raw beads status)
+	WorkStatus    string // Computed: "complete", "active", "stale", "stuck", "waiting"
 	Progress      string // e.g., "2/5"
 	Completed     int
 	Total         int
@@ -65,6 +66,7 @@ func LoadTemplates() (*template.Template, error) {
 	funcMap := template.FuncMap{
 		"activityClass":   activityClass,
 		"statusClass":     statusClass,
+		"workStatusClass": workStatusClass,
 		"progressPercent": progressPercent,
 	}
 
@@ -106,6 +108,24 @@ func statusClass(status string) string {
 		return "status-closed"
 	default:
 		return "status-unknown"
+	}
+}
+
+// workStatusClass returns the CSS class for a computed work status.
+func workStatusClass(workStatus string) string {
+	switch workStatus {
+	case "complete":
+		return "work-complete"
+	case "active":
+		return "work-active"
+	case "stale":
+		return "work-stale"
+	case "stuck":
+		return "work-stuck"
+	case "waiting":
+		return "work-waiting"
+	default:
+		return "work-unknown"
 	}
 }
 
