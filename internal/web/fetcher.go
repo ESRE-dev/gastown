@@ -710,3 +710,46 @@ func (f *LiveConvoyFetcher) getRefineryStatusHint(mergeQueueCount int) string {
 	}
 	return fmt.Sprintf("Processing %d PRs", mergeQueueCount)
 }
+
+// truncateStatusHint truncates a status hint to 60 characters with ellipsis.
+func truncateStatusHint(line string) string {
+	if len(line) > 60 {
+		return line[:57] + "..."
+	}
+	return line
+}
+
+// parsePolecatSessionName parses a tmux session name into rig and polecat components.
+// Format: gt-<rig>-<polecat> -> (rig, polecat, true)
+// Returns ("", "", false) if the format is invalid.
+func parsePolecatSessionName(sessionName string) (rig, polecat string, ok bool) {
+	if !strings.HasPrefix(sessionName, "gt-") {
+		return "", "", false
+	}
+	parts := strings.SplitN(sessionName, "-", 3)
+	if len(parts) != 3 {
+		return "", "", false
+	}
+	return parts[1], parts[2], true
+}
+
+// isWorkerSession returns true if the polecat name represents a worker session.
+// Non-worker sessions: witness, mayor, deacon, boot
+func isWorkerSession(polecat string) bool {
+	switch polecat {
+	case "witness", "mayor", "deacon", "boot":
+		return false
+	default:
+		return true
+	}
+}
+
+// parseActivityTimestamp parses a Unix timestamp string from tmux.
+// Returns (0, false) for invalid or zero timestamps.
+func parseActivityTimestamp(s string) (int64, bool) {
+	var unix int64
+	if _, err := fmt.Sscanf(s, "%d", &unix); err != nil || unix <= 0 {
+		return 0, false
+	}
+	return unix, true
+}
