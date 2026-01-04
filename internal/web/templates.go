@@ -14,7 +14,29 @@ var templateFS embed.FS
 
 // ConvoyData represents data passed to the convoy template.
 type ConvoyData struct {
-	Convoys []ConvoyRow
+	Convoys    []ConvoyRow
+	MergeQueue []MergeQueueRow
+	Polecats   []PolecatRow
+}
+
+// PolecatRow represents a polecat worker in the dashboard.
+type PolecatRow struct {
+	Name         string        // e.g., "dag", "nux"
+	Rig          string        // e.g., "roxas", "gastown"
+	SessionID    string        // e.g., "gt-roxas-dag"
+	LastActivity activity.Info // Colored activity display
+	StatusHint   string        // Last line from pane (optional)
+}
+
+// MergeQueueRow represents a PR in the merge queue.
+type MergeQueueRow struct {
+	Number     int
+	Repo       string // Short repo name (e.g., "roxas", "gastown")
+	Title      string
+	URL        string
+	CIStatus   string // "pass", "fail", "pending"
+	Mergeable  string // "ready", "conflict", "pending"
+	ColorClass string // "mq-green", "mq-yellow", "mq-red"
 }
 
 // ConvoyRow represents a single convoy in the dashboard.
