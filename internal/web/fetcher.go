@@ -68,6 +68,8 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 		row.Total = len(tracked)
 
 		var mostRecentActivity time.Time
+		var mostRecentUpdated time.Time
+		var hasAssignee bool
 		for _, t := range tracked {
 			if t.Status == "closed" {
 				row.Completed++
@@ -76,16 +78,37 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 			if t.LastActivity.After(mostRecentActivity) {
 				mostRecentActivity = t.LastActivity
 			}
+			// Track most recent updated_at as fallback
+			if t.UpdatedAt.After(mostRecentUpdated) {
+				mostRecentUpdated = t.UpdatedAt
+			}
+			if t.Assignee != "" {
+				hasAssignee = true
+			}
 		}
 
 		row.Progress = fmt.Sprintf("%d/%d", row.Completed, row.Total)
 
 		// Calculate activity info from most recent worker activity
 		if !mostRecentActivity.IsZero() {
+			// Have active tmux session activity
 			row.LastActivity = activity.Calculate(mostRecentActivity)
+		} else if !hasAssignee {
+			// No assignees - fall back to issue updated_at
+			if !mostRecentUpdated.IsZero() {
+				info := activity.Calculate(mostRecentUpdated)
+				info.FormattedAge = info.FormattedAge + " (unassigned)"
+				row.LastActivity = info
+			} else {
+				row.LastActivity = activity.Info{
+					FormattedAge: "unassigned",
+					ColorClass:   activity.ColorUnknown,
+				}
+			}
 		} else {
+			// Has assignee but no active session
 			row.LastActivity = activity.Info{
-				FormattedAge: "no activity",
+				FormattedAge: "idle",
 				ColorClass:   activity.ColorUnknown,
 			}
 		}
@@ -114,6 +137,7 @@ type trackedIssueInfo struct {
 	Status       string
 	Assignee     string
 	LastActivity time.Time
+	UpdatedAt    time.Time // Fallback for activity when no assignee
 }
 
 // getTrackedIssues fetches tracked issues for a convoy.
@@ -167,6 +191,7 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 			info.Title = d.Title
 			info.Status = d.Status
 			info.Assignee = d.Assignee
+			info.UpdatedAt = d.UpdatedAt
 		} else {
 			info.Title = "(external)"
 			info.Status = "unknown"
@@ -184,10 +209,11 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 
 // issueDetail holds basic issue info.
 type issueDetail struct {
-	ID       string
-	Title    string
-	Status   string
-	Assignee string
+	ID        string
+	Title     string
+	Status    string
+	Assignee  string
+	UpdatedAt time.Time
 }
 
 // getIssueDetailsBatch fetches details for multiple issues.
@@ -209,22 +235,30 @@ func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*
 	}
 
 	var issues []struct {
-		ID       string `json:"id"`
-		Title    string `json:"title"`
-		Status   string `json:"status"`
-		Assignee string `json:"assignee"`
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Status    string `json:"status"`
+		Assignee  string `json:"assignee"`
+		UpdatedAt string `json:"updated_at"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
 		return result
 	}
 
 	for _, issue := range issues {
-		result[issue.ID] = &issueDetail{
+		detail := &issueDetail{
 			ID:       issue.ID,
 			Title:    issue.Title,
 			Status:   issue.Status,
 			Assignee: issue.Assignee,
 		}
+		// Parse updated_at timestamp
+		if issue.UpdatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, issue.UpdatedAt); err == nil {
+				detail.UpdatedAt = t
+			}
+		}
+		result[issue.ID] = detail
 	}
 
 	return result
