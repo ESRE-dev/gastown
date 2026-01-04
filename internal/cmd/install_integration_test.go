@@ -129,6 +129,31 @@ func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
 	}
 }
 
+// TestInstallTownRoleSlots validates that town-level agent beads
+// have their role slot set after install.
+func TestInstallTownRoleSlots(t *testing.T) {
+	// Skip if bd is not available
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not installed, skipping role slot test")
+	}
+
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	gtBinary := buildGT(t)
+
+	// Run gt install (includes beads init by default)
+	cmd := exec.Command(gtBinary, "install", hqPath)
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
+	}
+
+	assertSlotValue(t, hqPath, "hq-mayor", "role", "hq-mayor-role")
+	assertSlotValue(t, hqPath, "hq-deacon", "role", "hq-deacon-role")
+}
+
 // TestInstallIdempotent validates that running gt install twice
 // on the same directory fails without --force flag.
 func TestInstallIdempotent(t *testing.T) {
@@ -310,5 +335,30 @@ func assertFileExists(t *testing.T, path, name string) {
 	}
 	if info.IsDir() {
 		t.Errorf("%s is a directory, expected file", name)
+	}
+}
+
+func assertSlotValue(t *testing.T, townRoot, issueID, slot, want string) {
+	t.Helper()
+	cmd := exec.Command("bd", "--no-daemon", "--json", "slot", "show", issueID)
+	cmd.Dir = townRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bd slot show %s failed: %v\nOutput: %s", issueID, err, output)
+	}
+
+	var parsed struct {
+		Slots map[string]*string `json:"slots"`
+	}
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		t.Fatalf("parsing slot show output failed: %v\nOutput: %s", err, output)
+	}
+
+	var got string
+	if value, ok := parsed.Slots[slot]; ok && value != nil {
+		got = *value
+	}
+	if got != want {
+		t.Fatalf("slot %s for %s = %q, want %q", slot, issueID, got, want)
 	}
 }
