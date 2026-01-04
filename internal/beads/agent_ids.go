@@ -50,3 +50,23 @@ func DeaconRoleBeadIDTown() string {
 func DogRoleBeadIDTown() string {
 	return RoleBeadIDTown("dog")
 }
+
+// WitnessRoleBeadIDTown returns the Witness role bead ID for town-level storage.
+func WitnessRoleBeadIDTown() string {
+	return RoleBeadIDTown("witness")
+}
+
+// RefineryRoleBeadIDTown returns the Refinery role bead ID for town-level storage.
+func RefineryRoleBeadIDTown() string {
+	return RoleBeadIDTown("refinery")
+}
+
+// PolecatRoleBeadIDTown returns the Polecat role bead ID for town-level storage.
+func PolecatRoleBeadIDTown() string {
+	return RoleBeadIDTown("polecat")
+}
+
+// CrewRoleBeadIDTown returns the Crew role bead ID for town-level storage.
+func CrewRoleBeadIDTown() string {
+	return RoleBeadIDTown("crew")
+}

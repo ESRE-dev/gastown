@@ -1188,6 +1188,8 @@ func DeaconBeadID() string {
 
 // DogBeadID returns a Dog agent bead ID.
 // Dogs are town-level agents, so they follow the pattern: gt-dog-<name>
+// Deprecated: Use DogBeadIDTown() for town-level beads with hq- prefix.
+// Dogs are town-level agents and should use hq-dog-<name>, not gt-dog-<name>.
 func DogBeadID(name string) string {
 	return "gt-dog-" + name
 }
@@ -1398,6 +1400,8 @@ func IsAgentSessionBead(beadID string) bool {
 
 // RoleBeadID returns the role bead ID for a given role type.
 // Role beads define lifecycle configuration for each agent type.
+// Deprecated: Use RoleBeadIDTown() for town-level beads with hq- prefix.
+// Role beads are global templates and should use hq-<role>-role, not gt-<role>-role.
 func RoleBeadID(roleType string) string {
 	return "gt-" + roleType + "-role"
 }

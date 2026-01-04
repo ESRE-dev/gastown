@@ -426,9 +426,9 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	}
 	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
 
-	// Create agent beads for this rig (witness, refinery) and
-	// global agents (deacon, mayor) if this is the first rig.
-	isFirstRig := len(m.config.Rigs) == 0
+	// Create rig-level agent beads (witness, refinery) in rig beads.
+	// Town-level agents (mayor, deacon) are created by gt install in town beads.
+	isFirstRig := len(m.config.Rigs) == 0 // Kept for backward compatibility
 	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix, isFirstRig); err != nil {
 		// Non-fatal: log warning but continue
 		fmt.Printf("  Warning: Could not create agent beads: %v\n", err)
@@ -559,13 +559,13 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	return nil
 }
 
-// initAgentBeads creates agent beads for this rig and optionally global agents.
-// - Always creates: gt-<rig>-witness, gt-<rig>-refinery
-// - First rig only: gt-deacon, gt-mayor
+// initAgentBeads creates rig-level agent beads for Witness and Refinery.
+// These agents use the rig's beads prefix and are stored in rig beads.
 //
-// Agent beads are stored in the TOWN beads (not rig beads) because they use
-// the canonical gt-* prefix for cross-rig coordination. The town beads must
-// be initialized with 'gt' prefix for this to work.
+// Town-level agents (Mayor, Deacon) are created by gt install in town beads.
+// Role beads are also created by gt install with hq- prefix.
+//
+// Format: <prefix>-<rig>-<role> (e.g., gt-gastown-witness)
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
 func (m *Manager) initAgentBeads(_, rigName, _ string, isFirstRig bool) error { // rigPath and prefix unused: agents use town beads not rig beads
@@ -574,7 +574,7 @@ func (m *Manager) initAgentBeads(_, rigName, _ string, isFirstRig bool) error { 
 	townBeadsDir := filepath.Join(m.townRoot, ".beads")
 	bd := beads.NewWithBeadsDir(m.townRoot, townBeadsDir)
 
-	// Define agents to create
+	// Define rig-level agents to create
 	type agentDef struct {
 		id       string
 		roleType string
@@ -582,43 +582,26 @@ func (m *Manager) initAgentBeads(_, rigName, _ string, isFirstRig bool) error { 
 		desc     string
 	}
 
-	var agents []agentDef
-
-	// Always create rig-specific agents using canonical gt- prefix.
-	// Agent bead IDs use the gastown namespace (gt-) regardless of the rig's
-	// beads prefix. Format: gt-<rig>-<role> (e.g., gt-tribal-witness)
-	agents = append(agents,
-		agentDef{
+	// Create rig-specific agents using gt prefix (agents stored in town beads).
+	// Format: gt-<rig>-<role> (e.g., gt-gastown-witness)
+	agents := []agentDef{
+		{
 			id:       beads.WitnessBeadID(rigName),
 			roleType: "witness",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
 		},
-		agentDef{
+		{
 			id:       beads.RefineryBeadID(rigName),
 			roleType: "refinery",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
 		},
-	)
-
-	// First rig also gets global agents (deacon, mayor)
-	if isFirstRig {
-		agents = append(agents,
-			agentDef{
-				id:       beads.DeaconBeadID(),
-				roleType: "deacon",
-				rig:      "",
-				desc:     "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring.",
-			},
-			agentDef{
-				id:       beads.MayorBeadID(),
-				roleType: "mayor",
-				rig:      "",
-				desc:     "Mayor - global coordinator, handles cross-rig communication and escalations.",
-			},
-		)
 	}
+
+	// Note: Mayor and Deacon are now created by gt install in town beads.
+	// isFirstRig parameter is kept for backward compatibility but no longer used.
+	_ = isFirstRig
 
 	for _, agent := range agents {
 		// Check if already exists
@@ -627,13 +610,13 @@ func (m *Manager) initAgentBeads(_, rigName, _ string, isFirstRig bool) error { 
 		}
 
 		// RoleBead points to the shared role definition bead for this agent type.
-		// Role beads are shared: gt-witness-role, gt-refinery-role, etc.
+		// Role beads are in town beads with hq- prefix (e.g., hq-witness-role).
 		fields := &beads.AgentFields{
 			RoleType:   agent.roleType,
 			Rig:        agent.rig,
 			AgentState: "idle",
 			HookBead:   "",
-			RoleBead:   "gt-" + agent.roleType + "-role",
+			RoleBead:   beads.RoleBeadIDTown(agent.roleType),
 		}
 
 		if _, err := bd.CreateAgentBead(agent.id, agent.desc, fields); err != nil {
