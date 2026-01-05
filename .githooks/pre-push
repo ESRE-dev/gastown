@@ -1,0 +1,32 @@
+#!/bin/bash
+# Block pushes to non-main branches from internal clones
+# External contributors use forks, so this only affects Gas Town agents
+
+# Allow: main, beads-sync
+# Block: feature branches, polecat/* branches, etc.
+
+while read local_ref local_sha remote_ref remote_sha; do
+  branch="${remote_ref#refs/heads/}"
+
+  case "$branch" in
+    main|beads-sync)
+      # Allowed branches
+      ;;
+    *)
+      echo "ERROR: Gas Town agents push directly to main."
+      echo ""
+      echo "Blocked push to: $branch"
+      echo ""
+      echo "If you're working on a fix:"
+      echo "  git checkout main"
+      echo "  git merge $branch"
+      echo "  git push origin main"
+      echo "  git branch -d $branch"
+      echo ""
+      echo "See CLAUDE.md: 'Crew workers push directly to main. No feature branches.'"
+      exit 1
+      ;;
+  esac
+done
+
+exit 0

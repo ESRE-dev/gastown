@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -102,7 +104,8 @@ func (g *Git) Clone(url, dest string) error {
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stderr.String(), []string{"clone", url})
 	}
-	return nil
+	// Configure hooks path for Gas Town clones
+	return configureHooksPath(dest)
 }
 
 // CloneWithReference clones a repository using a local repo as an object reference.
@@ -114,7 +117,8 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stderr.String(), []string{"clone", "--reference-if-able", url})
 	}
-	return nil
+	// Configure hooks path for Gas Town clones
+	return configureHooksPath(dest)
 }
 
 // CloneBare clones a repository as a bare repo (no working directory).
@@ -125,6 +129,25 @@ func (g *Git) CloneBare(url, dest string) error {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stderr.String(), []string{"clone", "--bare", url})
+	}
+	return nil
+}
+
+// configureHooksPath sets core.hooksPath to use the repo's .githooks directory
+// if it exists. This ensures Gas Town agents use the pre-push hook that blocks
+// pushes to non-main branches (internal PRs are not allowed).
+func configureHooksPath(repoPath string) error {
+	hooksDir := filepath.Join(repoPath, ".githooks")
+	if _, err := os.Stat(hooksDir); os.IsNotExist(err) {
+		// No .githooks directory, nothing to configure
+		return nil
+	}
+
+	cmd := exec.Command("git", "-C", repoPath, "config", "core.hooksPath", ".githooks")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("configuring hooks path: %s", strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
