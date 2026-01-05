@@ -48,7 +48,7 @@ Examples:
 		if jsonFlag {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			enc.Encode(info)
+			_ = enc.Encode(info)
 			return
 		}
 
@@ -148,7 +148,7 @@ func showWhatsNew(jsonOutput bool) {
 	if jsonOutput {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(map[string]interface{}{
+		_ = enc.Encode(map[string]interface{}{
 			"current_version": Version,
 			"recent_changes":  versionChanges,
 		})
