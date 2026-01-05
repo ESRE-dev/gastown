@@ -1240,7 +1240,16 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 	}
 
 	// Add tracking relation: convoy tracks the issue
-	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
+	// Format cross-prefix beads as external refs so bd can resolve them
+	trackBeadID := beadID
+	if !strings.HasPrefix(beadID, "hq-") {
+		parts := strings.SplitN(beadID, "-", 3)
+		if len(parts) >= 2 {
+			rigPrefix := parts[0] + "-" + parts[1]
+			trackBeadID = fmt.Sprintf("external:%s:%s", rigPrefix, beadID)
+		}
+	}
+	depArgs := []string{"dep", "add", convoyID, trackBeadID, "--type=tracks"}
 	depCmd := exec.Command("bd", depArgs...)
 	depCmd.Dir = townBeads
 	depCmd.Stderr = os.Stderr
@@ -1278,10 +1287,10 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 
 	// Track results for summary
 	type slingResult struct {
-		beadID   string
-		polecat  string
-		success  bool
-		errMsg   string
+		beadID  string
+		polecat string
+		success bool
+		errMsg  string
 	}
 	results := make([]slingResult, 0, len(beadIDs))
 
