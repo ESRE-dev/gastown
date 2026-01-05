@@ -640,16 +640,18 @@ type SearchOptions struct {
 
 // Search finds messages matching the given criteria.
 // Returns messages from both inbox and archive.
+// Query and FromFilter are treated as literal strings (not regex) to prevent ReDoS.
 func (m *Mailbox) Search(opts SearchOptions) ([]*Message, error) {
-	// Compile regex
-	re, err := regexp.Compile("(?i)" + opts.Query) // Case-insensitive
+	// Use QuoteMeta to escape special regex chars - prevents ReDoS attacks
+	// and provides intuitive literal string matching for users
+	re, err := regexp.Compile("(?i)" + regexp.QuoteMeta(opts.Query))
 	if err != nil {
 		return nil, fmt.Errorf("invalid search pattern: %w", err)
 	}
 
 	var fromRe *regexp.Regexp
 	if opts.FromFilter != "" {
-		fromRe, err = regexp.Compile("(?i)" + opts.FromFilter)
+		fromRe, err = regexp.Compile("(?i)" + regexp.QuoteMeta(opts.FromFilter))
 		if err != nil {
 			return nil, fmt.Errorf("invalid from pattern: %w", err)
 		}
