@@ -18,23 +18,27 @@ jobs:
             const prNumber = context.issue.number;
             const branch = context.payload.pull_request.head.ref;
 
+            const body = [
+              '**Internal PRs are not allowed.**',
+              '',
+              'Gas Town agents push directly to main. PRs are for external contributors only.',
+              '',
+              'To land your changes:',
+              '```bash',
+              'git checkout main',
+              'git merge ' + branch,
+              'git push origin main',
+              'git push origin --delete ' + branch,
+              '```',
+              '',
+              'See CLAUDE.md: "Crew workers push directly to main. No feature branches. NEVER create PRs."'
+            ].join('\n');
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
-              body: `🚫 **Internal PRs are not allowed.**
-
-Gas Town agents push directly to main. PRs are for external contributors only.
-
-To land your changes:
-\`\`\`bash
-git checkout main
-git merge ${branch}
-git push origin main
-git push origin --delete ${branch}
-\`\`\`
-
-See CLAUDE.md: "Crew workers push directly to main. No feature branches. NEVER create PRs."`
+              body: body
             });
 
             await github.rest.pulls.update({
