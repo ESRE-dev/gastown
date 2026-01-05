@@ -240,27 +240,30 @@ var crewPrevCmd = &cobra.Command{
 }
 
 var crewStartCmd = &cobra.Command{
-	Use:     "start <rig> [name]",
+	Use:     "start [rig] [name...]",
 	Aliases: []string{"spawn"},
 	Short:   "Start crew worker(s) in a rig",
 	Long: `Start crew workers in a rig, creating workspaces if they don't exist.
 
-Takes the rig name as the first argument. Optionally specify a crew member name
-to start just that worker, or use --all to start all crew members in the rig.
+The rig name can be provided as the first argument, or inferred from the
+current directory. Optionally specify crew member names to start specific
+workers, or use --all to start all crew members in the rig.
 
 The crew session starts in the background with Claude running and ready.
 
 Examples:
   gt crew start gastown joe       # Start joe in gastown rig
   gt crew start gastown --all     # Start all crew in gastown rig
-  gt crew start beads             # Error: specify name or --all
+  gt crew start --all             # Start all crew (rig inferred from cwd)
   gt crew start beads grip fang   # Start grip and fang in beads rig`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 {
-			return fmt.Errorf("requires at least 1 argument: the rig name")
+		// With --all, we can have 0 args (infer rig) or 1+ args (rig specified)
+		if crewAll {
+			return nil
 		}
-		if len(args) == 1 && !crewAll {
-			return fmt.Errorf("specify a crew member name or use --all to start all crew in the rig")
+		// Without --all, need at least rig and one crew name
+		if len(args) < 2 {
+			return fmt.Errorf("requires rig and crew name, or use --all")
 		}
 		return nil
 	},
