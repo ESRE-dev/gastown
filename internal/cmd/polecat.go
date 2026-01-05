@@ -229,6 +229,37 @@ Examples:
 	RunE: runPolecatCheckRecovery,
 }
 
+var (
+	polecatStaleJSON      bool
+	polecatStaleThreshold int
+	polecatStaleCleanup   bool
+)
+
+var polecatStaleCmd = &cobra.Command{
+	Use:   "stale <rig>",
+	Short: "Detect stale polecats that may need cleanup",
+	Long: `Detect stale polecats in a rig that are candidates for cleanup.
+
+A polecat is considered stale if:
+  - No active tmux session
+  - Way behind main (>threshold commits) OR no agent bead
+  - Has no uncommitted work that could be lost
+
+The default threshold is 20 commits behind main.
+
+Use --cleanup to automatically nuke stale polecats that are safe to remove.
+Use --dry-run with --cleanup to see what would be cleaned.
+
+Examples:
+  gt polecat stale greenplace
+  gt polecat stale greenplace --threshold 50
+  gt polecat stale greenplace --json
+  gt polecat stale greenplace --cleanup
+  gt polecat stale greenplace --cleanup --dry-run`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPolecatStale,
+}
+
 func init() {
 	// List flags
 	polecatListCmd.Flags().BoolVar(&polecatListJSON, "json", false, "Output as JSON")
@@ -259,6 +290,11 @@ func init() {
 	// Check-recovery flags
 	polecatCheckRecoveryCmd.Flags().BoolVar(&polecatCheckRecoveryJSON, "json", false, "Output as JSON")
 
+	// Stale flags
+	polecatStaleCmd.Flags().BoolVar(&polecatStaleJSON, "json", false, "Output as JSON")
+	polecatStaleCmd.Flags().IntVar(&polecatStaleThreshold, "threshold", 20, "Commits behind main to consider stale")
+	polecatStaleCmd.Flags().BoolVar(&polecatStaleCleanup, "cleanup", false, "Automatically nuke stale polecats")
+
 	// Add subcommands
 	polecatCmd.AddCommand(polecatListCmd)
 	polecatCmd.AddCommand(polecatAddCmd)
@@ -269,6 +305,7 @@ func init() {
 	polecatCmd.AddCommand(polecatCheckRecoveryCmd)
 	polecatCmd.AddCommand(polecatGCCmd)
 	polecatCmd.AddCommand(polecatNukeCmd)
+	polecatCmd.AddCommand(polecatStaleCmd)
 
 	rootCmd.AddCommand(polecatCmd)
 }
@@ -1457,6 +1494,119 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 
 	if len(nukeErrors) > 0 {
 		return fmt.Errorf("%d nuke(s) failed", len(nukeErrors))
+	}
+
+	return nil
+}
+
+func runPolecatStale(cmd *cobra.Command, args []string) error {
+	rigName := args[0]
+	mgr, r, err := getPolecatManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Detecting stale polecats in %s (threshold: %d commits behind main)...\n\n", r.Name, polecatStaleThreshold)
+
+	staleInfos, err := mgr.DetectStalePolecats(polecatStaleThreshold)
+	if err != nil {
+		return fmt.Errorf("detecting stale polecats: %w", err)
+	}
+
+	if len(staleInfos) == 0 {
+		fmt.Println("No polecats found.")
+		return nil
+	}
+
+	// JSON output
+	if polecatStaleJSON {
+		return json.NewEncoder(os.Stdout).Encode(staleInfos)
+	}
+
+	// Summary counts
+	var staleCount, safeCount int
+	for _, info := range staleInfos {
+		if info.IsStale {
+			staleCount++
+		} else {
+			safeCount++
+		}
+	}
+
+	// Display results
+	for _, info := range staleInfos {
+		statusIcon := style.Success.Render("●")
+		statusText := "active"
+		if info.IsStale {
+			statusIcon = style.Warning.Render("○")
+			statusText = "stale"
+		}
+
+		fmt.Printf("%s %s (%s)\n", statusIcon, style.Bold.Render(info.Name), statusText)
+
+		// Session status
+		if info.HasActiveSession {
+			fmt.Printf("    Session: %s\n", style.Success.Render("running"))
+		} else {
+			fmt.Printf("    Session: %s\n", style.Dim.Render("stopped"))
+		}
+
+		// Commits behind
+		if info.CommitsBehind > 0 {
+			behindStyle := style.Dim
+			if info.CommitsBehind >= polecatStaleThreshold {
+				behindStyle = style.Warning
+			}
+			fmt.Printf("    Behind main: %s\n", behindStyle.Render(fmt.Sprintf("%d commits", info.CommitsBehind)))
+		}
+
+		// Agent state
+		if info.AgentState != "" {
+			fmt.Printf("    Agent state: %s\n", info.AgentState)
+		} else {
+			fmt.Printf("    Agent state: %s\n", style.Dim.Render("no bead"))
+		}
+
+		// Uncommitted work
+		if info.HasUncommittedWork {
+			fmt.Printf("    Uncommitted: %s\n", style.Error.Render("yes"))
+		}
+
+		// Reason
+		fmt.Printf("    Reason: %s\n", info.Reason)
+		fmt.Println()
+	}
+
+	// Summary
+	fmt.Printf("Summary: %d stale, %d active\n", staleCount, safeCount)
+
+	// Cleanup if requested
+	if polecatStaleCleanup && staleCount > 0 {
+		fmt.Println()
+		if polecatNukeDryRun {
+			fmt.Printf("Would clean up %d stale polecat(s):\n", staleCount)
+			for _, info := range staleInfos {
+				if info.IsStale {
+					fmt.Printf("  - %s: %s\n", info.Name, info.Reason)
+				}
+			}
+		} else {
+			fmt.Printf("Cleaning up %d stale polecat(s)...\n", staleCount)
+			nuked := 0
+			for _, info := range staleInfos {
+				if !info.IsStale {
+					continue
+				}
+				fmt.Printf("  Nuking %s...", info.Name)
+				if err := mgr.RemoveWithOptions(info.Name, true, false); err != nil {
+					fmt.Printf(" %s (%v)\n", style.Error.Render("failed"), err)
+				} else {
+					fmt.Printf(" %s\n", style.Success.Render("done"))
+					nuked++
+				}
+			}
+			fmt.Printf("\n%s Nuked %d stale polecat(s).\n", style.SuccessPrefix, nuked)
+		}
 	}
 
 	return nil

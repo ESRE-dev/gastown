@@ -699,6 +699,24 @@ func (g *Git) CommitsAhead(base, branch string) (int, error) {
 	return count, nil
 }
 
+// CountCommitsBehind returns the number of commits that HEAD is behind the given ref.
+// For example, CountCommitsBehind("origin/main") returns how many commits
+// are on origin/main that are not on the current HEAD.
+func (g *Git) CountCommitsBehind(ref string) (int, error) {
+	out, err := g.run("rev-list", "--count", "HEAD.."+ref)
+	if err != nil {
+		return 0, err
+	}
+
+	var count int
+	_, err = fmt.Sscanf(out, "%d", &count)
+	if err != nil {
+		return 0, fmt.Errorf("parsing commit count: %w", err)
+	}
+
+	return count, nil
+}
+
 // StashCount returns the number of stashes in the repository.
 func (g *Git) StashCount() (int, error) {
 	out, err := g.run("stash", "list")

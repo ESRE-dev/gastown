@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -830,4 +831,132 @@ func (m *Manager) CleanupStaleBranches() (int, error) {
 	}
 
 	return deleted, nil
+}
+
+// StalenessInfo contains details about a polecat's staleness.
+type StalenessInfo struct {
+	Name            string
+	CommitsBehind   int  // How many commits behind origin/main
+	HasActiveSession bool // Whether tmux session is running
+	HasUncommittedWork bool // Whether there's uncommitted or unpushed work
+	AgentState      string // From agent bead (empty if no bead)
+	IsStale         bool   // Overall assessment: safe to clean up
+	Reason          string // Why it's considered stale (or not)
+}
+
+// DetectStalePolecats identifies polecats that are candidates for cleanup.
+// A polecat is considered stale if:
+// - No active tmux session AND
+// - Either: way behind main (>threshold commits) OR no agent bead/activity
+// - Has no uncommitted work that could be lost
+//
+// threshold: minimum commits behind main to consider "way behind" (e.g., 20)
+func (m *Manager) DetectStalePolecats(threshold int) ([]*StalenessInfo, error) {
+	polecats, err := m.List()
+	if err != nil {
+		return nil, fmt.Errorf("listing polecats: %w", err)
+	}
+
+	if len(polecats) == 0 {
+		return nil, nil
+	}
+
+	// Get default branch from rig config
+	defaultBranch := "main"
+	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+
+	var results []*StalenessInfo
+	for _, p := range polecats {
+		info := &StalenessInfo{
+			Name: p.Name,
+		}
+
+		// Check for active tmux session
+		// Session name follows pattern: gt-<rig>-<polecat>
+		sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, p.Name)
+		info.HasActiveSession = checkTmuxSession(sessionName)
+
+		// Check how far behind main
+		polecatGit := git.NewGit(p.ClonePath)
+		info.CommitsBehind = countCommitsBehind(polecatGit, defaultBranch)
+
+		// Check for uncommitted work
+		status, err := polecatGit.CheckUncommittedWork()
+		if err == nil && !status.Clean() {
+			info.HasUncommittedWork = true
+		}
+
+		// Check agent bead state
+		agentID := m.agentBeadID(p.Name)
+		_, fields, err := m.beads.GetAgentBead(agentID)
+		if err == nil && fields != nil {
+			info.AgentState = fields.AgentState
+		}
+
+		// Determine staleness
+		info.IsStale, info.Reason = assessStaleness(info, threshold)
+		results = append(results, info)
+	}
+
+	return results, nil
+}
+
+// checkTmuxSession checks if a tmux session exists.
+func checkTmuxSession(sessionName string) bool {
+	// Use has-session command which returns 0 if session exists
+	cmd := exec.Command("tmux", "has-session", "-t", sessionName) //nolint:gosec // G204: sessionName is constructed internally
+	return cmd.Run() == nil
+}
+
+// countCommitsBehind counts how many commits a worktree is behind origin/<defaultBranch>.
+func countCommitsBehind(g *git.Git, defaultBranch string) int {
+	// Use rev-list to count commits: origin/main..HEAD shows commits ahead,
+	// HEAD..origin/main shows commits behind
+	remoteBranch := "origin/" + defaultBranch
+	count, err := g.CountCommitsBehind(remoteBranch)
+	if err != nil {
+		return 0 // Can't determine, assume not behind
+	}
+	return count
+}
+
+// assessStaleness determines if a polecat should be cleaned up.
+func assessStaleness(info *StalenessInfo, threshold int) (bool, string) {
+	// Never clean up if there's uncommitted work
+	if info.HasUncommittedWork {
+		return false, "has uncommitted work"
+	}
+
+	// If session is active, not stale
+	if info.HasActiveSession {
+		return false, "session active"
+	}
+
+	// No active session - check other indicators
+
+	// If agent reports "running" state but no session, that's suspicious
+	// but give benefit of doubt (session may have just died)
+	if info.AgentState == "running" {
+		return false, "agent reports running (session may be restarting)"
+	}
+
+	// If agent reports "done" or "idle", it's a cleanup candidate
+	if info.AgentState == "done" || info.AgentState == "idle" {
+		return true, fmt.Sprintf("agent_state=%s, no active session", info.AgentState)
+	}
+
+	// Way behind main is a strong staleness signal
+	if info.CommitsBehind >= threshold {
+		return true, fmt.Sprintf("%d commits behind main, no active session", info.CommitsBehind)
+	}
+
+	// No agent bead and no session - likely abandoned
+	if info.AgentState == "" {
+		return true, "no agent bead, no active session"
+	}
+
+	// Default: not enough evidence to consider stale
+	return false, "insufficient staleness indicators"
 }
