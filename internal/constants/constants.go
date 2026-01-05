@@ -89,11 +89,15 @@ const (
 )
 
 // Tmux session names.
-// Mayor and Deacon use simple session names: gt-mayor, gt-deacon (one per machine).
+// Mayor and Deacon use hq- prefix: hq-mayor, hq-deacon (town-level, one per machine).
+// Rig-level services use gt- prefix: gt-<rig>-witness, gt-<rig>-refinery, etc.
 // Use session.MayorSessionName() and session.DeaconSessionName().
 const (
-	// SessionPrefix is the prefix for all Gas Town tmux sessions.
+	// SessionPrefix is the prefix for rig-level Gas Town tmux sessions.
 	SessionPrefix = "gt-"
+
+	// HQSessionPrefix is the prefix for town-level services (Mayor, Deacon).
+	HQSessionPrefix = "hq-"
 )
 
 // Agent role names.

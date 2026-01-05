@@ -91,9 +91,9 @@ func TestAddressToSessionID(t *testing.T) {
 		address string
 		want    string
 	}{
-		{"mayor", "gt-mayor"},
-		{"mayor/", "gt-mayor"},
-		{"deacon", "gt-deacon"},
+		{"mayor", "hq-mayor"},
+		{"mayor/", "hq-mayor"},
+		{"deacon", "hq-deacon"},
 		{"gastown/refinery", "gt-gastown-refinery"},
 		{"gastown/Toast", "gt-gastown-Toast"},
 		{"beads/witness", "gt-beads-witness"},

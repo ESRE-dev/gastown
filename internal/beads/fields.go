@@ -509,7 +509,7 @@ func FormatSynthesisFields(fields *SynthesisFields) string {
 type RoleConfig struct {
 	// SessionPattern defines how to derive tmux session name.
 	// Supports placeholders: {rig}, {name}, {role}
-	// Examples: "gt-mayor", "gt-{rig}-{role}", "gt-{rig}-{name}"
+	// Examples: "hq-mayor", "hq-deacon", "gt-{rig}-{role}", "gt-{rig}-{name}"
 	SessionPattern string
 
 	// WorkDirPattern defines the working directory relative to town root.

@@ -28,8 +28,8 @@ type AgentIdentity struct {
 // ParseSessionName parses a tmux session name into an AgentIdentity.
 //
 // Session name formats:
-//   - gt-mayor → Role: mayor (one per machine)
-//   - gt-deacon → Role: deacon (one per machine)
+//   - hq-mayor → Role: mayor (town-level, one per machine)
+//   - hq-deacon → Role: deacon (town-level, one per machine)
 //   - gt-<rig>-witness → Role: witness, Rig: <rig>
 //   - gt-<rig>-refinery → Role: refinery, Rig: <rig>
 //   - gt-<rig>-crew-<name> → Role: crew, Rig: <rig>, Name: <name>
@@ -39,21 +39,26 @@ type AgentIdentity struct {
 // is assumed to be the polecat name. This works for simple rig names but may
 // be ambiguous for rig names containing hyphens.
 func ParseSessionName(session string) (*AgentIdentity, error) {
+	// Check for town-level roles (hq- prefix)
+	if strings.HasPrefix(session, HQPrefix) {
+		suffix := strings.TrimPrefix(session, HQPrefix)
+		if suffix == "mayor" {
+			return &AgentIdentity{Role: RoleMayor}, nil
+		}
+		if suffix == "deacon" {
+			return &AgentIdentity{Role: RoleDeacon}, nil
+		}
+		return nil, fmt.Errorf("invalid session name %q: unknown hq- role", session)
+	}
+
+	// Rig-level roles use gt- prefix
 	if !strings.HasPrefix(session, Prefix) {
-		return nil, fmt.Errorf("invalid session name %q: missing %q prefix", session, Prefix)
+		return nil, fmt.Errorf("invalid session name %q: missing %q or %q prefix", session, HQPrefix, Prefix)
 	}
 
 	suffix := strings.TrimPrefix(session, Prefix)
 	if suffix == "" {
 		return nil, fmt.Errorf("invalid session name %q: empty after prefix", session)
-	}
-
-	// Check for simple town-level roles (no rig qualifier)
-	if suffix == "mayor" {
-		return &AgentIdentity{Role: RoleMayor}, nil
-	}
-	if suffix == "deacon" {
-		return &AgentIdentity{Role: RoleDeacon}, nil
 	}
 
 	// Parse into parts for rig-level roles

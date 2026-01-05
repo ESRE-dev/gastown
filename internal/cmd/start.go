@@ -430,7 +430,8 @@ func runShutdown(cmd *cobra.Command, args []string) error {
 // mayorSession and deaconSession are the dynamic session names for the current town.
 func categorizeSessions(sessions []string, mayorSession, deaconSession string) (toStop, preserved []string) {
 	for _, sess := range sessions {
-		if !strings.HasPrefix(sess, "gt-") {
+		// Gas Town sessions use gt- (rig-level) or hq- (town-level) prefix
+		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
 			continue // Not a Gas Town session
 		}
 

@@ -12,7 +12,7 @@ import (
 // TownSession represents a town-level tmux session.
 type TownSession struct {
 	Name      string // Display name (e.g., "Mayor")
-	SessionID string // Tmux session ID (e.g., "gt-mayor")
+	SessionID string // Tmux session ID (e.g., "hq-mayor")
 }
 
 // TownSessions returns the list of town-level sessions in shutdown order.

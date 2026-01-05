@@ -16,9 +16,9 @@ import (
 )
 
 // SessionName is the tmux session name for Boot.
-// Note: We use "gt-boot" instead of "gt-deacon-boot" to avoid tmux prefix
-// matching collisions. Tmux matches session names by prefix, so "gt-deacon-boot"
-// would match when checking for "gt-deacon", causing HasSession("gt-deacon")
+// Note: We use "gt-boot" instead of "hq-deacon-boot" to avoid tmux prefix
+// matching collisions. Tmux matches session names by prefix, so "hq-deacon-boot"
+// would match when checking for "hq-deacon", causing HasSession("hq-deacon")
 // to return true when only Boot is running.
 const SessionName = "gt-boot"
 

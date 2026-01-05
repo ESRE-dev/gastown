@@ -8,19 +8,22 @@ import (
 	"strings"
 )
 
-// Prefix is the common prefix for all Gas Town tmux session names.
+// Prefix is the common prefix for rig-level Gas Town tmux sessions.
 const Prefix = "gt-"
+
+// HQPrefix is the prefix for town-level services (Mayor, Deacon).
+const HQPrefix = "hq-"
 
 // MayorSessionName returns the session name for the Mayor agent.
 // One mayor per machine - multi-town requires containers/VMs for isolation.
 func MayorSessionName() string {
-	return Prefix + "mayor"
+	return HQPrefix + "mayor"
 }
 
 // DeaconSessionName returns the session name for the Deacon agent.
 // One deacon per machine - multi-town requires containers/VMs for isolation.
 func DeaconSessionName() string {
-	return Prefix + "deacon"
+	return HQPrefix + "deacon"
 }
 
 // WitnessSessionName returns the session name for a rig's Witness agent.

@@ -8,8 +8,8 @@ import (
 )
 
 func TestMayorSessionName(t *testing.T) {
-	// Mayor session name is now fixed (one per machine)
-	want := "gt-mayor"
+	// Mayor session name is now fixed (one per machine), uses HQ prefix
+	want := "hq-mayor"
 	got := MayorSessionName()
 	if got != want {
 		t.Errorf("MayorSessionName() = %q, want %q", got, want)
@@ -17,8 +17,8 @@ func TestMayorSessionName(t *testing.T) {
 }
 
 func TestDeaconSessionName(t *testing.T) {
-	// Deacon session name is now fixed (one per machine)
-	want := "gt-deacon"
+	// Deacon session name is now fixed (one per machine), uses HQ prefix
+	want := "hq-deacon"
 	got := DeaconSessionName()
 	if got != want {
 		t.Errorf("DeaconSessionName() = %q, want %q", got, want)
