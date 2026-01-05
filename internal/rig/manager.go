@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -351,7 +352,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			// bd init --prefix will create the database and auto-import from issues.jsonl.
 			sourceBeadsDB := filepath.Join(mayorRigPath, ".beads", "beads.db")
 			if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
-				cmd := exec.Command("bd", "init", "--prefix", sourcePrefix) //nolint:gosec // G204: bd is a trusted internal tool
+				cmd := exec.Command("bd", "init", "--prefix", sourcePrefix) // sourcePrefix validated by isValidBeadsPrefix
 				cmd.Dir = mayorRigPath
 				if output, err := cmd.CombinedOutput(); err != nil {
 					fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
@@ -500,6 +501,11 @@ func LoadRigConfig(rigPath string) (*RigConfig, error) {
 // Use `bd doctor --fix` in the project to configure sync-branch if needed.
 // TODO(bd-yaml): beads config should migrate to JSON (see beads issue)
 func (m *Manager) initBeads(rigPath, prefix string) error {
+	// Validate prefix format to prevent command injection from config files
+	if !isValidBeadsPrefix(prefix) {
+		return fmt.Errorf("invalid beads prefix %q: must be alphanumeric with optional hyphens, start with letter, max 20 chars", prefix)
+	}
+
 	beadsDir := filepath.Join(rigPath, ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		return err
@@ -677,6 +683,18 @@ func deriveBeadsPrefix(name string) string {
 // Returns empty string if the file doesn't exist or doesn't contain a prefix.
 // Falls back to detecting prefix from existing issues in issues.jsonl.
 //
+// beadsPrefixRegexp validates beads prefix format: alphanumeric, may contain hyphens,
+// must start with letter, max 20 chars. Prevents shell injection via config files.
+var beadsPrefixRegexp = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]{0,19}$`)
+
+// isValidBeadsPrefix checks if a prefix is safe for use in shell commands.
+// Prefixes must be alphanumeric (with optional hyphens), start with a letter,
+// and be at most 20 characters. This prevents command injection from
+// malicious config files.
+func isValidBeadsPrefix(prefix string) bool {
+	return beadsPrefixRegexp.MatchString(prefix)
+}
+
 // When adding a rig from a source repo that has .beads/ tracked in git (like a project
 // that already uses beads for issue tracking), we need to use that project's existing
 // prefix instead of generating a new one. Otherwise, the rig would have a mismatched
@@ -702,7 +720,7 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 				value := strings.TrimSpace(strings.TrimPrefix(line, key))
 				// Remove quotes if present
 				value = strings.Trim(value, `"'`)
-				if value != "" {
+				if value != "" && isValidBeadsPrefix(value) {
 					return value
 				}
 			}
@@ -729,7 +747,9 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 					if dashIdx := strings.LastIndex(issueID, "-"); dashIdx > 0 {
 						prefix := issueID[:dashIdx]
 						// Handle prefixes like "gt" (from "gt-abc") - return without trailing hyphen
-						return prefix
+						if isValidBeadsPrefix(prefix) {
+							return prefix
+						}
 					}
 				}
 			}

@@ -410,3 +410,70 @@ esac
 		}
 	}
 }
+
+func TestIsValidBeadsPrefix(t *testing.T) {
+	tests := []struct {
+		prefix string
+		want   bool
+	}{
+		// Valid prefixes
+		{"gt", true},
+		{"bd", true},
+		{"hq", true},
+		{"gastown", true},
+		{"myProject", true},
+		{"my-project", true},
+		{"a", true},
+		{"A", true},
+		{"test123", true},
+		{"a1b2c3", true},
+		{"a-b-c", true},
+
+		// Invalid prefixes
+		{"", false},                    // empty
+		{"1abc", false},                // starts with number
+		{"-abc", false},                // starts with hyphen
+		{"abc def", false},             // contains space
+		{"abc;ls", false},              // shell injection attempt
+		{"$(whoami)", false},           // command substitution
+		{"`id`", false},                // backtick command
+		{"abc|cat", false},             // pipe
+		{"../etc/passwd", false},       // path traversal
+		{"aaaaaaaaaaaaaaaaaaaaa", false}, // too long (21 chars, >20 limit)
+		{"valid-but-with-$var", false}, // variable reference
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.prefix, func(t *testing.T) {
+			got := isValidBeadsPrefix(tt.prefix)
+			if got != tt.want {
+				t.Errorf("isValidBeadsPrefix(%q) = %v, want %v", tt.prefix, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
+	rigPath := t.TempDir()
+	manager := &Manager{}
+
+	tests := []string{
+		"",
+		"$(whoami)",
+		"abc;rm -rf /",
+		"../etc",
+		"123",
+	}
+
+	for _, prefix := range tests {
+		t.Run(prefix, func(t *testing.T) {
+			err := manager.initBeads(rigPath, prefix)
+			if err == nil {
+				t.Errorf("initBeads(%q) should have failed", prefix)
+			}
+			if !strings.Contains(err.Error(), "invalid beads prefix") {
+				t.Errorf("initBeads(%q) error = %q, want error containing 'invalid beads prefix'", prefix, err.Error())
+			}
+		})
+	}
+}
