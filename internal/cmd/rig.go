@@ -177,9 +177,11 @@ Examples:
 }
 
 var rigStatusCmd = &cobra.Command{
-	Use:   "status <rig>",
+	Use:   "status [rig]",
 	Short: "Show detailed status for a specific rig",
 	Long: `Show detailed status for a specific rig including all workers.
+
+If no rig is specified, infers the rig from the current directory.
 
 Displays:
 - Rig information (name, path, beads prefix)
@@ -189,9 +191,10 @@ Displays:
 - Crew members (name, branch, session status, git status)
 
 Examples:
+  gt rig status           # Infer rig from current directory
   gt rig status gastown
   gt rig status beads`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runRigStatus,
 }
 
@@ -996,7 +999,21 @@ func runRigReboot(cmd *cobra.Command, args []string) error {
 }
 
 func runRigStatus(cmd *cobra.Command, args []string) error {
-	rigName := args[0]
+	var rigName string
+
+	if len(args) > 0 {
+		rigName = args[0]
+	} else {
+		// Infer rig from current directory
+		roleInfo, err := GetRole()
+		if err != nil {
+			return fmt.Errorf("detecting rig from current directory: %w", err)
+		}
+		if roleInfo.Rig == "" {
+			return fmt.Errorf("could not detect rig from current directory; please specify rig name")
+		}
+		rigName = roleInfo.Rig
+	}
 
 	// Get rig
 	townRoot, r, err := getRig(rigName)
