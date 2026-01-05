@@ -908,7 +908,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 			"Execute the step (heartbeat, mail, health checks, etc.)",
 			"Close step: `bd close <step-id>`",
 			"Check next: `bd ready`",
-			"At cycle end (loop-or-exit step):\n   - Generate summary of patrol cycle\n   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`\n   - Loop back to create new wisp, or exit if context high",
+			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `bd mol wisp mol-deacon-patrol`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `gt handoff -s \"Deacon patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
 	outputPatrolContext(cfg)
@@ -931,7 +931,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 			"Execute the step (survey polecats, inspect, nudge, etc.)",
 			"Close step: `bd close <step-id>`",
 			"Check next: `bd ready`",
-			"At cycle end (burn-or-loop step):\n   - Generate summary of patrol cycle\n   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`\n   - Loop back to create new wisp, or exit if context high",
+			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `bd mol wisp mol-witness-patrol`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `gt handoff -s \"Witness patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
 	outputPatrolContext(cfg)
@@ -954,7 +954,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 			"Execute the step (queue scan, process branch, tests, merge)",
 			"Close step: `bd close <step-id>`",
 			"Check next: `bd ready`",
-			"At cycle end (burn-or-loop step):\n   - Generate summary of patrol cycle\n   - Squash: `bd --no-daemon mol squash <mol-id> --summary \"<summary>\"`\n   - Loop back to create new wisp, or exit if context high",
+			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `bd mol wisp mol-refinery-patrol`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `gt handoff -s \"Refinery patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
 	outputPatrolContext(cfg)
