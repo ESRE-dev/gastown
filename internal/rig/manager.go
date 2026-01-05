@@ -791,12 +791,22 @@ func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName 
 	// Get town name for session names
 	townName, _ := workspace.GetTownName(m.townRoot)
 
+	// Get default branch from rig config (default to "main" if not set)
+	defaultBranch := "main"
+	if rigName != "" {
+		rigPath := filepath.Join(m.townRoot, rigName)
+		if rigCfg, err := LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
+			defaultBranch = rigCfg.DefaultBranch
+		}
+	}
+
 	data := templates.RoleData{
 		Role:          role,
 		RigName:       rigName,
 		TownRoot:      m.townRoot,
 		TownName:      townName,
 		WorkDir:       workspacePath,
+		DefaultBranch: defaultBranch,
 		Polecat:       workerName, // Used for crew member name as well
 		MayorSession:  fmt.Sprintf("gt-%s-mayor", townName),
 		DeaconSession: fmt.Sprintf("gt-%s-deacon", townName),

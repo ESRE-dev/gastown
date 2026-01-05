@@ -271,6 +271,7 @@ func createMayorCLAUDEmd(hqRoot, townRoot string) error {
 		TownRoot:      townRoot,
 		TownName:      townName,
 		WorkDir:       hqRoot,
+		DefaultBranch: "main", // Mayor doesn't merge, but field required
 		MayorSession:  session.MayorSessionName(),
 		DeaconSession: session.DeaconSessionName(),
 	}

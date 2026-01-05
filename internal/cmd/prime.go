@@ -19,6 +19,7 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/lock"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
@@ -308,12 +309,22 @@ func outputPrimeContext(ctx RoleContext) error {
 	// Get town name for session names
 	townName, _ := workspace.GetTownName(ctx.TownRoot)
 
+	// Get default branch from rig config (default to "main" if not set)
+	defaultBranch := "main"
+	if ctx.Rig != "" && ctx.TownRoot != "" {
+		rigPath := filepath.Join(ctx.TownRoot, ctx.Rig)
+		if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
+			defaultBranch = rigCfg.DefaultBranch
+		}
+	}
+
 	data := templates.RoleData{
 		Role:          roleName,
 		RigName:       ctx.Rig,
 		TownRoot:      ctx.TownRoot,
 		TownName:      townName,
 		WorkDir:       ctx.WorkDir,
+		DefaultBranch: defaultBranch,
 		Polecat:       ctx.Polecat,
 		MayorSession:  session.MayorSessionName(),
 		DeaconSession: session.DeaconSessionName(),
