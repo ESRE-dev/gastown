@@ -691,6 +691,31 @@ func LoadOrCreateTownSettings(path string) (*TownSettings, error) {
 	return &settings, nil
 }
 
+// SaveTownSettings saves town settings to a file.
+func SaveTownSettings(path string, settings *TownSettings) error {
+	if settings.Type != "town-settings" && settings.Type != "" {
+		return fmt.Errorf("%w: expected type 'town-settings', got '%s'", ErrInvalidType, settings.Type)
+	}
+	if settings.Version > CurrentTownSettingsVersion {
+		return fmt.Errorf("%w: got %d, max supported %d", ErrInvalidVersion, settings.Version, CurrentTownSettingsVersion)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding settings: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil { //nolint:gosec // G306: settings files don't contain secrets
+		return fmt.Errorf("writing settings: %w", err)
+	}
+
+	return nil
+}
+
 // ResolveAgentConfig resolves the agent configuration for a rig.
 // It looks up the agent by name in town settings (custom agents) and built-in presets.
 //
@@ -783,7 +808,12 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 // for starting an LLM session. It resolves the agent config and builds the command.
 func GetRuntimeCommand(rigPath string) string {
 	if rigPath == "" {
-		return DefaultRuntimeConfig().BuildCommand()
+		// Try to detect town root from cwd for town-level agents (mayor, deacon)
+		townRoot, err := findTownRootFromCwd()
+		if err != nil {
+			return DefaultRuntimeConfig().BuildCommand()
+		}
+		return ResolveAgentConfig(townRoot, "").BuildCommand()
 	}
 	// Derive town root from rig path (rig is typically ~/gt/<rigname>)
 	townRoot := filepath.Dir(rigPath)
@@ -793,15 +823,50 @@ func GetRuntimeCommand(rigPath string) string {
 // GetRuntimeCommandWithPrompt returns the full command with an initial prompt.
 func GetRuntimeCommandWithPrompt(rigPath, prompt string) string {
 	if rigPath == "" {
-		return DefaultRuntimeConfig().BuildCommandWithPrompt(prompt)
+		// Try to detect town root from cwd for town-level agents (mayor, deacon)
+		townRoot, err := findTownRootFromCwd()
+		if err != nil {
+			return DefaultRuntimeConfig().BuildCommandWithPrompt(prompt)
+		}
+		return ResolveAgentConfig(townRoot, "").BuildCommandWithPrompt(prompt)
 	}
 	townRoot := filepath.Dir(rigPath)
 	return ResolveAgentConfig(townRoot, rigPath).BuildCommandWithPrompt(prompt)
 }
 
+// findTownRootFromCwd locates the town root by walking up from cwd.
+// It looks for the mayor/town.json marker file.
+// Returns empty string and no error if not found (caller should use defaults).
+func findTownRootFromCwd() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getting cwd: %w", err)
+	}
+
+	absDir, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", fmt.Errorf("resolving path: %w", err)
+	}
+
+	const marker = "mayor/town.json"
+
+	current := absDir
+	for {
+		if _, err := os.Stat(filepath.Join(current, marker)); err == nil {
+			return current, nil
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("town root not found (no %s marker)", marker)
+		}
+		current = parent
+	}
+}
+
 // BuildStartupCommand builds a full startup command with environment exports.
 // envVars is a map of environment variable names to values.
-// rigPath is optional - if empty, uses defaults.
+// rigPath is optional - if empty, tries to detect town root from cwd.
 // prompt is optional - if provided, appended as the initial prompt.
 func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) string {
 	var rc *RuntimeConfig
@@ -810,7 +875,13 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 		townRoot := filepath.Dir(rigPath)
 		rc = ResolveAgentConfig(townRoot, rigPath)
 	} else {
-		rc = DefaultRuntimeConfig()
+		// Try to detect town root from cwd for town-level agents (mayor, deacon)
+		townRoot, err := findTownRootFromCwd()
+		if err != nil {
+			rc = DefaultRuntimeConfig()
+		} else {
+			rc = ResolveAgentConfig(townRoot, "")
+		}
 	}
 
 	// Build environment export prefix
