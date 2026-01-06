@@ -345,3 +345,309 @@ func TestSparseCheckoutCheck_NonGitDirSkipped(t *testing.T) {
 		t.Errorf("expected StatusOK when no git repos, got %v", result.Status)
 	}
 }
+
+func TestSparseCheckoutCheck_VerifiesAllPatterns(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	// Create git repo
+	mayorRig := filepath.Join(rigDir, "mayor", "rig")
+	initGitRepo(t, mayorRig)
+
+	// Configure sparse checkout using our function
+	if err := git.ConfigureSparseCheckout(mayorRig); err != nil {
+		t.Fatalf("ConfigureSparseCheckout failed: %v", err)
+	}
+
+	// Read the sparse-checkout file and verify all patterns are present
+	sparseFile := filepath.Join(mayorRig, ".git", "info", "sparse-checkout")
+	content, err := os.ReadFile(sparseFile)
+	if err != nil {
+		t.Fatalf("Failed to read sparse-checkout file: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Verify all required patterns are present
+	requiredPatterns := []string{
+		"!/.claude/",        // Settings, rules, agents, commands
+		"!/CLAUDE.md",       // Primary context file
+		"!/CLAUDE.local.md", // Personal context file
+		"!/.mcp.json",       // MCP server configuration
+	}
+
+	for _, pattern := range requiredPatterns {
+		if !strings.Contains(contentStr, pattern) {
+			t.Errorf("sparse-checkout file missing pattern %q, got:\n%s", pattern, contentStr)
+		}
+	}
+}
+
+func TestSparseCheckoutCheck_LegacyPatternNotSufficient(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	// Create git repo
+	mayorRig := filepath.Join(rigDir, "mayor", "rig")
+	initGitRepo(t, mayorRig)
+
+	// Manually configure sparse checkout with only legacy .claude/ pattern (missing CLAUDE.md)
+	cmd := exec.Command("git", "config", "core.sparseCheckout", "true")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config failed: %v\n%s", err, out)
+	}
+
+	sparseFile := filepath.Join(mayorRig, ".git", "info", "sparse-checkout")
+	if err := os.MkdirAll(filepath.Dir(sparseFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Only include legacy pattern, missing CLAUDE.md
+	if err := os.WriteFile(sparseFile, []byte("/*\n!.claude/\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewSparseCheckoutCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+
+	// Should fail because CLAUDE.md pattern is missing
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for legacy-only pattern, got %v", result.Status)
+	}
+}
+
+func TestSparseCheckoutCheck_FixUpgradesLegacyPatterns(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	// Create git repo with legacy sparse checkout (only .claude/)
+	mayorRig := filepath.Join(rigDir, "mayor", "rig")
+	initGitRepo(t, mayorRig)
+
+	cmd := exec.Command("git", "config", "core.sparseCheckout", "true")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config failed: %v\n%s", err, out)
+	}
+
+	sparseFile := filepath.Join(mayorRig, ".git", "info", "sparse-checkout")
+	if err := os.MkdirAll(filepath.Dir(sparseFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sparseFile, []byte("/*\n!.claude/\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewSparseCheckoutCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	// Verify fix is needed
+	result := check.Run(ctx)
+	if result.Status != StatusError {
+		t.Fatalf("expected StatusError before fix, got %v", result.Status)
+	}
+
+	// Apply fix
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix failed: %v", err)
+	}
+
+	// Verify all patterns are now present
+	content, err := os.ReadFile(sparseFile)
+	if err != nil {
+		t.Fatalf("Failed to read sparse-checkout file: %v", err)
+	}
+
+	contentStr := string(content)
+	requiredPatterns := []string{"!/.claude/", "!/CLAUDE.md", "!/CLAUDE.local.md", "!/.mcp.json"}
+	for _, pattern := range requiredPatterns {
+		if !strings.Contains(contentStr, pattern) {
+			t.Errorf("after fix, sparse-checkout file missing pattern %q", pattern)
+		}
+	}
+
+	// Verify check now passes
+	result = check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK after fix, got %v", result.Status)
+	}
+}
+
+func TestSparseCheckoutCheck_FixFailsWithUntrackedCLAUDEMD(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	// Create git repo without sparse checkout
+	mayorRig := filepath.Join(rigDir, "mayor", "rig")
+	initGitRepo(t, mayorRig)
+
+	// Create untracked CLAUDE.md (not added to git)
+	claudeFile := filepath.Join(mayorRig, "CLAUDE.md")
+	if err := os.WriteFile(claudeFile, []byte("# Untracked context\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewSparseCheckoutCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	// Verify fix is needed
+	result := check.Run(ctx)
+	if result.Status != StatusError {
+		t.Fatalf("expected StatusError before fix, got %v", result.Status)
+	}
+
+	// Fix should fail because CLAUDE.md is untracked and won't be removed
+	err := check.Fix(ctx)
+	if err == nil {
+		t.Fatal("expected Fix to return error for untracked CLAUDE.md, but it succeeded")
+	}
+
+	// Verify error message is helpful
+	if !strings.Contains(err.Error(), "CLAUDE.md") {
+		t.Errorf("expected error to mention CLAUDE.md, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "untracked or modified") {
+		t.Errorf("expected error to explain files are untracked/modified, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "manually remove") {
+		t.Errorf("expected error to mention manual removal, got: %v", err)
+	}
+}
+
+func TestSparseCheckoutCheck_FixFailsWithUntrackedClaudeDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	// Create git repo without sparse checkout
+	mayorRig := filepath.Join(rigDir, "mayor", "rig")
+	initGitRepo(t, mayorRig)
+
+	// Create untracked .claude/ directory (not added to git)
+	claudeDir := filepath.Join(mayorRig, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewSparseCheckoutCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	// Verify fix is needed
+	result := check.Run(ctx)
+	if result.Status != StatusError {
+		t.Fatalf("expected StatusError before fix, got %v", result.Status)
+	}
+
+	// Fix should fail because .claude/ is untracked and won't be removed
+	err := check.Fix(ctx)
+	if err == nil {
+		t.Fatal("expected Fix to return error for untracked .claude/, but it succeeded")
+	}
+
+	// Verify error message mentions .claude
+	if !strings.Contains(err.Error(), ".claude") {
+		t.Errorf("expected error to mention .claude, got: %v", err)
+	}
+}
+
+func TestSparseCheckoutCheck_FixFailsWithModifiedCLAUDEMD(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	// Create git repo without sparse checkout
+	mayorRig := filepath.Join(rigDir, "mayor", "rig")
+	initGitRepo(t, mayorRig)
+
+	// Add and commit CLAUDE.md to the repo
+	claudeFile := filepath.Join(mayorRig, "CLAUDE.md")
+	if err := os.WriteFile(claudeFile, []byte("# Original context\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "CLAUDE.md")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "Add CLAUDE.md")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+
+	// Now modify CLAUDE.md without committing (making it "dirty")
+	if err := os.WriteFile(claudeFile, []byte("# Modified context - local changes\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewSparseCheckoutCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	// Verify fix is needed
+	result := check.Run(ctx)
+	if result.Status != StatusError {
+		t.Fatalf("expected StatusError before fix, got %v", result.Status)
+	}
+
+	// Fix should fail because CLAUDE.md is modified and git won't remove it
+	err := check.Fix(ctx)
+	if err == nil {
+		t.Fatal("expected Fix to return error for modified CLAUDE.md, but it succeeded")
+	}
+
+	// Verify error message is helpful
+	if !strings.Contains(err.Error(), "CLAUDE.md") {
+		t.Errorf("expected error to mention CLAUDE.md, got: %v", err)
+	}
+}
+
+func TestSparseCheckoutCheck_FixFailsWithMultipleProblems(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	// Create git repo without sparse checkout
+	mayorRig := filepath.Join(rigDir, "mayor", "rig")
+	initGitRepo(t, mayorRig)
+
+	// Create multiple untracked context files
+	if err := os.WriteFile(filepath.Join(mayorRig, "CLAUDE.md"), []byte("# Context\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorRig, ".mcp.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewSparseCheckoutCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	// Verify fix is needed
+	result := check.Run(ctx)
+	if result.Status != StatusError {
+		t.Fatalf("expected StatusError before fix, got %v", result.Status)
+	}
+
+	// Fix should fail and list multiple files
+	err := check.Fix(ctx)
+	if err == nil {
+		t.Fatal("expected Fix to return error for multiple untracked files, but it succeeded")
+	}
+
+	// Verify error mentions both files
+	errStr := err.Error()
+	if !strings.Contains(errStr, "CLAUDE.md") {
+		t.Errorf("expected error to mention CLAUDE.md, got: %v", err)
+	}
+	if !strings.Contains(errStr, ".mcp.json") {
+		t.Errorf("expected error to mention .mcp.json, got: %v", err)
+	}
+}

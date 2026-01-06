@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/steveyegge/gastown/internal/git"
 )
 
 // SparseCheckoutCheck verifies that git clones/worktrees have sparse checkout configured
-// to exclude .claude/ from source repos. This ensures source repo settings don't override
-// Gas Town agent settings.
+// to exclude Claude Code context files from source repos. This ensures source repo settings
+// and instructions don't override Gas Town agent configuration.
+// Excluded files: .claude/, CLAUDE.md, CLAUDE.local.md, .mcp.json
 type SparseCheckoutCheck struct {
 	FixableCheck
 	rigPath       string
@@ -23,7 +25,7 @@ func NewSparseCheckoutCheck() *SparseCheckoutCheck {
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
 				CheckName:        "sparse-checkout",
-				CheckDescription: "Verify sparse checkout is configured to exclude .claude/",
+				CheckDescription: "Verify sparse checkout excludes Claude context files (.claude/, CLAUDE.md, etc.)",
 			},
 		},
 	}
@@ -84,7 +86,7 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: "All repos have sparse checkout configured to exclude .claude/",
+			Message: "All repos have sparse checkout configured to exclude Claude context files",
 		}
 	}
 
@@ -107,12 +109,21 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// Fix configures sparse checkout for affected repos to exclude .claude/.
+// Fix configures sparse checkout for affected repos to exclude Claude context files.
 func (c *SparseCheckoutCheck) Fix(ctx *CheckContext) error {
 	for _, repoPath := range c.affectedRepos {
 		if err := git.ConfigureSparseCheckout(repoPath); err != nil {
 			relPath, _ := filepath.Rel(c.rigPath, repoPath)
 			return fmt.Errorf("failed to configure sparse checkout for %s: %w", relPath, err)
+		}
+
+		// Check if any excluded files remain (untracked or modified files won't be removed by git read-tree)
+		if remaining := git.CheckExcludedFilesExist(repoPath); len(remaining) > 0 {
+			relPath, _ := filepath.Rel(c.rigPath, repoPath)
+			return fmt.Errorf("sparse checkout configured for %s but these files still exist: %s\n"+
+				"These files are untracked or modified and were not removed by git.\n"+
+				"Please manually remove or revert these files in %s",
+				relPath, strings.Join(remaining, ", "), repoPath)
 		}
 	}
 	return nil
