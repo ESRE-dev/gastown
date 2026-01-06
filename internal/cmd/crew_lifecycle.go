@@ -666,9 +666,20 @@ func runCrewStop(cmd *cobra.Command, args []string) error {
 		sessionID := crewSessionName(r.Name, name)
 
 		// Check if session exists
-		hasSession, _ := t.HasSession(sessionID)
+		hasSession, err := t.HasSession(sessionID)
+		if err != nil {
+			fmt.Printf("Error checking session %s: %v\n", sessionID, err)
+			lastErr = err
+			continue
+		}
 		if !hasSession {
 			fmt.Printf("No session found for %s/%s\n", r.Name, name)
+			continue
+		}
+
+		// Dry run - just show what would be stopped
+		if crewDryRun {
+			fmt.Printf("Would stop %s/%s (session: %s)\n", r.Name, name, sessionID)
 			continue
 		}
 
