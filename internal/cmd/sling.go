@@ -53,7 +53,6 @@ Target Resolution:
   gt sling gt-abc deacon/dogs/alpha     # Specific dog
 
 Spawning Options (when target is a rig):
-  gt sling gp-abc greenplace --molecule mol-review  # Use specific workflow
   gt sling gp-abc greenplace --create               # Create polecat if missing
   gt sling gp-abc greenplace --naked                # No-tmux (manual start)
   gt sling gp-abc greenplace --force                # Ignore unread mail
@@ -73,11 +72,6 @@ Formula Slinging:
 Formula-on-Bead (--on flag):
   gt sling mol-review --on gt-abc       # Apply formula to existing work
   gt sling shiny --on gt-abc crew       # Apply formula, sling to crew
-
-Quality Levels (shorthand for polecat workflows):
-  gt sling gp-abc greenplace --quality=basic   # mol-polecat-basic (trivial fixes)
-  gt sling gp-abc greenplace --quality=shiny   # mol-polecat-shiny (standard)
-  gt sling gp-abc greenplace --quality=chrome  # mol-polecat-chrome (max rigor)
 
 Compare:
   gt hook <bead>      # Just attach (no action)
@@ -106,10 +100,8 @@ var (
 	// Flags migrated for polecat spawning (used by sling for work assignment
 	slingNaked    bool   // --naked: no-tmux mode (skip session creation)
 	slingCreate   bool   // --create: create polecat if it doesn't exist
-	slingMolecule string // --molecule: workflow to instantiate on the bead
 	slingForce    bool   // --force: force spawn even if polecat has unread mail
 	slingAccount  string // --account: Claude Code account handle to use
-	slingQuality  string // --quality: shorthand for polecat workflow (basic|shiny|chrome)
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
 )
 
@@ -124,10 +116,8 @@ func init() {
 	// Flags for polecat spawning (when target is a rig)
 	slingCmd.Flags().BoolVar(&slingNaked, "naked", false, "No-tmux mode: assign work but skip session creation (manual start)")
 	slingCmd.Flags().BoolVar(&slingCreate, "create", false, "Create polecat if it doesn't exist")
-	slingCmd.Flags().StringVar(&slingMolecule, "molecule", "", "Molecule workflow to instantiate on the bead")
 	slingCmd.Flags().BoolVar(&slingForce, "force", false, "Force spawn even if polecat has unread mail")
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
-	slingCmd.Flags().StringVarP(&slingQuality, "quality", "q", "", "Polecat workflow quality level (basic|shiny|chrome)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
 
 	rootCmd.AddCommand(slingCmd)
@@ -160,22 +150,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 		if rigName, isRig := IsRigName(lastArg); isRig {
 			return runBatchSling(args[:len(args)-1], rigName, townBeadsDir)
 		}
-	}
-
-	// --quality is shorthand for formula-on-bead with polecat workflow
-	// Convert: gt sling gp-abc greenplace --quality=shiny
-	// To:      gt sling mol-polecat-shiny --on gt-abc gastown
-	if slingQuality != "" {
-		qualityFormula, err := qualityToFormula(slingQuality)
-		if err != nil {
-			return err
-		}
-		// The first arg should be the bead, and we wrap it with the formula
-		if slingOnTarget != "" {
-			return fmt.Errorf("--quality cannot be used with --on (both specify formula)")
-		}
-		slingOnTarget = args[0]  // The bead becomes --on target
-		args[0] = qualityFormula // The formula becomes first arg
 	}
 
 	// Determine mode based on flags and argument types
@@ -1069,19 +1043,6 @@ func agentIDToBeadID(agentID string) string {
 	}
 }
 
-// qualityToFormula converts a quality level to the corresponding polecat workflow formula.
-func qualityToFormula(quality string) (string, error) {
-	switch strings.ToLower(quality) {
-	case "basic", "b":
-		return "mol-polecat-basic", nil
-	case "shiny", "s":
-		return "mol-polecat-shiny", nil
-	case "chrome", "c":
-		return "mol-polecat-chrome", nil
-	default:
-		return "", fmt.Errorf("invalid quality level '%s' (use: basic, shiny, or chrome)", quality)
-	}
-}
 
 // IsDogTarget checks if target is a dog target pattern.
 // Returns the dog name (or empty for pool dispatch) and true if it's a dog target.
