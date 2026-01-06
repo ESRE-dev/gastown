@@ -545,8 +545,8 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 		addr := strings.TrimSuffix(agent.Address, "/") // Remove trailing slash for global agents
 		parts := strings.Split(addr, "/")
 		if len(parts) == 1 {
-			// Global agent: mayor/, deacon/ → gt-mayor, gt-deacon
-			agentBeadID = beads.AgentBeadID("", parts[0], "")
+			// Global agent: mayor/, deacon/ → hq-mayor, hq-deacon
+			agentBeadID = beads.AgentBeadIDWithPrefix(beads.TownBeadsPrefix, "", parts[0], "")
 		} else if len(parts) >= 2 {
 			rig := parts[0]
 			prefix := beads.GetPrefixForRig(townRoot, rig)
