@@ -67,18 +67,34 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 	// ESCALATED/DEFERRED exits typically have no MR pending
 	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
 
-	// Ephemeral model: try to auto-nuke immediately regardless of MR status
-	// If cleanup_status is clean, the branch is pushed and polecat is recyclable.
-	// The MR will be processed independently by the Refinery.
+	// Local-only branches model: if there's a pending MR, DON'T nuke.
+	// The polecat's local branch is needed for conflict resolution if merge fails.
+	// Once the MR merges (MERGED signal), HandleMerged will nuke the polecat.
+	if hasPendingMR {
+		// Create cleanup wisp to track this polecat is waiting for merge
+		wispID, err := createCleanupWisp(workDir, payload.PolecatName, payload.IssueID, payload.Branch)
+		if err != nil {
+			result.Error = fmt.Errorf("creating cleanup wisp: %w", err)
+			return result
+		}
+
+		// Update wisp state to indicate it's waiting for merge
+		if err := UpdateCleanupWispState(workDir, wispID, "merge-requested"); err != nil {
+			// Non-fatal - wisp was created, just couldn't update state
+			result.Error = fmt.Errorf("updating wisp state: %w", err)
+		}
+
+		result.Handled = true
+		result.WispCreated = wispID
+		result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, local branch preserved for conflict resolution)", payload.PolecatName, payload.MRID)
+		return result
+	}
+
+	// No pending MR - try to auto-nuke immediately
 	nukeResult := AutoNukeIfClean(workDir, rigName, payload.PolecatName)
 	if nukeResult.Nuked {
 		result.Handled = true
-		if hasPendingMR {
-			// Ephemeral model: polecat nuked, MR continues in Refinery
-			result.Action = fmt.Sprintf("auto-nuked %s (ephemeral: exit=%s, MR=%s): %s", payload.PolecatName, payload.Exit, payload.MRID, nukeResult.Reason)
-		} else {
-			result.Action = fmt.Sprintf("auto-nuked %s (exit=%s, no MR): %s", payload.PolecatName, payload.Exit, nukeResult.Reason)
-		}
+		result.Action = fmt.Sprintf("auto-nuked %s (exit=%s, no MR): %s", payload.PolecatName, payload.Exit, nukeResult.Reason)
 		return result
 	}
 	if nukeResult.Error != nil {
@@ -87,8 +103,6 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 	}
 
 	// Couldn't auto-nuke (dirty state or verification failed) - create wisp for manual intervention
-	// Note: Even with pending MR, if we can't auto-nuke it means something is wrong
-	// (uncommitted changes, unpushed commits, etc.) that needs attention.
 	wispID, err := createCleanupWisp(workDir, payload.PolecatName, payload.IssueID, payload.Branch)
 	if err != nil {
 		result.Error = fmt.Errorf("creating cleanup wisp: %w", err)
@@ -97,11 +111,7 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 
 	result.Handled = true
 	result.WispCreated = wispID
-	if hasPendingMR {
-		result.Action = fmt.Sprintf("created cleanup wisp %s for %s (MR=%s, needs intervention: %s)", wispID, payload.PolecatName, payload.MRID, nukeResult.Reason)
-	} else {
-		result.Action = fmt.Sprintf("created cleanup wisp %s for %s (needs manual cleanup: %s)", wispID, payload.PolecatName, nukeResult.Reason)
-	}
+	result.Action = fmt.Sprintf("created cleanup wisp %s for %s (needs manual cleanup: %s)", wispID, payload.PolecatName, nukeResult.Reason)
 
 	return result
 }
