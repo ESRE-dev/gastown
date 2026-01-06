@@ -397,7 +397,7 @@ func createCleanupWisp(workDir, polecatName, issueID, branch string) (string, er
 	labels := strings.Join(CleanupWispLabels(polecatName, "pending"), ",")
 
 	output, err := util.ExecWithOutput(workDir, "bd", "create",
-		"--wisp",
+		"--ephemeral",
 		"--title", title,
 		"--description", description,
 		"--labels", labels,
@@ -431,7 +431,7 @@ func createSwarmWisp(workDir string, payload *SwarmStartPayload) (string, error)
 	labels := strings.Join(SwarmWispLabels(payload.SwarmID, payload.Total, 0, payload.StartedAt), ",")
 
 	output, err := util.ExecWithOutput(workDir, "bd", "create",
-		"--wisp",
+		"--ephemeral",
 		"--title", title,
 		"--description", description,
 		"--labels", labels,
@@ -450,7 +450,7 @@ func createSwarmWisp(workDir string, payload *SwarmStartPayload) (string, error)
 // findCleanupWisp finds an existing cleanup wisp for a polecat.
 func findCleanupWisp(workDir, polecatName string) (string, error) {
 	output, err := util.ExecWithOutput(workDir, "bd", "list",
-		"--wisp",
+		"--ephemeral",
 		"--labels", fmt.Sprintf("polecat:%s,state:merge-requested", polecatName),
 		"--status", "open",
 		"--json",
