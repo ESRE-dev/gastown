@@ -12,6 +12,7 @@ var (
 	crewBranch   bool
 	crewJSON     bool
 	crewForce    bool
+	crewPurge    bool
 	crewNoTmux   bool
 	crewDetached bool
 	crewMessage  string
@@ -117,11 +118,22 @@ var crewRemoveCmd = &cobra.Command{
 Checks for uncommitted changes and running sessions before removing.
 Use --force to skip checks and remove anyway.
 
+The agent bead is CLOSED by default (preserves CV history). Use --purge
+to DELETE the agent bead entirely (for accidental/test crew that should
+leave no trace in the ledger).
+
+--purge also:
+  - Deletes the agent bead (not just closes it)
+  - Unassigns any beads assigned to this crew member
+  - Clears mail in the agent's inbox
+  - Properly handles git worktrees (not just regular clones)
+
 Examples:
   gt crew remove dave                       # Remove with safety checks
   gt crew remove dave emma fred             # Remove multiple
   gt crew remove beads/grip beads/fang      # Remove from specific rig
-  gt crew remove dave --force               # Force remove`,
+  gt crew remove dave --force               # Force remove (closes bead)
+  gt crew remove test-crew --purge          # Obliterate (deletes bead)`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runCrewRemove,
 }
@@ -319,6 +331,7 @@ func init() {
 
 	crewRemoveCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 	crewRemoveCmd.Flags().BoolVar(&crewForce, "force", false, "Force remove (skip safety checks)")
+	crewRemoveCmd.Flags().BoolVar(&crewPurge, "purge", false, "Obliterate: delete agent bead, unassign work, clear mail")
 
 	crewRefreshCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 	crewRefreshCmd.Flags().StringVarP(&crewMessage, "message", "m", "", "Custom handoff message")

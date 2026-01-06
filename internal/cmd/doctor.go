@@ -45,6 +45,10 @@ Clone divergence checks:
   - persistent-role-branches Detect crew/witness/refinery not on main
   - clone-divergence         Detect clones significantly behind origin/main
 
+Crew workspace checks:
+  - crew-state               Validate crew worker state.json files (fixable)
+  - crew-worktrees           Detect stale cross-rig worktrees (fixable)
+
 Rig checks (with --rig flag):
   - rig-is-git-repo          Verify rig is a valid git repository
   - git-exclude-configured   Check .git/info/exclude has Gas Town dirs (fixable)
@@ -136,6 +140,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Crew workspace checks
 	d.Register(doctor.NewCrewStateCheck())
+	d.Register(doctor.NewCrewWorktreeCheck())
 	d.Register(doctor.NewCommandsCheck())
 
 	// Lifecycle hygiene checks

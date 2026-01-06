@@ -24,6 +24,9 @@ import (
 func runCrewRemove(cmd *cobra.Command, args []string) error {
 	var lastErr error
 
+	// --purge implies --force
+	forceRemove := crewForce || crewPurge
+
 	for _, arg := range args {
 		name := arg
 		rigOverride := crewRig
@@ -44,7 +47,7 @@ func runCrewRemove(cmd *cobra.Command, args []string) error {
 		}
 
 		// Check for running session (unless forced)
-		if !crewForce {
+		if !forceRemove {
 			t := tmux.NewTmux()
 			sessionID := crewSessionName(r.Name, name)
 			hasSession, _ := t.HasSession(sessionID)
@@ -67,44 +70,115 @@ func runCrewRemove(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Killed session %s\n", sessionID)
 		}
 
-		// Remove the crew workspace
-		if err := crewMgr.Remove(name, crewForce); err != nil {
-			if err == crew.ErrCrewNotFound {
-				fmt.Printf("Error removing %s: crew workspace not found\n", arg)
-			} else if err == crew.ErrHasChanges {
-				fmt.Printf("Error removing %s: uncommitted changes (use --force)\n", arg)
-			} else {
-				fmt.Printf("Error removing %s: %v\n", arg, err)
-			}
-			lastErr = err
-			continue
+		// Determine workspace path
+		crewPath := filepath.Join(r.Path, "crew", name)
+
+		// Check if this is a worktree (has .git file) vs regular clone (has .git directory)
+		isWorktree := false
+		gitPath := filepath.Join(crewPath, ".git")
+		if info, err := os.Stat(gitPath); err == nil && !info.IsDir() {
+			isWorktree = true
 		}
 
-		fmt.Printf("%s Removed crew workspace: %s/%s\n",
-			style.Bold.Render("✓"), r.Name, name)
+		// Remove the workspace
+		if isWorktree {
+			// For worktrees, use git worktree remove
+			mayorRigPath := constants.RigMayorPath(r.Path)
+			removeArgs := []string{"worktree", "remove", crewPath}
+			if forceRemove {
+				removeArgs = []string{"worktree", "remove", "--force", crewPath}
+			}
+			removeCmd := exec.Command("git", removeArgs...)
+			removeCmd.Dir = mayorRigPath
+			if output, err := removeCmd.CombinedOutput(); err != nil {
+				fmt.Printf("Error removing worktree %s: %v\n%s", arg, err, string(output))
+				lastErr = err
+				continue
+			}
+			fmt.Printf("%s Removed crew worktree: %s/%s\n",
+				style.Bold.Render("✓"), r.Name, name)
+		} else {
+			// For regular clones, use the crew manager
+			if err := crewMgr.Remove(name, forceRemove); err != nil {
+				if err == crew.ErrCrewNotFound {
+					fmt.Printf("Error removing %s: crew workspace not found\n", arg)
+				} else if err == crew.ErrHasChanges {
+					fmt.Printf("Error removing %s: uncommitted changes (use --force)\n", arg)
+				} else {
+					fmt.Printf("Error removing %s: %v\n", arg, err)
+				}
+				lastErr = err
+				continue
+			}
+			fmt.Printf("%s Removed crew workspace: %s/%s\n",
+				style.Bold.Render("✓"), r.Name, name)
+		}
 
-		// Close the agent bead if it exists
-		// Use the rig's configured prefix (e.g., "gt" for gastown, "bd" for beads)
+		// Handle agent bead
 		townRoot, _ := workspace.Find(r.Path)
 		if townRoot == "" {
 			townRoot = r.Path
 		}
 		prefix := beads.GetPrefixForRig(townRoot, r.Name)
 		agentBeadID := beads.CrewBeadIDWithPrefix(prefix, r.Name, name)
-		closeArgs := []string{"close", agentBeadID, "--reason=Crew workspace removed"}
-		if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
-			closeArgs = append(closeArgs, "--session="+sessionID)
-		}
-		closeCmd := exec.Command("bd", closeArgs...)
-		closeCmd.Dir = r.Path // Run from rig directory for proper beads resolution
-		if output, err := closeCmd.CombinedOutput(); err != nil {
-			// Non-fatal: bead might not exist or already be closed
-			if !strings.Contains(string(output), "no issue found") &&
-				!strings.Contains(string(output), "already closed") {
-				style.PrintWarning("could not close agent bead %s: %v", agentBeadID, err)
+
+		if crewPurge {
+			// --purge: DELETE the agent bead entirely (obliterate)
+			deleteArgs := []string{"delete", agentBeadID, "--force"}
+			deleteCmd := exec.Command("bd", deleteArgs...)
+			deleteCmd.Dir = r.Path
+			if output, err := deleteCmd.CombinedOutput(); err != nil {
+				// Non-fatal: bead might not exist
+				if !strings.Contains(string(output), "no issue found") &&
+					!strings.Contains(string(output), "not found") {
+					style.PrintWarning("could not delete agent bead %s: %v", agentBeadID, err)
+				}
+			} else {
+				fmt.Printf("Deleted agent bead: %s\n", agentBeadID)
+			}
+
+			// Unassign any beads assigned to this crew member
+			agentAddr := fmt.Sprintf("%s/crew/%s", r.Name, name)
+			unassignArgs := []string{"list", "--assignee=" + agentAddr, "--format=id"}
+			unassignCmd := exec.Command("bd", unassignArgs...)
+			unassignCmd.Dir = r.Path
+			if output, err := unassignCmd.CombinedOutput(); err == nil {
+				ids := strings.Fields(strings.TrimSpace(string(output)))
+				for _, id := range ids {
+					if id == "" {
+						continue
+					}
+					updateCmd := exec.Command("bd", "update", id, "--unassign")
+					updateCmd.Dir = r.Path
+					if _, err := updateCmd.CombinedOutput(); err == nil {
+						fmt.Printf("Unassigned: %s\n", id)
+					}
+				}
+			}
+
+			// Clear mail directory if it exists
+			mailDir := filepath.Join(crewPath, "mail")
+			if _, err := os.Stat(mailDir); err == nil {
+				// Mail dir was removed with the workspace, so nothing to do
+				// But if we want to be extra thorough, we could look in town beads
 			}
 		} else {
-			fmt.Printf("Closed agent bead: %s\n", agentBeadID)
+			// Default: CLOSE the agent bead (preserves CV history)
+			closeArgs := []string{"close", agentBeadID, "--reason=Crew workspace removed"}
+			if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+				closeArgs = append(closeArgs, "--session="+sessionID)
+			}
+			closeCmd := exec.Command("bd", closeArgs...)
+			closeCmd.Dir = r.Path
+			if output, err := closeCmd.CombinedOutput(); err != nil {
+				// Non-fatal: bead might not exist or already be closed
+				if !strings.Contains(string(output), "no issue found") &&
+					!strings.Contains(string(output), "already closed") {
+					style.PrintWarning("could not close agent bead %s: %v", agentBeadID, err)
+				}
+			} else {
+				fmt.Printf("Closed agent bead: %s\n", agentBeadID)
+			}
 		}
 	}
 
