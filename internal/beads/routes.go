@@ -57,7 +57,12 @@ func LoadRoutes(beadsDir string) ([]Route, error) {
 // If the prefix already exists, it updates the path.
 func AppendRoute(townRoot string, route Route) error {
 	beadsDir := filepath.Join(townRoot, ".beads")
+	return AppendRouteToDir(beadsDir, route)
+}
 
+// AppendRouteToDir appends a route to routes.jsonl in the given beads directory.
+// If the prefix already exists, it updates the path.
+func AppendRouteToDir(beadsDir string, route Route) error {
 	// Load existing routes
 	routes, err := LoadRoutes(beadsDir)
 	if err != nil {

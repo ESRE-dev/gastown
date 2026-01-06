@@ -547,6 +547,15 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	// Ignore errors - fingerprint is optional for functionality
 	_, _ = migrateCmd.CombinedOutput()
 
+	// Add route from rig beads to town beads for cross-database resolution.
+	// This allows rig beads to resolve hq-* prefixed beads (role beads, etc.)
+	// that are stored in town beads.
+	townRoute := beads.Route{Prefix: "hq-", Path: ".."}
+	if err := beads.AppendRouteToDir(beadsDir, townRoute); err != nil {
+		// Non-fatal: role slot set will fail but agent beads still work
+		fmt.Printf("   ⚠ Could not add route to town beads: %v\n", err)
+	}
+
 	return nil
 }
 
