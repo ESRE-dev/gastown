@@ -24,16 +24,18 @@ import (
 )
 
 var (
-	startAll             bool
-	startCrewRig         string
-	startCrewAccount     string
-	shutdownGraceful     bool
-	shutdownWait         int
-	shutdownAll          bool
-	shutdownForce        bool
-	shutdownYes          bool
-	shutdownPolecatsOnly bool
-	shutdownNuclear      bool
+	startAll               bool
+	startAgentOverride     string
+	startCrewRig           string
+	startCrewAccount       string
+	startCrewAgentOverride string
+	shutdownGraceful       bool
+	shutdownWait           int
+	shutdownAll            bool
+	shutdownForce          bool
+	shutdownYes            bool
+	shutdownPolecatsOnly   bool
+	shutdownNuclear        bool
 )
 
 var startCmd = &cobra.Command{
@@ -104,9 +106,11 @@ Examples:
 func init() {
 	startCmd.Flags().BoolVarP(&startAll, "all", "a", false,
 		"Also start Witnesses and Refineries for all rigs")
+	startCmd.Flags().StringVar(&startAgentOverride, "agent", "", "Agent alias to run Mayor/Deacon with (overrides town default)")
 
 	startCrewCmd.Flags().StringVar(&startCrewRig, "rig", "", "Rig to use")
 	startCrewCmd.Flags().StringVar(&startCrewAccount, "account", "", "Claude Code account handle to use")
+	startCrewCmd.Flags().StringVar(&startCrewAgentOverride, "agent", "", "Agent alias to run crew worker with (overrides rig/town default)")
 	startCmd.AddCommand(startCrewCmd)
 
 	shutdownCmd.Flags().BoolVarP(&shutdownGraceful, "graceful", "g", false,
@@ -155,7 +159,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Starting Gas Town from %s\n\n", style.Dim.Render(townRoot))
 
 	// Start core agents (Mayor and Deacon)
-	if err := startCoreAgents(t); err != nil {
+	if err := startCoreAgents(t, startAgentOverride); err != nil {
 		return err
 	}
 
@@ -182,7 +186,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 }
 
 // startCoreAgents starts Mayor and Deacon sessions.
-func startCoreAgents(t *tmux.Tmux) error {
+func startCoreAgents(t *tmux.Tmux, agentOverride string) error {
 	// Get session names
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
@@ -193,7 +197,7 @@ func startCoreAgents(t *tmux.Tmux) error {
 		fmt.Printf("  %s Mayor already running\n", style.Dim.Render("○"))
 	} else {
 		fmt.Printf("  %s Starting Mayor...\n", style.Bold.Render("→"))
-		if err := startMayorSession(t, mayorSession); err != nil {
+		if err := startMayorSession(t, mayorSession, agentOverride); err != nil {
 			return fmt.Errorf("starting Mayor: %w", err)
 		}
 		fmt.Printf("  %s Mayor started\n", style.Bold.Render("✓"))
@@ -205,7 +209,7 @@ func startCoreAgents(t *tmux.Tmux) error {
 		fmt.Printf("  %s Deacon already running\n", style.Dim.Render("○"))
 	} else {
 		fmt.Printf("  %s Starting Deacon...\n", style.Bold.Render("→"))
-		if err := startDeaconSession(t, deaconSession); err != nil {
+		if err := startDeaconSession(t, deaconSession, agentOverride); err != nil {
 			return fmt.Errorf("starting Deacon: %w", err)
 		}
 		fmt.Printf("  %s Deacon started\n", style.Bold.Render("✓"))
@@ -799,8 +803,11 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		if !t.IsClaudeRunning(sessionID) {
 			// Claude has exited, restart it with "gt prime" as initial prompt
 			fmt.Printf("Session exists, restarting Claude...\n")
-			claudeCmd := config.BuildCrewStartupCommand(rigName, name, r.Path, "gt prime")
-			if err := t.SendKeys(sessionID, claudeCmd); err != nil {
+			startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(rigName, name, r.Path, "gt prime", startCrewAgentOverride)
+			if err != nil {
+				return fmt.Errorf("building startup command: %w", err)
+			}
+			if err := t.SendKeys(sessionID, startupCmd); err != nil {
 				return fmt.Errorf("restarting claude: %w", err)
 			}
 		} else {
@@ -833,8 +840,11 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 
 		// Start claude with skip permissions and proper env vars for seance
 		// Pass "gt prime" as initial prompt so context is loaded immediately
-		claudeCmd := config.BuildCrewStartupCommand(rigName, name, r.Path, "gt prime")
-		if err := t.SendKeys(sessionID, claudeCmd); err != nil {
+		startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(rigName, name, r.Path, "gt prime", startCrewAgentOverride)
+		if err != nil {
+			return fmt.Errorf("building startup command: %w", err)
+		}
+		if err := t.SendKeys(sessionID, startupCmd); err != nil {
 			return fmt.Errorf("starting claude: %w", err)
 		}
 

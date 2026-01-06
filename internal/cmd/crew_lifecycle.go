@@ -338,6 +338,7 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		// Set the start.go flags before calling runStartCrew
 		startCrewRig = rigName
 		startCrewAccount = crewAccount
+		startCrewAgentOverride = crewAgentOverride
 
 		// Use rig/name format for runStartCrew
 		fullName := rigName + "/" + name
