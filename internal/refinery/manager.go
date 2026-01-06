@@ -166,8 +166,10 @@ func (m *Manager) Start(foreground bool) error {
 		refineryRigDir = m.workDir
 	}
 
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(refineryRigDir, "refinery"); err != nil {
+	// Ensure Claude settings exist in refinery/ (not refinery/rig/) so we don't
+	// write into the source repo. Claude walks up the tree to find settings.
+	refineryParentDir := filepath.Join(m.rig.Path, "refinery")
+	if err := claude.EnsureSettingsForRole(refineryParentDir, "refinery"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 

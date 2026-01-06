@@ -400,7 +400,7 @@ func (d *Daemon) ensureWitnessesRunning() {
 // ensureWitnessRunning ensures the witness for a specific rig is running.
 // Discover, don't track: uses Manager.Start() which checks tmux directly (gt-zecmc).
 func (d *Daemon) ensureWitnessRunning(rigName string) {
-// Check rig operational state before auto-starting
+	// Check rig operational state before auto-starting
 	if operational, reason := d.isRigOperational(rigName); !operational {
 		d.logger.Printf("Skipping witness auto-start for %s: %s", rigName, reason)
 		return

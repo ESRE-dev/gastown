@@ -137,8 +137,11 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 		workDir = m.polecatDir(polecat)
 	}
 
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(workDir, "polecat"); err != nil {
+	// Ensure Claude settings exist in polecats/ (not polecats/<name>/) so we don't
+	// write into the source repo. Claude walks up the tree to find settings.
+	// All polecats share the same settings file.
+	polecatsDir := filepath.Join(m.rig.Path, "polecats")
+	if err := claude.EnsureSettingsForRole(polecatsDir, "polecat"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 

@@ -85,16 +85,21 @@ func runUp(cmd *cobra.Command, args []string) error {
 	deaconSession := getDeaconSessionName()
 	mayorSession := getMayorSessionName()
 
-	// 2. Deacon (Claude agent)
-	if err := ensureSession(t, deaconSession, townRoot, "deacon"); err != nil {
+	// 2. Deacon (Claude agent) - runs from townRoot/deacon/
+	deaconDir := filepath.Join(townRoot, "deacon")
+	if err := ensureSession(t, deaconSession, deaconDir, "deacon"); err != nil {
 		printStatus("Deacon", false, err.Error())
 		allOK = false
 	} else {
 		printStatus("Deacon", true, deaconSession)
 	}
 
-	// 3. Mayor (Claude agent)
-	if err := ensureSession(t, mayorSession, townRoot, "mayor"); err != nil {
+	// 3. Mayor (Claude agent) - runs from townRoot/mayor/
+	// IMPORTANT: Both settings.json and CLAUDE.md must be in ~/gt/mayor/, NOT ~/gt/
+	// Files at town root would be inherited by ALL agents via directory traversal,
+	// causing crew/polecat/etc to receive Mayor-specific context.
+	mayorDir := filepath.Join(townRoot, "mayor")
+	if err := ensureSession(t, mayorSession, mayorDir, "mayor"); err != nil {
 		printStatus("Mayor", false, err.Error())
 		allOK = false
 	} else {
