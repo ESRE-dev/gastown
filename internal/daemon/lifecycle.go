@@ -364,9 +364,21 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 		// Non-fatal - Claude might still start
 	}
 	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
+	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Note: gt prime is handled by Claude's SessionStart hook, not injected here.
-	// Injecting it via SendKeysDelayed causes rogue text to appear in the terminal.
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Send startup nudge for predecessor discovery via /resume
+	recipient := identityToBDActor(identity)
+	_ = session.StartupNudge(d.tmux, sessionName, session.StartupNudgeConfig{
+		Recipient: recipient,
+		Sender:    "deacon",
+		Topic:     "lifecycle-restart",
+	}) // Non-fatal
+
+	// Send propulsion nudge to trigger autonomous execution.
+	// Wait for beacon to be fully processed (needs to be separate prompt)
+	time.Sleep(2 * time.Second)
+	_ = d.tmux.NudgeSession(sessionName, session.PropulsionNudgeForRole(parsed.RoleType, workDir)) // Non-fatal
 
 	return nil
 }
