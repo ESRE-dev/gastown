@@ -220,13 +220,13 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 
 // runCrewStart starts crew workers in a rig.
 // args[0] is the rig name (optional if inferrable from cwd)
-// args[1:] are crew member names (optional, or use --all flag)
+// args[1:] are crew member names (optional - defaults to all if not specified)
 func runCrewStart(cmd *cobra.Command, args []string) error {
 	var rigName string
 	var crewNames []string
 
 	if len(args) == 0 {
-		// No args - infer rig from cwd (only valid with --all)
+		// No args - infer rig from cwd
 		rigName = "" // getCrewManager will infer from cwd
 	} else {
 		rigName = args[0]
@@ -241,8 +241,8 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 	// Update rigName in case it was inferred
 	rigName = r.Name
 
-	// If --all flag, get all crew members
-	if crewAll {
+	// If --all flag OR no crew names specified, get all crew members
+	if crewAll || len(crewNames) == 0 {
 		workers, err := crewMgr.List()
 		if err != nil {
 			return fmt.Errorf("listing crew: %w", err)
@@ -543,11 +543,28 @@ func restartCrewSession(rigName, crewName, clonePath string) error {
 }
 
 // runCrewStop stops one or more crew workers.
-// Supports: "name", "rig/name" formats, or --all to stop all.
+// Supports: "name", "rig/name" formats, "rig" (to stop all in rig), or --all.
 func runCrewStop(cmd *cobra.Command, args []string) error {
 	// Handle --all flag
 	if crewAll {
 		return runCrewStopAll()
+	}
+
+	// Handle 0 args: default to all in inferred rig
+	if len(args) == 0 {
+		return runCrewStopAll()
+	}
+
+	// Handle 1 arg without "/": check if it's a rig name
+	// If so, stop all crew in that rig
+	if len(args) == 1 && !strings.Contains(args[0], "/") {
+		// Try to interpret as rig name
+		if _, _, err := getRig(args[0]); err == nil {
+			// It's a valid rig name - stop all crew in that rig
+			crewRig = args[0]
+			return runCrewStopAll()
+		}
+		// Not a rig name - fall through to treat as crew name
 	}
 
 	var lastErr error
