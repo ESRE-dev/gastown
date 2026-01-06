@@ -216,7 +216,8 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 
 // checkSettings compares a settings file against the expected template.
 // Returns a list of what's missing.
-func (c *ClaudeSettingsCheck) checkSettings(path, agentType string) []string {
+// agentType is reserved for future role-specific validation.
+func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 	var missing []string
 
 	// Read the actual settings

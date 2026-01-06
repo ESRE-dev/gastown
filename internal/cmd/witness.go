@@ -7,7 +7,6 @@ import (
 	"os/exec"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/witness"
@@ -117,20 +116,20 @@ func init() {
 }
 
 // getWitnessManager creates a witness manager for a rig.
-func getWitnessManager(rigName string) (*witness.Manager, *rig.Rig, error) {
+func getWitnessManager(rigName string) (*witness.Manager, error) {
 	_, r, err := getRig(rigName)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	mgr := witness.NewManager(r)
-	return mgr, r, nil
+	return mgr, nil
 }
 
 func runWitnessStart(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
-	mgr, _, err := getWitnessManager(rigName)
+	mgr, err := getWitnessManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -161,7 +160,7 @@ func runWitnessStart(cmd *cobra.Command, args []string) error {
 func runWitnessStop(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
-	mgr, _, err := getWitnessManager(rigName)
+	mgr, err := getWitnessManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -195,7 +194,7 @@ func runWitnessStop(cmd *cobra.Command, args []string) error {
 func runWitnessStatus(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
-	mgr, _, err := getWitnessManager(rigName)
+	mgr, err := getWitnessManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -282,7 +281,7 @@ func runWitnessAttach(cmd *cobra.Command, args []string) error {
 	}
 
 	// Verify rig exists and get manager
-	mgr, _, err := getWitnessManager(rigName)
+	mgr, err := getWitnessManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -312,7 +311,7 @@ func runWitnessAttach(cmd *cobra.Command, args []string) error {
 func runWitnessRestart(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
-	mgr, _, err := getWitnessManager(rigName)
+	mgr, err := getWitnessManager(rigName)
 	if err != nil {
 		return err
 	}

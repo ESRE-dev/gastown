@@ -644,6 +644,14 @@ func ConfigureSparseCheckout(repoPath string) error {
 		return fmt.Errorf("writing sparse-checkout: %w", err)
 	}
 
+	// Check if HEAD exists (repo has commits) before running read-tree
+	// Empty repos (no commits) don't need read-tree and it would fail
+	checkHead := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "HEAD")
+	if err := checkHead.Run(); err != nil {
+		// No commits yet, sparse checkout config is set up for future use
+		return nil
+	}
+
 	// Reapply to remove excluded files
 	cmd = exec.Command("git", "-C", repoPath, "read-tree", "-mu", "HEAD")
 	stderr.Reset()
