@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	doctorFix     bool
-	doctorVerbose bool
-	doctorRig     string
+	doctorFix             bool
+	doctorVerbose         bool
+	doctorRig             string
+	doctorRestartSessions bool
 )
 
 var doctorCmd = &cobra.Command{
@@ -82,6 +83,7 @@ func init() {
 	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "Attempt to automatically fix issues")
 	doctorCmd.Flags().BoolVarP(&doctorVerbose, "verbose", "v", false, "Show detailed output")
 	doctorCmd.Flags().StringVar(&doctorRig, "rig", "", "Check specific rig only")
+	doctorCmd.Flags().BoolVar(&doctorRestartSessions, "restart-sessions", false, "Restart patrol sessions when fixing stale settings (use with --fix)")
 	rootCmd.AddCommand(doctorCmd)
 }
 
@@ -94,9 +96,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Create check context
 	ctx := &doctor.CheckContext{
-		TownRoot: townRoot,
-		RigName:  doctorRig,
-		Verbose:  doctorVerbose,
+		TownRoot:        townRoot,
+		RigName:         doctorRig,
+		Verbose:         doctorVerbose,
+		RestartSessions: doctorRestartSessions,
 	}
 
 	// Create doctor and register checks
