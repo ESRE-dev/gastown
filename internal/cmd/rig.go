@@ -366,12 +366,16 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	// - Otherwise route to rig root (where initBeads creates the database)
 	// The conditional routing is necessary because initBeads creates the database at
 	// "<rig>/.beads", while repos with tracked beads have their database at mayor/rig/.beads.
+	var beadsWorkDir string
 	if newRig.Config.Prefix != "" {
 		routePath := name
 		mayorRigBeads := filepath.Join(townRoot, name, "mayor", "rig", ".beads")
 		if _, err := os.Stat(mayorRigBeads); err == nil {
 			// Source repo has .beads/ tracked - route to mayor/rig
 			routePath = name + "/mayor/rig"
+			beadsWorkDir = filepath.Join(townRoot, name, "mayor", "rig")
+		} else {
+			beadsWorkDir = filepath.Join(townRoot, name)
 		}
 		route := beads.Route{
 			Prefix: newRig.Config.Prefix + "-",
@@ -380,6 +384,23 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		if err := beads.AppendRoute(townRoot, route); err != nil {
 			// Non-fatal: routing will still work, just not from town root
 			fmt.Printf("  %s Could not update routes.jsonl: %v\n", style.Warning.Render("!"), err)
+		}
+	}
+
+	// Create rig identity bead
+	if newRig.Config.Prefix != "" && beadsWorkDir != "" {
+		bd := beads.New(beadsWorkDir)
+		rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
+		fields := &beads.RigFields{
+			Repo:   gitURL,
+			Prefix: newRig.Config.Prefix,
+			State:  "active",
+		}
+		if _, err := bd.CreateRigBead(rigBeadID, name, fields); err != nil {
+			// Non-fatal: rig is functional without the identity bead
+			fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
+		} else {
+			fmt.Printf("  Created rig identity bead: %s\n", rigBeadID)
 		}
 	}
 
