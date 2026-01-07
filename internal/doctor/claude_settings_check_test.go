@@ -179,8 +179,9 @@ func createStaleSettings(t *testing.T, path string, missingElements ...string) {
 func TestClaudeSettingsCheck_ValidMayorSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create valid mayor settings
-	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	// Create valid mayor settings at correct location (mayor/.claude/settings.json)
+	// NOT at town root (.claude/settings.json) which is wrong location
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
 	createValidSettings(t, mayorSettings)
 
 	check := NewClaudeSettingsCheck()
@@ -285,8 +286,8 @@ func TestClaudeSettingsCheck_ValidPolecatSettings(t *testing.T) {
 func TestClaudeSettingsCheck_MissingEnabledPlugins(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale mayor settings missing enabledPlugins
-	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	// Create stale mayor settings missing enabledPlugins (at correct location)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "enabledPlugins")
 
 	check := NewClaudeSettingsCheck()
@@ -305,8 +306,8 @@ func TestClaudeSettingsCheck_MissingEnabledPlugins(t *testing.T) {
 func TestClaudeSettingsCheck_MissingHooks(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing hooks entirely
-	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	// Create stale settings missing hooks entirely (at correct location)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "hooks")
 
 	check := NewClaudeSettingsCheck()
@@ -322,8 +323,8 @@ func TestClaudeSettingsCheck_MissingHooks(t *testing.T) {
 func TestClaudeSettingsCheck_MissingPATH(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing PATH export
-	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	// Create stale settings missing PATH export (at correct location)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "PATH")
 
 	check := NewClaudeSettingsCheck()
@@ -349,8 +350,8 @@ func TestClaudeSettingsCheck_MissingPATH(t *testing.T) {
 func TestClaudeSettingsCheck_MissingDeaconNudge(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing deacon nudge
-	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	// Create stale settings missing deacon nudge (at correct location)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "deacon-nudge")
 
 	check := NewClaudeSettingsCheck()
@@ -376,8 +377,8 @@ func TestClaudeSettingsCheck_MissingDeaconNudge(t *testing.T) {
 func TestClaudeSettingsCheck_MissingStopHook(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing Stop hook
-	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	// Create stale settings missing Stop hook (at correct location)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "Stop")
 
 	check := NewClaudeSettingsCheck()
@@ -462,8 +463,8 @@ func TestClaudeSettingsCheck_MultipleStaleFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
-	// Create multiple stale settings files
-	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	// Create multiple stale settings files (all at correct locations)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "PATH")
 
 	deaconSettings := filepath.Join(tmpDir, "deacon", ".claude", "settings.json")
@@ -489,8 +490,8 @@ func TestClaudeSettingsCheck_MultipleStaleFiles(t *testing.T) {
 func TestClaudeSettingsCheck_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create invalid JSON file
-	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	// Create invalid JSON file (at correct location)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(mayorSettings), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -587,8 +588,8 @@ func TestClaudeSettingsCheck_MixedValidAndStale(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
-	// Create valid mayor settings
-	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	// Create valid mayor settings (at correct location)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
 	createValidSettings(t, mayorSettings)
 
 	// Create stale witness settings in correct location (missing PATH)
