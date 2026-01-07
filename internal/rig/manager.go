@@ -731,6 +731,11 @@ func deriveBeadsPrefix(name string) string {
 		return r == '-' || r == '_'
 	})
 
+	// If single part, try to detect compound words (e.g., "gastown" -> "gas" + "town")
+	if len(parts) == 1 {
+		parts = splitCompoundWord(parts[0])
+	}
+
 	if len(parts) >= 2 {
 		// Take first letter of each part: "gas-town" -> "gt"
 		prefix := ""
@@ -747,6 +752,27 @@ func deriveBeadsPrefix(name string) string {
 		return strings.ToLower(name)
 	}
 	return strings.ToLower(name[:2])
+}
+
+// splitCompoundWord attempts to split a compound word into its components.
+// Common suffixes like "town", "ville", "port" are detected to split
+// compound names (e.g., "gastown" -> ["gas", "town"]).
+func splitCompoundWord(word string) []string {
+	word = strings.ToLower(word)
+
+	// Common suffixes for compound place names
+	suffixes := []string{"town", "ville", "port", "place", "land", "field", "wood", "ford"}
+
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(word, suffix) && len(word) > len(suffix) {
+			prefix := word[:len(word)-len(suffix)]
+			if len(prefix) > 0 {
+				return []string{prefix, suffix}
+			}
+		}
+	}
+
+	return []string{word}
 }
 
 // detectBeadsPrefixFromConfig reads the issue prefix from a beads config.yaml file.

@@ -485,3 +485,94 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestDeriveBeadsPrefix(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		// Compound words with common suffixes should split
+		{"gastown", "gt"},       // gas + town
+		{"nashville", "nv"},     // nash + ville
+		{"bridgeport", "bp"},    // bridge + port
+		{"someplace", "sp"},     // some + place
+		{"greenland", "gl"},     // green + land
+		{"springfield", "sf"},   // spring + field
+		{"hollywood", "hw"},     // holly + wood
+		{"oxford", "of"},        // ox + ford
+
+		// Hyphenated names
+		{"my-project", "mp"},
+		{"gas-town", "gt"},
+		{"some-long-name", "sln"},
+
+		// Underscored names
+		{"my_project", "mp"},
+
+		// Short single words (use the whole name)
+		{"foo", "foo"},
+		{"bar", "bar"},
+		{"ab", "ab"},
+
+		// Longer single words without known suffixes (first 2 chars)
+		{"myrig", "my"},
+		{"awesome", "aw"},
+		{"coolrig", "co"},
+
+		// With language suffixes stripped
+		{"myproject-py", "my"},
+		{"myproject-go", "my"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deriveBeadsPrefix(tt.name)
+			if got != tt.want {
+				t.Errorf("deriveBeadsPrefix(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSplitCompoundWord(t *testing.T) {
+	tests := []struct {
+		word string
+		want []string
+	}{
+		// Known suffixes
+		{"gastown", []string{"gas", "town"}},
+		{"nashville", []string{"nash", "ville"}},
+		{"bridgeport", []string{"bridge", "port"}},
+		{"someplace", []string{"some", "place"}},
+		{"greenland", []string{"green", "land"}},
+		{"springfield", []string{"spring", "field"}},
+		{"hollywood", []string{"holly", "wood"}},
+		{"oxford", []string{"ox", "ford"}},
+
+		// Just the suffix (should not split)
+		{"town", []string{"town"}},
+		{"ville", []string{"ville"}},
+
+		// No known suffix
+		{"myrig", []string{"myrig"}},
+		{"awesome", []string{"awesome"}},
+
+		// Empty prefix would result (should not split)
+		// Note: "town" itself shouldn't split to ["", "town"]
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.word, func(t *testing.T) {
+			got := splitCompoundWord(tt.word)
+			if len(got) != len(tt.want) {
+				t.Errorf("splitCompoundWord(%q) = %v, want %v", tt.word, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("splitCompoundWord(%q)[%d] = %q, want %q", tt.word, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
