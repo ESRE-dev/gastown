@@ -680,11 +680,13 @@ func sessionToAgentID(sessionName string) string {
 }
 
 // verifyBeadExists checks that the bead exists using bd show.
+// Uses bd's native prefix-based routing via routes.jsonl - do NOT set BEADS_DIR
+// as that overrides routing and breaks resolution of rig-level beads.
 func verifyBeadExists(beadID string) error {
 	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
-	// Set BEADS_DIR to town root so hq-* beads are accessible
+	// Run from town root so bd can find routes.jsonl for prefix-based routing.
+	// Do NOT set BEADS_DIR - that overrides routing and breaks rig bead resolution.
 	if townRoot, err := workspace.FindFromCwd(); err == nil {
-		cmd.Env = append(os.Environ(), "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
 		cmd.Dir = townRoot
 	}
 	if err := cmd.Run(); err != nil {
@@ -701,8 +703,13 @@ type beadInfo struct {
 }
 
 // getBeadInfo returns status and assignee for a bead.
+// Uses bd's native prefix-based routing via routes.jsonl.
 func getBeadInfo(beadID string) (*beadInfo, error) {
 	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
+	// Run from town root so bd can find routes.jsonl for prefix-based routing.
+	if townRoot, err := workspace.FindFromCwd(); err == nil {
+		cmd.Dir = townRoot
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
