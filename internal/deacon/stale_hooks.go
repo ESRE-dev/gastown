@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -155,9 +156,9 @@ func assigneeToSessionName(assignee string) string {
 		// Simple names like "deacon", "mayor"
 		switch assignee {
 		case "deacon":
-			return "gt-deacon"
+			return session.DeaconSessionName()
 		case "mayor":
-			return "gt-mayor"
+			return session.MayorSessionName()
 		default:
 			return ""
 		}
