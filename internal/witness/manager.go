@@ -59,8 +59,8 @@ func (m *Manager) saveState(w *Witness) error {
 	return m.stateManager.Save(w)
 }
 
-// sessionName returns the tmux session name for this witness.
-func (m *Manager) sessionName() string {
+// SessionName returns the tmux session name for this witness.
+func (m *Manager) SessionName() string {
 	return fmt.Sprintf("gt-%s-witness", m.rig.Name)
 }
 
@@ -105,7 +105,7 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	t := tmux.NewTmux()
-	sessionID := m.sessionName()
+	sessionID := m.SessionName()
 
 	if foreground {
 		// Foreground mode is deprecated - patrol logic moved to mol-witness-patrol
@@ -224,7 +224,7 @@ func (m *Manager) Stop() error {
 
 	// Check if tmux session exists
 	t := tmux.NewTmux()
-	sessionID := m.sessionName()
+	sessionID := m.SessionName()
 	sessionRunning, _ := t.HasSession(sessionID)
 
 	// If neither state nor session indicates running, it's not running

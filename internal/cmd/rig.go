@@ -17,7 +17,6 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
@@ -958,11 +957,11 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 
 	// 1. Stop all polecat sessions
 	t := tmux.NewTmux()
-	sessMgr := session.NewManager(t, r)
-	infos, err := sessMgr.List()
+	polecatMgr := polecat.NewSessionManager(t, r)
+	infos, err := polecatMgr.List()
 	if err == nil && len(infos) > 0 {
 		fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
-		if err := sessMgr.StopAll(rigShutdownForce); err != nil {
+		if err := polecatMgr.StopAll(rigShutdownForce); err != nil {
 			errors = append(errors, fmt.Sprintf("polecat sessions: %v", err))
 		}
 	}
@@ -1235,11 +1234,11 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 
 		// 1. Stop all polecat sessions
 		t := tmux.NewTmux()
-		sessMgr := session.NewManager(t, r)
-		infos, err := sessMgr.List()
+		polecatMgr := polecat.NewSessionManager(t, r)
+		infos, err := polecatMgr.List()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
-			if err := sessMgr.StopAll(rigStopForce); err != nil {
+			if err := polecatMgr.StopAll(rigStopForce); err != nil {
 				errors = append(errors, fmt.Sprintf("polecat sessions: %v", err))
 			}
 		}
@@ -1368,11 +1367,11 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Stopping...\n")
 
 		// 1. Stop all polecat sessions
-		sessMgr := session.NewManager(t, r)
-		infos, err := sessMgr.List()
+		polecatMgr := polecat.NewSessionManager(t, r)
+		infos, err := polecatMgr.List()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("    Stopping %d polecat session(s)...\n", len(infos))
-			if err := sessMgr.StopAll(rigRestartForce); err != nil {
+			if err := polecatMgr.StopAll(rigRestartForce); err != nil {
 				stopErrors = append(stopErrors, fmt.Sprintf("polecat sessions: %v", err))
 			}
 		}

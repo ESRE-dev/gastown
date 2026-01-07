@@ -14,7 +14,9 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -160,7 +162,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Starting Gas Town from %s\n\n", style.Dim.Render(townRoot))
 
 	// Start core agents (Mayor and Deacon)
-	if err := startCoreAgents(t, startAgentOverride); err != nil {
+	if err := startCoreAgents(townRoot, startAgentOverride); err != nil {
 		return err
 	}
 
@@ -186,33 +188,29 @@ func runStart(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// startCoreAgents starts Mayor and Deacon sessions.
-func startCoreAgents(t *tmux.Tmux, agentOverride string) error {
-	// Get session names
-	mayorSession := getMayorSessionName()
-	deaconSession := getDeaconSessionName()
-
+// startCoreAgents starts Mayor and Deacon sessions using the Manager pattern.
+func startCoreAgents(townRoot string, agentOverride string) error {
 	// Start Mayor first (so Deacon sees it as up)
-	mayorRunning, _ := t.HasSession(mayorSession)
-	if mayorRunning {
-		fmt.Printf("  %s Mayor already running\n", style.Dim.Render("○"))
-	} else {
-		fmt.Printf("  %s Starting Mayor...\n", style.Bold.Render("→"))
-		if err := startMayorSession(t, mayorSession, agentOverride); err != nil {
+	mayorMgr := mayor.NewManager(townRoot)
+	if err := mayorMgr.Start(agentOverride); err != nil {
+		if err == mayor.ErrAlreadyRunning {
+			fmt.Printf("  %s Mayor already running\n", style.Dim.Render("○"))
+		} else {
 			return fmt.Errorf("starting Mayor: %w", err)
 		}
+	} else {
 		fmt.Printf("  %s Mayor started\n", style.Bold.Render("✓"))
 	}
 
 	// Start Deacon (health monitor)
-	deaconRunning, _ := t.HasSession(deaconSession)
-	if deaconRunning {
-		fmt.Printf("  %s Deacon already running\n", style.Dim.Render("○"))
-	} else {
-		fmt.Printf("  %s Starting Deacon...\n", style.Bold.Render("→"))
-		if err := startDeaconSession(t, deaconSession, agentOverride); err != nil {
+	deaconMgr := deacon.NewManager(townRoot)
+	if err := deaconMgr.Start(); err != nil {
+		if err == deacon.ErrAlreadyRunning {
+			fmt.Printf("  %s Deacon already running\n", style.Dim.Render("○"))
+		} else {
 			return fmt.Errorf("starting Deacon: %w", err)
 		}
+	} else {
 		fmt.Printf("  %s Deacon started\n", style.Bold.Render("✓"))
 	}
 
