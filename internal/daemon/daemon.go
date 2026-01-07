@@ -325,7 +325,14 @@ func (d *Daemon) ensureDeaconRunning() {
 		hasSession, sessionErr := d.tmux.HasSession(deaconSession)
 		if sessionErr == nil && hasSession {
 			if d.tmux.IsClaudeRunning(deaconSession) {
-				d.logger.Println("Deacon session healthy (Claude running), skipping restart despite stale bead")
+				// STATE DIVERGENCE: tmux shows running but bead disagrees.
+				// Don't kill (safety), but nudge the agent to reconcile its state.
+				// This prevents silent state drift where bead and reality diverge.
+				d.logger.Printf("STATE DIVERGENCE: Deacon bead='%s' but Claude is running in tmux", beadState)
+				nudgeMsg := "[DAEMON] State divergence detected: your agent bead shows '" + beadState + "' but you appear running. Please run: bd agent state " + deaconSession + " running"
+				if err := d.tmux.NudgeSession(deaconSession, nudgeMsg); err != nil {
+					d.logger.Printf("Warning: failed to nudge Deacon about state divergence: %v", err)
+				}
 				return
 			}
 		}
@@ -460,8 +467,13 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 
 	if err := mgr.Start(false); err != nil {
 		if err == witness.ErrAlreadyRunning {
-			// Session is healthy (Claude running) - bead state was stale
-			d.logger.Printf("Witness for %s session healthy (Claude running), skipping restart despite stale bead", rigName)
+			// STATE DIVERGENCE: tmux shows running but bead disagrees.
+			// Don't kill (safety), but nudge the agent to reconcile its state.
+			d.logger.Printf("STATE DIVERGENCE: Witness for %s bead='%s' but Claude is running in tmux", rigName, beadState)
+			nudgeMsg := "[DAEMON] State divergence detected: your agent bead shows '" + beadState + "' but you appear running. Please run: bd agent state " + agentID + " running"
+			if err := d.tmux.NudgeSession(sessionName, nudgeMsg); err != nil {
+				d.logger.Printf("Warning: failed to nudge Witness %s about state divergence: %v", rigName, err)
+			}
 			return
 		}
 		d.logger.Printf("Error starting witness for %s: %v", rigName, err)
@@ -522,8 +534,13 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 
 	if err := mgr.Start(false); err != nil {
 		if err == refinery.ErrAlreadyRunning {
-			// Session is healthy (Claude running) - bead state was stale
-			d.logger.Printf("Refinery for %s session healthy (Claude running), skipping restart despite stale bead", rigName)
+			// STATE DIVERGENCE: tmux shows running but bead disagrees.
+			// Don't kill (safety), but nudge the agent to reconcile its state.
+			d.logger.Printf("STATE DIVERGENCE: Refinery for %s bead='%s' but Claude is running in tmux", rigName, beadState)
+			nudgeMsg := "[DAEMON] State divergence detected: your agent bead shows '" + beadState + "' but you appear running. Please run: bd agent state " + agentID + " running"
+			if err := d.tmux.NudgeSession(sessionName, nudgeMsg); err != nil {
+				d.logger.Printf("Warning: failed to nudge Refinery %s about state divergence: %v", rigName, err)
+			}
 			return
 		}
 		d.logger.Printf("Error starting refinery for %s: %v", rigName, err)
