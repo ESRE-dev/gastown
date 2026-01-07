@@ -586,40 +586,34 @@ func outputStatusText(status TownStatus) error {
 // renderAgentDetails renders full agent bead details
 func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string) { //nolint:unparam // indent kept for future customization
 	// Line 1: Agent bead ID + status
-	// Reconcile bead state with tmux session state to surface mismatches
-	// States: "running" (active), "idle" (waiting), "stopped", "dead", etc.
-	beadState := agent.State
+	// Per gt-zecmc: derive status from tmux (observable reality), not bead state.
+	// "Discover, don't track" - agent liveness is observable from tmux session.
 	sessionExists := agent.Running
-
-	// "idle" is a normal operational state (running but waiting for work)
-	// Treat it the same as "running" for reconciliation purposes
-	beadSaysRunning := beadState == "running" || beadState == "idle" || beadState == ""
 
 	var statusStr string
 	var stateInfo string
 
-	switch {
-	case beadSaysRunning && sessionExists:
-		// Normal running state - session exists and bead agrees
+	if sessionExists {
 		statusStr = style.Success.Render("running")
-	case beadSaysRunning && !sessionExists:
-		// Bead thinks running but session is gone - stale bead state
-		statusStr = style.Error.Render("running")
-		stateInfo = style.Warning.Render(" [dead]")
-	case !beadSaysRunning && sessionExists:
-		// Session exists but bead says stopped/dead - mismatch!
-		// This is the key case: tmux says alive, bead says dead/stopped
-		statusStr = style.Success.Render("running")
-		stateInfo = style.Warning.Render(" [bead: " + beadState + "]")
-	default:
-		// Both agree: stopped
+	} else {
 		statusStr = style.Error.Render("stopped")
 	}
 
-	// Add agent state info if not already shown and state is interesting
-	// Skip "idle" and "running" as they're normal operational states
-	if stateInfo == "" && beadState != "" && beadState != "idle" && beadState != "running" {
+	// Show non-observable states that represent intentional agent decisions.
+	// These can't be discovered from tmux and are legitimately recorded in beads.
+	beadState := agent.State
+	switch beadState {
+	case "stuck":
+		// Agent escalated - needs help
+		stateInfo = style.Warning.Render(" [stuck]")
+	case "awaiting-gate":
+		// Agent waiting for external trigger (phase gate)
+		stateInfo = style.Dim.Render(" [awaiting-gate]")
+	case "muted", "paused", "degraded":
+		// Other intentional non-observable states
 		stateInfo = style.Dim.Render(fmt.Sprintf(" [%s]", beadState))
+	// Ignore observable states: "running", "idle", "dead", "done", "stopped", ""
+	// These should be derived from tmux, not bead.
 	}
 
 	// Build agent bead ID using canonical naming: prefix-rig-role-name
@@ -741,22 +735,8 @@ func formatMQSummaryCompact(mq *MQSummary) string {
 
 // renderAgentCompactWithSuffix renders a single-line agent status with an extra suffix
 func renderAgentCompactWithSuffix(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string, suffix string) {
-	// Build status indicator
-	var statusIndicator string
-	beadState := agent.State
-	sessionExists := agent.Running
-	beadSaysRunning := beadState == "running" || beadState == "idle" || beadState == ""
-
-	switch {
-	case beadSaysRunning && sessionExists:
-		statusIndicator = style.Success.Render("●")
-	case beadSaysRunning && !sessionExists:
-		statusIndicator = style.Error.Render("●") + style.Warning.Render(" dead")
-	case !beadSaysRunning && sessionExists:
-		statusIndicator = style.Success.Render("●") + style.Warning.Render(" ["+beadState+"]")
-	default:
-		statusIndicator = style.Error.Render("○")
-	}
+	// Build status indicator (gt-zecmc: use tmux state, not bead state)
+	statusIndicator := buildStatusIndicator(agent)
 
 	// Get hook info
 	hookBead := agent.HookBead
@@ -795,22 +775,8 @@ func renderAgentCompactWithSuffix(agent AgentRuntime, indent string, hooks []Age
 
 // renderAgentCompact renders a single-line agent status
 func renderAgentCompact(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string) {
-	// Build status indicator
-	var statusIndicator string
-	beadState := agent.State
-	sessionExists := agent.Running
-	beadSaysRunning := beadState == "running" || beadState == "idle" || beadState == ""
-
-	switch {
-	case beadSaysRunning && sessionExists:
-		statusIndicator = style.Success.Render("●")
-	case beadSaysRunning && !sessionExists:
-		statusIndicator = style.Error.Render("●") + style.Warning.Render(" dead")
-	case !beadSaysRunning && sessionExists:
-		statusIndicator = style.Success.Render("●") + style.Warning.Render(" ["+beadState+"]")
-	default:
-		statusIndicator = style.Error.Render("○")
-	}
+	// Build status indicator (gt-zecmc: use tmux state, not bead state)
+	statusIndicator := buildStatusIndicator(agent)
 
 	// Get hook info
 	hookBead := agent.HookBead
@@ -845,6 +811,35 @@ func renderAgentCompact(agent AgentRuntime, indent string, hooks []AgentHookInfo
 
 	// Print single line: name + status + hook + mail
 	fmt.Printf("%s%-12s %s%s%s\n", indent, agent.Name, statusIndicator, hookSuffix, mailSuffix)
+}
+
+// buildStatusIndicator creates the visual status indicator for an agent.
+// Per gt-zecmc: uses tmux state (observable reality), not bead state.
+// Non-observable states (stuck, awaiting-gate, muted, etc.) are shown as suffixes.
+func buildStatusIndicator(agent AgentRuntime) string {
+	sessionExists := agent.Running
+
+	// Base indicator from tmux state
+	var indicator string
+	if sessionExists {
+		indicator = style.Success.Render("●")
+	} else {
+		indicator = style.Error.Render("○")
+	}
+
+	// Add non-observable state suffix if present
+	beadState := agent.State
+	switch beadState {
+	case "stuck":
+		indicator += style.Warning.Render(" stuck")
+	case "awaiting-gate":
+		indicator += style.Dim.Render(" gate")
+	case "muted", "paused", "degraded":
+		indicator += style.Dim.Render(" " + beadState)
+	// Ignore observable states: running, idle, dead, done, stopped, ""
+	}
+
+	return indicator
 }
 
 // formatHookInfo formats the hook bead and title for display

@@ -357,6 +357,13 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
+// Run executes a bd command and returns stdout.
+// This is a public wrapper around the internal run method for cases where
+// callers need to run arbitrary bd commands.
+func (b *Beads) Run(args ...string) ([]byte, error) {
+	return b.run(args...)
+}
+
 // wrapError wraps bd errors with context.
 func (b *Beads) wrapError(err error, stderr string, args []string) error {
 	stderr = strings.TrimSpace(stderr)
@@ -1141,6 +1148,38 @@ func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) erro
 		}
 	}
 
+	return nil
+}
+
+// SetHookBead sets the hook_bead slot on an agent bead.
+// This is a convenience wrapper that only sets the hook without changing agent_state.
+// Per gt-zecmc: agent_state ("running", "dead", "idle") is observable from tmux
+// and should not be recorded in beads ("discover, don't track" principle).
+func (b *Beads) SetHookBead(agentBeadID, hookBeadID string) error {
+	// Set the hook using bd slot set
+	// This updates the hook_bead column directly in SQLite
+	_, err := b.run("slot", "set", agentBeadID, "hook", hookBeadID)
+	if err != nil {
+		// If slot is already occupied, clear it first then retry
+		errStr := err.Error()
+		if strings.Contains(errStr, "already occupied") {
+			_, _ = b.run("slot", "clear", agentBeadID, "hook")
+			_, err = b.run("slot", "set", agentBeadID, "hook", hookBeadID)
+		}
+		if err != nil {
+			return fmt.Errorf("setting hook: %w", err)
+		}
+	}
+	return nil
+}
+
+// ClearHookBead clears the hook_bead slot on an agent bead.
+// Used when work is complete or unslung.
+func (b *Beads) ClearHookBead(agentBeadID string) error {
+	_, err := b.run("slot", "clear", agentBeadID, "hook")
+	if err != nil {
+		return fmt.Errorf("clearing hook: %w", err)
+	}
 	return nil
 }
 

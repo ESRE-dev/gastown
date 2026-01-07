@@ -356,12 +356,10 @@ func runDone(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// updateAgentStateOnDone updates the agent bead state when work is complete.
-// Maps exit type to agent state:
-//   - COMPLETED → "done"
-//   - ESCALATED → "stuck"
-//   - DEFERRED → "idle"
-//   - PHASE_COMPLETE → "awaiting-gate"
+// updateAgentStateOnDone clears the agent's hook and reports cleanup status.
+// Per gt-zecmc: observable states ("done", "idle") removed - use tmux to discover.
+// Non-observable states ("stuck", "awaiting-gate") are still set since they represent
+// intentional agent decisions that can't be observed from tmux.
 //
 // Also self-reports cleanup_status for ZFC compliance (#10).
 func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unused but kept for future audit logging
@@ -384,22 +382,6 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		return
 	}
 
-	// Map exit type to agent state
-	var newState string
-	switch exitType {
-	case ExitCompleted:
-		newState = "done"
-	case ExitEscalated:
-		newState = "stuck"
-	case ExitDeferred:
-		newState = "idle"
-	case ExitPhaseComplete:
-		newState = "awaiting-gate"
-	default:
-		return
-	}
-
-	// Update agent bead with new state and clear hook_bead (work is done)
 	// Use rig path for slot commands - bd slot doesn't route from town root
 	var beadsPath string
 	switch ctx.Role {
@@ -423,11 +405,26 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		}
 	}
 
-	emptyHook := ""
-	if err := bd.UpdateAgentState(agentBeadID, newState, &emptyHook); err != nil {
-		// Log warning instead of silent ignore - helps debug cross-beads issues
-		fmt.Fprintf(os.Stderr, "Warning: couldn't update agent %s state on done: %v\n", agentBeadID, err)
-		return
+	// Clear the hook (work is done) - gt-zecmc
+	if err := bd.ClearHookBead(agentBeadID); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: couldn't clear agent %s hook: %v\n", agentBeadID, err)
+	}
+
+	// Only set non-observable states - "stuck" and "awaiting-gate" are intentional
+	// agent decisions that can't be discovered from tmux. Skip "done" and "idle"
+	// since those are observable (no session = done, session + no hook = idle).
+	switch exitType {
+	case ExitEscalated:
+		// "stuck" = agent is requesting help - not observable from tmux
+		if _, err := bd.Run("agent", "state", agentBeadID, "stuck"); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to stuck: %v\n", agentBeadID, err)
+		}
+	case ExitPhaseComplete:
+		// "awaiting-gate" = agent is waiting for external trigger - not observable
+		if _, err := bd.Run("agent", "state", agentBeadID, "awaiting-gate"); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to awaiting-gate: %v\n", agentBeadID, err)
+		}
+	// ExitCompleted and ExitDeferred don't set state - observable from tmux
 	}
 
 	// ZFC #10: Self-report cleanup status

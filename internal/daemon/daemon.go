@@ -189,9 +189,10 @@ func (d *Daemon) heartbeat(state *State) {
 	// 4. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 5. Check for stale agents (timeout fallback)
-	// Agents that report "running" but haven't updated in too long are marked dead
-	d.checkStaleAgents()
+	// 5. Stale agent check REMOVED (gt-zecmc)
+	// Was: d.checkStaleAgents() - marked agents "dead" based on bead update time.
+	// This violated "discover, don't track" - agent liveness is observable from tmux.
+	// The daemon now checks tmux directly in ensureXxxRunning() functions.
 
 	// 6. Check for GUPP violations (agents with work-on-hook not progressing)
 	d.checkGUPPViolations()
@@ -288,58 +289,28 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 }
 
 // ensureDeaconRunning ensures the Deacon is running.
-// ZFC-compliant: trusts agent bead state, with tmux health check fallback.
+// Discover, don't track: checks tmux directly instead of bead state (gt-zecmc).
 // The Deacon is the system's heartbeat - it must always be running.
 func (d *Daemon) ensureDeaconRunning() {
-	// Check agent bead state (ZFC: trust what agent reports)
-	beadState, beadErr := d.getAgentBeadState(d.getDeaconSessionName())
-	if beadErr == nil {
-		if beadState == "running" || beadState == "working" {
-			// Agent reports it's running - trust it
-			// Timeout fallback for stale state is in lifecycle.go
+	deaconSession := d.getDeaconSessionName()
+
+	// Check if tmux session exists and Claude is running (observable reality)
+	hasSession, sessionErr := d.tmux.HasSession(deaconSession)
+	if sessionErr == nil && hasSession {
+		if d.tmux.IsClaudeRunning(deaconSession) {
+			// Deacon is running - nothing to do
 			return
 		}
-
-		// CIRCUIT BREAKER: If agent is marked "dead" by checkStaleAgents(),
-		// force-kill the session and restart. This handles stuck agents that
-		// are still alive (zombie Claude sessions that haven't updated their bead).
-		if beadState == "dead" {
-			d.logger.Println("Deacon is marked dead (circuit breaker triggered), forcing restart...")
-			deaconSession := d.getDeaconSessionName()
-			hasSession, _ := d.tmux.HasSession(deaconSession)
-			if hasSession {
-				if err := d.tmux.KillSession(deaconSession); err != nil {
-					d.logger.Printf("Warning: failed to kill dead Deacon session: %v", err)
-				}
-			}
-			// Fall through to restart
+		// Session exists but Claude not running - zombie session, kill it
+		d.logger.Println("Deacon session exists but Claude not running, killing zombie session...")
+		if err := d.tmux.KillSession(deaconSession); err != nil {
+			d.logger.Printf("Warning: failed to kill zombie Deacon session: %v", err)
 		}
+		// Fall through to restart
 	}
 
-	// Agent bead check failed or state is not running/working.
-	// FALLBACK: Check if tmux session is actually healthy before attempting restart.
-	// This prevents killing healthy sessions when bead state is stale or unreadable.
-	// Skip this check if agent was marked dead (we already handled that above).
-	if beadState != "dead" {
-		deaconSession := d.getDeaconSessionName()
-		hasSession, sessionErr := d.tmux.HasSession(deaconSession)
-		if sessionErr == nil && hasSession {
-			if d.tmux.IsClaudeRunning(deaconSession) {
-				// STATE DIVERGENCE: tmux shows running but bead disagrees.
-				// Don't kill (safety), but nudge the agent to reconcile its state.
-				// This prevents silent state drift where bead and reality diverge.
-				d.logger.Printf("STATE DIVERGENCE: Deacon bead='%s' but Claude is running in tmux", beadState)
-				nudgeMsg := "[DAEMON] State divergence detected: your agent bead shows '" + beadState + "' but you appear running. Please run: bd agent state " + deaconSession + " running"
-				if err := d.tmux.NudgeSession(deaconSession, nudgeMsg); err != nil {
-					d.logger.Printf("Warning: failed to nudge Deacon about state divergence: %v", err)
-				}
-				return
-			}
-		}
-	}
-
-	// Agent not running (or bead not found) AND session is not healthy - start it
-	d.logger.Println("Deacon not running per agent bead, starting...")
+	// Deacon not running - start it
+	d.logger.Println("Deacon not running, starting...")
 
 	// Create session in deacon directory (ensures correct CLAUDE.md is loaded)
 	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
@@ -426,39 +397,11 @@ func (d *Daemon) ensureWitnessesRunning() {
 }
 
 // ensureWitnessRunning ensures the witness for a specific rig is running.
+// Discover, don't track: uses Manager.Start() which checks tmux directly (gt-zecmc).
 func (d *Daemon) ensureWitnessRunning(rigName string) {
-	prefix := config.GetRigPrefix(d.config.TownRoot, rigName)
-	agentID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
-	sessionName := "gt-" + rigName + "-witness"
-
-	// Check agent bead state (ZFC: trust what agent reports)
-	beadState, beadErr := d.getAgentBeadState(agentID)
-	if beadErr == nil {
-		if beadState == "running" || beadState == "working" {
-			// Agent reports it's running - trust it
-			return
-		}
-
-		// CIRCUIT BREAKER: If agent is marked "dead" by checkStaleAgents(),
-		// force-kill the session and restart. This handles stuck agents that
-		// are still alive (zombie Claude sessions that haven't updated their bead).
-		if beadState == "dead" {
-			d.logger.Printf("Witness for %s is marked dead (circuit breaker triggered), forcing restart...", rigName)
-			hasSession, _ := d.tmux.HasSession(sessionName)
-			if hasSession {
-				if err := d.tmux.KillSession(sessionName); err != nil {
-					d.logger.Printf("Warning: failed to kill dead witness session for %s: %v", rigName, err)
-				}
-			}
-			// Fall through to restart
-		}
-	}
-
-	// Agent not running (or bead not found) - use Manager.Start() for unified startup
 	// Manager.Start() handles: zombie detection, session creation, env vars, theming,
-	// WaitForClaudeReady, and crucially - startup/propulsion nudges (GUPP)
-	d.logger.Printf("Witness for %s not running per agent bead, starting...", rigName)
-
+	// WaitForClaudeReady, and crucially - startup/propulsion nudges (GUPP).
+	// It returns ErrAlreadyRunning if Claude is already running in tmux.
 	r := &rig.Rig{
 		Name: rigName,
 		Path: filepath.Join(d.config.TownRoot, rigName),
@@ -467,20 +410,14 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 
 	if err := mgr.Start(false); err != nil {
 		if err == witness.ErrAlreadyRunning {
-			// STATE DIVERGENCE: tmux shows running but bead disagrees.
-			// Don't kill (safety), but nudge the agent to reconcile its state.
-			d.logger.Printf("STATE DIVERGENCE: Witness for %s bead='%s' but Claude is running in tmux", rigName, beadState)
-			nudgeMsg := "[DAEMON] State divergence detected: your agent bead shows '" + beadState + "' but you appear running. Please run: bd agent state " + agentID + " running"
-			if err := d.tmux.NudgeSession(sessionName, nudgeMsg); err != nil {
-				d.logger.Printf("Warning: failed to nudge Witness %s about state divergence: %v", rigName, err)
-			}
+			// Already running - nothing to do
 			return
 		}
 		d.logger.Printf("Error starting witness for %s: %v", rigName, err)
 		return
 	}
 
-	d.logger.Printf("Witness session for %s started successfully (with nudges)", rigName)
+	d.logger.Printf("Witness session for %s started successfully", rigName)
 }
 
 // ensureRefineriesRunning ensures refineries are running for all rigs.
@@ -493,39 +430,11 @@ func (d *Daemon) ensureRefineriesRunning() {
 }
 
 // ensureRefineryRunning ensures the refinery for a specific rig is running.
+// Discover, don't track: uses Manager.Start() which checks tmux directly (gt-zecmc).
 func (d *Daemon) ensureRefineryRunning(rigName string) {
-	prefix := config.GetRigPrefix(d.config.TownRoot, rigName)
-	agentID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
-	sessionName := "gt-" + rigName + "-refinery"
-
-	// Check agent bead state (ZFC: trust what agent reports)
-	beadState, beadErr := d.getAgentBeadState(agentID)
-	if beadErr == nil {
-		if beadState == "running" || beadState == "working" {
-			// Agent reports it's running - trust it
-			return
-		}
-
-		// CIRCUIT BREAKER: If agent is marked "dead" by checkStaleAgents(),
-		// force-kill the session and restart. This handles stuck agents that
-		// are still alive (zombie Claude sessions that haven't updated their bead).
-		if beadState == "dead" {
-			d.logger.Printf("Refinery for %s is marked dead (circuit breaker triggered), forcing restart...", rigName)
-			hasSession, _ := d.tmux.HasSession(sessionName)
-			if hasSession {
-				if err := d.tmux.KillSession(sessionName); err != nil {
-					d.logger.Printf("Warning: failed to kill dead refinery session for %s: %v", rigName, err)
-				}
-			}
-			// Fall through to restart
-		}
-	}
-
-	// Agent not running (or bead not found) - use Manager.Start() for unified startup
 	// Manager.Start() handles: zombie detection, session creation, env vars, theming,
-	// WaitForClaudeReady, and crucially - startup/propulsion nudges (GUPP)
-	d.logger.Printf("Refinery for %s not running per agent bead, starting...", rigName)
-
+	// WaitForClaudeReady, and crucially - startup/propulsion nudges (GUPP).
+	// It returns ErrAlreadyRunning if Claude is already running in tmux.
 	r := &rig.Rig{
 		Name: rigName,
 		Path: filepath.Join(d.config.TownRoot, rigName),
@@ -534,20 +443,14 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 
 	if err := mgr.Start(false); err != nil {
 		if err == refinery.ErrAlreadyRunning {
-			// STATE DIVERGENCE: tmux shows running but bead disagrees.
-			// Don't kill (safety), but nudge the agent to reconcile its state.
-			d.logger.Printf("STATE DIVERGENCE: Refinery for %s bead='%s' but Claude is running in tmux", rigName, beadState)
-			nudgeMsg := "[DAEMON] State divergence detected: your agent bead shows '" + beadState + "' but you appear running. Please run: bd agent state " + agentID + " running"
-			if err := d.tmux.NudgeSession(sessionName, nudgeMsg); err != nil {
-				d.logger.Printf("Warning: failed to nudge Refinery %s about state divergence: %v", rigName, err)
-			}
+			// Already running - nothing to do
 			return
 		}
 		d.logger.Printf("Error starting refinery for %s: %v", rigName, err)
 		return
 	}
 
-	d.logger.Printf("Refinery session for %s started successfully (with nudges)", rigName)
+	d.logger.Printf("Refinery session for %s started successfully", rigName)
 }
 
 // getKnownRigs returns list of registered rig names.

@@ -149,8 +149,9 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	// Ensure beads redirect exists for worktree-based roles
 	ensureBeadsRedirect(ctx)
 
-	// Report agent state as running (ZFC: agents self-report state)
-	reportAgentState(ctx, "running")
+	// NOTE: reportAgentState("running") removed (gt-zecmc)
+	// Agent liveness is observable from tmux - no need to record it in bead.
+	// "Discover, don't track" principle: reality is truth, state is derived.
 
 	// Emit session_start event for seance discovery
 	emitSessionEvent(ctx)
