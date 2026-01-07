@@ -759,9 +759,14 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 			continue // No hooked work - no GUPP violation possible
 		}
 
-		// Check if agent is actively working
-		if agent.AgentState == "working" || agent.AgentState == "running" {
-			// Check when the agent bead was last updated
+		// Per gt-zecmc: derive running state from tmux, not agent_state
+		// Extract polecat name from agent ID (gt-polecat-<rig>-<name> -> <name>)
+		polecatName := strings.TrimPrefix(agent.ID, prefix)
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+
+		// Check if tmux session exists and Claude is running
+		if d.tmux.IsClaudeRunning(sessionName) {
+			// Session is alive - check if it's been stuck too long
 			updatedAt, err := time.Parse(time.RFC3339, agent.UpdatedAt)
 			if err != nil {
 				continue
@@ -803,69 +808,61 @@ Action needed: Check if agent is alive and responsive. Consider restarting if st
 
 // checkOrphanedWork looks for work assigned to dead agents.
 // Orphaned work needs to be reassigned or the agent needs to be restarted.
+// Per gt-zecmc: derive agent liveness from tmux, not agent_state.
 func (d *Daemon) checkOrphanedWork() {
-	// Get list of dead agents
-	deadAgents := d.getDeadAgents()
-	if len(deadAgents) == 0 {
-		return
-	}
-
-	// For each dead agent, check if they have hooked work
-	// Use HookBead from database column directly (not parsed from description)
-	for _, agent := range deadAgents {
-		if agent.HookBead == "" {
-			continue // No hooked work to orphan
-		}
-
-		d.logger.Printf("Orphaned work detected: agent %s is dead but has hook_bead=%s",
-			agent.ID, agent.HookBead)
-
-		// Determine the rig from the agent ID (gt-polecat-<rig>-<name>)
-		rigName := d.extractRigFromAgentID(agent.ID)
-		if rigName != "" {
-			d.notifyWitnessOfOrphanedWork(rigName, agent.ID, agent.HookBead)
-		}
+	// Check all polecat agents with hooked work
+	rigs := d.getKnownRigs()
+	for _, rigName := range rigs {
+		d.checkRigOrphanedWork(rigName)
 	}
 }
 
-// deadAgentInfo holds info about a dead agent for orphaned work detection.
-type deadAgentInfo struct {
-	ID       string
-	HookBead string // Read from database column, not description
-}
-
-// getDeadAgents returns all agent beads with state=dead.
-func (d *Daemon) getDeadAgents() []deadAgentInfo {
+// checkRigOrphanedWork checks polecats in a specific rig for orphaned work.
+func (d *Daemon) checkRigOrphanedWork(rigName string) {
 	cmd := exec.Command("bd", "list", "--type=agent", "--json")
 	cmd.Dir = d.config.TownRoot
 
 	output, err := cmd.Output()
 	if err != nil {
-		return nil
+		return
 	}
 
 	var agents []struct {
-		ID         string `json:"id"`
-		Type       string `json:"issue_type"`
-		HookBead   string `json:"hook_bead"`   // Read from database column
-		AgentState string `json:"agent_state"` // Read from database column
+		ID       string `json:"id"`
+		HookBead string `json:"hook_bead"`
 	}
 
 	if err := json.Unmarshal(output, &agents); err != nil {
-		return nil
+		return
 	}
 
-	var dead []deadAgentInfo
+	prefix := "gt-polecat-" + rigName + "-"
 	for _, agent := range agents {
-		if agent.AgentState == "dead" {
-			dead = append(dead, deadAgentInfo{
-				ID:       agent.ID,
-				HookBead: agent.HookBead,
-			})
+		// Only check polecats for this rig
+		if !strings.HasPrefix(agent.ID, prefix) {
+			continue
 		}
-	}
 
-	return dead
+		// No hooked work = nothing to orphan
+		if agent.HookBead == "" {
+			continue
+		}
+
+		// Check if tmux session is alive (derive state from tmux, not bead)
+		polecatName := strings.TrimPrefix(agent.ID, prefix)
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+
+		// Session running = not orphaned (work is being processed)
+		if d.tmux.IsClaudeRunning(sessionName) {
+			continue
+		}
+
+		// Session dead but has hooked work = orphaned!
+		d.logger.Printf("Orphaned work detected: agent %s session is dead but has hook_bead=%s",
+			agent.ID, agent.HookBead)
+
+		d.notifyWitnessOfOrphanedWork(rigName, agent.ID, agent.HookBead)
+	}
 }
 
 // extractRigFromAgentID extracts the rig name from a polecat agent ID.

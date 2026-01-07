@@ -866,40 +866,39 @@ func countCommitsBehind(g *git.Git, defaultBranch string) int {
 }
 
 // assessStaleness determines if a polecat should be cleaned up.
+// Per gt-zecmc: uses tmux state (HasActiveSession) rather than agent_state
+// since observable states (running, done, idle) are no longer recorded in beads.
 func assessStaleness(info *StalenessInfo, threshold int) (bool, string) {
 	// Never clean up if there's uncommitted work
 	if info.HasUncommittedWork {
 		return false, "has uncommitted work"
 	}
 
-	// If session is active, not stale
+	// If session is active, not stale (tmux is source of truth for liveness)
 	if info.HasActiveSession {
 		return false, "session active"
 	}
 
-	// No active session - check other indicators
+	// No active session - this polecat is a cleanup candidate
+	// Check for reasons to keep it:
 
-	// If agent reports "running" state but no session, that's suspicious
-	// but give benefit of doubt (session may have just died)
-	if info.AgentState == "running" {
-		return false, "agent reports running (session may be restarting)"
+	// Check for non-observable states that indicate intentional pause
+	// (stuck, awaiting-gate are still stored in beads per gt-zecmc)
+	if info.AgentState == "stuck" || info.AgentState == "awaiting-gate" {
+		return false, fmt.Sprintf("agent_state=%s (intentional pause)", info.AgentState)
 	}
 
-	// If agent reports "done" or "idle", it's a cleanup candidate
-	if info.AgentState == "done" || info.AgentState == "idle" {
-		return true, fmt.Sprintf("agent_state=%s, no active session", info.AgentState)
-	}
-
-	// Way behind main is a strong staleness signal
+	// No session and way behind main = stale
 	if info.CommitsBehind >= threshold {
 		return true, fmt.Sprintf("%d commits behind main, no active session", info.CommitsBehind)
 	}
 
-	// No agent bead and no session - likely abandoned
+	// No session and no agent bead = abandoned, clean up
 	if info.AgentState == "" {
 		return true, "no agent bead, no active session"
 	}
 
-	// Default: not enough evidence to consider stale
-	return false, "insufficient staleness indicators"
+	// No session but has agent bead without special state = clean up
+	// (The session is the source of truth for liveness)
+	return true, "no active session"
 }
