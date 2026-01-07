@@ -847,7 +847,7 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // - Crew sessions: All crew members in the same rig
 //
 // IMPORTANT: These bindings are conditional - they only run gt cycle for
-// Gas Town sessions (those starting with "gt-"). For non-GT sessions,
+// Gas Town sessions (those starting with "gt-" or "hq-"). For non-GT sessions,
 // the default tmux behavior (next-window/previous-window) is preserved.
 // See: https://github.com/steveyegge/gastown/issues/13
 //
@@ -856,16 +856,16 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // resolution time (when the key is pressed), giving us the correct session.
 func (t *Tmux) SetCycleBindings(session string) error {
 	// C-b n → gt cycle next for GT sessions, next-window otherwise
-	// The if-shell checks if session name starts with "gt-"
+	// The if-shell checks if session name starts with "gt-" or "hq-"
 	if _, err := t.run("bind-key", "-T", "prefix", "n",
-		"if-shell", "echo '#{session_name}' | grep -q '^gt-'",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
 		"run-shell 'gt cycle next --session #{session_name}'",
 		"next-window"); err != nil {
 		return err
 	}
 	// C-b p → gt cycle prev for GT sessions, previous-window otherwise
 	if _, err := t.run("bind-key", "-T", "prefix", "p",
-		"if-shell", "echo '#{session_name}' | grep -q '^gt-'",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
 		"run-shell 'gt cycle prev --session #{session_name}'",
 		"previous-window"); err != nil {
 		return err
@@ -878,12 +878,12 @@ func (t *Tmux) SetCycleBindings(session string) error {
 // Uses `gt feed --window` which handles both creation and switching.
 //
 // IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
-// (those starting with "gt-"). For non-GT sessions, a help message is shown.
+// (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
 // See: https://github.com/steveyegge/gastown/issues/13
 func (t *Tmux) SetFeedBinding(session string) error {
 	// C-b a → gt feed --window for GT sessions, help message otherwise
 	_, err := t.run("bind-key", "-T", "prefix", "a",
-		"if-shell", "echo '#{session_name}' | grep -q '^gt-'",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
 		"run-shell 'gt feed --window'",
 		"display-message 'C-b a is for Gas Town sessions only'")
 	return err
