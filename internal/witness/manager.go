@@ -59,6 +59,11 @@ func (m *Manager) saveState(w *Witness) error {
 	return m.stateManager.Save(w)
 }
 
+// sessionName returns the tmux session name for this witness.
+func (m *Manager) sessionName() string {
+	return fmt.Sprintf("gt-%s-witness", m.rig.Name)
+}
+
 // Status returns the current witness status.
 // ZFC-compliant: trusts agent-reported state, no PID inference.
 // The daemon reads agent bead state for liveness checks.
@@ -72,11 +77,6 @@ func (m *Manager) Status() (*Witness, error) {
 	w.MonitoredPolecats = m.rig.Polecats
 
 	return w, nil
-}
-
-// sessionName returns the tmux session name for this witness.
-func (m *Manager) sessionName() string {
-	return fmt.Sprintf("gt-%s-witness", m.rig.Name)
 }
 
 // witnessDir returns the working directory for the witness.

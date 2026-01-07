@@ -29,6 +29,7 @@ type RoleData struct {
 	TownRoot       string   // e.g., "/Users/steve/ai"
 	TownName       string   // e.g., "ai" - the town identifier for session names
 	WorkDir        string   // current working directory
+	DefaultBranch  string   // default branch for merges (e.g., "main", "develop")
 	Polecat        string   // polecat name (for polecat role)
 	Polecats       []string // list of polecats (for witness role)
 	BeadsDir       string   // BEADS_DIR path
