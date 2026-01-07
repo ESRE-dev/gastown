@@ -181,7 +181,8 @@ func (m *Manager) Start(foreground bool) error {
 	// Restarts are handled by daemon via LIFECYCLE mail or deacon health-scan
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	command := config.BuildAgentStartupCommand("witness", bdActor, "", "")
+	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
+	command := config.BuildAgentStartupCommand("witness", bdActor, m.rig.Path, "")
 	if err := t.SendKeys(sessionID, command); err != nil {
 		_ = t.KillSession(sessionID) // best-effort cleanup
 		return fmt.Errorf("starting Claude agent: %w", err)
