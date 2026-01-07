@@ -326,12 +326,15 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 			continue
 		}
 
-		// Check if agent has a running session
-		running, _ := t.HasSession(sf.sessionName)
-		if running {
-			// Cycle the agent by killing and letting gt up restart it
-			// (or the daemon will restart it)
-			_ = t.KillSession(sf.sessionName)
+		// Only cycle patrol roles that can auto-recover (daemon restarts them).
+		// Crew and polecats are spawned on-demand and won't auto-restart.
+		if sf.agentType == "witness" || sf.agentType == "refinery" ||
+			sf.agentType == "deacon" || sf.agentType == "mayor" {
+			running, _ := t.HasSession(sf.sessionName)
+			if running {
+				// Cycle the agent by killing and letting gt up restart it
+				_ = t.KillSession(sf.sessionName)
+			}
 		}
 	}
 
