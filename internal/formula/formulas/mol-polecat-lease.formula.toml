@@ -62,7 +62,8 @@ Polecat is actively working. Monitor for stuck or completion.
 
 **Periodic checks:**
 - Use standard nudge protocol from Witness CLAUDE.md
-- Watch for POLECAT_DONE mail or agent_state=done
+- Watch for POLECAT_DONE mail (primary completion signal)
+- Check tmux session: `gt session status {{rig}}/polecats/{{polecat}}`
 
 **Signs of progress:**
 - Git commits appearing
@@ -73,11 +74,12 @@ Polecat is actively working. Monitor for stuck or completion.
 - Idle >15 minutes
 - Repeated errors
 - Explicit "I'm stuck" messages
+- Agent bead shows stuck state: `bd show <agent-bead-id>`
 
-**If POLECAT_DONE received or agent_state=done:**
+**If POLECAT_DONE mail received:**
 Proceed to verifying step.
 
-**Exit criteria:** Polecat signals completion (POLECAT_DONE mail or state=done)."""
+**Exit criteria:** Polecat signals completion via POLECAT_DONE mail."""
 
 [[steps]]
 id = "verifying"

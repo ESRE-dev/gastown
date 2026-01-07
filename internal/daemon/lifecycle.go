@@ -564,9 +564,10 @@ type AgentBeadInfo struct {
 	LastUpdate string `json:"updated_at"`
 }
 
-// getAgentBeadState reads agent state from an agent bead.
-// This is the ZFC-compliant way to get agent state: trust what agents report.
-// Returns the agent_state field value (idle|running|stuck|stopped) or empty string if not found.
+// getAgentBeadState reads non-observable agent state from an agent bead.
+// Per gt-zecmc: Observable states (running, dead, idle) are derived from tmux.
+// Only non-observable states (stuck, awaiting-gate, muted, paused) are stored in beads.
+// Returns the agent_state field value or empty string if not found.
 func (d *Daemon) getAgentBeadState(agentBeadID string) (string, error) {
 	info, err := d.getAgentBeadInfo(agentBeadID)
 	if err != nil {
@@ -661,104 +662,9 @@ func (d *Daemon) identityToAgentBeadID(identity string) string {
 	}
 }
 
-// DeadAgentTimeout is how long an agent can report "running" without updating
-// before the daemon marks it as dead. This is a fallback for crashed agents.
-const DeadAgentTimeout = 15 * time.Minute
-
-// checkStaleAgents looks for agents that report state=running but haven't
-// updated their bead recently. These are likely dead agents that crashed
-// without updating their state. This is the timeout fallback per gt-2hzl4.
-func (d *Daemon) checkStaleAgents() {
-	// Known agent bead IDs to check
-	agentBeadIDs := []string{
-		beads.DeaconBeadIDTown(),
-		beads.MayorBeadIDTown(),
-	}
-
-	// Dynamically discover rigs from the rigs config
-	rigsConfigPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
-	if err != nil {
-		// Log warning but continue with global agents only
-		d.logger.Printf("Warning: could not load rigs config: %v", err)
-	} else {
-		// Add rig-specific agents (witness, refinery) for each discovered rig
-		for rigName, rigEntry := range rigsConfig.Rigs {
-			// Get rig prefix from config (defaults to "gt" if not set)
-			prefix := "gt"
-			if rigEntry.BeadsConfig != nil && rigEntry.BeadsConfig.Prefix != "" {
-				prefix = strings.TrimSuffix(rigEntry.BeadsConfig.Prefix, "-")
-			}
-			agentBeadIDs = append(agentBeadIDs, beads.WitnessBeadIDWithPrefix(prefix, rigName))
-			agentBeadIDs = append(agentBeadIDs, beads.RefineryBeadIDWithPrefix(prefix, rigName))
-		}
-	}
-
-	for _, agentBeadID := range agentBeadIDs {
-		info, err := d.getAgentBeadInfo(agentBeadID)
-		if err != nil {
-			// Agent bead doesn't exist or error fetching - skip
-			continue
-		}
-
-		// Only check agents reporting they're running/working
-		if info.State != "running" && info.State != "working" {
-			continue
-		}
-
-		// Parse the updated_at timestamp
-		updatedAt, err := time.Parse(time.RFC3339, info.LastUpdate)
-		if err != nil {
-			d.logger.Printf("Warning: cannot parse updated_at for %s: %v", agentBeadID, err)
-			continue
-		}
-
-		// Check if stale
-		age := time.Since(updatedAt)
-		if age > DeadAgentTimeout {
-			d.logger.Printf("Agent %s appears dead (state=%s, last update %v ago, timeout %v)",
-				agentBeadID, info.State, age.Round(time.Minute), DeadAgentTimeout)
-
-			// Mark as dead
-			if err := d.markAgentDead(agentBeadID); err != nil {
-				d.logger.Printf("Warning: failed to mark %s as dead: %v", agentBeadID, err)
-			} else {
-				d.logger.Printf("Marked agent %s as dead due to timeout", agentBeadID)
-			}
-		}
-	}
-}
-
-// markAgentDead updates an agent bead's state to "dead".
-// Uses bd update to modify the description with the new agent_state.
-func (d *Daemon) markAgentDead(agentBeadID string) error {
-	// Get current agent info
-	info, err := d.getAgentBeadInfo(agentBeadID)
-	if err != nil {
-		return fmt.Errorf("fetching agent bead: %w", err)
-	}
-
-	// Build new description with updated state
-	newDesc := fmt.Sprintf("role_type: %s\nrig: %s\nagent_state: dead\nhook_bead: %s\nrole_bead: %s\n\nMarked dead by daemon at %s (was %s, last update too old)",
-		info.RoleType,
-		info.Rig,
-		info.HookBead,
-		info.RoleBead,
-		time.Now().Format(time.RFC3339),
-		info.State,
-	)
-
-	// Use bd update to set the new description
-	cmd := exec.Command("bd", "update", agentBeadID, "--description", newDesc)
-	cmd.Dir = d.config.TownRoot
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("bd update: %w (output: %s)", err, string(output))
-	}
-
-	return nil
-}
+// NOTE: checkStaleAgents() and markAgentDead() were removed in gt-zecmc.
+// Agent liveness is now discovered from tmux, not recorded in beads.
+// "Discover, don't track" principle: observable state should not be recorded.
 
 // identityToBDActor converts a daemon identity to BD_ACTOR format (with slashes).
 // Uses parseIdentity to extract components, then builds the slash format.

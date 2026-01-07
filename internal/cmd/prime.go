@@ -1186,89 +1186,9 @@ func acquireIdentityLock(ctx RoleContext) error {
 	return nil
 }
 
-// reportAgentState updates the agent bead to report the agent's current state.
-// This implements ZFC-compliant self-reporting of agent state.
-// Agents call this on startup (running) and shutdown (stopped).
-// For crew workers, creates the agent bead if it doesn't exist.
-func reportAgentState(ctx RoleContext, state string) {
-	agentBeadID := getAgentBeadID(ctx)
-	if agentBeadID == "" {
-		return
-	}
-
-	// Use the beads API directly to update agent state
-	// This is more reliable than shelling out to bd
-	bd := beads.New(ctx.WorkDir)
-
-	// Check if agent bead exists, create if needed (especially for crew workers)
-	if _, err := bd.Show(agentBeadID); err != nil {
-		// Agent bead doesn't exist - create it
-		fields := getAgentFields(ctx, state)
-		if fields != nil {
-			_, createErr := bd.CreateAgentBead(agentBeadID, agentBeadID, fields)
-			if createErr != nil {
-				// Silently ignore - beads might not be configured
-				return
-			}
-			// Bead created with initial state, no need to update
-			return
-		}
-	}
-
-	// Update existing agent bead state
-	if err := bd.UpdateAgentState(agentBeadID, state, nil); err != nil {
-		// Silently ignore errors - don't fail prime if state reporting fails
-		return
-	}
-}
-
-// getAgentFields returns the AgentFields for creating a new agent bead.
-func getAgentFields(ctx RoleContext, state string) *beads.AgentFields {
-	switch ctx.Role {
-	case RoleCrew:
-		return &beads.AgentFields{
-			RoleType:   "crew",
-			Rig:        ctx.Rig,
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("crew"),
-		}
-	case RolePolecat:
-		return &beads.AgentFields{
-			RoleType:   "polecat",
-			Rig:        ctx.Rig,
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("polecat"),
-		}
-	case RoleMayor:
-		return &beads.AgentFields{
-			RoleType:   "mayor",
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("mayor"),
-		}
-	case RoleDeacon:
-		return &beads.AgentFields{
-			RoleType:   "deacon",
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("deacon"),
-		}
-	case RoleWitness:
-		return &beads.AgentFields{
-			RoleType:   "witness",
-			Rig:        ctx.Rig,
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("witness"),
-		}
-	case RoleRefinery:
-		return &beads.AgentFields{
-			RoleType:   "refinery",
-			Rig:        ctx.Rig,
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("refinery"),
-		}
-	default:
-		return nil
-	}
-}
+// NOTE: reportAgentState() and getAgentFields() were removed in gt-zecmc.
+// Agent liveness is now discovered from tmux, not recorded in beads.
+// "Discover, don't track" principle: observable state should not be recorded.
 
 // getAgentBeadID returns the agent bead ID for the current role.
 // Town-level agents (mayor, deacon) use hq- prefix; rig-scoped agents use the rig's prefix.
