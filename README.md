@@ -83,7 +83,7 @@ Git-backed issue tracking system that stores work state as structured data.
 
 - **Go 1.23+** - [go.dev/dl](https://go.dev/dl/)
 - **Git 2.25+** - for worktree support
-- **beads (bd)** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads)
+- **beads (bd) 0.44.0+** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads) (required for custom type support)
 - **tmux 3.0+** - recommended for full experience
 - **Claude Code CLI** - [claude.ai/code](https://claude.ai/code)
 
