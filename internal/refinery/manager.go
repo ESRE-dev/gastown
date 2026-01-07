@@ -58,8 +58,8 @@ func (m *Manager) stateFile() string {
 	return filepath.Join(m.rig.Path, ".runtime", "refinery.json")
 }
 
-// sessionName returns the tmux session name for this refinery.
-func (m *Manager) sessionName() string {
+// SessionName returns the tmux session name for this refinery.
+func (m *Manager) SessionName() string {
 	return fmt.Sprintf("gt-%s-refinery", m.rig.Name)
 }
 
@@ -111,7 +111,7 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	t := tmux.NewTmux()
-	sessionID := m.sessionName()
+	sessionID := m.SessionName()
 
 	if foreground {
 		// In foreground mode, we're likely running inside the tmux session
@@ -166,8 +166,10 @@ func (m *Manager) Start(foreground bool) error {
 		refineryRigDir = m.workDir
 	}
 
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(refineryRigDir, "refinery"); err != nil {
+	// Ensure Claude settings exist in refinery/ (not refinery/rig/) so we don't
+	// write into the source repo. Claude walks up the tree to find settings.
+	refineryParentDir := filepath.Join(m.rig.Path, "refinery")
+	if err := claude.EnsureSettingsForRole(refineryParentDir, "refinery"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
@@ -251,7 +253,7 @@ func (m *Manager) Stop() error {
 
 	// Check if tmux session exists
 	t := tmux.NewTmux()
-	sessionID := m.sessionName()
+	sessionID := m.SessionName()
 	sessionRunning, _ := t.HasSession(sessionID)
 
 	// If neither state nor session indicates running, it's not running

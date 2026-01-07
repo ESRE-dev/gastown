@@ -10,12 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/mail"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
@@ -201,7 +198,7 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Get the crew worker
+	// Get the crew worker (must exist for refresh)
 	worker, err := crewMgr.Get(name)
 	if err != nil {
 		if err == crew.ErrCrewNotFound {
@@ -209,12 +206,6 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("getting crew worker: %w", err)
 	}
-
-	t := tmux.NewTmux()
-	sessionID := crewSessionName(r.Name, name)
-
-	// Check if session exists
-	hasSession, _ := t.HasSession(sessionID)
 
 	// Create handoff message
 	handoffMsg := crewMessage
@@ -243,47 +234,14 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Sent handoff mail to %s/%s\n", r.Name, name)
 
-	// Kill existing session if running
-	if hasSession {
-		if err := t.KillSession(sessionID); err != nil {
-			return fmt.Errorf("killing old session: %w", err)
-		}
-		fmt.Printf("Killed old session %s\n", sessionID)
-	}
-
-	// Start new session
-	if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Wait for shell to be ready
-	if err := t.WaitForShellReady(sessionID, constants.ShellReadyTimeout); err != nil {
-		return fmt.Errorf("waiting for shell: %w", err)
-	}
-
-	// Build the startup beacon for predecessor discovery via /resume
-	// Pass it as Claude's initial prompt - processed when Claude is ready
-	address := fmt.Sprintf("%s/crew/%s", r.Name, name)
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "human",
-		Topic:     "refresh",
+	// Use manager's Start() with refresh options
+	err = crewMgr.Start(name, crew.StartOptions{
+		KillExisting: true,      // Kill old session if running
+		Topic:        "refresh", // Startup nudge topic
+		Interactive:  true,      // No --dangerously-skip-permissions
 	})
-
-	// Start claude with environment exports and beacon as initial prompt
-	// Refresh uses regular permissions (no --dangerously-skip-permissions)
-	// SessionStart hook handles context loading (gt prime --hook)
-	claudeCmd := config.BuildCrewStartupCommand(r.Name, name, r.Path, beacon)
-	// Remove --dangerously-skip-permissions for refresh (interactive mode)
-	claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
-	if err := t.SendKeys(sessionID, claudeCmd); err != nil {
-		return fmt.Errorf("starting claude: %w", err)
-	}
-
-	// Wait for Claude to start (optional, for status feedback)
-	shells := constants.SupportedShells
-	if err := t.WaitForCommand(sessionID, shells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal
+	if err != nil {
+		return fmt.Errorf("starting crew session: %w", err)
 	}
 
 	fmt.Printf("%s Refreshed crew workspace: %s/%s\n",
@@ -385,79 +343,16 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Get the crew worker, create if not exists (idempotent)
-		worker, err := crewMgr.Get(name)
-		if err == crew.ErrCrewNotFound {
-			fmt.Printf("Creating crew workspace %s in %s...\n", name, r.Name)
-			worker, err = crewMgr.Add(name, false) // No feature branch for crew
-			if err != nil {
-				fmt.Printf("Error creating %s: %v\n", arg, err)
-				lastErr = err
-				continue
-			}
-			fmt.Printf("Created crew workspace: %s/%s\n", r.Name, name)
-		} else if err != nil {
-			fmt.Printf("Error getting %s: %v\n", arg, err)
-			lastErr = err
-			continue
-		}
-
-		t := tmux.NewTmux()
-		sessionID := crewSessionName(r.Name, name)
-
-		// Kill existing session if running
-		if hasSession, _ := t.HasSession(sessionID); hasSession {
-			if err := t.KillSession(sessionID); err != nil {
-				fmt.Printf("Error killing session for %s: %v\n", arg, err)
-				lastErr = err
-				continue
-			}
-			fmt.Printf("Killed session %s\n", sessionID)
-		}
-
-		// Start new session
-		if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
-			fmt.Printf("Error creating session for %s: %v\n", arg, err)
-			lastErr = err
-			continue
-		}
-
-		// Set environment
-		_ = t.SetEnvironment(sessionID, "GT_ROLE", "crew")
-		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
-		theme := getThemeForRig(r.Name)
-		_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
-
-		// Wait for shell to be ready
-		if err := t.WaitForShellReady(sessionID, constants.ShellReadyTimeout); err != nil {
-			fmt.Printf("Error waiting for shell for %s: %v\n", arg, err)
-			lastErr = err
-			continue
-		}
-
-		// Build the startup beacon for predecessor discovery via /resume
-		// Pass it as Claude's initial prompt - processed when Claude is ready
-		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
-		beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
-			Recipient: address,
-			Sender:    "human",
-			Topic:     "restart",
+		// Use manager's Start() with restart options
+		// Start() will create workspace if needed (idempotent)
+		err = crewMgr.Start(name, crew.StartOptions{
+			KillExisting: true,     // Kill old session if running
+			Topic:        "restart", // Startup nudge topic
 		})
-
-		// Start claude with environment exports and beacon as initial prompt
-		// SessionStart hook handles context loading (gt prime --hook)
-		// The startup protocol tells agent to check mail/hook, no explicit prompt needed
-		claudeCmd := config.BuildCrewStartupCommand(r.Name, name, r.Path, beacon)
-		if err := t.SendKeys(sessionID, claudeCmd); err != nil {
-			fmt.Printf("Error starting claude for %s: %v\n", arg, err)
+		if err != nil {
+			fmt.Printf("Error restarting %s: %v\n", arg, err)
 			lastErr = err
 			continue
-		}
-
-		// Wait for Claude to start (optional, for status feedback)
-		shells := constants.SupportedShells
-		if err := t.WaitForCommand(sessionID, shells, constants.ClaudeStartTimeout); err != nil {
-			style.PrintWarning("Timeout waiting for Claude to start for %s: %v", arg, err)
 		}
 
 		fmt.Printf("%s Restarted crew workspace: %s/%s\n",
@@ -519,7 +414,7 @@ func runCrewRestartAll() error {
 		savedRig := crewRig
 		crewRig = agent.Rig
 
-		crewMgr, r, err := getCrewManager(crewRig)
+		crewMgr, _, err := getCrewManager(crewRig)
 		if err != nil {
 			failed++
 			failures = append(failures, fmt.Sprintf("%s: %v", agentName, err))
@@ -528,17 +423,12 @@ func runCrewRestartAll() error {
 			continue
 		}
 
-		worker, err := crewMgr.Get(agent.AgentName)
+		// Use manager's Start() with restart options
+		err = crewMgr.Start(agent.AgentName, crew.StartOptions{
+			KillExisting: true,     // Kill old session if running
+			Topic:        "restart", // Startup nudge topic
+		})
 		if err != nil {
-			failed++
-			failures = append(failures, fmt.Sprintf("%s: %v", agentName, err))
-			fmt.Printf("  %s %s\n", style.ErrorPrefix, agentName)
-			crewRig = savedRig
-			continue
-		}
-
-		// Restart the session
-		if err := restartCrewSession(r.Name, agent.AgentName, worker.ClonePath); err != nil {
 			failed++
 			failures = append(failures, fmt.Sprintf("%s: %v", agentName, err))
 			fmt.Printf("  %s %s\n", style.ErrorPrefix, agentName)
@@ -564,62 +454,6 @@ func runCrewRestartAll() error {
 	}
 
 	fmt.Printf("%s Restart complete: %d crew session(s) restarted\n", style.SuccessPrefix, succeeded)
-	return nil
-}
-
-// restartCrewSession handles the core restart logic for a single crew session.
-func restartCrewSession(rigName, crewName, clonePath string) error {
-	t := tmux.NewTmux()
-	sessionID := crewSessionName(rigName, crewName)
-
-	// Kill existing session if running
-	if hasSession, _ := t.HasSession(sessionID); hasSession {
-		if err := t.KillSession(sessionID); err != nil {
-			return fmt.Errorf("killing old session: %w", err)
-		}
-	}
-
-	// Ensure Claude settings exist (crew is interactive role)
-	if err := claude.EnsureSettingsForRole(clonePath, "crew"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
-	}
-
-	// Start new session
-	if err := t.NewSession(sessionID, clonePath); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Apply rig-based theming
-	theme := getThemeForRig(rigName)
-	_ = t.ConfigureGasTownSession(sessionID, theme, rigName, crewName, "crew")
-
-	// Wait for shell to be ready
-	if err := t.WaitForShellReady(sessionID, constants.ShellReadyTimeout); err != nil {
-		return fmt.Errorf("waiting for shell: %w", err)
-	}
-
-	// Build the startup beacon for predecessor discovery via /resume
-	// Pass it as Claude's initial prompt - processed when Claude is ready
-	address := fmt.Sprintf("%s/crew/%s", rigName, crewName)
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "human",
-		Topic:     "restart",
-	})
-
-	// Start claude with environment exports and beacon as initial prompt
-	// SessionStart hook handles context loading (gt prime --hook)
-	claudeCmd := config.BuildCrewStartupCommand(rigName, crewName, "", beacon)
-	if err := t.SendKeys(sessionID, claudeCmd); err != nil {
-		return fmt.Errorf("starting claude: %w", err)
-	}
-
-	// Wait for Claude to start (optional, for status feedback)
-	shells := constants.SupportedShells
-	if err := t.WaitForCommand(sessionID, shells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal warning
-	}
-
 	return nil
 }
 

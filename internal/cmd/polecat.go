@@ -15,7 +15,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -361,7 +360,7 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 	for _, r := range rigs {
 		polecatGit := git.NewGit(r.Path)
 		mgr := polecat.NewManager(r, polecatGit)
-		sessMgr := session.NewManager(t, r)
+		polecatMgr := polecat.NewSessionManager(t, r)
 
 		polecats, err := mgr.List()
 		if err != nil {
@@ -370,7 +369,7 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 		}
 
 		for _, p := range polecats {
-			running, _ := sessMgr.IsRunning(p.Name)
+			running, _ := polecatMgr.IsRunning(p.Name)
 			allPolecats = append(allPolecats, PolecatListItem{
 				Rig:            r.Name,
 				Name:           p.Name,
@@ -525,8 +524,8 @@ func runPolecatRemove(cmd *cobra.Command, args []string) error {
 	for _, p := range toRemove {
 		// Check if session is running
 		if !polecatForce {
-			sessMgr := session.NewManager(t, p.r)
-			running, _ := sessMgr.IsRunning(p.polecatName)
+			polecatMgr := polecat.NewSessionManager(t, p.r)
+			running, _ := polecatMgr.IsRunning(p.polecatName)
 			if running {
 				removeErrors = append(removeErrors, fmt.Sprintf("%s/%s: session is running (stop first or use --force)", p.rigName, p.polecatName))
 				continue
@@ -682,11 +681,11 @@ func runPolecatStatus(cmd *cobra.Command, args []string) error {
 
 	// Get session info
 	t := tmux.NewTmux()
-	sessMgr := session.NewManager(t, r)
-	sessInfo, err := sessMgr.Status(polecatName)
+	polecatMgr := polecat.NewSessionManager(t, r)
+	sessInfo, err := polecatMgr.Status(polecatName)
 	if err != nil {
 		// Non-fatal - continue without session info
-		sessInfo = &session.Info{
+		sessInfo = &polecat.SessionInfo{
 			Polecat: polecatName,
 			Running: false,
 		}
@@ -1434,10 +1433,10 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 		}
 
 		// Step 1: Kill session (force mode - no graceful shutdown)
-		sessMgr := session.NewManager(t, p.r)
-		running, _ := sessMgr.IsRunning(p.polecatName)
+		polecatMgr := polecat.NewSessionManager(t, p.r)
+		running, _ := polecatMgr.IsRunning(p.polecatName)
 		if running {
-			if err := sessMgr.Stop(p.polecatName, true); err != nil {
+			if err := polecatMgr.Stop(p.polecatName, true); err != nil {
 				fmt.Printf("  %s session kill failed: %v\n", style.Warning.Render("⚠"), err)
 				// Continue anyway - worktree removal will still work
 			} else {

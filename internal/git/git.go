@@ -635,12 +635,19 @@ func ConfigureSparseCheckout(repoPath string) error {
 
 	// Write patterns directly to sparse-checkout file
 	// (git sparse-checkout set --stdin escapes the ! character incorrectly)
+	// Exclude all Claude Code context files to prevent source repo instructions
+	// from interfering with Gas Town agent context:
+	// - .claude/      : settings, rules, agents, commands
+	// - CLAUDE.md     : primary context file
+	// - CLAUDE.local.md : personal context file
+	// - .mcp.json     : MCP server configuration
 	infoDir := filepath.Join(gitDir, "info")
 	if err := os.MkdirAll(infoDir, 0755); err != nil {
 		return fmt.Errorf("creating info dir: %w", err)
 	}
 	sparseFile := filepath.Join(infoDir, "sparse-checkout")
-	if err := os.WriteFile(sparseFile, []byte("/*\n!.claude/\n"), 0644); err != nil {
+	sparsePatterns := "/*\n!/.claude/\n!/CLAUDE.md\n!/CLAUDE.local.md\n!/.mcp.json\n"
+	if err := os.WriteFile(sparseFile, []byte(sparsePatterns), 0644); err != nil {
 		return fmt.Errorf("writing sparse-checkout: %w", err)
 	}
 
@@ -662,10 +669,33 @@ func ConfigureSparseCheckout(repoPath string) error {
 	return nil
 }
 
+// ExcludedContextFiles lists all Claude context files that should be excluded by sparse checkout.
+var ExcludedContextFiles = []string{
+	".claude",
+	"CLAUDE.md",
+	"CLAUDE.local.md",
+	".mcp.json",
+}
+
+// CheckExcludedFilesExist checks if any Claude context files still exist in the repo
+// after sparse checkout was configured. These files should have been removed by
+// git read-tree, but may remain if they were untracked or modified.
+// Returns a list of files that still exist and should be manually removed.
+func CheckExcludedFilesExist(repoPath string) []string {
+	var remaining []string
+	for _, file := range ExcludedContextFiles {
+		path := filepath.Join(repoPath, file)
+		if _, err := os.Stat(path); err == nil {
+			remaining = append(remaining, file)
+		}
+	}
+	return remaining
+}
+
 // IsSparseCheckoutConfigured checks if sparse checkout is enabled and configured
-// to exclude .claude/ for a given repo/worktree.
+// to exclude Claude Code context files for a given repo/worktree.
 // Returns true only if both core.sparseCheckout is true AND the sparse-checkout
-// file contains the !.claude/ exclusion pattern.
+// file contains all required exclusion patterns.
 func IsSparseCheckoutConfigured(repoPath string) bool {
 	// Check if core.sparseCheckout is true
 	cmd := exec.Command("git", "-C", repoPath, "config", "core.sparseCheckout")
@@ -685,15 +715,27 @@ func IsSparseCheckoutConfigured(repoPath string) bool {
 		gitDir = filepath.Join(repoPath, gitDir)
 	}
 
-	// Check if sparse-checkout file exists and excludes .claude/
+	// Check if sparse-checkout file exists and excludes Claude context files
 	sparseFile := filepath.Join(gitDir, "info", "sparse-checkout")
 	content, err := os.ReadFile(sparseFile)
 	if err != nil {
 		return false
 	}
 
-	// Check for our exclusion pattern
-	return strings.Contains(string(content), "!.claude/")
+	// Check for all required exclusion patterns
+	contentStr := string(content)
+	requiredPatterns := []string{
+		"!/.claude/",  // or legacy "!.claude/"
+		"!/CLAUDE.md", // or legacy without leading slash
+	}
+	for _, pattern := range requiredPatterns {
+		// Accept both with and without leading slash for backwards compatibility
+		legacyPattern := strings.TrimPrefix(pattern, "/")
+		if !strings.Contains(contentStr, pattern) && !strings.Contains(contentStr, legacyPattern) {
+			return false
+		}
+	}
+	return true
 }
 
 // WorktreeRemove removes a worktree.

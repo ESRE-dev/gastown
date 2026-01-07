@@ -400,7 +400,7 @@ func (d *Daemon) ensureWitnessesRunning() {
 // ensureWitnessRunning ensures the witness for a specific rig is running.
 // Discover, don't track: uses Manager.Start() which checks tmux directly (gt-zecmc).
 func (d *Daemon) ensureWitnessRunning(rigName string) {
-// Check rig operational state before auto-starting
+	// Check rig operational state before auto-starting
 	if operational, reason := d.isRigOperational(rigName); !operational {
 		d.logger.Printf("Skipping witness auto-start for %s: %s", rigName, reason)
 		return
@@ -798,7 +798,9 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	_ = d.tmux.SetPaneDiedHook(sessionName, agentID)
 
 	// Launch Claude with environment exported inline
-	startCmd := config.BuildPolecatStartupCommand(rigName, polecatName, "", "")
+	// Pass rigPath so rig agent settings are honored (not town-level defaults)
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
+	startCmd := config.BuildPolecatStartupCommand(rigName, polecatName, rigPath, "")
 	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
 		return fmt.Errorf("sending startup command: %w", err)
 	}

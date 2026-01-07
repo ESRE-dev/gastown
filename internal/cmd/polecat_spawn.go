@@ -12,7 +12,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -152,13 +151,13 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 
 	// Start session
 	t := tmux.NewTmux()
-	sessMgr := session.NewManager(t, r)
+	polecatSessMgr := polecat.NewSessionManager(t, r)
 
 	// Check if already running
-	running, _ := sessMgr.IsRunning(polecatName)
+	running, _ := polecatSessMgr.IsRunning(polecatName)
 	if !running {
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
-		startOpts := session.StartOptions{
+		startOpts := polecat.SessionStartOptions{
 			ClaudeConfigDir: claudeConfigDir,
 		}
 		if opts.Agent != "" {
@@ -168,13 +167,13 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 			}
 			startOpts.Command = cmd
 		}
-		if err := sessMgr.Start(polecatName, startOpts); err != nil {
+		if err := polecatSessMgr.Start(polecatName, startOpts); err != nil {
 			return nil, fmt.Errorf("starting session: %w", err)
 		}
 	}
 
 	// Get session name and pane
-	sessionName := sessMgr.SessionName(polecatName)
+	sessionName := polecatSessMgr.SessionName(polecatName)
 	pane, err := getSessionPane(sessionName)
 	if err != nil {
 		return nil, fmt.Errorf("getting pane for %s: %w", sessionName, err)

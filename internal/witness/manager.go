@@ -59,8 +59,8 @@ func (m *Manager) saveState(w *Witness) error {
 	return m.stateManager.Save(w)
 }
 
-// sessionName returns the tmux session name for this witness.
-func (m *Manager) sessionName() string {
+// SessionName returns the tmux session name for this witness.
+func (m *Manager) SessionName() string {
 	return fmt.Sprintf("gt-%s-witness", m.rig.Name)
 }
 
@@ -105,7 +105,7 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	t := tmux.NewTmux()
-	sessionID := m.sessionName()
+	sessionID := m.SessionName()
 
 	if foreground {
 		// Foreground mode is deprecated - patrol logic moved to mol-witness-patrol
@@ -144,8 +144,10 @@ func (m *Manager) Start(foreground bool) error {
 	// Working directory
 	witnessDir := m.witnessDir()
 
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(witnessDir, "witness"); err != nil {
+	// Ensure Claude settings exist in witness/ (not witness/rig/) so we don't
+	// write into the source repo. Claude walks up the tree to find settings.
+	witnessParentDir := filepath.Join(m.rig.Path, "witness")
+	if err := claude.EnsureSettingsForRole(witnessParentDir, "witness"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
@@ -179,7 +181,8 @@ func (m *Manager) Start(foreground bool) error {
 	// Restarts are handled by daemon via LIFECYCLE mail or deacon health-scan
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	command := config.BuildAgentStartupCommand("witness", bdActor, "", "")
+	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
+	command := config.BuildAgentStartupCommand("witness", bdActor, m.rig.Path, "")
 	if err := t.SendKeys(sessionID, command); err != nil {
 		_ = t.KillSession(sessionID) // best-effort cleanup
 		return fmt.Errorf("starting Claude agent: %w", err)
@@ -222,7 +225,7 @@ func (m *Manager) Stop() error {
 
 	// Check if tmux session exists
 	t := tmux.NewTmux()
-	sessionID := m.sessionName()
+	sessionID := m.SessionName()
 	sessionRunning, _ := t.HasSession(sessionID)
 
 	// If neither state nor session indicates running, it's not running
