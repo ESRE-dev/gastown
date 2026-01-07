@@ -494,6 +494,11 @@ func (d *Daemon) getKnownRigs() []string {
 func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 	cfg := wisp.NewConfig(d.config.TownRoot, rigName)
 
+	// Warn if wisp config is missing - parked/docked state may have been lost
+	if _, err := os.Stat(cfg.ConfigPath()); os.IsNotExist(err) {
+		d.logger.Printf("Warning: no wisp config for %s - parked state may have been lost", rigName)
+	}
+
 	// Check rig status - parked and docked rigs should not have agents auto-started
 	status := cfg.GetString("status")
 	switch status {
