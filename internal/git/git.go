@@ -579,13 +579,6 @@ func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
 	return ConfigureSparseCheckout(path)
 }
 
-// WorktreeAddFromRef creates a new worktree at the given path with a new branch
-// starting from the specified ref (e.g., "origin/main").
-func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
-	_, err := g.run("worktree", "add", "-b", branch, path, startPoint)
-	return err
-}
-
 // WorktreeAddDetached creates a new worktree at the given path with a detached HEAD.
 // Sparse checkout is enabled to exclude .claude/ from source repos.
 func (g *Git) WorktreeAddDetached(path, ref string) error {
