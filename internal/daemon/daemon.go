@@ -169,40 +169,40 @@ const recoveryHeartbeatInterval = 3 * time.Minute
 func (d *Daemon) heartbeat(state *State) {
 	d.logger.Println("Heartbeat starting (recovery-focused)")
 
-	// 1. Poke Boot (the Deacon's watchdog) instead of Deacon directly
-	// Boot handles the "when to wake Deacon" decision via triage logic
+	// 1. Ensure Deacon is running (restart if dead)
+	d.ensureDeaconRunning()
+
+	// 2. Poke Boot for intelligent triage (stuck/nudge/interrupt)
+	// Boot handles nuanced "is Deacon responsive" decisions
 	d.ensureBootRunning()
 
-	// 1b. Direct Deacon heartbeat check (belt-and-suspenders)
+	// 3. Direct Deacon heartbeat check (belt-and-suspenders)
 	// Boot may not detect all stuck states; this provides a fallback
 	d.checkDeaconHeartbeat()
 
-	// 2. Ensure Witnesses are running for all rigs (restart if dead)
+	// 4. Ensure Witnesses are running for all rigs (restart if dead)
 	d.ensureWitnessesRunning()
 
-	// 2b. Ensure Refineries are running for all rigs (restart if dead)
+	// 5. Ensure Refineries are running for all rigs (restart if dead)
 	d.ensureRefineriesRunning()
 
-	// 3. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
+	// 6. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
 	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
 	// Uses regex-based WaitForClaudeReady, which is acceptable for daemon bootstrap.
 	d.triggerPendingSpawns()
 
-	// 4. Process lifecycle requests
+	// 7. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 5. Stale agent check REMOVED (gt-zecmc)
-	// Was: d.checkStaleAgents() - marked agents "dead" based on bead update time.
-	// This violated "discover, don't track" - agent liveness is observable from tmux.
-	// The daemon now checks tmux directly in ensureXxxRunning() functions.
+	// 8. (Removed) Stale agent check - violated "discover, don't track"
 
-	// 6. Check for GUPP violations (agents with work-on-hook not progressing)
+	// 9. Check for GUPP violations (agents with work-on-hook not progressing)
 	d.checkGUPPViolations()
 
-	// 7. Check for orphaned work (assigned to dead agents)
+	// 10. Check for orphaned work (assigned to dead agents)
 	d.checkOrphanedWork()
 
-	// 8. Check polecat session health (proactive crash detection)
+	// 11. Check polecat session health (proactive crash detection)
 	// This validates tmux sessions are still alive for polecats with work-on-hook
 	d.checkPolecatSessionHealth()
 
@@ -291,51 +291,20 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 }
 
 // ensureDeaconRunning ensures the Deacon is running.
-// Discover, don't track: checks tmux directly instead of bead state (gt-zecmc).
-// The Deacon is the system's heartbeat - it must always be running.
+// Uses deacon.Manager for consistent startup behavior (WaitForShellReady, GUPP, etc.).
 func (d *Daemon) ensureDeaconRunning() {
-	deaconSession := d.getDeaconSessionName()
+	mgr := deacon.NewManager(d.config.TownRoot)
 
-	// Check if tmux session exists and Claude is running (observable reality)
-	hasSession, sessionErr := d.tmux.HasSession(deaconSession)
-	if sessionErr == nil && hasSession {
-		if d.tmux.IsClaudeRunning(deaconSession) {
+	if err := mgr.Start(""); err != nil {
+		if err == deacon.ErrAlreadyRunning {
 			// Deacon is running - nothing to do
 			return
 		}
-		// Session exists but Claude not running - zombie session, kill it
-		d.logger.Println("Deacon session exists but Claude not running, killing zombie session...")
-		if err := d.tmux.KillSession(deaconSession); err != nil {
-			d.logger.Printf("Warning: failed to kill zombie Deacon session: %v", err)
-		}
-		// Fall through to restart
-	}
-
-	// Deacon not running - start it
-	d.logger.Println("Deacon not running, starting...")
-
-	// Create session in deacon directory (ensures correct CLAUDE.md is loaded)
-	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
-	deaconDir := filepath.Join(d.config.TownRoot, "deacon")
-	sessionName := d.getDeaconSessionName()
-	if err := d.tmux.EnsureSessionFresh(sessionName, deaconDir); err != nil {
-		d.logger.Printf("Error creating Deacon session: %v", err)
+		d.logger.Printf("Error starting Deacon: %v", err)
 		return
 	}
 
-	// Set environment (non-fatal: session works without these)
-	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", "deacon")
-	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", "deacon")
-
-	// Launch Claude directly (no shell respawn loop)
-	// The daemon will detect if Claude exits and restart it on next heartbeat
-	// Export GT_ROLE and BD_ACTOR so Claude inherits them (tmux SetEnvironment doesn't export to processes)
-	if err := d.tmux.SendKeys(sessionName, config.BuildAgentStartupCommand("deacon", "deacon", "", "")); err != nil {
-		d.logger.Printf("Error launching Claude in Deacon session: %v", err)
-		return
-	}
-
-	d.logger.Println("Deacon session started successfully")
+	d.logger.Println("Deacon started successfully")
 }
 
 // checkDeaconHeartbeat checks if the Deacon is making progress.
@@ -368,7 +337,8 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	}
 
 	if !hasSession {
-		// Session doesn't exist - ensureBootRunning will handle restart
+		// Session doesn't exist - ensureDeaconRunning already ran earlier
+		// in heartbeat, so Deacon should be starting
 		return
 	}
 
@@ -379,7 +349,7 @@ func (d *Daemon) checkDeaconHeartbeat() {
 		if err := d.tmux.KillSession(sessionName); err != nil {
 			d.logger.Printf("Error killing stuck Deacon: %v", err)
 		}
-		// ensureDeaconRunning will be called next heartbeat to restart
+		// ensureDeaconRunning will restart on next heartbeat
 	} else {
 		// Stuck but not critically - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
