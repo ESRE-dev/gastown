@@ -29,7 +29,19 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// Try to detect from current directory
 		detected, err := detectCrewFromCwd()
 		if err != nil {
-			return fmt.Errorf("could not detect crew workspace from current directory: %w\n\nUsage: gt crew at <name>", err)
+			// Try to show available crew members if we can detect the rig
+			hint := "\n\nUsage: gt crew at <name>"
+			if crewRig != "" {
+				if mgr, _, mgrErr := getCrewManager(crewRig); mgrErr == nil {
+					if members, listErr := mgr.List(); listErr == nil && len(members) > 0 {
+						hint = fmt.Sprintf("\n\nAvailable crew in %s:", crewRig)
+						for _, m := range members {
+							hint += fmt.Sprintf("\n  %s", m.Name)
+						}
+					}
+				}
+			}
+			return fmt.Errorf("could not detect crew workspace from current directory: %w%s", err, hint)
 		}
 		name = detected.crewName
 		if crewRig == "" {

@@ -9,8 +9,8 @@ import (
 )
 
 func TestBuiltinPresets(t *testing.T) {
-	// Ensure all built-in presets are accessible (E2E tested agents only)
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex}
+	// Ensure all built-in presets are accessible
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -21,6 +21,11 @@ func TestBuiltinPresets(t *testing.T) {
 
 		if info.Command == "" {
 			t.Errorf("preset %s has empty Command", preset)
+		}
+
+		// All presets should have ProcessNames for agent detection
+		if len(info.ProcessNames) == 0 {
+			t.Errorf("preset %s has empty ProcessNames", preset)
 		}
 	}
 }
@@ -34,6 +39,9 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"claude", AgentClaude, false},
 		{"gemini", AgentGemini, false},
 		{"codex", AgentCodex, false},
+		{"cursor", AgentCursor, false},
+		{"auggie", AgentAuggie, false},
+		{"amp", AgentAmp, false},
 		{"aider", "", true},    // Not built-in, can be added via config
 		{"opencode", "", true}, // Not built-in, can be added via config
 		{"unknown", "", true},
@@ -63,6 +71,9 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentClaude, "claude"},
 		{AgentGemini, "gemini"},
 		{AgentCodex, "codex"},
+		{AgentCursor, "cursor-agent"},
+		{AgentAuggie, "auggie"},
+		{AgentAmp, "amp"},
 	}
 
 	for _, tt := range tests {
@@ -84,6 +95,9 @@ func TestIsKnownPreset(t *testing.T) {
 		{"claude", true},
 		{"gemini", true},
 		{"codex", true},
+		{"cursor", true},
+		{"auggie", true},
+		{"amp", true},
 		{"aider", false},    // Not built-in, can be added via config
 		{"opencode", false}, // Not built-in, can be added via config
 		{"unknown", false},
@@ -286,6 +300,9 @@ func TestSupportsSessionResume(t *testing.T) {
 		{"claude", true},
 		{"gemini", true},
 		{"codex", true},
+		{"cursor", true},
+		{"auggie", true},
+		{"amp", true},
 		{"unknown", false},
 	}
 
@@ -305,7 +322,10 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 	}{
 		{"claude", "CLAUDE_SESSION_ID"},
 		{"gemini", "GEMINI_SESSION_ID"},
-		{"codex", ""}, // Codex uses JSONL output instead
+		{"codex", ""},    // Codex uses JSONL output instead
+		{"cursor", ""},   // Cursor uses --resume with chatId directly
+		{"auggie", ""},   // Auggie uses --resume directly
+		{"amp", ""},      // AMP uses 'threads continue' subcommand
 		{"unknown", ""},
 	}
 
@@ -315,5 +335,170 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 				t.Errorf("GetSessionIDEnvVar(%s) = %q, want %q", tt.agentName, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetProcessNames(t *testing.T) {
+	tests := []struct {
+		agentName string
+		want      []string
+	}{
+		{"claude", []string{"node"}},
+		{"gemini", []string{"gemini"}},
+		{"codex", []string{"codex"}},
+		{"cursor", []string{"cursor-agent"}},
+		{"auggie", []string{"auggie"}},
+		{"amp", []string{"amp"}},
+		{"unknown", []string{"node"}}, // Falls back to Claude's process
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agentName, func(t *testing.T) {
+			got := GetProcessNames(tt.agentName)
+			if len(got) != len(tt.want) {
+				t.Errorf("GetProcessNames(%s) = %v, want %v", tt.agentName, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("GetProcessNames(%s)[%d] = %q, want %q", tt.agentName, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestListAgentPresetsMatchesConstants(t *testing.T) {
+	// Ensure all AgentPreset constants are returned by ListAgentPresets
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := ListAgentPresets()
+
+	// Convert to map for quick lookup
+	presetMap := make(map[string]bool)
+	for _, p := range presets {
+		presetMap[p] = true
+	}
+
+	// Verify all constants are in the list
+	for _, c := range allConstants {
+		if !presetMap[string(c)] {
+			t.Errorf("ListAgentPresets() missing constant %q", c)
+		}
+	}
+
+	// Verify no empty names
+	for _, p := range presets {
+		if p == "" {
+			t.Error("ListAgentPresets() contains empty string")
+		}
+	}
+}
+
+func TestAgentCommandGeneration(t *testing.T) {
+	// Test full command line generation for each agent
+	tests := []struct {
+		preset       AgentPreset
+		wantCommand  string
+		wantContains []string // Args that should be present
+	}{
+		{
+			preset:       AgentClaude,
+			wantCommand:  "claude",
+			wantContains: []string{"--dangerously-skip-permissions"},
+		},
+		{
+			preset:       AgentGemini,
+			wantCommand:  "gemini",
+			wantContains: []string{"--approval-mode", "yolo"},
+		},
+		{
+			preset:       AgentCodex,
+			wantCommand:  "codex",
+			wantContains: []string{"--yolo"},
+		},
+		{
+			preset:       AgentCursor,
+			wantCommand:  "cursor-agent",
+			wantContains: []string{"-f"},
+		},
+		{
+			preset:       AgentAuggie,
+			wantCommand:  "auggie",
+			wantContains: []string{"--allow-indexing"},
+		},
+		{
+			preset:       AgentAmp,
+			wantCommand:  "amp",
+			wantContains: []string{"--dangerously-allow-all", "--no-ide"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.preset), func(t *testing.T) {
+			rc := RuntimeConfigFromPreset(tt.preset)
+			if rc == nil {
+				t.Fatal("RuntimeConfigFromPreset returned nil")
+			}
+
+			if rc.Command != tt.wantCommand {
+				t.Errorf("Command = %q, want %q", rc.Command, tt.wantCommand)
+			}
+
+			// Check required args are present
+			argsStr := strings.Join(rc.Args, " ")
+			for _, arg := range tt.wantContains {
+				found := false
+				for _, a := range rc.Args {
+					if a == arg {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Args %q missing expected %q", argsStr, arg)
+				}
+			}
+		})
+	}
+}
+
+func TestCursorAgentPreset(t *testing.T) {
+	// Verify cursor agent preset is correctly configured
+	info := GetAgentPreset(AgentCursor)
+	if info == nil {
+		t.Fatal("cursor preset not found")
+	}
+
+	// Check command
+	if info.Command != "cursor-agent" {
+		t.Errorf("cursor command = %q, want cursor-agent", info.Command)
+	}
+
+	// Check YOLO-equivalent flag (-f for force mode)
+	// Note: -p is for non-interactive mode with prompt, not used for default Args
+	hasF := false
+	for _, arg := range info.Args {
+		if arg == "-f" {
+			hasF = true
+		}
+	}
+	if !hasF {
+		t.Error("cursor args missing -f (force/YOLO mode)")
+	}
+
+	// Check ProcessNames for detection
+	if len(info.ProcessNames) == 0 {
+		t.Error("cursor ProcessNames is empty")
+	}
+	if info.ProcessNames[0] != "cursor-agent" {
+		t.Errorf("cursor ProcessNames[0] = %q, want cursor-agent", info.ProcessNames[0])
+	}
+
+	// Check resume support
+	if info.ResumeFlag != "--resume" {
+		t.Errorf("cursor ResumeFlag = %q, want --resume", info.ResumeFlag)
+	}
+	if info.ResumeStyle != "flag" {
+		t.Errorf("cursor ResumeStyle = %q, want flag", info.ResumeStyle)
 	}
 }

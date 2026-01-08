@@ -649,9 +649,13 @@ func deriveSessionName() string {
 		return fmt.Sprintf("gt-%s-crew-%s", rig, crew)
 	}
 
-	// Town-level roles (mayor, deacon): gt-{town}-{role}
-	if (role == "mayor" || role == "deacon") && town != "" {
-		return fmt.Sprintf("gt-%s-%s", town, role)
+	// Town-level roles (mayor, deacon): gt-{town}-{role} or gt-{role}
+	if role == "mayor" || role == "deacon" {
+		if town != "" {
+			return fmt.Sprintf("gt-%s-%s", town, role)
+		}
+		// No town set - use simple gt-{role} pattern
+		return fmt.Sprintf("gt-%s", role)
 	}
 
 	// Rig-based roles (witness, refinery): gt-{rig}-{role}
@@ -664,12 +668,9 @@ func deriveSessionName() string {
 
 // detectCurrentTmuxSession returns the current tmux session name if running inside tmux.
 // Uses `tmux display-message -p '#S'` which prints the session name.
+// Note: We don't check TMUX env var because it may not be inherited when Claude Code
+// runs bash commands, even though we are inside a tmux session.
 func detectCurrentTmuxSession() string {
-	// Check if we're inside tmux
-	if os.Getenv("TMUX") == "" {
-		return ""
-	}
-
 	cmd := exec.Command("tmux", "display-message", "-p", "#S")
 	output, err := cmd.Output()
 	if err != nil {

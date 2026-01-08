@@ -313,12 +313,30 @@ func initTownBeads(townPath string) error {
 		}
 	}
 
+	// Configure custom types for Gas Town (agent, role, rig, convoy).
+	// These were extracted from beads core in v0.46.0 and now require explicit config.
+	customTypes := "agent,role,rig,convoy,event"
+	configCmd := exec.Command("bd", "config", "set", "types.custom", customTypes)
+	configCmd.Dir = townPath
+	if configOutput, configErr := configCmd.CombinedOutput(); configErr != nil {
+		// Non-fatal: older beads versions don't need this, newer ones do
+		fmt.Printf("   %s Could not set custom types: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(configOutput)))
+	}
+
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
 	// Without fingerprint, the bd daemon fails to start silently.
 	if err := ensureRepoFingerprint(townPath); err != nil {
 		// Non-fatal: fingerprint is optional for functionality, just daemon optimization
 		fmt.Printf("   %s Could not verify repo fingerprint: %v\n", style.Dim.Render("⚠"), err)
+	}
+
+	// Register Gas Town custom types (agent, role, rig, convoy, slot).
+	// These types are not built into beads core - they must be registered
+	// before creating agent/role beads. See GH #gt-xyz for context.
+	if err := ensureCustomTypes(townPath); err != nil {
+		// Non-fatal but will cause agent bead creation to fail
+		fmt.Printf("   %s Could not register custom types: %v\n", style.Dim.Render("⚠"), err)
 	}
 
 	return nil
@@ -333,6 +351,20 @@ func ensureRepoFingerprint(beadsPath string) error {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bd migrate --update-repo-id: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// ensureCustomTypes registers Gas Town custom issue types with beads.
+// Beads core only supports built-in types (bug, feature, task, etc.).
+// Gas Town needs custom types: agent, role, rig, convoy, slot.
+// This is idempotent - safe to call multiple times.
+func ensureCustomTypes(beadsPath string) error {
+	cmd := exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,slot")
+	cmd.Dir = beadsPath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
 }

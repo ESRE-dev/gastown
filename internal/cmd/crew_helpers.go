@@ -122,7 +122,7 @@ func detectCrewFromCwd() (*crewDetection, error) {
 	// Look for pattern: <rig>/crew/<name>/...
 	// Minimum: rig, crew, name = 3 parts
 	if len(parts) < 3 {
-		return nil, fmt.Errorf("not in a crew workspace (path too short)")
+		return nil, fmt.Errorf("not inside a crew workspace - specify the crew name or cd into a crew directory (e.g., gastown/crew/max)")
 	}
 
 	rigName := parts[0]
