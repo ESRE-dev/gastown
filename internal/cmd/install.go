@@ -333,7 +333,7 @@ func initTownBeads(townPath string) error {
 
 	// Register Gas Town custom types (agent, role, rig, convoy, slot).
 	// These types are not built into beads core - they must be registered
-	// before creating agent/role beads. See GH #gt-xyz for context.
+	// before creating agent/role beads. See gt-4ke5e for context.
 	if err := ensureCustomTypes(townPath); err != nil {
 		// Non-fatal but will cause agent bead creation to fail
 		fmt.Printf("   %s Could not register custom types: %v\n", style.Dim.Render("⚠"), err)
