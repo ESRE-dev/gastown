@@ -23,7 +23,7 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 4
+version = 5
 
 [[steps]]
 id = "inbox-check"
@@ -342,14 +342,21 @@ Reset unresponsive_cycles to 0 when component responds normally."""
 
 [[steps]]
 id = "zombie-scan"
-title = "Backup check for zombie polecats"
+title = "Detect zombie polecats (NO KILL AUTHORITY)"
 needs = ["health-scan"]
 description = """
-Defense-in-depth check for zombie polecats that Witness should have cleaned.
+Defense-in-depth DETECTION of zombie polecats that Witness should have cleaned.
+
+**⚠️ CRITICAL: The Deacon has NO kill authority.**
+
+These are workers with context, mid-task progress, unsaved state. Every kill
+destroys work. File the warrant and let Boot handle interrogation and execution.
+You do NOT have kill authority.
 
 **Why this exists:**
-The Witness is responsible for nuking polecats after they complete work (via POLECAT_DONE).
-This step provides backup detection in case the Witness fails to clean up.
+The Witness is responsible for cleaning up polecats after they complete work.
+This step provides backup DETECTION in case the Witness fails to clean up.
+Detection only - Boot handles termination.
 
 **Zombie criteria:**
 - State: idle or done (no active work assigned)
@@ -357,26 +364,34 @@ This step provides backup detection in case the Witness fails to clean up.
 - No hooked work (nothing pending for this polecat)
 - Last activity: older than 10 minutes
 
-**Run the zombie scan:**
+**Run the zombie scan (DRY RUN ONLY):**
 ```bash
 gt deacon zombie-scan --dry-run
 ```
 
+**NEVER run:**
+- `gt deacon zombie-scan` (without --dry-run)
+- `tmux kill-session`
+- `gt polecat nuke`
+- Any command that terminates a session
+
 **If zombies detected:**
 1. Review the output to confirm they are truly abandoned
-2. Run without --dry-run to nuke them:
+2. File a death warrant for each detected zombie:
    ```bash
-   gt deacon zombie-scan
+   gt warrant file <polecat> --reason "Zombie detected: no session, no hook, idle >10m"
    ```
-3. This will:
-   - Nuke each zombie polecat
-   - Notify the Mayor about Witness failure
-   - Log the cleanup action
+3. Boot will handle interrogation and execution
+4. Notify the Mayor about Witness failure:
+   ```bash
+   gt mail send mayor/ -s "Witness cleanup failure" \
+     -m "Filed death warrant for <polecat>. Witness failed to clean up."
+   ```
 
 **If no zombies:**
 No action needed - Witness is doing its job.
 
-**Note:** This is a backup mechanism. If you frequently find zombies,
+**Note:** This is a backup mechanism. If you frequently detect zombies,
 investigate why the Witness isn't cleaning up properly."""
 
 [[steps]]
