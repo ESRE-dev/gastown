@@ -339,6 +339,13 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not register custom types: %v\n", style.Dim.Render("⚠"), err)
 	}
 
+	// Ensure routes.jsonl has an explicit town-level mapping for hq-* beads.
+	// This keeps hq-* operations stable even when invoked from rig worktrees.
+	if err := beads.AppendRoute(townPath, beads.Route{Prefix: "hq-", Path: "."}); err != nil {
+		// Non-fatal: routing still works in many contexts, but explicit mapping is preferred.
+		fmt.Printf("   %s Could not update routes.jsonl: %v\n", style.Dim.Render("⚠"), err)
+	}
+
 	return nil
 }
 
@@ -389,6 +396,13 @@ func ensureCustomTypes(beadsPath string) error {
 // agents can function without their role bead existing.
 func initTownAgentBeads(townPath string) error {
 	bd := beads.New(townPath)
+
+	// bd init doesn't enable "custom" issue types by default, but Gas Town uses
+	// agent/role beads during install and runtime. Ensure these types are enabled
+	// before attempting to create any town-level system beads.
+	if err := ensureBeadsCustomTypes(townPath, []string{"agent", "role", "rig", "convoy", "slot"}); err != nil {
+		return err
+	}
 
 	// Role beads (global templates)
 	roleDefs := []struct {
@@ -506,5 +520,19 @@ func initTownAgentBeads(townPath string) error {
 		fmt.Printf("   ✓ Created agent bead: %s\n", agent.id)
 	}
 
+	return nil
+}
+
+func ensureBeadsCustomTypes(workDir string, types []string) error {
+	if len(types) == 0 {
+		return nil
+	}
+
+	cmd := exec.Command("bd", "config", "set", "types.custom", strings.Join(types, ","))
+	cmd.Dir = workDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd config set types.custom failed: %s", strings.TrimSpace(string(output)))
+	}
 	return nil
 }
