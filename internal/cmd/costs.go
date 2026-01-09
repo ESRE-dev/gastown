@@ -27,6 +27,14 @@ var (
 	// Record subcommand flags
 	recordSession  string
 	recordWorkItem string
+
+	// Digest subcommand flags
+	digestYesterday bool
+	digestDate      string
+	digestDryRun    bool
+
+	// Migrate subcommand flags
+	migrateDryRun bool
 )
 
 var costsCmd = &cobra.Command{
@@ -37,29 +45,79 @@ var costsCmd = &cobra.Command{
 
 By default, shows live costs scraped from running tmux sessions.
 
+Cost tracking uses ephemeral wisps for individual sessions that are
+aggregated into daily "Cost Report" digest beads for audit purposes.
+
 Examples:
   gt costs              # Live costs from running sessions
-  gt costs --today      # Today's total from session events
-  gt costs --week       # This week's total
+  gt costs --today      # Today's costs from wisps (not yet digested)
+  gt costs --week       # This week's costs from digest beads + today's wisps
   gt costs --by-role    # Breakdown by role (polecat, witness, etc.)
   gt costs --by-rig     # Breakdown by rig
-  gt costs --json       # Output as JSON`,
+  gt costs --json       # Output as JSON
+
+Subcommands:
+  gt costs record       # Record session cost as ephemeral wisp (Stop hook)
+  gt costs digest       # Aggregate wisps into daily digest bead (Deacon patrol)`,
 	RunE: runCosts,
 }
 
 var costsRecordCmd = &cobra.Command{
 	Use:   "record",
-	Short: "Record session cost as a bead event (called by Stop hook)",
-	Long: `Record the final cost of a session as a session.ended event in beads.
+	Short: "Record session cost as an ephemeral wisp (called by Stop hook)",
+	Long: `Record the final cost of a session as an ephemeral wisp.
 
 This command is intended to be called from a Claude Code Stop hook.
-It captures the final cost from the tmux session and creates an event
-bead with the cost data.
+It captures the final cost from the tmux session and creates an ephemeral
+event that is NOT exported to JSONL (avoiding log-in-database pollution).
+
+Session cost wisps are aggregated daily by 'gt costs digest' into a single
+permanent "Cost Report YYYY-MM-DD" bead for audit purposes.
 
 Examples:
   gt costs record --session gt-gastown-toast
   gt costs record --session gt-gastown-toast --work-item gt-abc123`,
 	RunE: runCostsRecord,
+}
+
+var costsDigestCmd = &cobra.Command{
+	Use:   "digest",
+	Short: "Aggregate session cost wisps into a daily digest bead",
+	Long: `Aggregate ephemeral session cost wisps into a permanent daily digest.
+
+This command is intended to be run by Deacon patrol (daily) or manually.
+It queries session.ended wisps for a target date, creates a single aggregate
+"Cost Report YYYY-MM-DD" bead, then deletes the source wisps.
+
+The resulting digest bead is permanent (exported to JSONL, synced via git)
+and provides an audit trail without log-in-database pollution.
+
+Examples:
+  gt costs digest --yesterday   # Digest yesterday's costs (default for patrol)
+  gt costs digest --date 2026-01-07  # Digest a specific date
+  gt costs digest --yesterday --dry-run  # Preview without changes`,
+	RunE: runCostsDigest,
+}
+
+var costsMigrateCmd = &cobra.Command{
+	Use:   "migrate",
+	Short: "Migrate legacy session.ended beads to the new wisp architecture",
+	Long: `Migrate legacy session.ended event beads to the new cost tracking system.
+
+This command handles the transition from the old architecture (where each
+session.ended event was a permanent bead) to the new wisp-based system.
+
+The migration:
+1. Finds all open session.ended event beads (should be none if auto-close worked)
+2. Closes them with reason "migrated to wisp architecture"
+
+Legacy beads remain in the database for historical queries but won't interfere
+with the new wisp-based cost tracking.
+
+Examples:
+  gt costs migrate            # Migrate legacy beads
+  gt costs migrate --dry-run  # Preview what would be migrated`,
+	RunE: runCostsMigrate,
 }
 
 func init() {
@@ -74,6 +132,16 @@ func init() {
 	costsCmd.AddCommand(costsRecordCmd)
 	costsRecordCmd.Flags().StringVar(&recordSession, "session", "", "Tmux session name to record")
 	costsRecordCmd.Flags().StringVar(&recordWorkItem, "work-item", "", "Work item ID (bead) for attribution")
+
+	// Add digest subcommand
+	costsCmd.AddCommand(costsDigestCmd)
+	costsDigestCmd.Flags().BoolVar(&digestYesterday, "yesterday", false, "Digest yesterday's costs (default for patrol)")
+	costsDigestCmd.Flags().StringVar(&digestDate, "date", "", "Digest a specific date (YYYY-MM-DD)")
+	costsDigestCmd.Flags().BoolVar(&digestDryRun, "dry-run", false, "Preview what would be done without making changes")
+
+	// Add migrate subcommand
+	costsCmd.AddCommand(costsMigrateCmd)
+	costsMigrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Preview what would be migrated without making changes")
 }
 
 // SessionCost represents cost info for a single session.
@@ -180,38 +248,40 @@ func runLiveCosts() error {
 }
 
 func runCostsFromLedger() error {
-	// Query session events from beads
-	entries, err := querySessionEvents()
-	if err != nil {
-		return fmt.Errorf("querying session events: %w", err)
+	now := time.Now()
+	var entries []CostEntry
+	var err error
+
+	if costsToday {
+		// For today: query ephemeral wisps (not yet digested)
+		// This gives real-time view of today's costs
+		entries, err = querySessionCostWisps(now)
+		if err != nil {
+			return fmt.Errorf("querying session cost wisps: %w", err)
+		}
+	} else if costsWeek {
+		// For week: query digest beads (costs.digest events)
+		// These are the aggregated daily reports
+		entries, err = queryDigestBeads(7)
+		if err != nil {
+			return fmt.Errorf("querying digest beads: %w", err)
+		}
+
+		// Also include today's wisps (not yet digested)
+		todayWisps, _ := querySessionCostWisps(now)
+		entries = append(entries, todayWisps...)
+	} else {
+		// No time filter: query both digests and legacy session.ended events
+		// (for backwards compatibility during migration)
+		entries, err = querySessionEvents()
+		if err != nil {
+			return fmt.Errorf("querying session events: %w", err)
+		}
 	}
 
 	if len(entries) == 0 {
-		fmt.Println(style.Dim.Render("No session events found. Costs are recorded when sessions end."))
+		fmt.Println(style.Dim.Render("No cost data found. Costs are recorded when sessions end."))
 		return nil
-	}
-
-	// Filter entries by time period
-	var filtered []CostEntry
-	now := time.Now()
-
-	for _, entry := range entries {
-		if costsToday {
-			// Today: same day
-			if entry.EndedAt.Year() == now.Year() &&
-				entry.EndedAt.YearDay() == now.YearDay() {
-				filtered = append(filtered, entry)
-			}
-		} else if costsWeek {
-			// This week: within 7 days
-			weekAgo := now.AddDate(0, 0, -7)
-			if entry.EndedAt.After(weekAgo) {
-				filtered = append(filtered, entry)
-			}
-		} else {
-			// No time filter
-			filtered = append(filtered, entry)
-		}
 	}
 
 	// Calculate totals
@@ -219,7 +289,7 @@ func runCostsFromLedger() error {
 	byRole := make(map[string]float64)
 	byRig := make(map[string]float64)
 
-	for _, entry := range filtered {
+	for _, entry := range entries {
 		total += entry.CostUSD
 		byRole[entry.Role] += entry.CostUSD
 		if entry.Rig != "" {
@@ -250,7 +320,7 @@ func runCostsFromLedger() error {
 		return outputCostsJSON(output)
 	}
 
-	return outputLedgerHuman(output, filtered)
+	return outputLedgerHuman(output, entries)
 }
 
 // SessionEvent represents a session.ended event from beads.
@@ -357,6 +427,84 @@ func querySessionEvents() ([]CostEntry, error) {
 			EndedAt:   endedAt,
 			WorkItem:  event.Target,
 		})
+	}
+
+	return entries, nil
+}
+
+// queryDigestBeads queries costs.digest events from the past N days and extracts session entries.
+func queryDigestBeads(days int) ([]CostEntry, error) {
+	// Get list of event IDs
+	listArgs := []string{
+		"list",
+		"--type=event",
+		"--all",
+		"--limit=0",
+		"--json",
+	}
+
+	listCmd := exec.Command("bd", listArgs...)
+	listOutput, err := listCmd.Output()
+	if err != nil {
+		return nil, nil
+	}
+
+	var listItems []EventListItem
+	if err := json.Unmarshal(listOutput, &listItems); err != nil {
+		return nil, fmt.Errorf("parsing event list: %w", err)
+	}
+
+	if len(listItems) == 0 {
+		return nil, nil
+	}
+
+	// Get full details for all events
+	showArgs := []string{"show", "--json"}
+	for _, item := range listItems {
+		showArgs = append(showArgs, item.ID)
+	}
+
+	showCmd := exec.Command("bd", showArgs...)
+	showOutput, err := showCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("showing events: %w", err)
+	}
+
+	var events []SessionEvent
+	if err := json.Unmarshal(showOutput, &events); err != nil {
+		return nil, fmt.Errorf("parsing event details: %w", err)
+	}
+
+	// Calculate date range
+	now := time.Now()
+	cutoff := now.AddDate(0, 0, -days)
+
+	var entries []CostEntry
+	for _, event := range events {
+		// Filter for costs.digest events only
+		if event.EventKind != "costs.digest" {
+			continue
+		}
+
+		// Parse the digest payload
+		var digest CostDigest
+		if event.Payload != "" {
+			if err := json.Unmarshal([]byte(event.Payload), &digest); err != nil {
+				continue
+			}
+		}
+
+		// Check date is within range
+		digestDate, err := time.Parse("2006-01-02", digest.Date)
+		if err != nil {
+			continue
+		}
+		if digestDate.Before(cutoff) {
+			continue
+		}
+
+		// Extract individual session entries from the digest
+		entries = append(entries, digest.Sessions...)
 	}
 
 	return entries, nil
@@ -574,9 +722,14 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("marshaling payload: %w", err)
 	}
 
-	// Build bd create command
+	// Build bd create command for ephemeral wisp
+	// Using --ephemeral creates a wisp that:
+	// - Is stored locally only (not exported to JSONL)
+	// - Won't pollute git history with O(sessions/day) events
+	// - Will be aggregated into daily digests by 'gt costs digest'
 	bdArgs := []string{
 		"create",
+		"--ephemeral",
 		"--type=event",
 		"--title=" + title,
 		"--event-category=session.ended",
@@ -593,30 +746,28 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 	// NOTE: We intentionally don't use --rig flag here because it causes
 	// event fields (event_kind, actor, payload) to not be stored properly.
 	// The bd command will auto-detect the correct rig from cwd.
-	// TODO: File beads bug about --rig flag losing event fields.
 
 	// Execute bd create
 	bdCmd := exec.Command("bd", bdArgs...)
 	output, err := bdCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("creating session event: %w\nOutput: %s", err, string(output))
+		return fmt.Errorf("creating session cost wisp: %w\nOutput: %s", err, string(output))
 	}
 
-	eventID := strings.TrimSpace(string(output))
+	wispID := strings.TrimSpace(string(output))
 
-	// Auto-close session events immediately after creation.
-	// These are informational audit events that don't need to stay open.
-	// The event data is preserved in the closed bead and remains queryable.
-	closeCmd := exec.Command("bd", "close", eventID, "--reason=auto-closed session event")
+	// Auto-close session cost wisps immediately after creation.
+	// These are informational records that don't need to stay open.
+	// The wisp data is preserved and queryable until digested.
+	closeCmd := exec.Command("bd", "close", wispID, "--reason=auto-closed session cost wisp")
 	if closeErr := closeCmd.Run(); closeErr != nil {
-		// Non-fatal: event was created, just couldn't auto-close
-		// The witness patrol can clean these up if needed
-		fmt.Fprintf(os.Stderr, "warning: could not auto-close session event %s: %v\n", eventID, closeErr)
+		// Non-fatal: wisp was created, just couldn't auto-close
+		fmt.Fprintf(os.Stderr, "warning: could not auto-close session cost wisp %s: %v\n", wispID, closeErr)
 	}
 
 	// Output confirmation (silent if cost is zero and no work item)
 	if cost > 0 || recordWorkItem != "" {
-		fmt.Printf("%s Recorded $%.2f for %s (event: %s)", style.Success.Render("✓"), cost, session, eventID)
+		fmt.Printf("%s Recorded $%.2f for %s (wisp: %s)", style.Success.Render("✓"), cost, session, wispID)
 		if recordWorkItem != "" {
 			fmt.Printf(" (work: %s)", recordWorkItem)
 		}
@@ -722,4 +873,417 @@ func buildAgentPath(role, rig, worker string) string {
 		}
 		return worker
 	}
+}
+
+// CostDigest represents the aggregated daily cost report.
+type CostDigest struct {
+	Date         string             `json:"date"`
+	TotalUSD     float64            `json:"total_usd"`
+	SessionCount int                `json:"session_count"`
+	Sessions     []CostEntry        `json:"sessions"`
+	ByRole       map[string]float64 `json:"by_role"`
+	ByRig        map[string]float64 `json:"by_rig,omitempty"`
+}
+
+// WispListOutput represents the JSON output from bd mol wisp list.
+type WispListOutput struct {
+	Wisps []WispItem `json:"wisps"`
+	Count int        `json:"count"`
+}
+
+// WispItem represents a single wisp from bd mol wisp list.
+type WispItem struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// runCostsDigest aggregates session cost wisps into a daily digest bead.
+func runCostsDigest(cmd *cobra.Command, args []string) error {
+	// Determine target date
+	var targetDate time.Time
+
+	if digestDate != "" {
+		parsed, err := time.Parse("2006-01-02", digestDate)
+		if err != nil {
+			return fmt.Errorf("invalid date format (use YYYY-MM-DD): %w", err)
+		}
+		targetDate = parsed
+	} else if digestYesterday {
+		targetDate = time.Now().AddDate(0, 0, -1)
+	} else {
+		return fmt.Errorf("specify --yesterday or --date YYYY-MM-DD")
+	}
+
+	dateStr := targetDate.Format("2006-01-02")
+
+	// Query ephemeral session.ended wisps for target date
+	wisps, err := querySessionCostWisps(targetDate)
+	if err != nil {
+		return fmt.Errorf("querying session cost wisps: %w", err)
+	}
+
+	if len(wisps) == 0 {
+		fmt.Printf("%s No session cost wisps found for %s\n", style.Dim.Render("○"), dateStr)
+		return nil
+	}
+
+	// Build digest
+	digest := CostDigest{
+		Date:     dateStr,
+		Sessions: wisps,
+		ByRole:   make(map[string]float64),
+		ByRig:    make(map[string]float64),
+	}
+
+	for _, w := range wisps {
+		digest.TotalUSD += w.CostUSD
+		digest.SessionCount++
+		digest.ByRole[w.Role] += w.CostUSD
+		if w.Rig != "" {
+			digest.ByRig[w.Rig] += w.CostUSD
+		}
+	}
+
+	if digestDryRun {
+		fmt.Printf("%s [DRY RUN] Would create Cost Report %s:\n", style.Bold.Render("📊"), dateStr)
+		fmt.Printf("  Total: $%.2f\n", digest.TotalUSD)
+		fmt.Printf("  Sessions: %d\n", digest.SessionCount)
+		fmt.Printf("  By Role:\n")
+		for role, cost := range digest.ByRole {
+			fmt.Printf("    %s: $%.2f\n", role, cost)
+		}
+		if len(digest.ByRig) > 0 {
+			fmt.Printf("  By Rig:\n")
+			for rig, cost := range digest.ByRig {
+				fmt.Printf("    %s: $%.2f\n", rig, cost)
+			}
+		}
+		return nil
+	}
+
+	// Create permanent digest bead
+	digestID, err := createCostDigestBead(digest)
+	if err != nil {
+		return fmt.Errorf("creating digest bead: %w", err)
+	}
+
+	// Delete source wisps (they're ephemeral, use bd mol burn)
+	deletedCount, deleteErr := deleteSessionCostWisps(targetDate)
+	if deleteErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to delete some source wisps: %v\n", deleteErr)
+	}
+
+	fmt.Printf("%s Created Cost Report %s (bead: %s)\n", style.Success.Render("✓"), dateStr, digestID)
+	fmt.Printf("  Total: $%.2f from %d sessions\n", digest.TotalUSD, digest.SessionCount)
+	if deletedCount > 0 {
+		fmt.Printf("  Deleted %d source wisps\n", deletedCount)
+	}
+
+	return nil
+}
+
+// querySessionCostWisps queries ephemeral session.ended events for a target date.
+func querySessionCostWisps(targetDate time.Time) ([]CostEntry, error) {
+	// List all wisps including closed ones
+	listCmd := exec.Command("bd", "mol", "wisp", "list", "--all", "--json")
+	listOutput, err := listCmd.Output()
+	if err != nil {
+		// No wisps database or command failed
+		return nil, nil
+	}
+
+	var wispList WispListOutput
+	if err := json.Unmarshal(listOutput, &wispList); err != nil {
+		return nil, fmt.Errorf("parsing wisp list: %w", err)
+	}
+
+	if wispList.Count == 0 {
+		return nil, nil
+	}
+
+	// Get full details for each wisp to check event_kind and payload
+	var sessionCostWisps []CostEntry
+	targetDay := targetDate.Format("2006-01-02")
+
+	for _, wisp := range wispList.Wisps {
+		// Get full wisp details
+		showCmd := exec.Command("bd", "show", wisp.ID, "--json")
+		showOutput, err := showCmd.Output()
+		if err != nil {
+			continue
+		}
+
+		var events []SessionEvent
+		if err := json.Unmarshal(showOutput, &events); err != nil {
+			continue
+		}
+
+		if len(events) == 0 {
+			continue
+		}
+
+		event := events[0]
+
+		// Filter for session.ended events only
+		if event.EventKind != "session.ended" {
+			continue
+		}
+
+		// Parse payload
+		var payload SessionPayload
+		if event.Payload != "" {
+			if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+				continue
+			}
+		}
+
+		// Parse ended_at and filter by target date
+		endedAt := event.CreatedAt
+		if payload.EndedAt != "" {
+			if parsed, err := time.Parse(time.RFC3339, payload.EndedAt); err == nil {
+				endedAt = parsed
+			}
+		}
+
+		// Check if this event is from the target date
+		if endedAt.Format("2006-01-02") != targetDay {
+			continue
+		}
+
+		sessionCostWisps = append(sessionCostWisps, CostEntry{
+			SessionID: payload.SessionID,
+			Role:      payload.Role,
+			Rig:       payload.Rig,
+			Worker:    payload.Worker,
+			CostUSD:   payload.CostUSD,
+			EndedAt:   endedAt,
+			WorkItem:  event.Target,
+		})
+	}
+
+	return sessionCostWisps, nil
+}
+
+// createCostDigestBead creates a permanent bead for the daily cost digest.
+func createCostDigestBead(digest CostDigest) (string, error) {
+	// Build description with aggregate data
+	var desc strings.Builder
+	desc.WriteString(fmt.Sprintf("Daily cost aggregate for %s.\n\n", digest.Date))
+	desc.WriteString(fmt.Sprintf("**Total:** $%.2f from %d sessions\n\n", digest.TotalUSD, digest.SessionCount))
+
+	if len(digest.ByRole) > 0 {
+		desc.WriteString("## By Role\n")
+		for role, cost := range digest.ByRole {
+			icon := constants.RoleEmoji(role)
+			desc.WriteString(fmt.Sprintf("- %s %s: $%.2f\n", icon, role, cost))
+		}
+		desc.WriteString("\n")
+	}
+
+	if len(digest.ByRig) > 0 {
+		desc.WriteString("## By Rig\n")
+		for rig, cost := range digest.ByRig {
+			desc.WriteString(fmt.Sprintf("- %s: $%.2f\n", rig, cost))
+		}
+		desc.WriteString("\n")
+	}
+
+	// Build payload JSON with full session details
+	payloadJSON, err := json.Marshal(digest)
+	if err != nil {
+		return "", fmt.Errorf("marshaling digest payload: %w", err)
+	}
+
+	// Create the digest bead (NOT ephemeral - this is permanent)
+	title := fmt.Sprintf("Cost Report %s", digest.Date)
+	bdArgs := []string{
+		"create",
+		"--type=event",
+		"--title=" + title,
+		"--event-category=costs.digest",
+		"--event-payload=" + string(payloadJSON),
+		"--description=" + desc.String(),
+		"--silent",
+	}
+
+	bdCmd := exec.Command("bd", bdArgs...)
+	output, err := bdCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("creating digest bead: %w\nOutput: %s", err, string(output))
+	}
+
+	digestID := strings.TrimSpace(string(output))
+
+	// Auto-close the digest (it's an audit record, not work)
+	closeCmd := exec.Command("bd", "close", digestID, "--reason=daily cost digest")
+	_ = closeCmd.Run() // Best effort
+
+	return digestID, nil
+}
+
+// deleteSessionCostWisps deletes ephemeral session.ended wisps for a target date.
+func deleteSessionCostWisps(targetDate time.Time) (int, error) {
+	// List all wisps
+	listCmd := exec.Command("bd", "mol", "wisp", "list", "--all", "--json")
+	listOutput, err := listCmd.Output()
+	if err != nil {
+		return 0, nil
+	}
+
+	var wispList WispListOutput
+	if err := json.Unmarshal(listOutput, &wispList); err != nil {
+		return 0, fmt.Errorf("parsing wisp list: %w", err)
+	}
+
+	targetDay := targetDate.Format("2006-01-02")
+	deletedCount := 0
+
+	for _, wisp := range wispList.Wisps {
+		// Get full wisp details to check if it's a session.ended event
+		showCmd := exec.Command("bd", "show", wisp.ID, "--json")
+		showOutput, err := showCmd.Output()
+		if err != nil {
+			continue
+		}
+
+		var events []SessionEvent
+		if err := json.Unmarshal(showOutput, &events); err != nil {
+			continue
+		}
+
+		if len(events) == 0 {
+			continue
+		}
+
+		event := events[0]
+
+		// Only delete session.ended wisps
+		if event.EventKind != "session.ended" {
+			continue
+		}
+
+		// Parse payload to get ended_at for date filtering
+		var payload SessionPayload
+		if event.Payload != "" {
+			if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+				continue
+			}
+		}
+
+		endedAt := event.CreatedAt
+		if payload.EndedAt != "" {
+			if parsed, err := time.Parse(time.RFC3339, payload.EndedAt); err == nil {
+				endedAt = parsed
+			}
+		}
+
+		// Only delete wisps from the target date
+		if endedAt.Format("2006-01-02") != targetDay {
+			continue
+		}
+
+		// Delete using bd mol burn (for ephemeral wisps)
+		burnCmd := exec.Command("bd", "mol", "burn", wisp.ID)
+		if burnErr := burnCmd.Run(); burnErr == nil {
+			deletedCount++
+		}
+	}
+
+	return deletedCount, nil
+}
+
+// runCostsMigrate migrates legacy session.ended beads to the new architecture.
+func runCostsMigrate(cmd *cobra.Command, args []string) error {
+	// Query all session.ended events (both open and closed)
+	listArgs := []string{
+		"list",
+		"--type=event",
+		"--all",
+		"--limit=0",
+		"--json",
+	}
+
+	listCmd := exec.Command("bd", listArgs...)
+	listOutput, err := listCmd.Output()
+	if err != nil {
+		fmt.Println(style.Dim.Render("No events found or bd command failed"))
+		return nil
+	}
+
+	var listItems []EventListItem
+	if err := json.Unmarshal(listOutput, &listItems); err != nil {
+		return fmt.Errorf("parsing event list: %w", err)
+	}
+
+	if len(listItems) == 0 {
+		fmt.Println(style.Dim.Render("No events found"))
+		return nil
+	}
+
+	// Get full details for all events
+	showArgs := []string{"show", "--json"}
+	for _, item := range listItems {
+		showArgs = append(showArgs, item.ID)
+	}
+
+	showCmd := exec.Command("bd", showArgs...)
+	showOutput, err := showCmd.Output()
+	if err != nil {
+		return fmt.Errorf("showing events: %w", err)
+	}
+
+	var events []SessionEvent
+	if err := json.Unmarshal(showOutput, &events); err != nil {
+		return fmt.Errorf("parsing event details: %w", err)
+	}
+
+	// Find open session.ended events
+	var openEvents []SessionEvent
+	var closedCount int
+	for _, event := range events {
+		if event.EventKind != "session.ended" {
+			continue
+		}
+		if event.Status == "closed" {
+			closedCount++
+			continue
+		}
+		openEvents = append(openEvents, event)
+	}
+
+	fmt.Printf("%s Legacy session.ended beads:\n", style.Bold.Render("📊"))
+	fmt.Printf("  Closed: %d (no action needed)\n", closedCount)
+	fmt.Printf("  Open:   %d (will be closed)\n", len(openEvents))
+
+	if len(openEvents) == 0 {
+		fmt.Println(style.Success.Render("\n✓ No migration needed - all session.ended events are already closed"))
+		return nil
+	}
+
+	if migrateDryRun {
+		fmt.Printf("\n%s Would close %d open session.ended events\n", style.Bold.Render("[DRY RUN]"), len(openEvents))
+		for _, event := range openEvents {
+			fmt.Printf("  - %s: %s\n", event.ID, event.Title)
+		}
+		return nil
+	}
+
+	// Close all open session.ended events
+	closedMigrated := 0
+	for _, event := range openEvents {
+		closeCmd := exec.Command("bd", "close", event.ID, "--reason=migrated to wisp architecture")
+		if err := closeCmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not close %s: %v\n", event.ID, err)
+			continue
+		}
+		closedMigrated++
+	}
+
+	fmt.Printf("\n%s Migrated %d session.ended events (closed)\n", style.Success.Render("✓"), closedMigrated)
+	fmt.Println(style.Dim.Render("Legacy beads preserved for historical queries."))
+	fmt.Println(style.Dim.Render("New session costs will use ephemeral wisps + daily digests."))
+
+	return nil
 }

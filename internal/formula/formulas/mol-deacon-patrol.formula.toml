@@ -564,9 +564,47 @@ Skip dispatch - system is healthy.
 **Exit criteria:** Session GC dispatched to dog (if needed)."""
 
 [[steps]]
+id = "costs-digest"
+title = "Aggregate daily costs"
+needs = ["session-gc"]
+description = """
+**DAILY DIGEST** - Aggregate yesterday's session cost wisps.
+
+Session costs are recorded as ephemeral wisps (not exported to JSONL) to avoid
+log-in-database pollution. This step aggregates them into a permanent daily
+"Cost Report YYYY-MM-DD" bead for audit purposes.
+
+**Step 1: Check if digest is needed**
+```bash
+# Preview yesterday's costs (dry run)
+gt costs digest --yesterday --dry-run
+```
+
+If output shows "No session cost wisps found", skip to Step 3.
+
+**Step 2: Create the digest**
+```bash
+gt costs digest --yesterday
+```
+
+This:
+- Queries all session.ended wisps from yesterday
+- Creates a single "Cost Report YYYY-MM-DD" bead with aggregated data
+- Deletes the source wisps
+
+**Step 3: Verify**
+The digest appears in `gt costs --week` queries.
+Daily digests preserve audit trail without per-session pollution.
+
+**Timing**: Run once per morning patrol cycle. The --yesterday flag ensures
+we don't try to digest today's incomplete data.
+
+**Exit criteria:** Yesterday's costs digested (or no wisps to digest)."""
+
+[[steps]]
 id = "log-maintenance"
 title = "Rotate logs and prune state"
-needs = ["session-gc"]
+needs = ["costs-digest"]
 description = """
 Maintain daemon logs and state files.
 
