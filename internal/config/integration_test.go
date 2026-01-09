@@ -310,8 +310,7 @@ func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName s
 
 	output, found := pollForOutput(t, sessionName, "STUB_AGENT_STARTED", 12*time.Second)
 	if !found {
-		t.Skipf("stub agent output not detected; tmux capture unreliable. Output:
-%s", output)
+		t.Skipf("stub agent output not detected; tmux capture unreliable. Output:\n%s", output)
 	}
 
 	if !strings.Contains(output, "GT_ROLE: polecat") {
