@@ -828,7 +828,18 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.SetCycleBindings(session); err != nil {
 		return fmt.Errorf("setting cycle bindings: %w", err)
 	}
+	if err := t.EnableMouseMode(session); err != nil {
+		return fmt.Errorf("enabling mouse mode: %w", err)
+	}
 	return nil
+}
+
+// EnableMouseMode enables mouse support for a tmux session.
+// This allows clicking to select panes/windows, scrolling with mouse wheel,
+// and dragging to resize panes. Hold Shift for native terminal text selection.
+func (t *Tmux) EnableMouseMode(session string) error {
+	_, err := t.run("set-option", "-t", session, "mouse", "on")
+	return err
 }
 
 // IsInsideTmux checks if the current process is running inside a tmux session.
