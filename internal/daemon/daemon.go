@@ -547,7 +547,7 @@ func (d *Daemon) triggerPendingSpawns() {
 
 	d.logger.Printf("Found %d pending spawn(s), attempting to trigger...", len(pending))
 
-// Trigger pending spawns (uses WaitForRuntimeReady with short timeout)
+	// Trigger pending spawns (uses WaitForRuntimeReady with short timeout)
 	results, err := polecat.TriggerPendingSpawns(d.config.TownRoot, triggerTimeout)
 	if err != nil {
 		d.logger.Printf("Error triggering spawns: %v", err)
