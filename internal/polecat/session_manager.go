@@ -96,9 +96,34 @@ func (m *SessionManager) SessionName(polecat string) string {
 	return fmt.Sprintf("gt-%s-%s", m.rig.Name, polecat)
 }
 
-// polecatDir returns the working directory for a polecat.
+// polecatDir returns the parent directory for a polecat.
+// This is polecats/<name>/ - the polecat's home directory.
 func (m *SessionManager) polecatDir(polecat string) string {
 	return filepath.Join(m.rig.Path, "polecats", polecat)
+}
+
+// clonePath returns the path where the git worktree lives.
+// New structure: polecats/<name>/<rigname>/ - gives LLMs recognizable repo context.
+// Falls back to old structure: polecats/<name>/ for backward compatibility.
+func (m *SessionManager) clonePath(polecat string) string {
+	// New structure: polecats/<name>/<rigname>/
+	newPath := filepath.Join(m.rig.Path, "polecats", polecat, m.rig.Name)
+	if info, err := os.Stat(newPath); err == nil && info.IsDir() {
+		return newPath
+	}
+
+	// Old structure: polecats/<name>/ (backward compat)
+	oldPath := filepath.Join(m.rig.Path, "polecats", polecat)
+	if info, err := os.Stat(oldPath); err == nil && info.IsDir() {
+		// Check if this is actually a git worktree (has .git file or dir)
+		gitPath := filepath.Join(oldPath, ".git")
+		if _, err := os.Stat(gitPath); err == nil {
+			return oldPath
+		}
+	}
+
+	// Default to new structure for new polecats
+	return newPath
 }
 
 // hasPolecat checks if the polecat exists in this rig.
@@ -131,7 +156,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Determine working directory
 	workDir := opts.WorkDir
 	if workDir == "" {
-		workDir = m.polecatDir(polecat)
+		workDir = m.clonePath(polecat)
 	}
 
 	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)

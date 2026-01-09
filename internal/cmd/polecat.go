@@ -579,7 +579,7 @@ func runPolecatSync(cmd *cobra.Command, args []string) error {
 		polecatName = ""
 	}
 
-	mgr, r, err := getPolecatManager(rigName)
+	mgr, _, err := getPolecatManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -606,10 +606,15 @@ func runPolecatSync(cmd *cobra.Command, args []string) error {
 	// Sync each polecat
 	var syncErrors []string
 	for _, name := range polecatsToSync {
-		polecatDir := filepath.Join(r.Path, "polecats", name)
+		// Get polecat to get correct clone path (handles old vs new structure)
+		p, err := mgr.Get(name)
+		if err != nil {
+			syncErrors = append(syncErrors, fmt.Sprintf("%s: %v", name, err))
+			continue
+		}
 
 		// Check directory exists
-		if _, err := os.Stat(polecatDir); os.IsNotExist(err) {
+		if _, err := os.Stat(p.ClonePath); os.IsNotExist(err) {
 			syncErrors = append(syncErrors, fmt.Sprintf("%s: directory not found", name))
 			continue
 		}
@@ -623,7 +628,7 @@ func runPolecatSync(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Syncing %s/%s...\n", rigName, name)
 
 		syncCmd := exec.Command("bd", syncArgs...)
-		syncCmd.Dir = polecatDir
+		syncCmd.Dir = p.ClonePath
 		output, err := syncCmd.CombinedOutput()
 		if err != nil {
 			syncErrors = append(syncErrors, fmt.Sprintf("%s: %v", name, err))

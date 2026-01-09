@@ -752,8 +752,14 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		return fmt.Errorf("cannot restart polecat: %s", reason)
 	}
 
-	// Determine working directory
-	workDir := filepath.Join(d.config.TownRoot, rigName, "polecats", polecatName)
+	// Determine working directory (handle both new and old structures)
+	// New structure: polecats/<name>/<rigname>/
+	// Old structure: polecats/<name>/
+	workDir := filepath.Join(d.config.TownRoot, rigName, "polecats", polecatName, rigName)
+	if _, err := os.Stat(workDir); os.IsNotExist(err) {
+		// Fall back to old structure
+		workDir = filepath.Join(d.config.TownRoot, rigName, "polecats", polecatName)
+	}
 
 	// Verify the worktree exists
 	if _, err := os.Stat(workDir); os.IsNotExist(err) {

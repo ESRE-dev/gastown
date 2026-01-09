@@ -698,13 +698,23 @@ func (c *PolecatClonesValidCheck) Run(ctx *CheckContext) *CheckResult {
 	var warnings []string
 	validCount := 0
 
+	// Get rig name for new structure path detection
+	rigName := ctx.RigName
+
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 
-		polecatPath := filepath.Join(polecatsDir, entry.Name())
 		polecatName := entry.Name()
+
+		// Determine worktree path (handle both new and old structures)
+		// New structure: polecats/<name>/<rigname>/
+		// Old structure: polecats/<name>/
+		polecatPath := filepath.Join(polecatsDir, polecatName, rigName)
+		if _, err := os.Stat(polecatPath); os.IsNotExist(err) {
+			polecatPath = filepath.Join(polecatsDir, polecatName)
+		}
 
 		// Check if it's a git clone
 		gitPath := filepath.Join(polecatPath, ".git")

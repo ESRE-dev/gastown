@@ -460,14 +460,24 @@ func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 			}
 		}
 
-		// Polecats
+		// Polecats (handle both new and old structures)
+		// New structure: polecats/<name>/<rigname>/.claude/settings.json
+		// Old structure: polecats/<name>/.claude/settings.json
+		rigName := filepath.Base(rig)
 		polecatsPath := filepath.Join(rig, "polecats")
 		if polecatEntries, err := os.ReadDir(polecatsPath); err == nil {
 			for _, polecat := range polecatEntries {
 				if polecat.IsDir() && !strings.HasPrefix(polecat.Name(), ".") {
-					polecatSettings := filepath.Join(polecatsPath, polecat.Name(), ".claude", "settings.json")
+					// Try new structure first
+					polecatSettings := filepath.Join(polecatsPath, polecat.Name(), rigName, ".claude", "settings.json")
 					if _, err := os.Stat(polecatSettings); err == nil {
 						files = append(files, polecatSettings)
+					} else {
+						// Fall back to old structure
+						polecatSettings = filepath.Join(polecatsPath, polecat.Name(), ".claude", "settings.json")
+						if _, err := os.Stat(polecatSettings); err == nil {
+							files = append(files, polecatSettings)
+						}
 					}
 				}
 			}
