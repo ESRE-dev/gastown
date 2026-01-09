@@ -6,6 +6,7 @@ package doctor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/steveyegge/gastown/internal/shell"
 	"github.com/steveyegge/gastown/internal/state"
@@ -105,14 +106,5 @@ func hasShellIntegration(rcPath string) bool {
 	if err != nil {
 		return false
 	}
-	return len(data) > 0 && contains(string(data), "Gas Town Integration")
-}
-
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(string(data), "Gas Town Integration")
 }
