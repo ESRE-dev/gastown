@@ -18,11 +18,12 @@ import (
 )
 
 var (
-	costsJSON   bool
-	costsToday  bool
-	costsWeek   bool
-	costsByRole bool
-	costsByRig  bool
+	costsJSON    bool
+	costsToday   bool
+	costsWeek    bool
+	costsByRole  bool
+	costsByRig   bool
+	costsVerbose bool
 
 	// Record subcommand flags
 	recordSession  string
@@ -127,6 +128,7 @@ func init() {
 	costsCmd.Flags().BoolVar(&costsWeek, "week", false, "Show this week's total from session events")
 	costsCmd.Flags().BoolVar(&costsByRole, "by-role", false, "Show breakdown by role")
 	costsCmd.Flags().BoolVar(&costsByRig, "by-rig", false, "Show breakdown by rig")
+	costsCmd.Flags().BoolVarP(&costsVerbose, "verbose", "v", false, "Show debug output for failures")
 
 	// Add record subcommand
 	costsCmd.AddCommand(costsRecordCmd)
@@ -991,6 +993,9 @@ func querySessionCostWisps(targetDate time.Time) ([]CostEntry, error) {
 	listOutput, err := listCmd.Output()
 	if err != nil {
 		// No wisps database or command failed
+		if costsVerbose {
+			fmt.Fprintf(os.Stderr, "[costs] wisp list failed: %v\n", err)
+		}
 		return nil, nil
 	}
 
@@ -1033,6 +1038,9 @@ func querySessionCostWisps(targetDate time.Time) ([]CostEntry, error) {
 		var payload SessionPayload
 		if event.Payload != "" {
 			if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+				if costsVerbose {
+					fmt.Fprintf(os.Stderr, "[costs] payload unmarshal failed for event %s: %v\n", event.ID, err)
+				}
 				continue
 			}
 		}
@@ -1137,6 +1145,9 @@ func deleteSessionCostWisps(targetDate time.Time) (int, error) {
 	listCmd := exec.Command("bd", "mol", "wisp", "list", "--all", "--json")
 	listOutput, err := listCmd.Output()
 	if err != nil {
+		if costsVerbose {
+			fmt.Fprintf(os.Stderr, "[costs] wisp list failed in deletion: %v\n", err)
+		}
 		return 0, nil
 	}
 
@@ -1155,11 +1166,17 @@ func deleteSessionCostWisps(targetDate time.Time) (int, error) {
 		showCmd := exec.Command("bd", "show", wisp.ID, "--json")
 		showOutput, err := showCmd.Output()
 		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] bd show failed for wisp %s: %v\n", wisp.ID, err)
+			}
 			continue
 		}
 
 		var events []SessionEvent
 		if err := json.Unmarshal(showOutput, &events); err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] JSON unmarshal failed for wisp %s: %v\n", wisp.ID, err)
+			}
 			continue
 		}
 
@@ -1178,6 +1195,9 @@ func deleteSessionCostWisps(targetDate time.Time) (int, error) {
 		var payload SessionPayload
 		if event.Payload != "" {
 			if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+				if costsVerbose {
+					fmt.Fprintf(os.Stderr, "[costs] payload unmarshal failed for wisp %s: %v\n", wisp.ID, err)
+				}
 				continue
 			}
 		}
