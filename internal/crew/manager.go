@@ -482,8 +482,34 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
-	// Create tmux session
-	if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
+	// Build the startup beacon for predecessor discovery via /resume
+	// Pass it as Claude's initial prompt - processed when Claude is ready
+	address := fmt.Sprintf("%s/crew/%s", m.rig.Name, name)
+	topic := opts.Topic
+	if topic == "" {
+		topic = "start"
+	}
+	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		Recipient: address,
+		Sender:    "human",
+		Topic:     topic,
+	})
+
+	// Build startup command first
+	// SessionStart hook handles context loading (gt prime --hook)
+	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
+	if err != nil {
+		return fmt.Errorf("building startup command: %w", err)
+	}
+
+	// For interactive/refresh mode, remove --dangerously-skip-permissions
+	if opts.Interactive {
+		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
+	}
+
+	// Create session with command directly to avoid send-keys race condition.
+	// See: https://github.com/anthropics/gastown/issues/280
+	if err := t.NewSessionWithCommand(sessionID, worker.ClonePath, claudeCmd); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
@@ -503,41 +529,6 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 
 	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
 	_ = t.SetCrewCycleBindings(sessionID)
-
-	// Wait for shell to be ready
-	if err := t.WaitForShellReady(sessionID, constants.ShellReadyTimeout); err != nil {
-		return fmt.Errorf("waiting for shell: %w", err)
-	}
-
-	// Build the startup beacon for predecessor discovery via /resume
-	// Pass it as Claude's initial prompt - processed when Claude is ready
-	address := fmt.Sprintf("%s/crew/%s", m.rig.Name, name)
-	topic := opts.Topic
-	if topic == "" {
-		topic = "start"
-	}
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "human",
-		Topic:     topic,
-	})
-
-	// Start claude with environment exports and beacon as initial prompt
-	// SessionStart hook handles context loading (gt prime --hook)
-	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
-	if err != nil {
-		_ = t.KillSession(sessionID)
-		return fmt.Errorf("building startup command: %w", err)
-	}
-
-	// For interactive/refresh mode, remove --dangerously-skip-permissions
-	if opts.Interactive {
-		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
-	}
-	if err := t.SendKeys(sessionID, claudeCmd); err != nil {
-		_ = t.KillSession(sessionID) // best-effort cleanup
-		return fmt.Errorf("starting claude: %w", err)
-	}
 
 	// Wait for Claude to start (non-fatal: session continues even if this times out)
 	_ = t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout)

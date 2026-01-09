@@ -168,8 +168,19 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Create session
-	if err := m.tmux.NewSession(sessionID, workDir); err != nil {
+	// Build startup command first
+	command := opts.Command
+	if command == "" {
+		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
+	}
+	// Prepend runtime config dir env if needed
+	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
+		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
+	}
+
+	// Create session with command directly to avoid send-keys race condition.
+	// See: https://github.com/anthropics/gastown/issues/280
+	if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
@@ -204,24 +215,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Set pane-died hook for crash detection (non-fatal)
 	agentID := fmt.Sprintf("%s/%s", m.rig.Name, polecat)
 	debugSession("SetPaneDiedHook", m.tmux.SetPaneDiedHook(sessionID, agentID))
-
-	// Send initial command with env vars exported inline
-	command := opts.Command
-	if command == "" {
-		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
-	}
-	// Prepend runtime config dir env if needed
-	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
-		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
-	}
-	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
-	if err := m.tmux.WaitForShellReady(sessionID, 5*time.Second); err != nil {
-		_ = m.tmux.KillSession(sessionID)
-		return fmt.Errorf("waiting for shell: %w", err)
-	}
-	if err := m.tmux.SendKeys(sessionID, command); err != nil {
-		return fmt.Errorf("sending command: %w", err)
-	}
 
 	// Wait for Claude to start (non-fatal)
 	debugSession("WaitForCommand", m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout))

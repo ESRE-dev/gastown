@@ -78,6 +78,22 @@ func (t *Tmux) NewSession(name, workDir string) error {
 	return err
 }
 
+// NewSessionWithCommand creates a new detached tmux session that immediately runs a command.
+// Unlike NewSession + SendKeys, this avoids race conditions where the shell isn't ready
+// or the command arrives before the shell prompt. The command runs directly as the
+// initial process of the pane.
+// See: https://github.com/anthropics/gastown/issues/280
+func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
+	args := []string{"new-session", "-d", "-s", name}
+	if workDir != "" {
+		args = append(args, "-c", workDir)
+	}
+	// Add the command as the last argument - tmux runs it as the pane's initial process
+	args = append(args, command)
+	_, err := t.run(args...)
+	return err
+}
+
 // EnsureSessionFresh ensures a session is available and healthy.
 // If the session exists but is a zombie (Claude not running), it kills the session first.
 // This prevents "session already exists" errors when trying to restart dead agents.

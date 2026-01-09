@@ -281,7 +281,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 
 	// Copy overlay files from .runtime/overlay/ to polecat root.
 	// This allows services to have .env and other config files at their root.
-	if err := rig.CopyOverlay(m.rig.Path, polecatPath); err != nil {
+	if err := rig.CopyOverlay(m.rig.Path, clonePath); err != nil {
 		// Non-fatal - log warning but continue
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
@@ -538,7 +538,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	}
 
 	// Copy overlay files from .runtime/overlay/ to polecat root.
-	if err := rig.CopyOverlay(m.rig.Path, polecatPath); err != nil {
+	if err := rig.CopyOverlay(m.rig.Path, newClonePath); err != nil {
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
@@ -787,9 +787,9 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.
 // This eliminates the need for git sync between polecat clones - all polecats share one database.
-func (m *Manager) setupSharedBeads(polecatPath string) error {
+func (m *Manager) setupSharedBeads(clonePath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
-	return beads.SetupRedirect(townRoot, polecatPath)
+	return beads.SetupRedirect(townRoot, clonePath)
 }
 
 // CleanupStaleBranches removes orphaned polecat branches that are no longer in use.

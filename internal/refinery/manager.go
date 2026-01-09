@@ -174,12 +174,17 @@ func (m *Manager) Start(foreground bool) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	if err := t.NewSession(sessionID, refineryRigDir); err != nil {
+	// Build startup command first
+	bdActor := fmt.Sprintf("%s/refinery", m.rig.Name)
+	command := config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
+
+	// Create session with command directly to avoid send-keys race condition.
+	// See: https://github.com/anthropics/gastown/issues/280
+	if err := t.NewSessionWithCommand(sessionID, refineryRigDir, command); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
 	// Set environment variables (non-fatal: session works without these)
-	bdActor := fmt.Sprintf("%s/refinery", m.rig.Name)
 	_ = t.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
 	_ = t.SetEnvironment(sessionID, "GT_REFINERY", "1")
 	_ = t.SetEnvironment(sessionID, "GT_ROLE", "refinery")
@@ -204,22 +209,6 @@ func (m *Manager) Start(foreground bool) error {
 	if err := m.saveState(ref); err != nil {
 		_ = t.KillSession(sessionID) // best-effort cleanup on state save failure
 		return fmt.Errorf("saving state: %w", err)
-	}
-
-	// Start Claude agent with full permissions (like polecats)
-	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
-	// Restarts are handled by daemon via LIFECYCLE mail, not shell loops
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	command := config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
-	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
-	if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
-		_ = t.KillSession(sessionID)
-		return fmt.Errorf("waiting for shell: %w", err)
-	}
-	if err := t.SendKeys(sessionID, command); err != nil {
-		// Clean up the session on failure (best-effort cleanup)
-		_ = t.KillSession(sessionID)
-		return fmt.Errorf("starting Claude agent: %w", err)
 	}
 
 	// Wait for Claude to start and show its prompt (non-fatal)
