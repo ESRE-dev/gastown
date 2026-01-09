@@ -1003,29 +1003,27 @@ func querySessionCostWisps(targetDate time.Time) ([]CostEntry, error) {
 		return nil, nil
 	}
 
-	// Get full details for each wisp to check event_kind and payload
+	// Batch all wisp IDs into a single bd show call to avoid N+1 queries
+	showArgs := []string{"show", "--json"}
+	for _, wisp := range wispList.Wisps {
+		showArgs = append(showArgs, wisp.ID)
+	}
+
+	showCmd := exec.Command("bd", showArgs...)
+	showOutput, err := showCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("showing wisps: %w", err)
+	}
+
+	var events []SessionEvent
+	if err := json.Unmarshal(showOutput, &events); err != nil {
+		return nil, fmt.Errorf("parsing wisp details: %w", err)
+	}
+
 	var sessionCostWisps []CostEntry
 	targetDay := targetDate.Format("2006-01-02")
 
-	for _, wisp := range wispList.Wisps {
-		// Get full wisp details
-		showCmd := exec.Command("bd", "show", wisp.ID, "--json")
-		showOutput, err := showCmd.Output()
-		if err != nil {
-			continue
-		}
-
-		var events []SessionEvent
-		if err := json.Unmarshal(showOutput, &events); err != nil {
-			continue
-		}
-
-		if len(events) == 0 {
-			continue
-		}
-
-		event := events[0]
-
+	for _, event := range events {
 		// Filter for session.ended events only
 		if event.EventKind != "session.ended" {
 			continue
@@ -1075,17 +1073,27 @@ func createCostDigestBead(digest CostDigest) (string, error) {
 
 	if len(digest.ByRole) > 0 {
 		desc.WriteString("## By Role\n")
-		for role, cost := range digest.ByRole {
+		roles := make([]string, 0, len(digest.ByRole))
+		for role := range digest.ByRole {
+			roles = append(roles, role)
+		}
+		sort.Strings(roles)
+		for _, role := range roles {
 			icon := constants.RoleEmoji(role)
-			desc.WriteString(fmt.Sprintf("- %s %s: $%.2f\n", icon, role, cost))
+			desc.WriteString(fmt.Sprintf("- %s %s: $%.2f\n", icon, role, digest.ByRole[role]))
 		}
 		desc.WriteString("\n")
 	}
 
 	if len(digest.ByRig) > 0 {
 		desc.WriteString("## By Rig\n")
-		for rig, cost := range digest.ByRig {
-			desc.WriteString(fmt.Sprintf("- %s: $%.2f\n", rig, cost))
+		rigs := make([]string, 0, len(digest.ByRig))
+		for rig := range digest.ByRig {
+			rigs = append(rigs, rig)
+		}
+		sort.Strings(rigs)
+		for _, rig := range rigs {
+			desc.WriteString(fmt.Sprintf("- %s: $%.2f\n", rig, digest.ByRig[rig]))
 		}
 		desc.WriteString("\n")
 	}
@@ -1138,7 +1146,9 @@ func deleteSessionCostWisps(targetDate time.Time) (int, error) {
 	}
 
 	targetDay := targetDate.Format("2006-01-02")
-	deletedCount := 0
+
+	// Collect all wisp IDs that match our criteria
+	var wispIDsToDelete []string
 
 	for _, wisp := range wispList.Wisps {
 		// Get full wisp details to check if it's a session.ended event
@@ -1184,14 +1194,21 @@ func deleteSessionCostWisps(targetDate time.Time) (int, error) {
 			continue
 		}
 
-		// Delete using bd mol burn (for ephemeral wisps)
-		burnCmd := exec.Command("bd", "mol", "burn", wisp.ID)
-		if burnErr := burnCmd.Run(); burnErr == nil {
-			deletedCount++
-		}
+		wispIDsToDelete = append(wispIDsToDelete, wisp.ID)
 	}
 
-	return deletedCount, nil
+	if len(wispIDsToDelete) == 0 {
+		return 0, nil
+	}
+
+	// Batch delete all wisps in a single subprocess call
+	burnArgs := append([]string{"mol", "burn", "--force"}, wispIDsToDelete...)
+	burnCmd := exec.Command("bd", burnArgs...)
+	if burnErr := burnCmd.Run(); burnErr != nil {
+		return 0, fmt.Errorf("batch burn failed: %w", burnErr)
+	}
+
+	return len(wispIDsToDelete), nil
 }
 
 // runCostsMigrate migrates legacy session.ended beads to the new architecture.
