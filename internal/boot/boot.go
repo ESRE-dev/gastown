@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -190,9 +191,15 @@ func (b *Boot) spawnTmux() error {
 		return fmt.Errorf("creating boot session: %w", err)
 	}
 
-	// Set environment
-	_ = b.tmux.SetEnvironment(SessionName, "GT_ROLE", "boot")
-	_ = b.tmux.SetEnvironment(SessionName, "BD_ACTOR", "deacon-boot")
+	// Set environment using centralized AgentEnv for consistency
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:     "boot",
+		TownRoot: b.townRoot,
+		BeadsDir: beads.ResolveBeadsDir(b.townRoot),
+	})
+	for k, v := range envVars {
+		_ = b.tmux.SetEnvironment(SessionName, k, v)
+	}
 
 	// Launch Claude with environment exported inline and initial triage prompt
 	// The "gt boot triage" prompt tells Boot to immediately start triage (GUPP principle)
@@ -216,11 +223,15 @@ func (b *Boot) spawnDegraded() error {
 	// This performs the triage logic without a full Claude session
 	cmd := exec.Command("gt", "boot", "triage", "--degraded")
 	cmd.Dir = b.deaconDir
-	cmd.Env = append(os.Environ(),
-		"GT_ROLE=boot",
-		"BD_ACTOR=deacon-boot",
-		"GT_DEGRADED=true",
-	)
+
+	// Use centralized AgentEnv for consistency with tmux mode
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:     "boot",
+		TownRoot: b.townRoot,
+		BeadsDir: beads.ResolveBeadsDir(b.townRoot),
+	})
+	cmd.Env = config.EnvForExecCommand(envVars)
+	cmd.Env = append(cmd.Env, "GT_DEGRADED=true")
 
 	// Run async - don't wait for completion
 	return cmd.Start()

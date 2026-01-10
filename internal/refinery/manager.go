@@ -186,17 +186,23 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	// Set environment variables (non-fatal: session works without these)
-	_ = t.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
-	_ = t.SetEnvironment(sessionID, "GT_REFINERY", "1")
-	_ = t.SetEnvironment(sessionID, "GT_ROLE", "refinery")
-	_ = t.SetEnvironment(sessionID, "BD_ACTOR", bdActor)
+	// Use centralized AgentEnv for consistency across all role startup paths
+	townRoot := filepath.Dir(m.rig.Path)
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:          "refinery",
+		Rig:           m.rig.Name,
+		TownRoot:      townRoot,
+		BeadsDir:      beads.ResolveBeadsDir(m.rig.Path),
+		BeadsNoDaemon: true,
+	})
 
-	// Set beads environment - refinery uses rig-level beads (non-fatal)
-	// Use ResolveBeadsDir to handle both tracked (mayor/rig) and local beads
-	beadsDir := beads.ResolveBeadsDir(m.rig.Path)
-	_ = t.SetEnvironment(sessionID, "BEADS_DIR", beadsDir)
-	_ = t.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1")
-	_ = t.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/refinery", m.rig.Name))
+	// Add refinery-specific flag
+	envVars["GT_REFINERY"] = "1"
+
+	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
+	for k, v := range envVars {
+		_ = t.SetEnvironment(sessionID, k, v)
+	}
 
 	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(m.rig.Name)
