@@ -151,6 +151,13 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 		return nil, b.wrapError(err, stderr.String(), args)
 	}
 
+	// Handle bd --no-daemon exit code 0 bug: when issue not found,
+	// --no-daemon exits 0 but writes error to stderr with empty stdout.
+	// Detect this case and treat as error to avoid JSON parse failures.
+	if stdout.Len() == 0 && stderr.Len() > 0 {
+		return nil, b.wrapError(fmt.Errorf("command produced no output"), stderr.String(), args)
+	}
+
 	return stdout.Bytes(), nil
 }
 
@@ -174,7 +181,9 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 	}
 
 	// ErrNotFound is widely used for issue lookups - acceptable exception
-	if strings.Contains(stderr, "not found") || strings.Contains(stderr, "Issue not found") {
+	// Match various "not found" error patterns from bd
+	if strings.Contains(stderr, "not found") || strings.Contains(stderr, "Issue not found") ||
+		strings.Contains(stderr, "no issue found") {
 		return ErrNotFound
 	}
 

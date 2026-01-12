@@ -523,6 +523,10 @@ func storeArgsInBead(beadID, args string) error {
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
 	}
+	// Handle bd --no-daemon exit 0 bug: empty stdout means not found
+	if len(out) == 0 {
+		return fmt.Errorf("bead not found")
+	}
 
 	// Parse the bead
 	var issues []beads.Issue
@@ -738,8 +742,14 @@ func verifyBeadExists(beadID string) error {
 	if townRoot, err := workspace.FindFromCwd(); err == nil {
 		cmd.Dir = townRoot
 	}
-	if err := cmd.Run(); err != nil {
+	// Use Output() instead of Run() to detect bd --no-daemon exit 0 bug:
+	// when issue not found, --no-daemon exits 0 but produces empty stdout.
+	out, err := cmd.Output()
+	if err != nil {
 		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
+	}
+	if len(out) == 0 {
+		return fmt.Errorf("bead '%s' not found", beadID)
 	}
 	return nil
 }
@@ -762,6 +772,11 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 	}
 	out, err := cmd.Output()
 	if err != nil {
+		return nil, fmt.Errorf("bead '%s' not found", beadID)
+	}
+	// Handle bd --no-daemon exit 0 bug: when issue not found,
+	// --no-daemon exits 0 but produces empty stdout (error goes to stderr).
+	if len(out) == 0 {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
 	}
 	// bd show --json returns an array (issue + dependents), take first element
@@ -829,14 +844,16 @@ func resolveSelfTarget() (agentID string, pane string, hookRoot string, err erro
 // Uses --no-daemon with --allow-stale for consistency with verifyBeadExists.
 func verifyFormulaExists(formulaName string) error {
 	// Try bd formula show (handles all formula file formats)
+	// Use Output() instead of Run() to detect bd --no-daemon exit 0 bug:
+	// when formula not found, --no-daemon may exit 0 but produce empty stdout.
 	cmd := exec.Command("bd", "--no-daemon", "formula", "show", formulaName, "--allow-stale")
-	if err := cmd.Run(); err == nil {
+	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
 
 	// Try with mol- prefix
 	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "mol-"+formulaName, "--allow-stale")
-	if err := cmd.Run(); err == nil {
+	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
 
