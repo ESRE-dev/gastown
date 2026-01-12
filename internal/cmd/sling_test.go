@@ -234,7 +234,8 @@ case "$cmd" in
     echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
     ;;
   formula)
-    # formula show <name>
+    # formula show <name> - must output something for verifyFormulaExists
+    echo '{"name":"test-formula"}'
     exit 0
     ;;
   cook)
