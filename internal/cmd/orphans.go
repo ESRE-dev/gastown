@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -36,13 +38,51 @@ Examples:
 }
 
 var (
-	orphansDays int
-	orphansAll  bool
+	orphansDays  int
+	orphansAll   bool
+	orphansForce bool
 )
+
+// Subcommands for process orphan management
+var orphansListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List orphaned Claude processes",
+	Long: `List Claude processes that have become orphaned (PPID=1).
+
+These are processes that survived session termination and are now
+parented to init/launchd. They consume resources and should be killed.
+
+Excludes:
+- tmux server processes
+- Claude.app desktop application processes
+
+Examples:
+  gt orphans list      # Show all orphan Claude processes`,
+	RunE: runOrphansListProcesses,
+}
+
+var orphansKillCmd = &cobra.Command{
+	Use:   "kill",
+	Short: "Kill orphaned Claude processes",
+	Long: `Kill Claude processes that have become orphaned (PPID=1).
+
+Without flags, prompts for confirmation before killing.
+Use -f/--force to kill without confirmation.
+
+Examples:
+  gt orphans kill      # Kill with confirmation
+  gt orphans kill -f   # Force kill without confirmation`,
+	RunE: runOrphansKillProcesses,
+}
 
 func init() {
 	orphansCmd.Flags().IntVar(&orphansDays, "days", 7, "Show orphans from last N days")
 	orphansCmd.Flags().BoolVar(&orphansAll, "all", false, "Show all orphans (no date filter)")
+
+	orphansKillCmd.Flags().BoolVarP(&orphansForce, "force", "f", false, "Kill without confirmation")
+
+	orphansCmd.AddCommand(orphansListCmd)
+	orphansCmd.AddCommand(orphansKillCmd)
 
 	rootCmd.AddCommand(orphansCmd)
 }
@@ -242,4 +282,196 @@ func formatAge(t time.Time) string {
 		return "1 day ago"
 	}
 	return fmt.Sprintf("%d days ago", days)
+}
+
+// OrphanProcess represents a Claude process that has become orphaned (PPID=1)
+type OrphanProcess struct {
+	PID  int
+	Args string
+}
+
+// findOrphanProcesses finds Claude processes with PPID=1 (orphaned)
+func findOrphanProcesses() ([]OrphanProcess, error) {
+	// Run ps to get all processes with PID, PPID, and args
+	cmd := exec.Command("ps", "-eo", "pid,ppid,args")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("running ps: %w", err)
+	}
+
+	var orphans []OrphanProcess
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+
+	// Skip header line
+	if scanner.Scan() {
+		// First line is header, skip it
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+
+		ppid, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
+
+		// Only interested in orphans (PPID=1)
+		if ppid != 1 {
+			continue
+		}
+
+		// Reconstruct the args (rest of the fields)
+		args := strings.Join(fields[2:], " ")
+
+		// Check if it's a claude-related process
+		if !isClaudeProcess(args) {
+			continue
+		}
+
+		// Exclude processes we don't want to kill
+		if isExcludedProcess(args) {
+			continue
+		}
+
+		orphans = append(orphans, OrphanProcess{
+			PID:  pid,
+			Args: args,
+		})
+	}
+
+	return orphans, nil
+}
+
+// isClaudeProcess checks if the process is claude-related
+func isClaudeProcess(args string) bool {
+	argsLower := strings.ToLower(args)
+	return strings.Contains(argsLower, "claude")
+}
+
+// isExcludedProcess checks if the process should be excluded from orphan list
+func isExcludedProcess(args string) bool {
+	// Exclude any tmux process (server, new-session, etc.)
+	// These may contain "claude" in args but are tmux processes, not actual Claude processes
+	if strings.HasPrefix(args, "tmux ") || strings.HasPrefix(args, "/usr/bin/tmux") {
+		return true
+	}
+
+	// Exclude Claude.app desktop application processes
+	if strings.Contains(args, "Claude.app") || strings.Contains(args, "/Applications/Claude") {
+		return true
+	}
+
+	// Exclude Claude Helper processes (part of Claude.app)
+	if strings.Contains(args, "Claude Helper") {
+		return true
+	}
+
+	return false
+}
+
+// runOrphansListProcesses lists orphaned Claude processes
+func runOrphansListProcesses(cmd *cobra.Command, args []string) error {
+	orphans, err := findOrphanProcesses()
+	if err != nil {
+		return fmt.Errorf("finding orphan processes: %w", err)
+	}
+
+	if len(orphans) == 0 {
+		fmt.Printf("%s No orphaned Claude processes found\n", style.Bold.Render("✓"))
+		return nil
+	}
+
+	fmt.Printf("%s Found %d orphaned Claude process(es):\n\n", style.Warning.Render("⚠"), len(orphans))
+
+	for _, o := range orphans {
+		// Truncate args for display
+		displayArgs := o.Args
+		if len(displayArgs) > 80 {
+			displayArgs = displayArgs[:77] + "..."
+		}
+		fmt.Printf("  %s %s\n", style.Bold.Render(fmt.Sprintf("PID %d", o.PID)), displayArgs)
+	}
+
+	fmt.Printf("\n%s\n", style.Dim.Render("Use 'gt orphans kill' to terminate these processes"))
+
+	return nil
+}
+
+// runOrphansKillProcesses kills orphaned Claude processes
+func runOrphansKillProcesses(cmd *cobra.Command, args []string) error {
+	orphans, err := findOrphanProcesses()
+	if err != nil {
+		return fmt.Errorf("finding orphan processes: %w", err)
+	}
+
+	if len(orphans) == 0 {
+		fmt.Printf("%s No orphaned Claude processes found\n", style.Bold.Render("✓"))
+		return nil
+	}
+
+	// Show what we're about to kill
+	fmt.Printf("%s Found %d orphaned Claude process(es):\n\n", style.Warning.Render("⚠"), len(orphans))
+	for _, o := range orphans {
+		displayArgs := o.Args
+		if len(displayArgs) > 80 {
+			displayArgs = displayArgs[:77] + "..."
+		}
+		fmt.Printf("  %s %s\n", style.Bold.Render(fmt.Sprintf("PID %d", o.PID)), displayArgs)
+	}
+	fmt.Println()
+
+	// Confirm unless --force
+	if !orphansForce {
+		fmt.Printf("Kill these %d process(es)? [y/N] ", len(orphans))
+		var response string
+		fmt.Scanln(&response)
+		response = strings.ToLower(strings.TrimSpace(response))
+		if response != "y" && response != "yes" {
+			fmt.Println("Aborted")
+			return nil
+		}
+	}
+
+	// Kill the processes
+	var killed, failed int
+	for _, o := range orphans {
+		proc, err := os.FindProcess(o.PID)
+		if err != nil {
+			fmt.Printf("  %s PID %d: %v\n", style.Error.Render("✗"), o.PID, err)
+			failed++
+			continue
+		}
+
+		// Send SIGTERM first for graceful shutdown
+		if err := proc.Signal(syscall.SIGTERM); err != nil {
+			// Process may have already exited
+			if err == os.ErrProcessDone {
+				fmt.Printf("  %s PID %d: already terminated\n", style.Dim.Render("○"), o.PID)
+				continue
+			}
+			fmt.Printf("  %s PID %d: %v\n", style.Error.Render("✗"), o.PID, err)
+			failed++
+			continue
+		}
+
+		fmt.Printf("  %s PID %d killed\n", style.Bold.Render("✓"), o.PID)
+		killed++
+	}
+
+	fmt.Printf("\n%s %d killed", style.Bold.Render("Summary:"), killed)
+	if failed > 0 {
+		fmt.Printf(", %d failed", failed)
+	}
+	fmt.Println()
+
+	return nil
 }
