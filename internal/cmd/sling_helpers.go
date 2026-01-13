@@ -12,6 +12,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -270,12 +271,19 @@ func ensureAgentReady(sessionName string) error {
 	agentName, _ := t.GetEnvironment(sessionName, "GT_AGENT")
 	if agentName == "" || agentName == "claude" {
 		_ = t.AcceptBypassPermissionsWarning(sessionName)
+	}
 
-		// PRAGMATIC APPROACH: fixed delay rather than prompt detection.
-		// Claude startup takes ~5-8 seconds on typical machines.
-		time.Sleep(8 * time.Second)
-	} else {
-		time.Sleep(1 * time.Second)
+	// Use prompt-detection polling instead of fixed sleep.
+	// Resolves runtime config for the agent to get ReadyPromptPrefix and ReadyDelayMs.
+	// For Claude: polls for "❯ " prompt prefix every 200ms (typically detects in <1s).
+	// For agents without prompt prefix: falls back to ReadyDelayMs (configurable per agent).
+	rc := config.RuntimeConfigFromPreset(config.AgentPreset(agentName))
+	if rc == nil {
+		rc = config.DefaultRuntimeConfig()
+	}
+	if err := t.WaitForRuntimeReady(sessionName, rc, constants.ClaudeStartTimeout); err != nil {
+		// Graceful degradation: warn but proceed (matches original behavior of always continuing)
+		fmt.Fprintf(os.Stderr, "Warning: agent readiness detection timed out for %s: %v\n", sessionName, err)
 	}
 
 	return nil

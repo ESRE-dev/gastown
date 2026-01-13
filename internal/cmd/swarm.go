@@ -8,8 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
-
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
@@ -529,8 +527,6 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 				style.PrintWarning("  couldn't start %s: %v", worker, err)
 				continue
 			}
-			// Wait for Claude to initialize
-			time.Sleep(5 * time.Second)
 		}
 
 		// Inject work assignment
