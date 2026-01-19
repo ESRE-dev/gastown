@@ -967,7 +967,7 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 	// 1. Stop all polecat sessions
 	t := tmux.NewTmux()
 	polecatMgr := polecat.NewSessionManager(t, r)
-	infos, err := polecatMgr.List()
+	infos, err := polecatMgr.ListPolecats()
 	if err == nil && len(infos) > 0 {
 		fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
 		if err := polecatMgr.StopAll(rigShutdownForce); err != nil {
@@ -1230,7 +1230,7 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 		// 1. Stop all polecat sessions
 		t := tmux.NewTmux()
 		polecatMgr := polecat.NewSessionManager(t, r)
-		infos, err := polecatMgr.List()
+		infos, err := polecatMgr.ListPolecats()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
 			if err := polecatMgr.StopAll(rigStopForce); err != nil {
@@ -1361,7 +1361,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 
 		// 1. Stop all polecat sessions
 		polecatMgr := polecat.NewSessionManager(t, r)
-		infos, err := polecatMgr.List()
+		infos, err := polecatMgr.ListPolecats()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("    Stopping %d polecat session(s)...\n", len(infos))
 			if err := polecatMgr.StopAll(rigRestartForce); err != nil {
