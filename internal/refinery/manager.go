@@ -353,21 +353,6 @@ func parseTime(s string) time.Time {
 	return t
 }
 
-// run is deprecated - foreground mode now just prints a message.
-// The Refinery agent (Claude) handles all merge processing.
-// See: ZFC #5 - Move merge/conflict decisions from Go to Refinery agent
-func (m *Manager) run(_ *Refinery) error { // ref unused: deprecated function
-	_, _ = fmt.Fprintln(m.output, "")
-	_, _ = fmt.Fprintln(m.output, "╔══════════════════════════════════════════════════════════════╗")
-	_, _ = fmt.Fprintln(m.output, "║  Foreground mode is deprecated.                              ║")
-	_, _ = fmt.Fprintln(m.output, "║                                                              ║")
-	_, _ = fmt.Fprintln(m.output, "║  The Refinery agent (Claude) handles all merge decisions.   ║")
-	_, _ = fmt.Fprintln(m.output, "║  Use 'gt refinery start' to run in background mode.         ║")
-	_, _ = fmt.Fprintln(m.output, "╚══════════════════════════════════════════════════════════════╝")
-	_, _ = fmt.Fprintln(m.output, "")
-	return nil
-}
-
 // MergeResult contains the result of a merge attempt.
 type MergeResult struct {
 	Success     bool
