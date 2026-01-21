@@ -55,3 +55,6 @@ CLAUDE.md
 # Gas Town (added by gt)
 .beads/
 .logs/
+logs/
+settings/
+.events.jsonl
