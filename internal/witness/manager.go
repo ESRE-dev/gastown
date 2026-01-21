@@ -27,15 +27,13 @@ var (
 // Manager handles witness lifecycle and monitoring operations.
 // ZFC-compliant: tmux session is the source of truth for running state.
 type Manager struct {
-	rig     *rig.Rig
-	workDir string
+	rig *rig.Rig
 }
 
 // NewManager creates a new witness manager for a rig.
 func NewManager(r *rig.Rig) *Manager {
 	return &Manager{
-		rig:     r,
-		workDir: r.Path,
+		rig: r,
 	}
 }
 

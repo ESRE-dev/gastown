@@ -1073,9 +1073,8 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 
 	// Witness status
 	fmt.Printf("%s\n", style.Bold.Render("Witness"))
-	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-	witnessRunning, _ := t.HasSession(witnessSession)
-	_ = witness.NewManager(r) // silence unused warning, manager created for consistency
+	witMgr := witness.NewManager(r)
+	witnessRunning, _ := witMgr.IsRunning()
 	if witnessRunning {
 		fmt.Printf("  %s running\n", style.Success.Render("●"))
 	} else {
