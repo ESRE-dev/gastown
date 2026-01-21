@@ -268,19 +268,29 @@ func runDone(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cannot complete: uncommitted changes would be lost\nCommit your changes first, or use --status DEFERRED to exit without completing\nUncommitted: %s", workStatus.String())
 		}
 
-		// Check that branch has commits ahead of origin/default (not local default)
-		// This ensures we compare against the remote, not a potentially stale local copy
+		// Check if branch has commits ahead of origin/default
+		// If not, work may have been pushed directly to main - that's fine, just skip MR
 		originDefault := "origin/" + defaultBranch
 		aheadCount, err := g.CommitsAhead(originDefault, "HEAD")
 		if err != nil {
 			// Fallback to local branch comparison if origin not available
 			aheadCount, err = g.CommitsAhead(defaultBranch, branch)
 			if err != nil {
-				return fmt.Errorf("checking commits ahead of %s: %w", defaultBranch, err)
+				// Can't determine - assume work exists and continue
+				style.PrintWarning("could not check commits ahead of %s: %v", defaultBranch, err)
+				aheadCount = 1
 			}
 		}
+
+		// If no commits ahead, work was likely pushed directly to main (or already merged)
+		// This is valid - skip MR creation but still complete successfully
 		if aheadCount == 0 {
-			return fmt.Errorf("branch '%s' has 0 commits ahead of %s; nothing to merge\nMake and commit changes first, or use --status DEFERRED to exit without completing", branch, originDefault)
+			fmt.Printf("%s Branch has no commits ahead of %s\n", style.Bold.Render("→"), originDefault)
+			fmt.Printf("  Work was likely pushed directly to main or already merged.\n")
+			fmt.Printf("  Skipping MR creation - completing without merge request.\n\n")
+
+			// Skip straight to witness notification (no MR needed)
+			goto notifyWitness
 		}
 
 		// CRITICAL: Push branch BEFORE creating MR bead (hq-6dk53, hq-a4ksk)
@@ -410,6 +420,7 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Branch: %s\n", branch)
 	}
 
+notifyWitness:
 	// Notify Witness about completion
 	// Use town-level beads for cross-agent mail
 	townRouter := mail.NewRouter(townRoot)
