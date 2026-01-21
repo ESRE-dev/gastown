@@ -127,7 +127,7 @@ func (g *Git) Clone(url, dest string) error {
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
 	cmd := exec.Command("git", "clone", url, tmpDest)
@@ -167,7 +167,7 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
 	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, tmpDest)
@@ -207,7 +207,7 @@ func (g *Git) CloneBare(url, dest string) error {
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
 	cmd := exec.Command("git", "clone", "--bare", url, tmpDest)
@@ -282,7 +282,7 @@ func (g *Git) CloneBareWithReference(url, dest, reference string) error {
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
 	cmd := exec.Command("git", "clone", "--bare", "--reference-if-able", reference, url, tmpDest)
