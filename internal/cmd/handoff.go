@@ -204,6 +204,13 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
 	}
 
+	// Kill all processes in the pane before respawning to prevent orphan leaks
+	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
+	if err := t.KillPaneProcesses(pane); err != nil {
+		// Non-fatal but log the warning
+		style.PrintWarning("could not kill pane processes: %v", err)
+	}
+
 	// Use exec to respawn the pane - this kills us and restarts
 	return t.RespawnPane(pane, restartCmd)
 }
@@ -558,6 +565,13 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 			fmt.Printf("Would execute: tmux switch-client -t %s\n", targetSession)
 		}
 		return nil
+	}
+
+	// Kill all processes in the pane before respawning to prevent orphan leaks
+	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
+	if err := t.KillPaneProcesses(targetPane); err != nil {
+		// Non-fatal but log the warning
+		style.PrintWarning("could not kill pane processes: %v", err)
 	}
 
 	// Clear scrollback history before respawn (resets copy-mode from [0/N] to [0/0])
