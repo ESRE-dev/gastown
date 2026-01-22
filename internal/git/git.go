@@ -570,6 +570,27 @@ func (g *Git) MergeNoFF(branch, message string) error {
 	return err
 }
 
+// MergeSquash performs a squash merge of the given branch and commits with the provided message.
+// This stages all changes from the branch without creating a merge commit, then commits them
+// as a single commit with the given message. This eliminates redundant merge commits while
+// preserving the original commit message from the source branch.
+func (g *Git) MergeSquash(branch, message string) error {
+	// Stage all changes from the branch without committing
+	if _, err := g.run("merge", "--squash", branch); err != nil {
+		return err
+	}
+	// Commit the staged changes with the provided message
+	_, err := g.run("commit", "-m", message)
+	return err
+}
+
+// GetBranchCommitMessage returns the commit message of the HEAD commit on the given branch.
+// This is useful for preserving the original conventional commit message (feat:/fix:) when
+// performing squash merges.
+func (g *Git) GetBranchCommitMessage(branch string) (string, error) {
+	return g.run("log", "-1", "--format=%B", branch)
+}
+
 // DeleteRemoteBranch deletes a branch on the remote.
 func (g *Git) DeleteRemoteBranch(remote, branch string) error {
 	_, err := g.run("push", remote, "--delete", branch)
