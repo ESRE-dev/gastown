@@ -176,12 +176,16 @@ Exits silently with code 1 if no unread messages.`,
 }
 
 var mailDeleteCmd = &cobra.Command{
-	Use:   "delete <message-id>",
-	Short: "Delete a message",
-	Long: `Delete (acknowledge) a message.
+	Use:   "delete <message-id> [message-id...]",
+	Short: "Delete messages",
+	Long: `Delete (acknowledge) one or more messages.
 
-This closes the message in beads.`,
-	Args: cobra.ExactArgs(1),
+This closes the messages in beads.
+
+Examples:
+  gt mail delete hq-abc123
+  gt mail delete hq-abc123 hq-def456 hq-ghi789`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: runMailDelete,
 }
 
@@ -461,6 +465,7 @@ func init() {
 	// Reply flags
 	mailReplyCmd.Flags().StringVarP(&mailReplySubject, "subject", "s", "", "Override reply subject (default: Re: <original>)")
 	mailReplyCmd.Flags().StringVarP(&mailReplyMessage, "message", "m", "", "Reply message body")
+	mailReplyCmd.Flags().StringVar(&mailReplyMessage, "body", "", "Reply message body (alias for --message)")
 
 	// Search flags
 	mailSearchCmd.Flags().StringVar(&mailSearchFrom, "from", "", "Filter by sender address")

@@ -224,11 +224,6 @@ func runMailPeek(cmd *cobra.Command, args []string) error {
 }
 
 func runMailDelete(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 {
-		return errors.New("msgID argument required")
-	}
-	msgID := args[0]
-
 	// Determine which inbox
 	address := detectSender()
 
@@ -237,11 +232,32 @@ func runMailDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := mailbox.Delete(msgID); err != nil {
-		return fmt.Errorf("deleting message: %w", err)
+	// Delete all specified messages
+	deleted := 0
+	var errors []string
+	for _, msgID := range args {
+		if err := mailbox.Delete(msgID); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", msgID, err))
+		} else {
+			deleted++
+		}
 	}
 
-	fmt.Printf("%s Message deleted\n", style.Bold.Render("✓"))
+	// Report results
+	if len(errors) > 0 {
+		fmt.Printf("%s Deleted %d/%d messages\n",
+			style.Bold.Render("⚠"), deleted, len(args))
+		for _, e := range errors {
+			fmt.Printf("  Error: %s\n", e)
+		}
+		return fmt.Errorf("failed to delete %d messages", len(errors))
+	}
+
+	if len(args) == 1 {
+		fmt.Printf("%s Message deleted\n", style.Bold.Render("✓"))
+	} else {
+		fmt.Printf("%s Deleted %d messages\n", style.Bold.Render("✓"), deleted)
+	}
 	return nil
 }
 
