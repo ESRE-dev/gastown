@@ -981,9 +981,9 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 	// New signature: (role, rig, townRoot, rigPath, prompt)
 	cmd := BuildAgentStartupCommand("witness", "gastown", "", "", "")
 
-	// Should contain environment exports and claude command
-	if !strings.Contains(cmd, "export") {
-		t.Error("expected export in command")
+	// Should contain environment prefix and claude command
+	if !strings.Contains(cmd, "exec env") {
+		t.Error("expected exec env in command")
 	}
 	if !strings.Contains(cmd, "GT_ROLE=witness") {
 		t.Error("expected GT_ROLE=witness in command")
