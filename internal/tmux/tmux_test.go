@@ -1,10 +1,13 @@
 package tmux
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func hasTmux() bool {
@@ -703,6 +706,97 @@ func TestKillSessionWithProcessesExcluding_NonexistentSession(t *testing.T) {
 	err := tm.KillSessionWithProcessesExcluding("nonexistent-session-xyz-12345", []string{"12345"})
 	// We don't care about the error value, just that it doesn't panic
 	_ = err
+}
+
+func TestGetProcessGroupID(t *testing.T) {
+	// Test with current process
+	pid := fmt.Sprintf("%d", os.Getpid())
+	pgid := getProcessGroupID(pid)
+
+	if pgid == "" {
+		t.Error("expected non-empty PGID for current process")
+	}
+
+	// PGID should not be 0 or 1 for a normal process
+	if pgid == "0" || pgid == "1" {
+		t.Errorf("unexpected PGID %q for current process", pgid)
+	}
+
+	// Test with nonexistent PID
+	pgid = getProcessGroupID("999999999")
+	if pgid != "" {
+		t.Errorf("expected empty PGID for nonexistent process, got %q", pgid)
+	}
+}
+
+func TestGetProcessGroupMembers(t *testing.T) {
+	// Get current process's PGID
+	pid := fmt.Sprintf("%d", os.Getpid())
+	pgid := getProcessGroupID(pid)
+	if pgid == "" {
+		t.Skip("could not get PGID for current process")
+	}
+
+	members := getProcessGroupMembers(pgid)
+
+	// Current process should be in the list
+	found := false
+	for _, m := range members {
+		if m == pid {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("current process %s not found in process group %s members: %v", pid, pgid, members)
+	}
+}
+
+func TestKillSessionWithProcesses_KillsProcessGroup(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-killpg-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session that spawns a child process
+	// The child will stay in the same process group as the shell
+	cmd := `sleep 300 & sleep 300`
+	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+
+	// Give processes time to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify session exists
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Fatal("expected session to exist after creation")
+	}
+
+	// Kill with processes (should kill the entire process group)
+	if err := tm.KillSessionWithProcesses(sessionName); err != nil {
+		t.Fatalf("KillSessionWithProcesses: %v", err)
+	}
+
+	// Verify session is gone
+	has, err = tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession after kill: %v", err)
+	}
+	if has {
+		t.Error("expected session to not exist after KillSessionWithProcesses")
+		_ = tm.KillSession(sessionName) // cleanup
+	}
 }
 
 func TestSessionSet(t *testing.T) {

@@ -128,7 +128,8 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 		if !t.IsAgentRunning(name) {
 			// Zombie session: tmux alive but Claude dead
 			// Kill it so we can create a fresh one
-			if err := t.KillSession(name); err != nil {
+			// Use KillSessionWithProcesses to ensure all descendant processes are killed
+			if err := t.KillSessionWithProcesses(name); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
 		} else {
@@ -156,12 +157,17 @@ const processKillGracePeriod = 2 * time.Second
 // This prevents orphan processes that survive tmux kill-session due to SIGHUP being ignored.
 //
 // Process:
-// 1. Get the pane's main process PID
-// 2. Find all descendant processes recursively (not just direct children)
-// 3. Send SIGTERM to all descendants (deepest first)
-// 4. Wait 2s for graceful shutdown
-// 5. Send SIGKILL to any remaining descendants
+// 1. Get the pane's main process PID and its process group ID (PGID)
+// 2. Kill the entire process group (catches reparented processes that stayed in the group)
+// 3. Find all descendant processes recursively (catches any stragglers)
+// 4. Send SIGTERM/SIGKILL to descendants
+// 5. Kill the pane process itself
 // 6. Kill the tmux session
+//
+// The process group kill is critical because:
+// - pgrep -P only finds direct children (PPID matching)
+// - Processes that reparent to init (PID 1) are missed by pgrep
+// - But they typically stay in the same process group unless they call setsid()
 //
 // This ensures Claude processes and all their children are properly terminated.
 func (t *Tmux) KillSessionWithProcesses(name string) error {
@@ -173,7 +179,22 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	if pid != "" {
-		// Get all descendant PIDs recursively (returns deepest-first order)
+		// First, kill the entire process group. This catches processes that:
+		// - Reparented to init (PID 1) when their parent died
+		// - Are not direct children but stayed in the same process group
+		// Note: Processes that called setsid() will have a new PGID and won't be killed here
+		pgid := getProcessGroupID(pid)
+		if pgid != "" && pgid != "0" && pgid != "1" {
+			// Kill process group with negative PGID (POSIX convention)
+			// Use SIGTERM first for graceful shutdown
+			_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
+			time.Sleep(100 * time.Millisecond)
+			// Force kill any remaining processes in the group
+			_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+		}
+
+		// Also walk the process tree for any descendants that might have called setsid()
+		// and created their own process groups (rare but possible)
 		descendants := getAllDescendants(pid)
 
 		// Send SIGTERM to all descendants (deepest first to avoid orphaning)
@@ -224,27 +245,45 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 	}
 
 	if pid != "" {
-		// Get all descendant PIDs recursively (returns deepest-first order)
-		descendants := getAllDescendants(pid)
+		// Get the process group ID
+		pgid := getProcessGroupID(pid)
 
-		// Filter out excluded PIDs
-		var filtered []string
-		for _, dpid := range descendants {
-			if !exclude[dpid] {
-				filtered = append(filtered, dpid)
+		// Collect all PIDs to kill (from multiple sources)
+		toKill := make(map[string]bool)
+
+		// 1. Get all process group members (catches reparented processes)
+		if pgid != "" && pgid != "0" && pgid != "1" {
+			for _, member := range getProcessGroupMembers(pgid) {
+				if !exclude[member] {
+					toKill[member] = true
+				}
 			}
 		}
 
-		// Send SIGTERM to all non-excluded descendants (deepest first to avoid orphaning)
-		for _, dpid := range filtered {
+		// 2. Get all descendant PIDs recursively (catches processes that called setsid())
+		descendants := getAllDescendants(pid)
+		for _, dpid := range descendants {
+			if !exclude[dpid] {
+				toKill[dpid] = true
+			}
+		}
+
+		// Convert to slice for iteration
+		var killList []string
+		for p := range toKill {
+			killList = append(killList, p)
+		}
+
+		// Send SIGTERM to all non-excluded processes
+		for _, dpid := range killList {
 			_ = exec.Command("kill", "-TERM", dpid).Run()
 		}
 
 		// Wait for graceful shutdown (2s gives processes time to clean up)
 		time.Sleep(processKillGracePeriod)
 
-		// Send SIGKILL to any remaining non-excluded descendants
-		for _, dpid := range filtered {
+		// Send SIGKILL to any remaining non-excluded processes
+		for _, dpid := range killList {
 			_ = exec.Command("kill", "-KILL", dpid).Run()
 		}
 
@@ -289,16 +328,46 @@ func getAllDescendants(pid string) []string {
 	return result
 }
 
+// getProcessGroupID returns the process group ID (PGID) for a given PID.
+// Returns empty string if the process doesn't exist or PGID can't be determined.
+func getProcessGroupID(pid string) string {
+	out, err := exec.Command("ps", "-o", "pgid=", "-p", pid).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// getProcessGroupMembers returns all PIDs in a process group.
+// This finds processes that share the same PGID, including those that reparented to init.
+func getProcessGroupMembers(pgid string) []string {
+	// Use ps to find all processes with this PGID
+	// On macOS: ps -axo pid,pgid
+	// On Linux: ps -eo pid,pgid
+	out, err := exec.Command("ps", "-axo", "pid,pgid").Output()
+	if err != nil {
+		return nil
+	}
+
+	var members []string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.TrimSpace(fields[1]) == pgid {
+			members = append(members, strings.TrimSpace(fields[0]))
+		}
+	}
+	return members
+}
+
 // KillPaneProcesses explicitly kills all processes associated with a tmux pane.
 // This prevents orphan processes that survive pane respawn due to SIGHUP being ignored.
 //
 // Process:
-// 1. Get the pane's main process PID
-// 2. Find all descendant processes recursively (not just direct children)
-// 3. Send SIGTERM to all descendants (deepest first)
-// 4. Wait 2s for graceful shutdown
-// 5. Send SIGKILL to any remaining descendants
-// 6. Kill the pane process itself
+// 1. Get the pane's main process PID and its process group ID (PGID)
+// 2. Kill the entire process group (catches reparented processes)
+// 3. Find all descendant processes recursively (catches any stragglers)
+// 4. Send SIGTERM/SIGKILL to descendants
+// 5. Kill the pane process itself
 //
 // This ensures Claude processes and all their children are properly terminated
 // before respawning the pane.
@@ -313,7 +382,18 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 		return fmt.Errorf("pane PID is empty")
 	}
 
-	// Get all descendant PIDs recursively (returns deepest-first order)
+	// First, kill the entire process group. This catches processes that:
+	// - Reparented to init (PID 1) when their parent died
+	// - Are not direct children but stayed in the same process group
+	pgid := getProcessGroupID(pid)
+	if pgid != "" && pgid != "0" && pgid != "1" {
+		// Kill process group with negative PGID (POSIX convention)
+		_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
+		time.Sleep(100 * time.Millisecond)
+		_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+	}
+
+	// Also walk the process tree for any descendants that might have called setsid()
 	descendants := getAllDescendants(pid)
 
 	// Send SIGTERM to all descendants (deepest first to avoid orphaning)
