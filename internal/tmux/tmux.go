@@ -1374,6 +1374,40 @@ func (t *Tmux) SetFeedBinding(session string) error {
 	return err
 }
 
+// CleanupOrphanedSessions scans for zombie Gas Town sessions and kills them.
+// A zombie session is one where tmux is alive but the Claude process has died.
+// This runs at `gt start` time to prevent session name conflicts and resource accumulation.
+//
+// Returns:
+//   - cleaned: number of zombie sessions that were killed
+//   - err: error if session listing failed (individual kill errors are logged but not returned)
+func (t *Tmux) CleanupOrphanedSessions() (cleaned int, err error) {
+	sessions, err := t.ListSessions()
+	if err != nil {
+		return 0, fmt.Errorf("listing sessions: %w", err)
+	}
+
+	for _, sess := range sessions {
+		// Only process Gas Town sessions (gt-* for rigs, hq-* for town-level)
+		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
+			continue
+		}
+
+		// Check if the session is a zombie (tmux alive, Claude dead)
+		if !t.IsClaudeRunning(sess) {
+			// Kill the zombie session
+			if killErr := t.KillSessionWithProcesses(sess); killErr != nil {
+				// Log but continue - other sessions may still need cleanup
+				fmt.Printf("  warning: failed to kill orphaned session %s: %v\n", sess, killErr)
+				continue
+			}
+			cleaned++
+		}
+	}
+
+	return cleaned, nil
+}
+
 // SetPaneDiedHook sets a pane-died hook on a session to detect crashes.
 // When the pane exits, tmux runs the hook command with exit status info.
 // The agentID is used to identify the agent in crash logs (e.g., "gastown/Toast").

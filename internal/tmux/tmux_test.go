@@ -757,3 +757,97 @@ func TestSessionSet(t *testing.T) {
 		t.Errorf("SessionSet.Names() doesn't contain %q", sessionName)
 	}
 }
+
+func TestCleanupOrphanedSessions(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Create test sessions with gt- and hq- prefixes (zombie sessions - no Claude running)
+	gtSession := "gt-test-cleanup-rig"
+	hqSession := "hq-test-cleanup"
+	nonGtSession := "other-test-session"
+
+	// Clean up any existing test sessions
+	_ = tm.KillSession(gtSession)
+	_ = tm.KillSession(hqSession)
+	_ = tm.KillSession(nonGtSession)
+
+	// Create zombie sessions (tmux alive, but just shell - no Claude)
+	if err := tm.NewSession(gtSession, ""); err != nil {
+		t.Fatalf("NewSession(gt): %v", err)
+	}
+	defer func() { _ = tm.KillSession(gtSession) }()
+
+	if err := tm.NewSession(hqSession, ""); err != nil {
+		t.Fatalf("NewSession(hq): %v", err)
+	}
+	defer func() { _ = tm.KillSession(hqSession) }()
+
+	// Create a non-GT session (should NOT be cleaned up)
+	if err := tm.NewSession(nonGtSession, ""); err != nil {
+		t.Fatalf("NewSession(other): %v", err)
+	}
+	defer func() { _ = tm.KillSession(nonGtSession) }()
+
+	// Verify all sessions exist
+	for _, sess := range []string{gtSession, hqSession, nonGtSession} {
+		has, err := tm.HasSession(sess)
+		if err != nil {
+			t.Fatalf("HasSession(%q): %v", sess, err)
+		}
+		if !has {
+			t.Fatalf("expected session %q to exist", sess)
+		}
+	}
+
+	// Run cleanup
+	cleaned, err := tm.CleanupOrphanedSessions()
+	if err != nil {
+		t.Fatalf("CleanupOrphanedSessions: %v", err)
+	}
+
+	// Should have cleaned the gt- and hq- zombie sessions
+	if cleaned < 2 {
+		t.Errorf("CleanupOrphanedSessions cleaned %d sessions, want >= 2", cleaned)
+	}
+
+	// Verify GT sessions are gone
+	for _, sess := range []string{gtSession, hqSession} {
+		has, err := tm.HasSession(sess)
+		if err != nil {
+			t.Fatalf("HasSession(%q) after cleanup: %v", sess, err)
+		}
+		if has {
+			t.Errorf("expected session %q to be cleaned up", sess)
+		}
+	}
+
+	// Verify non-GT session still exists
+	has, err := tm.HasSession(nonGtSession)
+	if err != nil {
+		t.Fatalf("HasSession(%q) after cleanup: %v", nonGtSession, err)
+	}
+	if !has {
+		t.Error("non-GT session should NOT have been cleaned up")
+	}
+}
+
+func TestCleanupOrphanedSessions_NoSessions(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Running cleanup with no orphaned GT sessions should return 0, no error
+	cleaned, err := tm.CleanupOrphanedSessions()
+	if err != nil {
+		t.Fatalf("CleanupOrphanedSessions: %v", err)
+	}
+
+	// May clean some existing GT sessions if they exist, but shouldn't error
+	t.Logf("CleanupOrphanedSessions cleaned %d sessions", cleaned)
+}
