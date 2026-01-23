@@ -1254,11 +1254,17 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	return nil
 }
 
-// EnableMouseMode enables mouse support for a tmux session.
+// EnableMouseMode enables mouse support and clipboard integration for a tmux session.
 // This allows clicking to select panes/windows, scrolling with mouse wheel,
 // and dragging to resize panes. Hold Shift for native terminal text selection.
+// Also enables clipboard integration so copied text goes to system clipboard.
 func (t *Tmux) EnableMouseMode(session string) error {
-	_, err := t.run("set-option", "-t", session, "mouse", "on")
+	if _, err := t.run("set-option", "-t", session, "mouse", "on"); err != nil {
+		return err
+	}
+	// Enable clipboard integration with terminal (OSC 52)
+	// This allows copying text to system clipboard when selecting with mouse
+	_, err := t.run("set-option", "-t", session, "set-clipboard", "on")
 	return err
 }
 
