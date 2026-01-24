@@ -26,10 +26,24 @@ across distributed teams of AI agents working on shared codebases.`,
 
 // Commands that don't require beads to be installed/checked.
 // These are basic utility commands that should work without beads.
+// NOTE: Gas Town has migrated to Dolt for beads storage. The bd version
+// check is increasingly obsolete. Most commands are now exempt.
 var beadsExemptCommands = map[string]bool{
 	"version":    true,
 	"help":       true,
 	"completion": true,
+	"crew":       true,
+	"polecat":    true,
+	"witness":    true,
+	"refinery":   true,
+	"status":     true,
+	"mail":       true,
+	"hook":       true,
+	"prime":      true,
+	"nudge":      true,
+	"seance":     true,
+	"doctor":     true,
+	"dolt":       true,
 }
 
 // Commands exempt from the town root branch warning.
