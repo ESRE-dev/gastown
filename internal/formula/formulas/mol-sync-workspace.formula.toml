@@ -69,7 +69,7 @@ git branch --show-current
 
 **2. Check beads state:**
 ```bash
-bd status
+bd doctor            # Verify beads database health
 ```
 
 **3. Document starting state:**
@@ -240,29 +240,31 @@ risk merging incorrectly. A resubmitted branch is better than a broken main.
 **Exit criteria:** Local branch matches or is cleanly ahead of origin/main."""
 
 [[steps]]
-id = "sync-beads"
-title = "Verify beads state"
+id = "verify-beads"
+title = "Verify beads database health"
 needs = ["sync-git"]
 description = """
-Verify beads database is healthy.
+Verify the Dolt-backed beads database is healthy.
 
-With Dolt backend, beads changes are automatically persisted - no manual sync needed.
+**Note:** Gas Town uses Dolt as the beads backend. There is no `bd sync` command -
+changes are written directly to the Dolt sql-server and synced via Dolt's
+git-like PUSH/PULL operations.
 
 ```bash
-bd status  # Check database health
-bd list --status=in_progress  # Verify active work is visible
+bd doctor            # Check database health
+bd list --limit 5    # Verify we can read beads
 ```
 
-**If issues:**
-- Check dolt sql-server is running
-- Verify database connectivity
+**If errors:**
+- Connection errors: Check if `dolt sql-server` is running
+- Data errors: Escalate to mayor
 
-**Exit criteria:** Beads database healthy and accessible."""
+**Exit criteria:** Beads database accessible and healthy."""
 
 [[steps]]
 id = "run-doctor"
 title = "Run beads health check"
-needs = ["sync-beads"]
+needs = ["verify-beads"]
 description = """
 Check for beads system issues.
 
