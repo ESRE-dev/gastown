@@ -68,6 +68,15 @@ var branchCheckExemptCommands = map[string]bool{
 
 // persistentPreRun runs before every command.
 func persistentPreRun(cmd *cobra.Command, args []string) error {
+	// Check if binary was built properly (via make build, not raw go build).
+	// Raw go build produces unsigned binaries that macOS will kill.
+	if BuiltProperly == "" {
+		fmt.Fprintln(os.Stderr, "ERROR: This binary was built with 'go build' directly.")
+		fmt.Fprintln(os.Stderr, "       Use 'make build' to create a properly signed binary.")
+		fmt.Fprintln(os.Stderr, "       Run from: ~/gt/gastown/mayor/rig (or your rig's worktree)")
+		os.Exit(1)
+	}
+
 	// Initialize CLI theme (dark/light mode support)
 	initCLITheme()
 
