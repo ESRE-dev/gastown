@@ -137,14 +137,16 @@ Old logs are moved to `$GT_ROOT/logs/archive/` with timestamps.
 
 [[steps]]
 id = "sync-state"
-title = "Sync beads and push"
+title = "Verify beads state"
 needs = ["rotate-logs"]
 description = """
-Ensure all beads state is persisted.
+Verify beads state is healthy.
 
 ```bash
-bd sync
+bd status
 ```
+
+With Dolt backend, beads changes are automatically persisted.
 
 Note: We do NOT force-commit polecat work here. Their sandboxes
 are preserved with whatever state they had. They'll commit their
