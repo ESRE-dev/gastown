@@ -289,6 +289,20 @@ func runDone(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Work was likely pushed directly to main or already merged.\n")
 			fmt.Printf("  Skipping MR creation - completing without merge request.\n\n")
 
+			// G15 fix: Close the base issue when completing with no MR.
+			// Without this, no-op polecats (bug already fixed) leave issues stuck
+			// in HOOKED state with assignee pointing to the nuked polecat.
+			// Normally the Refinery closes after merge, but with no MR, nothing
+			// would ever close the issue.
+			if issueID != "" {
+				bd := beads.New(beads.ResolveBeadsDir(cwd))
+				if err := bd.CloseWithReason("Completed with no code changes (already fixed or pushed directly to main)", issueID); err != nil {
+					style.PrintWarning("could not close issue %s: %v (issue may be left HOOKED)", issueID, err)
+				} else {
+					fmt.Printf("%s Issue %s closed (no MR needed)\n", style.Bold.Render("✓"), issueID)
+				}
+			}
+
 			// Skip straight to witness notification (no MR needed)
 			goto notifyWitness
 		}

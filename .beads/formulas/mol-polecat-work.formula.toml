@@ -338,47 +338,49 @@ id = "cleanup-workspace"
 title = "Clean up workspace"
 needs = ["run-tests"]
 description = """
-Ensure workspace is pristine before handoff.
+Ensure all work is committed and pushed before handoff.
 
-**1. Check for uncommitted changes:**
+**CRITICAL: NEVER discard your implementation changes.**
+If you have uncommitted work, you MUST commit it. `gt done` will REJECT
+completion if you have uncommitted changes, and the worktree is nuked after
+`gt done` — any uncommitted work is lost forever.
+
+**1. Commit ALL uncommitted changes:**
 ```bash
 git status
 ```
-Must show "working tree clean". If not:
-- Commit legitimate changes
-- Discard garbage: `git checkout -- .`
-
-**2. Check for untracked files:**
+If there are ANY modified or untracked files from your implementation:
 ```bash
-git status --porcelain
+git add -A
+git commit -m "fix: <brief description> ({{issue}})"
 ```
-Should be empty. If not:
-- Add to .gitignore if appropriate
-- Remove if temporary: `rm <file>`
-- Commit if needed
+NEVER use `git checkout -- .` or `git restore .` to discard implementation work.
+Only discard files you are CERTAIN are temporary artifacts (e.g., `.DS_Store`).
 
-**3. Check stash:**
+**2. Check stash:**
 ```bash
 git stash list
 ```
 Should be empty. If not:
-- Pop and commit: `git stash pop && git add -A && git commit`
-- Or drop if garbage: `git stash drop`
+```bash
+git stash pop && git add -A && git commit -m "chore: unstash work ({{issue}})"
+```
 
-**4. Push your branch:**
+**3. Push your branch:**
 ```bash
 git push -u origin $(git branch --show-current)
 ```
 
-**5. Verify nothing left behind:**
+**4. Verify commits exist:**
 ```bash
-git status                  # Clean
-git stash list              # Empty
-git log origin/main..HEAD   # Your commits
-git diff origin/main...HEAD # Your changes (expected)
+git log origin/main..HEAD   # MUST show at least 1 commit if you made changes
+git status                  # Must be clean
 ```
 
-**Exit criteria:** Branch pushed, workspace clean, no cruft."""
+If `git log origin/main..HEAD` shows nothing but you DID make changes,
+something went wrong. Do NOT proceed — mail Witness for help.
+
+**Exit criteria:** All work committed, branch pushed, at least 1 commit ahead of main (if changes were made)."""
 
 [[steps]]
 id = "prepare-for-review"
