@@ -921,10 +921,12 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// hasChildWithNames checks if a process has a child matching any of the given names.
+// hasDescendantWithNames checks if a process has any descendant (child, grandchild, etc.)
+// matching any of the given names. Recursively traverses the process tree up to maxDepth.
 // Used when the pane command is a shell (bash, zsh) that launched an agent.
-func hasChildWithNames(pid string, names []string) bool {
-	if len(names) == 0 {
+func hasDescendantWithNames(pid string, names []string, depth int) bool {
+	const maxDepth = 10 // Prevent infinite loops in case of circular references
+	if len(names) == 0 || depth > maxDepth {
 		return false
 	}
 	// Use pgrep to find child processes
@@ -938,7 +940,7 @@ func hasChildWithNames(pid string, names []string) bool {
 	for _, n := range names {
 		nameSet[n] = true
 	}
-	// Check if any child matches
+	// Check if any child matches, or recursively check grandchildren
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -948,12 +950,25 @@ func hasChildWithNames(pid string, names []string) bool {
 		// Format: "PID name" e.g., "29677 node"
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
-			if nameSet[parts[1]] {
+			childPid := parts[0]
+			childName := parts[1]
+			// Direct match
+			if nameSet[childName] {
+				return true
+			}
+			// Recursive check of descendants
+			if hasDescendantWithNames(childPid, names, depth+1) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// hasChildWithNames checks if a process has a child matching any of the given names.
+// Deprecated: Use hasDescendantWithNames for more robust detection.
+func hasChildWithNames(pid string, names []string) bool {
+	return hasDescendantWithNames(pid, names, 0)
 }
 
 // FindSessionByWorkDir finds tmux sessions where the pane's current working directory
@@ -1167,18 +1182,23 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 			return true
 		}
 	}
-	// If pane command is a shell, check for child processes.
-	// This handles agents started with "bash -c 'export ... && agent ...'"
+	// Check for child processes if pane command is a shell or unrecognized.
+	// This handles:
+	// - Agents started with "bash -c 'export ... && agent ...'"
+	// - Claude Code showing version as argv[0] (e.g., "2.1.29")
+	pid, err := t.GetPanePID(session)
+	if err != nil || pid == "" {
+		return false
+	}
+	// If pane command is a shell, check descendants
 	for _, shell := range constants.SupportedShells {
 		if cmd == shell {
-			pid, err := t.GetPanePID(session)
-			if err == nil && pid != "" {
-				return hasChildWithNames(pid, processNames)
-			}
-			break
+			return hasDescendantWithNames(pid, processNames, 0)
 		}
 	}
-	return false
+	// If pane command is unrecognized (not in processNames, not a shell),
+	// still check descendants as fallback. This handles version-as-argv[0].
+	return hasDescendantWithNames(pid, processNames, 0)
 }
 
 // IsAgentAlive checks if an agent is running in the session using agent-agnostic detection.
