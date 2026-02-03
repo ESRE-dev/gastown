@@ -823,6 +823,18 @@ func (h *APIHandler) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate title doesn't contain control characters or newlines
+	if strings.ContainsAny(req.Title, "\n\r\x00") {
+		h.sendError(w, "Title cannot contain newlines or control characters", http.StatusBadRequest)
+		return
+	}
+
+	// Validate description if provided
+	if req.Description != "" && strings.Contains(req.Description, "\x00") {
+		h.sendError(w, "Description cannot contain null characters", http.StatusBadRequest)
+		return
+	}
+
 	// Build bd create command
 	args := []string{"create", req.Title}
 
