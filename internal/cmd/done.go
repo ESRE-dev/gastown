@@ -326,8 +326,14 @@ func runDone(cmd *cobra.Command, args []string) error {
 		// The MR bead triggers Refinery to process this branch. If the branch
 		// isn't pushed yet, Refinery finds nothing to merge. The worktree gets
 		// nuked at the end of gt done, so the commits are lost forever.
+		//
+		// Use explicit refspec (branch:branch) to create the remote branch.
+		// Without refspec, git push follows the tracking config — polecat branches
+		// track origin/main, so a bare push sends commits to main directly,
+		// bypassing the MR/refinery flow (G20 root cause).
 		fmt.Printf("Pushing branch to remote...\n")
-		if err := g.Push("origin", branch, false); err != nil {
+		refspec := branch + ":" + branch
+		if err := g.Push("origin", refspec, false); err != nil {
 			return fmt.Errorf("pushing branch '%s' to origin: %w\nCommits exist locally but failed to push. Fix the issue and retry.", branch, err)
 		}
 		fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
