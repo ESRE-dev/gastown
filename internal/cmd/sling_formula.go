@@ -91,11 +91,12 @@ func runSlingFormula(args []string) error {
 	var targetAgent string
 	var targetPane string
 	var delayedDogInfo *DogDispatchInfo // For delayed session start after hook is set
+	var formulaWorkDir string            // Working directory for bd cook/wisp (routes to correct rig beads)
 
 	if target != "" {
 		// Resolve "." to current agent identity (like git's "." meaning current directory)
 		if target == "." {
-			targetAgent, targetPane, _, err = resolveSelfTarget()
+			targetAgent, targetPane, formulaWorkDir, err = resolveSelfTarget()
 			if err != nil {
 				return fmt.Errorf("resolving self for '.' target: %w", err)
 			}
@@ -149,6 +150,7 @@ func runSlingFormula(args []string) error {
 				}
 				targetAgent = spawnInfo.AgentID()
 				targetPane = spawnInfo.Pane
+				formulaWorkDir = spawnInfo.ClonePath // Route bd commands to rig beads
 
 				// Wake witness and refinery to monitor the new polecat (G11: skip if --no-boot)
 				if !slingNoBoot {
@@ -157,22 +159,17 @@ func runSlingFormula(args []string) error {
 			}
 		} else {
 			// Slinging to an existing agent
-			var targetWorkDir string
-			targetAgent, targetPane, targetWorkDir, err = resolveTargetAgent(target)
+			targetAgent, targetPane, formulaWorkDir, err = resolveTargetAgent(target)
 			if err != nil {
 				return fmt.Errorf("resolving target: %w", err)
 			}
-			// Use target's working directory for bd commands (needed for redirect-based routing)
-			_ = targetWorkDir // Formula sling doesn't need hookWorkDir
 		}
 	} else {
 		// Slinging to self
-		var selfWorkDir string
-		targetAgent, targetPane, selfWorkDir, err = resolveSelfTarget()
+		targetAgent, targetPane, formulaWorkDir, err = resolveSelfTarget()
 		if err != nil {
 			return err
 		}
-		_ = selfWorkDir // Formula sling doesn't need hookWorkDir
 	}
 
 	fmt.Printf("%s Slinging formula %s to %s...\n", style.Bold.Render("🎯"), formulaName, targetAgent)
@@ -187,10 +184,17 @@ func runSlingFormula(args []string) error {
 		return nil
 	}
 
+	// Resolve working directory for bd commands (routes to correct rig beads)
+	// Fall back to townRoot (HQ beads) if no specific rig directory was determined
+	if formulaWorkDir == "" {
+		formulaWorkDir = townRoot
+	}
+
 	// Step 1: Cook the formula (ensures proto exists)
 	fmt.Printf("  Cooking formula...\n")
 	cookArgs := []string{"--no-daemon", "cook", formulaName}
 	cookCmd := exec.Command("bd", cookArgs...)
+	cookCmd.Dir = formulaWorkDir
 	cookCmd.Stderr = os.Stderr
 	if err := cookCmd.Run(); err != nil {
 		return fmt.Errorf("cooking formula: %w", err)
@@ -205,6 +209,7 @@ func runSlingFormula(args []string) error {
 	wispArgs = append(wispArgs, "--json")
 
 	wispCmd := exec.Command("bd", wispArgs...)
+	wispCmd.Dir = formulaWorkDir
 	wispCmd.Stderr = os.Stderr // Show wisp errors to user
 	wispOut, err := wispCmd.Output()
 	if err != nil {
