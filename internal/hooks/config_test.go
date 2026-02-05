@@ -206,6 +206,253 @@ func TestDefaultBase(t *testing.T) {
 	}
 }
 
+func TestMerge(t *testing.T) {
+	base := &HooksConfig{
+		SessionStart: []HookEntry{
+			{Matcher: "", Hooks: []Hook{{Type: "command", Command: "base-session"}}},
+		},
+		Stop: []HookEntry{
+			{Matcher: "", Hooks: []Hook{{Type: "command", Command: "base-stop"}}},
+		},
+	}
+
+	override := &HooksConfig{
+		SessionStart: []HookEntry{
+			{Matcher: "", Hooks: []Hook{{Type: "command", Command: "override-session"}}},
+		},
+		PreToolUse: []HookEntry{
+			{Matcher: "Bash(git*)", Hooks: []Hook{{Type: "command", Command: "block-git"}}},
+		},
+	}
+
+	result := Merge(base, override)
+
+	// SessionStart should be replaced by override
+	if len(result.SessionStart) != 1 || result.SessionStart[0].Hooks[0].Command != "override-session" {
+		t.Errorf("expected override SessionStart, got %v", result.SessionStart)
+	}
+
+	// Stop should be preserved from base (not in override)
+	if len(result.Stop) != 1 || result.Stop[0].Hooks[0].Command != "base-stop" {
+		t.Errorf("expected base Stop, got %v", result.Stop)
+	}
+
+	// PreToolUse should come from override
+	if len(result.PreToolUse) != 1 || result.PreToolUse[0].Matcher != "Bash(git*)" {
+		t.Errorf("expected override PreToolUse, got %v", result.PreToolUse)
+	}
+
+	// Original base should not be mutated
+	if len(base.PreToolUse) != 0 {
+		t.Error("Merge mutated the original base config")
+	}
+}
+
+func TestMergeEmptyOverride(t *testing.T) {
+	base := DefaultBase()
+	override := &HooksConfig{}
+
+	result := Merge(base, override)
+
+	// Everything should be preserved from base
+	if !HooksEqual(base, result) {
+		t.Error("empty override should not change base config")
+	}
+}
+
+func TestComputeExpected(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Save a base config
+	base := &HooksConfig{
+		SessionStart: []HookEntry{
+			{Matcher: "", Hooks: []Hook{{Type: "command", Command: "base-cmd"}}},
+		},
+	}
+	if err := SaveBase(base); err != nil {
+		t.Fatalf("SaveBase failed: %v", err)
+	}
+
+	// Save a crew override
+	crewOverride := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: "Bash(git*)", Hooks: []Hook{{Type: "command", Command: "crew-guard"}}},
+		},
+	}
+	if err := SaveOverride("crew", crewOverride); err != nil {
+		t.Fatalf("SaveOverride crew failed: %v", err)
+	}
+
+	// Save a gastown/crew override
+	gcOverride := &HooksConfig{
+		SessionStart: []HookEntry{
+			{Matcher: "", Hooks: []Hook{{Type: "command", Command: "gastown-crew-session"}}},
+		},
+	}
+	if err := SaveOverride("gastown/crew", gcOverride); err != nil {
+		t.Fatalf("SaveOverride gastown/crew failed: %v", err)
+	}
+
+	// Compute expected for gastown/crew (should apply: base → crew → gastown/crew)
+	expected, err := ComputeExpected("gastown/crew")
+	if err != nil {
+		t.Fatalf("ComputeExpected failed: %v", err)
+	}
+
+	// SessionStart should come from gastown/crew override (most specific)
+	if len(expected.SessionStart) != 1 || expected.SessionStart[0].Hooks[0].Command != "gastown-crew-session" {
+		t.Errorf("expected gastown/crew SessionStart, got %v", expected.SessionStart)
+	}
+
+	// PreToolUse should come from crew override
+	if len(expected.PreToolUse) != 1 || expected.PreToolUse[0].Hooks[0].Command != "crew-guard" {
+		t.Errorf("expected crew PreToolUse, got %v", expected.PreToolUse)
+	}
+}
+
+func TestComputeExpectedNoBase(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// No base config, no overrides - should fall back to DefaultBase
+	expected, err := ComputeExpected("mayor")
+	if err != nil {
+		t.Fatalf("ComputeExpected failed: %v", err)
+	}
+
+	defaultBase := DefaultBase()
+	if !HooksEqual(expected, defaultBase) {
+		t.Error("expected DefaultBase when no configs exist")
+	}
+}
+
+func TestHooksEqual(t *testing.T) {
+	a := &HooksConfig{
+		SessionStart: []HookEntry{
+			{Matcher: "", Hooks: []Hook{{Type: "command", Command: "test"}}},
+		},
+	}
+	b := &HooksConfig{
+		SessionStart: []HookEntry{
+			{Matcher: "", Hooks: []Hook{{Type: "command", Command: "test"}}},
+		},
+	}
+	c := &HooksConfig{
+		SessionStart: []HookEntry{
+			{Matcher: "", Hooks: []Hook{{Type: "command", Command: "different"}}},
+		},
+	}
+
+	if !HooksEqual(a, b) {
+		t.Error("identical configs should be equal")
+	}
+	if HooksEqual(a, c) {
+		t.Error("different configs should not be equal")
+	}
+	if !HooksEqual(&HooksConfig{}, &HooksConfig{}) {
+		t.Error("empty configs should be equal")
+	}
+}
+
+func TestLoadSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Test loading existing file
+	settings := SettingsJSON{
+		EditorMode: "vim",
+		Hooks: HooksConfig{
+			SessionStart: []HookEntry{
+				{Matcher: "", Hooks: []Hook{{Type: "command", Command: "test"}}},
+			},
+		},
+	}
+	data, _ := json.Marshal(settings)
+	path := filepath.Join(tmpDir, "settings.json")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	loaded, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings failed: %v", err)
+	}
+	if loaded.EditorMode != "vim" {
+		t.Errorf("expected editorMode vim, got %q", loaded.EditorMode)
+	}
+	if len(loaded.Hooks.SessionStart) != 1 {
+		t.Errorf("expected 1 SessionStart hook, got %d", len(loaded.Hooks.SessionStart))
+	}
+
+	// Test loading non-existent file (should return zero-value)
+	missing, err := LoadSettings(filepath.Join(tmpDir, "missing.json"))
+	if err != nil {
+		t.Fatalf("LoadSettings missing file failed: %v", err)
+	}
+	if missing.EditorMode != "" || len(missing.Hooks.SessionStart) != 0 {
+		t.Error("missing file should return zero-value SettingsJSON")
+	}
+}
+
+func TestDiscoverTargets(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a minimal workspace structure
+	// mayor/town.json (workspace marker)
+	os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "mayor", "town.json"), []byte(`{"name":"test"}`), 0644)
+
+	// deacon directory
+	os.MkdirAll(filepath.Join(tmpDir, "deacon"), 0755)
+
+	// rig with crew and witness
+	os.MkdirAll(filepath.Join(tmpDir, "testrig", "crew", "alice"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "testrig", "crew", "bob"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "testrig", "witness"), 0755)
+
+	targets, err := DiscoverTargets(tmpDir)
+	if err != nil {
+		t.Fatalf("DiscoverTargets failed: %v", err)
+	}
+
+	// Should find: mayor, deacon, testrig/rig, testrig/crew, testrig/crew (alice), testrig/crew (bob), testrig/witness
+	if len(targets) < 5 {
+		t.Errorf("expected at least 5 targets, got %d", len(targets))
+		for _, tgt := range targets {
+			t.Logf("  target: %s (key=%s)", tgt.DisplayKey(), tgt.Key)
+		}
+	}
+
+	// Verify specific targets exist
+	found := make(map[string]bool)
+	for _, tgt := range targets {
+		found[tgt.DisplayKey()] = true
+	}
+
+	for _, expected := range []string{"mayor", "deacon", "testrig/crew", "testrig/witness"} {
+		if !found[expected] {
+			t.Errorf("expected target %q not found", expected)
+		}
+	}
+}
+
+func TestTargetDisplayKey(t *testing.T) {
+	tests := []struct {
+		target   Target
+		expected string
+	}{
+		{Target{Key: "mayor", Role: "mayor"}, "mayor"},
+		{Target{Key: "gastown/crew", Rig: "gastown", Role: "crew"}, "gastown/crew"},
+		{Target{Key: "beads/witness", Rig: "beads", Role: "witness"}, "beads/witness"},
+	}
+
+	for _, tt := range tests {
+		if got := tt.target.DisplayKey(); got != tt.expected {
+			t.Errorf("DisplayKey() = %q, want %q", got, tt.expected)
+		}
+	}
+}
+
 func TestMarshalConfig(t *testing.T) {
 	cfg := &HooksConfig{
 		SessionStart: []HookEntry{

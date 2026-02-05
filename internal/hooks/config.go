@@ -196,6 +196,234 @@ func GetApplicableOverrides(target string) []string {
 	return []string{target}
 }
 
+// Merge merges an override config into a base config.
+// For each hook type, if the override has entries, they replace the base entries.
+// Hook types not present in the override are preserved from the base.
+func Merge(base, override *HooksConfig) *HooksConfig {
+	result := *base
+	if len(override.PreToolUse) > 0 {
+		result.PreToolUse = override.PreToolUse
+	}
+	if len(override.PostToolUse) > 0 {
+		result.PostToolUse = override.PostToolUse
+	}
+	if len(override.SessionStart) > 0 {
+		result.SessionStart = override.SessionStart
+	}
+	if len(override.Stop) > 0 {
+		result.Stop = override.Stop
+	}
+	if len(override.PreCompact) > 0 {
+		result.PreCompact = override.PreCompact
+	}
+	if len(override.UserPromptSubmit) > 0 {
+		result.UserPromptSubmit = override.UserPromptSubmit
+	}
+	return &result
+}
+
+// ComputeExpected computes the expected HooksConfig for a target by loading
+// the base config and applying all applicable overrides in order of specificity.
+// If no base config exists, uses DefaultBase().
+func ComputeExpected(target string) (*HooksConfig, error) {
+	base, err := LoadBase()
+	if err != nil {
+		if os.IsNotExist(err) {
+			base = DefaultBase()
+		} else {
+			return nil, fmt.Errorf("loading base config: %w", err)
+		}
+	}
+
+	result := base
+	for _, overrideKey := range GetApplicableOverrides(target) {
+		override, err := LoadOverride(overrideKey)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("loading override %q: %w", overrideKey, err)
+		}
+		result = Merge(result, override)
+	}
+
+	return result, nil
+}
+
+// LoadSettings loads a Claude Code settings.json file.
+// Returns a zero-value SettingsJSON if the file doesn't exist.
+func LoadSettings(path string) (*SettingsJSON, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &SettingsJSON{}, nil
+		}
+		return nil, err
+	}
+
+	var settings SettingsJSON
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+
+	return &settings, nil
+}
+
+// HooksEqual returns true if two HooksConfigs are structurally equal.
+// Compares by serializing to JSON for reliable deep equality.
+func HooksEqual(a, b *HooksConfig) bool {
+	aj, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	bj, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return string(aj) == string(bj)
+}
+
+// DiscoverTargets finds all managed .claude/settings.json locations in the workspace.
+// Returns Target structs with path, override key, rig, and role information.
+func DiscoverTargets(townRoot string) ([]Target, error) {
+	var targets []Target
+
+	// Town-level targets
+	targets = append(targets, Target{
+		Path: filepath.Join(townRoot, "mayor", ".claude", "settings.json"),
+		Key:  "mayor",
+		Role: "mayor",
+	})
+	targets = append(targets, Target{
+		Path: filepath.Join(townRoot, "deacon", ".claude", "settings.json"),
+		Key:  "deacon",
+		Role: "deacon",
+	})
+
+	// Scan rigs
+	entries, err := os.ReadDir(townRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == "mayor" || entry.Name() == "deacon" ||
+			entry.Name() == ".beads" || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		rigName := entry.Name()
+		rigPath := filepath.Join(townRoot, rigName)
+
+		// Skip directories that aren't rigs (no crew/ or witness/ or polecats/ subdirs)
+		if !isRig(rigPath) {
+			continue
+		}
+
+		// Rig-level
+		targets = append(targets, Target{
+			Path: filepath.Join(rigPath, ".claude", "settings.json"),
+			Key:  rigName + "/rig",
+			Rig:  rigName,
+			Role: "rig",
+		})
+
+		// Crew-level
+		crewDir := filepath.Join(rigPath, "crew")
+		if info, err := os.Stat(crewDir); err == nil && info.IsDir() {
+			targets = append(targets, Target{
+				Path: filepath.Join(crewDir, ".claude", "settings.json"),
+				Key:  rigName + "/crew",
+				Rig:  rigName,
+				Role: "crew",
+			})
+
+			// Individual crew members
+			if members, err := os.ReadDir(crewDir); err == nil {
+				for _, m := range members {
+					if m.IsDir() && !strings.HasPrefix(m.Name(), ".") {
+						targets = append(targets, Target{
+							Path: filepath.Join(crewDir, m.Name(), ".claude", "settings.json"),
+							Key:  rigName + "/crew",
+							Rig:  rigName,
+							Role: "crew",
+						})
+					}
+				}
+			}
+		}
+
+		// Polecats-level
+		polecatsDir := filepath.Join(rigPath, "polecats")
+		if info, err := os.Stat(polecatsDir); err == nil && info.IsDir() {
+			targets = append(targets, Target{
+				Path: filepath.Join(polecatsDir, ".claude", "settings.json"),
+				Key:  rigName + "/polecats",
+				Rig:  rigName,
+				Role: "polecats",
+			})
+
+			// Individual polecats
+			if polecats, err := os.ReadDir(polecatsDir); err == nil {
+				for _, p := range polecats {
+					if p.IsDir() && !strings.HasPrefix(p.Name(), ".") {
+						targets = append(targets, Target{
+							Path: filepath.Join(polecatsDir, p.Name(), ".claude", "settings.json"),
+							Key:  rigName + "/polecats",
+							Rig:  rigName,
+							Role: "polecats",
+						})
+					}
+				}
+			}
+		}
+
+		// Witness
+		witnessDir := filepath.Join(rigPath, "witness")
+		if info, err := os.Stat(witnessDir); err == nil && info.IsDir() {
+			targets = append(targets, Target{
+				Path: filepath.Join(witnessDir, ".claude", "settings.json"),
+				Key:  rigName + "/witness",
+				Rig:  rigName,
+				Role: "witness",
+			})
+		}
+
+		// Refinery
+		refineryDir := filepath.Join(rigPath, "refinery")
+		if info, err := os.Stat(refineryDir); err == nil && info.IsDir() {
+			targets = append(targets, Target{
+				Path: filepath.Join(refineryDir, ".claude", "settings.json"),
+				Key:  rigName + "/refinery",
+				Rig:  rigName,
+				Role: "refinery",
+			})
+		}
+	}
+
+	return targets, nil
+}
+
+// isRig checks if a directory looks like a rig (has crew/, witness/, or polecats/ subdirectory).
+func isRig(path string) bool {
+	for _, sub := range []string{"crew", "witness", "polecats", "refinery"} {
+		info, err := os.Stat(filepath.Join(path, sub))
+		if err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// DisplayKey returns a human-readable label for the target.
+// For targets with a rig, shows "rig/role"; for town-level targets, shows the role.
+func (t Target) DisplayKey() string {
+	if t.Rig != "" {
+		return t.Rig + "/" + t.Role
+	}
+	return t.Role
+}
+
 // loadConfig loads a HooksConfig from a JSON file.
 func loadConfig(path string) (*HooksConfig, error) {
 	data, err := os.ReadFile(path)
