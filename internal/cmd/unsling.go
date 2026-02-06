@@ -92,23 +92,16 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("finding town root: %w", err)
 	}
 
-	// Extract rig name from agent ID (e.g., "gastown/crew/joe" -> "gastown")
-	// For town-level agents like "mayor/", use town root
-	rigName := strings.Split(agentID, "/")[0]
-	var beadsPath string
-	if rigName == "mayor" || rigName == "deacon" {
-		beadsPath = townRoot
-	} else {
-		beadsPath = filepath.Join(townRoot, rigName)
-	}
-
-	b := beads.New(beadsPath)
-
-	// Convert agent ID to agent bead ID and look up the agent bead
+	// Convert agent ID to agent bead ID first - needed to resolve correct directory
 	agentBeadID := agentIDToBeadID(agentID, townRoot)
 	if agentBeadID == "" {
 		return fmt.Errorf("could not convert agent ID %s to bead ID", agentID)
 	}
+
+	// Resolve the correct beads directory using prefix-based resolution.
+	// This handles crew workspaces where .beads/redirect points to the rig DB.
+	beadsPath := beads.ResolveHookDir(townRoot, agentBeadID, filepath.Join(townRoot, strings.Split(agentID, "/")[0]))
+	b := beads.New(beadsPath)
 
 	// Get the agent bead to find current hook
 	agentBead, err := b.Show(agentBeadID)
