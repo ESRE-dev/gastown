@@ -6,9 +6,8 @@
 > **Consolidates**: DOLT-STORAGE-DESIGN.md, THREE-PLANES.md, dolt-integration-analysis-v{1,2}.md,
 > dolt-license-analysis.md (all deleted; available in git history under ~/hop/docs/)
 > **Key decisions**: SQLite retired. JSONL retired (interim backup only). Dolt is the
-> only backend. Gas Town requires server mode. Standalone Beads defaults to embedded
-> Dolt, with server mode available for heavy concurrency. Dolt-in-git replaces JSONL
-> for federation when it ships.
+> only backend. Server mode is **required** (embedded mode fully removed — no fallback).
+> Dolt-in-git replaces JSONL for federation when it ships.
 
 ---
 
@@ -20,29 +19,12 @@
 |----------|---------|
 | **Dolt is the only backend** | SQLite retired. No dual-backend. |
 | **JSONL is not source of truth** | One-way backup export only (interim). Eliminated entirely by dolt-in-git. |
+| **Dolt Server is required** | One server per town, serving all rig databases. No embedded fallback. |
+| **Embedded mode removed** | File-level locking causes hangs under concurrent load. Removed entirely — not kept as fallback. |
+| **Single binary** | Pure-Go Dolt (`bd`). No CGO needed for local ops. |
 | **Licensing** | Dolt is Apache 2.0, compatible with Beads/Gas Town MIT. Standard attribution. |
 
-### Deployment Tiers
-
-Dolt access mode depends on concurrency requirements:
-
-| Tier | Mode | Use Case | Concurrency |
-|------|------|----------|-------------|
-| **Solo / light multi** | Embedded Dolt | Standalone Beads, 1-4 CC instances | File-level locking (noms LOCK) |
-| **Heavy multi** | Dolt SQL Server | Gas Town, swarms, 5+ concurrent agents | MySQL protocol, no lock contention |
-| **Federation** | Dolt-in-git | Cross-town sync, ledger plane | Dolt binary files in git, cell-level merge |
-
-**Gas Town**: Server mode is required. One server per town, serving all rig databases.
-Embedded mode is not available in Gas Town — the concurrency profile (40+ concurrent
-`bd` processes from `gt status`) makes file-level locking untenable.
-
-**Standalone Beads**: Embedded Dolt is the default. No server process, no daemon — just
-works. Users running 3-4 Claude Code instances will see acceptable performance with
-file-level locking. For heavier concurrency, users can opt into Dolt Server mode.
-Dolt-in-git (when shipped) becomes the default for federation/sync — replacing SQLite,
-JSONL, and `bd daemon` entirely.
-
-### Server Mode Architecture (Gas Town)
+### Server Mode Architecture
 
 ```
 ┌─────────────────────────────────┐
@@ -64,10 +46,10 @@ All `bd` commands connect via MySQL protocol. There is no embedded fallback.
 If the server is not running, `bd` fails fast with a clear error message
 pointing the user to `gt dolt start`.
 
-### Why Gas Town Requires Server Mode
+### Why Embedded Mode Was Removed
 
-Embedded Dolt uses file-level locking (noms LOCK). In Gas Town's multi-agent
-environment, this causes severe problems:
+Embedded Dolt uses file-level locking (noms LOCK). In multi-agent environments,
+this causes severe problems:
 
 - `gt status` spawns 40+ `bd` processes to check all rigs
 - Each process contends for the same lock file
@@ -75,14 +57,10 @@ environment, this causes severe problems:
 - A semaphore hack (MaxConcurrentBd=3) serializes access but kills parallelism
 - Even read-only operations acquire exclusive locks in the embedded driver
 
-Gas Town's data lives in the server's centralized data directory (`~/.dolt-data/`),
-so embedded can't access it anyway. Removing the embedded path from Gas Town
+Embedded was initially kept as a fallback, but this created complexity for no
+benefit: if the server is down, the data lives on the server's data directory
+(`~/.dolt-data/`), so embedded can't access it anyway. Removing embedded entirely
 enables significant code simplification (see Part 11).
-
-**Standalone Beads does not have this problem.** A solo developer or small team
-running 1-4 concurrent `bd` processes has a fundamentally different concurrency
-profile. Embedded Dolt with file locks works fine here and avoids the operational
-overhead of running a server process.
 
 ### Server Topology Options
 
@@ -450,14 +428,9 @@ CREATE TABLE channels (
 3. Enable `dolt_server` in `mayor/daemon.json`
 4. `gt daemon start` — daemon auto-starts the Dolt server
 
-**Fresh Beads install (standalone, embedded — default):**
-1. `bd init` — initializes `.beads/` with embedded Dolt database
-2. `bd` reads/writes directly via embedded driver. No server, no daemon.
-
-**Fresh Beads install (standalone, server — for heavy concurrency):**
+**Fresh Beads install (standalone):**
 1. `dolt sql-server --port 3307 --data-dir <path>` — start server
-2. Configure `metadata.json` with `dolt_mode: "server"`
-3. `bd` connects via MySQL protocol, creates database and schema automatically
+2. `bd` connects via MySQL protocol, creates database and schema automatically
 
 ### Error Recovery
 
@@ -521,9 +494,8 @@ Direct answers from Tim Sehn (CEO) and Dustin Brown (engineer), January 2026.
 
 ### Immediate
 
-1. **Gas Town: Remove embedded code path from gt** (see Part 11): Simplify Gas Town's
-   server-only path. Remove semaphore hacks, fallback logic, advisory locks from gt.
-2. **Dolt-in-git integration**: Dolt team delivering ~Feb 11 2026.
+1. **Remove embedded mode from bd** (see Part 11): Major code simplification.
+2. **Dolt-in-git integration**: Dolt team delivering soon.
    When ready, integrate into bd — replace JSONL with Dolt binary commits.
 3. **Gas Town pristine state**: Clean up old `.beads/dolt/` directories, stale
    SQLite, misrouted beads, stale JSONL.
@@ -531,10 +503,8 @@ Direct answers from Tim Sehn (CEO) and Dustin Brown (engineer), January 2026.
 ### Next
 
 - Closed-beads-only ledger export
-- Make Dolt the default (and only) Beads backend — retire SQLite after
-  sufficient happy Dolt-Beads users validate the embedded path
-- Investigate transparent Dolt Server lifecycle management for standalone
-  Beads users who need to escalate from embedded to server mode
+- Agent-managed Dolt migration flow for Beads users
+- Ship `bd` release (server-only, no embedded driver → smaller binary)
 - Per-rig server option for isolation (if demand emerges)
 
 ### Future
@@ -550,10 +520,9 @@ Direct answers from Tim Sehn (CEO) and Dustin Brown (engineer), January 2026.
 |----------|-----------|------|
 | Dolt only, retire SQLite | One backend, better conflicts | 2026-01-15 |
 | JSONL retired as source of truth | Dolt is truth; JSONL is interim backup | 2026-01-15 |
-| ~~Embedded Dolt default for all~~ | ~~No server process, just works~~ | ~~2026-01-30~~ |
-| **Three-tier deployment** | Embedded (solo/light), server (heavy multi), dolt-in-git (federation) | 2026-02-05 |
-| **Gas Town: server-only** | Embedded file locking causes hangs under Gas Town's 40+ concurrent processes | 2026-02-05 |
-| **Standalone Beads: embedded default** | Solo/light-multi (1-4 CC instances) works fine with file locks; no server overhead | 2026-02-05 |
+| ~~Embedded Dolt default~~ | ~~No server process, just works~~ | ~~2026-01-30~~ |
+| **Server mode is default** | Embedded file locking causes hangs under multi-agent concurrency | 2026-02-05 |
+| **Embedded mode removed entirely** | No fallback — data lives on server, embedded can't access it. Enables major code simplification. | 2026-02-05 |
 | **Daemon manages Dolt server** | Auto-start on heartbeat, auto-restart on crash, graceful shutdown | 2026-02-05 |
 | **One server per town** | Centralized `.dolt-data/` serves all rigs; simple ops, single process | 2026-02-05 |
 | Single binary (pure-Go) | No CGO needed for local ops | 2026-01-30 |
@@ -568,48 +537,52 @@ Direct answers from Tim Sehn (CEO) and Dustin Brown (engineer), January 2026.
 
 ---
 
-## Part 11: Code Simplification
+## Part 11: Code Simplification (Embedded Removal)
 
-### Gas Town: Remove Embedded Path from gt
+Removing embedded mode entirely enables significant cleanup across the `bd` codebase.
+This is not incremental — it's a wholesale removal of a code path that no longer executes.
 
-Gas Town is server-only. The embedded code path in `gt` hooks and commands never
-executes and can be removed entirely.
+### What Gets Removed
 
-| Component | Location | What |
-|-----------|----------|------|
-| **Semaphore hacks** | gt hooks, bd `main.go` | `MaxConcurrentBd=3` (G1/G5) — no contention with server |
+| Component | File | What |
+|-----------|------|------|
+| **Embedded Dolt driver** | `go.mod` | `go-dolt` dependency — largest single dep in the binary |
+| **Advisory lock layer** | `access_lock.go` | Entire file: shared/exclusive flock, `AcquireAccessLock()`, `dolt-access.lock` |
+| **Embedded connection** | `store.go` | `openEmbeddedConnection()`, `withEmbeddedDolt()`, embedded backoff/retry |
+| **UOW1/UOW2 init path** | `store.go` | Embedded-only `CREATE DATABASE` + schema init via embedded driver |
 | **Server fallback** | `factory_dolt.go` | `isServerConnectionError()` fallback to embedded (lines 39-55) |
+| **JSONL bootstrap** | `factory_dolt.go` | `bootstrapEmbeddedDolt()`, `hasDoltSubdir()` |
 | **Read-only distinction** | `main.go` | `isReadOnlyCommand()` map — server handles concurrency natively |
+| **Semaphore hacks** | gt hooks, `main.go` | `MaxConcurrentBd=3` (G1/G5) — no contention with server |
 | **Lock timeout config** | `main.go` | 5s/15s read/write timeouts — no advisory locks |
+| **`BD_SKIP_ACCESS_LOCK`** | `store.go` | Debug env var for bypassing flock |
+| **Embedded build tags** | Various | `//go:build cgo` guards |
 
-### Standalone Beads: Embedded Stays
+### Impact
 
-The `bd` binary retains embedded Dolt for standalone users. The embedded code path
-(`openEmbeddedConnection()`, advisory locks, `go-dolt` dependency) stays in `bd`
-because it's the default access mode for solo and light-multi use.
+| Metric | Before | After (estimated) |
+|--------|--------|-------------------|
+| Binary size | ~120MB (embedded Dolt engine) | ~20MB (MySQL client only) |
+| Build time | ~90s (CGO, Dolt compilation) | ~15s (pure Go, no CGO) |
+| `store.go` complexity | Two code paths (embedded + server) | One code path (server only) |
+| Lock-related code | ~300 lines across 4 files | 0 |
+| External deps | go-dolt + go-sql-driver/mysql | go-sql-driver/mysql only |
 
-What changes for standalone Beads:
-- SQLite backend removed (replaced by embedded Dolt)
-- JSONL sync removed (replaced by dolt-in-git when shipped)
-- `bd daemon` removed (no JSONL serialization layer needed)
-- Server mode available as opt-in escalation for heavy concurrency
+### What Stays
 
-### Future: Full SQLite + JSONL Removal from bd
+- `openServerConnection()` in `store.go` — the MySQL connection path
+- `initSchemaOnDB()` — schema creation (runs via MySQL now)
+- `dolt.Config` struct — simplified (remove `Path`, `OpenTimeout`, embedded fields)
+- `metadata.json` config — `dolt_mode` field becomes vestigial (always server)
+- JSONL export (`bd sync --flush-only`) — interim backup until dolt-in-git ships
 
-Once Dolt-in-git ships and we have happy standalone Dolt-Beads users:
+### Migration Path
 
-| Removed | Replaced By |
-|---------|-------------|
-| SQLite backend | Embedded Dolt (default) or Dolt Server (opt-in) |
-| JSONL sync | Dolt-in-git (native binary in git) |
-| `bd daemon` | Nothing — no serialization layer needed |
-| `bd sync` bidirectional | Dolt merge driver handles conflicts |
-
-### Impact (SQLite + JSONL removal, estimated)
-
-| Metric | Before | After |
-|--------|--------|-------|
-| Backends | 3 (SQLite, embedded Dolt, Dolt server) | 2 (embedded Dolt, Dolt server) |
-| Sync layer | JSONL export/import + daemon | Dolt-in-git (zero-translation) |
-| `store.go` complexity | Three code paths | Two code paths (embedded + server) |
-| External deps | SQLite + go-dolt + go-sql-driver/mysql | go-dolt + go-sql-driver/mysql |
+1. Remove embedded code paths from `store.go` and `factory_dolt.go`
+2. Remove `access_lock.go` entirely
+3. Remove `go-dolt` from `go.mod`
+4. Remove CGO build tags
+5. Simplify `main.go` — remove `isReadOnlyCommand()`, lock timeout logic
+6. Remove semaphore infrastructure from gt hooks
+7. Update `metadata.json` handling — `dolt_mode: "server"` becomes the only valid value
+8. Clean up old `.beads/dolt/` directories and `dolt-access.lock` files
