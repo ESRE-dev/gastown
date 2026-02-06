@@ -48,6 +48,9 @@ func runHooksOverride(cmd *cobra.Command, args []string) error {
 
 	cfg, err := hooks.LoadOverride(target)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("loading override config for %q: %w", target, err)
+		}
 		// File doesn't exist yet - create empty
 		cfg = &hooks.HooksConfig{}
 		if err := hooks.SaveOverride(target, cfg); err != nil {

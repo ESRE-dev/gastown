@@ -250,6 +250,93 @@ func TestMerge(t *testing.T) {
 	}
 }
 
+// TestMergePerMatcherPreservation is the exact bug scenario from the spec:
+// base has PreToolUse with matchers ["Bash(git*)", "Bash(rm*)"], override has
+// PreToolUse with matcher ["Bash(git*)"]. The "Bash(rm*)" matcher must be preserved.
+func TestMergePerMatcherPreservation(t *testing.T) {
+	base := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: "Bash(git*)", Hooks: []Hook{{Type: "command", Command: "git-guard"}}},
+			{Matcher: "Bash(rm*)", Hooks: []Hook{{Type: "command", Command: "rm-guard"}}},
+		},
+	}
+	override := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: "Bash(git*)", Hooks: []Hook{{Type: "command", Command: "crew-git-guard"}}},
+		},
+	}
+
+	result := Merge(base, override)
+
+	if len(result.PreToolUse) != 2 {
+		t.Fatalf("expected 2 PreToolUse entries (per-matcher merge), got %d", len(result.PreToolUse))
+	}
+
+	// Bash(git*) should be replaced by override
+	if result.PreToolUse[0].Matcher != "Bash(git*)" {
+		t.Errorf("expected first matcher Bash(git*), got %q", result.PreToolUse[0].Matcher)
+	}
+	if result.PreToolUse[0].Hooks[0].Command != "crew-git-guard" {
+		t.Errorf("expected override command for Bash(git*), got %q", result.PreToolUse[0].Hooks[0].Command)
+	}
+
+	// Bash(rm*) should be preserved from base
+	if result.PreToolUse[1].Matcher != "Bash(rm*)" {
+		t.Errorf("expected second matcher Bash(rm*), got %q", result.PreToolUse[1].Matcher)
+	}
+	if result.PreToolUse[1].Hooks[0].Command != "rm-guard" {
+		t.Errorf("expected base command for Bash(rm*), got %q", result.PreToolUse[1].Hooks[0].Command)
+	}
+}
+
+func TestMergeDifferentMatchersBothIncluded(t *testing.T) {
+	base := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: "Write", Hooks: []Hook{{Type: "command", Command: "write-check"}}},
+		},
+	}
+	override := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: "Bash", Hooks: []Hook{{Type: "command", Command: "bash-check"}}},
+		},
+	}
+
+	result := Merge(base, override)
+
+	if len(result.PreToolUse) != 2 {
+		t.Fatalf("expected 2 PreToolUse entries, got %d", len(result.PreToolUse))
+	}
+	if result.PreToolUse[0].Matcher != "Write" {
+		t.Errorf("expected base Write matcher first, got %q", result.PreToolUse[0].Matcher)
+	}
+	if result.PreToolUse[1].Matcher != "Bash" {
+		t.Errorf("expected override Bash matcher second, got %q", result.PreToolUse[1].Matcher)
+	}
+}
+
+func TestMergeExplicitDisable(t *testing.T) {
+	base := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: "Write", Hooks: []Hook{{Type: "command", Command: "write-check"}}},
+			{Matcher: "Bash", Hooks: []Hook{{Type: "command", Command: "bash-check"}}},
+		},
+	}
+	override := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: "Write", Hooks: []Hook{}}, // Explicit disable
+		},
+	}
+
+	result := Merge(base, override)
+
+	if len(result.PreToolUse) != 1 {
+		t.Fatalf("expected 1 PreToolUse entry after disable, got %d", len(result.PreToolUse))
+	}
+	if result.PreToolUse[0].Matcher != "Bash" {
+		t.Errorf("expected Bash matcher to remain, got %q", result.PreToolUse[0].Matcher)
+	}
+}
+
 func TestMergeEmptyOverride(t *testing.T) {
 	base := DefaultBase()
 	override := &HooksConfig{}

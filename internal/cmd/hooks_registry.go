@@ -44,7 +44,7 @@ installed for different roles (crew, polecat, witness, etc.).
 Examples:
   gt hooks registry           # Show enabled hooks
   gt hooks registry --all     # Show all hooks including disabled`,
-	RunE: runHooksList,
+	RunE: runHooksRegistry,
 }
 
 func init() {
@@ -73,7 +73,7 @@ func LoadRegistry(townRoot string) (*HookRegistry, error) {
 	return &registry, nil
 }
 
-func runHooksList(cmd *cobra.Command, args []string) error {
+func runHooksRegistry(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)

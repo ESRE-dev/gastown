@@ -36,6 +36,9 @@ func init() {
 func runHooksBase(cmd *cobra.Command, args []string) error {
 	cfg, err := hooks.LoadBase()
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("loading base config: %w", err)
+		}
 		// File doesn't exist yet - create with defaults
 		cfg = hooks.DefaultBase()
 		if err := hooks.SaveBase(cfg); err != nil {

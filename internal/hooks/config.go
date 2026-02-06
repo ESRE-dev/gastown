@@ -197,30 +197,74 @@ func GetApplicableOverrides(target string) []string {
 	return []string{target}
 }
 
-// Merge merges an override config into a base config.
-// For each hook type, if the override has entries, they replace the base entries.
+// Merge merges an override config into a base config using per-matcher merging.
+// For each hook type present in the override:
+//   - Same matcher: override replaces the base entry entirely
+//   - Different matcher: both entries are included (base first, then override)
+//   - Empty hooks list on a matcher: removes that entry (explicit disable)
+//
 // Hook types not present in the override are preserved from the base.
 func Merge(base, override *HooksConfig) *HooksConfig {
-	result := *base
-	if len(override.PreToolUse) > 0 {
-		result.PreToolUse = override.PreToolUse
+	result := copyConfig(base)
+
+	for _, eventType := range EventTypes {
+		overrideEntries := override.GetEntries(eventType)
+		if len(overrideEntries) == 0 {
+			continue
+		}
+
+		baseEntries := result.GetEntries(eventType)
+		if baseEntries == nil {
+			baseEntries = []HookEntry{}
+		}
+
+		for _, oe := range overrideEntries {
+			replaced := false
+			for i, be := range baseEntries {
+				if be.Matcher == oe.Matcher {
+					replaced = true
+					if len(oe.Hooks) == 0 {
+						// Explicit disable: remove this entry
+						baseEntries = append(baseEntries[:i], baseEntries[i+1:]...)
+					} else {
+						baseEntries[i] = oe
+					}
+					break
+				}
+			}
+			if !replaced && len(oe.Hooks) > 0 {
+				baseEntries = append(baseEntries, oe)
+			}
+		}
+
+		result.SetEntries(eventType, baseEntries)
 	}
-	if len(override.PostToolUse) > 0 {
-		result.PostToolUse = override.PostToolUse
+
+	return result
+}
+
+// copyConfig creates a deep copy of a HooksConfig.
+func copyConfig(c *HooksConfig) *HooksConfig {
+	if c == nil {
+		return &HooksConfig{}
 	}
-	if len(override.SessionStart) > 0 {
-		result.SessionStart = override.SessionStart
+	result := &HooksConfig{}
+	for _, eventType := range EventTypes {
+		entries := c.GetEntries(eventType)
+		if entries == nil {
+			continue
+		}
+		copied := make([]HookEntry, len(entries))
+		for i, e := range entries {
+			copied[i] = HookEntry{
+				Matcher: e.Matcher,
+				Hooks:   make([]Hook, len(e.Hooks)),
+			}
+			copy(copied[i].Hooks, e.Hooks)
+		}
+		result.SetEntries(eventType, copied)
 	}
-	if len(override.Stop) > 0 {
-		result.Stop = override.Stop
-	}
-	if len(override.PreCompact) > 0 {
-		result.PreCompact = override.PreCompact
-	}
-	if len(override.UserPromptSubmit) > 0 {
-		result.UserPromptSubmit = override.UserPromptSubmit
-	}
-	return &result
+	return result
 }
 
 // ComputeExpected computes the expected HooksConfig for a target by loading
