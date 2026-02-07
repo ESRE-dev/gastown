@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -78,39 +79,104 @@ func init() {
 	rootCmd.AddCommand(compactCmd)
 }
 
-// loadTTLConfig loads TTL configuration from the wisp config for the given rig.
-// Falls back to hardcoded defaults if no config exists.
+// loadTTLConfig loads TTL configuration with layered precedence:
+//
+//	role bead > rig config (wisp layer + bead labels) > hardcoded defaults
+//
+// The roleName parameter enables role bead overrides (e.g., "deacon", "witness").
+// Pass empty string to skip the role bead layer.
 func loadTTLConfig(townRoot, rigName string) map[string]time.Duration {
+	roleName := os.Getenv("GT_ROLE")
+	return loadTTLConfigWithRole(townRoot, rigName, roleName)
+}
+
+// loadTTLConfigWithRole is the testable version of loadTTLConfig that accepts
+// an explicit role name parameter instead of reading from environment.
+func loadTTLConfigWithRole(townRoot, rigName, roleName string) map[string]time.Duration {
+	// Layer 1: Hardcoded defaults (lowest precedence)
 	ttls := make(map[string]time.Duration)
 	for k, v := range defaultTTLs {
 		ttls[k] = v
 	}
 
-	if townRoot == "" || rigName == "" {
+	if townRoot == "" {
 		return ttls
 	}
 
-	cfg := wisp.NewConfig(townRoot, rigName)
-	raw := cfg.Get("wisp_ttl")
-	if raw == nil {
-		return ttls
-	}
-
-	// wisp_ttl is stored as map[string]interface{} in JSON config
-	ttlMap, ok := raw.(map[string]interface{})
-	if !ok {
-		return ttls
-	}
-
-	for wispType, val := range ttlMap {
-		if s, ok := val.(string); ok {
-			if d, err := time.ParseDuration(s); err == nil {
-				ttls[wispType] = d
+	// Layer 2: Rig config - wisp layer (middle precedence)
+	if rigName != "" {
+		cfg := wisp.NewConfig(townRoot, rigName)
+		raw := cfg.Get("wisp_ttl")
+		if raw != nil {
+			// wisp_ttl is stored as map[string]interface{} in JSON config
+			if ttlMap, ok := raw.(map[string]interface{}); ok {
+				for wispType, val := range ttlMap {
+					if s, ok := val.(string); ok {
+						if d, err := time.ParseDuration(s); err == nil {
+							ttls[wispType] = d
+						}
+					}
+				}
 			}
 		}
+
+		// Layer 2b: Rig identity bead labels (wisp_ttl_*:value)
+		applyRigBeadTTLOverrides(ttls, townRoot, rigName)
+	}
+
+	// Layer 3: Role bead description (highest precedence)
+	if roleName != "" {
+		applyRoleBeadTTLOverrides(ttls, townRoot, roleName)
 	}
 
 	return ttls
+}
+
+// applyRigBeadTTLOverrides reads wisp_ttl_* labels from the rig identity bead
+// and applies them as overrides.
+func applyRigBeadTTLOverrides(ttls map[string]time.Duration, townRoot, rigName string) {
+	beadsDir := beads.ResolveBeadsDir(townRoot)
+	bd := beads.NewWithBeadsDir(townRoot, beadsDir)
+
+	rigBeadID := beads.RigBeadIDWithPrefix("gt", rigName)
+	issue, err := bd.Show(rigBeadID)
+	if err != nil {
+		return
+	}
+
+	for _, label := range issue.Labels {
+		colonIdx := strings.Index(label, ":")
+		if colonIdx == -1 {
+			continue
+		}
+		key := strings.ToLower(label[:colonIdx])
+		value := strings.TrimSpace(label[colonIdx+1:])
+
+		if wispType, ok := beads.ParseWispTTLKey(key); ok {
+			if dur, err := time.ParseDuration(value); err == nil {
+				ttls[wispType] = dur
+			}
+		}
+	}
+}
+
+// applyRoleBeadTTLOverrides reads wisp_ttl_* fields from the role bead description
+// and applies them as overrides (highest precedence).
+func applyRoleBeadTTLOverrides(ttls map[string]time.Duration, townRoot, roleName string) {
+	beadsDir := beads.ResolveBeadsDir(townRoot)
+	bd := beads.NewWithBeadsDir(townRoot, beadsDir)
+
+	roleBeadID := beads.RoleBeadIDTown(roleName)
+	roleConfig, err := bd.GetRoleConfig(roleBeadID)
+	if err != nil || roleConfig == nil {
+		return
+	}
+
+	for wispType, ttlStr := range roleConfig.WispTTLs {
+		if dur, err := time.ParseDuration(ttlStr); err == nil {
+			ttls[wispType] = dur
+		}
+	}
 }
 
 // getTTL returns the TTL for a wisp based on its wisp_type field.

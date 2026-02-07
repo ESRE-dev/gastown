@@ -192,3 +192,27 @@ func TestLoadTTLConfigDefaults(t *testing.T) {
 		t.Errorf("error TTL = %v, want 168h", ttls["error"])
 	}
 }
+
+func TestLoadTTLConfigWithRoleDefaults(t *testing.T) {
+	// With empty town root and no role, should return hardcoded defaults
+	ttls := loadTTLConfigWithRole("", "", "")
+
+	for k, want := range defaultTTLs {
+		if got := ttls[k]; got != want {
+			t.Errorf("loadTTLConfigWithRole TTLs[%q] = %v, want %v", k, got, want)
+		}
+	}
+}
+
+func TestLoadTTLConfigWithRoleSkipsInvalidPaths(t *testing.T) {
+	// With nonexistent paths, role bead lookup should gracefully skip
+	ttls := loadTTLConfigWithRole("/nonexistent/town", "myrig", "deacon")
+
+	// Should still have defaults even though lookups failed
+	if ttls["patrol"] != defaultTTLs["patrol"] {
+		t.Errorf("patrol TTL = %v, want %v", ttls["patrol"], defaultTTLs["patrol"])
+	}
+	if ttls["error"] != defaultTTLs["error"] {
+		t.Errorf("error TTL = %v, want %v", ttls["error"], defaultTTLs["error"])
+	}
+}
