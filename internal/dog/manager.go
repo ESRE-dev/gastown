@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -36,6 +37,17 @@ func NewManager(townRoot string, rigsConfig *config.RigsConfig) *Manager {
 	}
 }
 
+// validateName checks that a dog name is non-empty and contains no path separators or traversal.
+func validateName(name string) error {
+	if name == "" {
+		return errors.New("dog name must not be empty")
+	}
+	if strings.ContainsAny(name, "/\\") || name == "." || name == ".." || strings.Contains(name, "..") {
+		return fmt.Errorf("invalid dog name %q: must not contain path separators or traversal", name)
+	}
+	return nil
+}
+
 // dogDir returns the directory for a dog.
 func (m *Manager) dogDir(name string) string {
 	return filepath.Join(m.kennelPath, name)
@@ -56,6 +68,9 @@ func (m *Manager) stateFilePath(name string) string {
 // Each dog gets a worktree per rig (e.g., dogs/alpha/gastown/, dogs/alpha/beads/).
 // Worktrees are created from each rig's bare repo (.repo.git) or mayor/rig.
 func (m *Manager) Add(name string) (*Dog, error) {
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
 	if m.exists(name) {
 		return nil, ErrDogExists
 	}
@@ -174,6 +189,9 @@ func (m *Manager) findRepoBase(rigPath string) (*git.Git, error) {
 // Remove deletes a dog from the kennel.
 // Removes all worktrees and the dog directory.
 func (m *Manager) Remove(name string) error {
+	if err := validateName(name); err != nil {
+		return err
+	}
 	if !m.exists(name) {
 		return ErrDogNotFound
 	}
