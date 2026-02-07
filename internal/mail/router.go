@@ -694,6 +694,7 @@ func (r *Router) sendToGroup(msg *Message) error {
 		// Create a copy of the message for this recipient
 		msgCopy := *msg
 		msgCopy.To = recipient
+		msgCopy.ID = "" // Each fan-out copy gets its own ID from bd create
 
 		if err := r.sendToSingle(&msgCopy); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", recipient, err))
@@ -835,6 +836,7 @@ func (r *Router) sendToList(msg *Message) error {
 		// Create a copy of the message for this recipient
 		msgCopy := *msg
 		msgCopy.To = recipient
+		msgCopy.ID = "" // Each fan-out copy gets its own ID from bd create
 
 		if err := r.Send(&msgCopy); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", recipient, err))
@@ -1084,6 +1086,7 @@ func (r *Router) sendToChannel(msg *Message) error {
 			// Create a copy for this subscriber with channel context in subject
 			msgCopy := *msg
 			msgCopy.To = subscriber
+			msgCopy.ID = "" // Each fan-out copy gets its own ID from bd create
 			msgCopy.Subject = fmt.Sprintf("[channel:%s] %s", channelName, msg.Subject)
 
 			if err := r.sendToSingle(&msgCopy); err != nil {
