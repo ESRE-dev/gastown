@@ -57,13 +57,19 @@ func UnmarshalSettings(data []byte) (*SettingsJSON, error) {
 
 	// Extract known fields
 	if raw, ok := s.Extra["editorMode"]; ok {
-		json.Unmarshal(raw, &s.EditorMode)
+		if err := json.Unmarshal(raw, &s.EditorMode); err != nil {
+			return nil, fmt.Errorf("unmarshaling editorMode: %w", err)
+		}
 	}
 	if raw, ok := s.Extra["enabledPlugins"]; ok {
-		json.Unmarshal(raw, &s.EnabledPlugins)
+		if err := json.Unmarshal(raw, &s.EnabledPlugins); err != nil {
+			return nil, fmt.Errorf("unmarshaling enabledPlugins: %w", err)
+		}
 	}
 	if raw, ok := s.Extra["hooks"]; ok {
-		json.Unmarshal(raw, &s.Hooks)
+		if err := json.Unmarshal(raw, &s.Hooks); err != nil {
+			return nil, fmt.Errorf("unmarshaling hooks: %w", err)
+		}
 	}
 
 	return s, nil
