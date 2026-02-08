@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -178,23 +177,27 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	if pid != "" {
-		// First, kill the entire process group. This catches processes that:
-		// - Reparented to init (PID 1) when their parent died
-		// - Are not direct children but stayed in the same process group
-		// Note: Processes that called setsid() will have a new PGID and won't be killed here
-		pgid := getProcessGroupID(pid)
-		if pgid != "" && pgid != "0" && pgid != "1" {
-			// Kill process group using syscall.Kill() directly, rather than shelling
-			// out to /usr/bin/kill which has parsing ambiguity with negative PGIDs.
-			// procps-ng kill (v4.0.4+) misparses "-PGID" and can kill ALL processes.
-			// syscall.Kill with negative PID targets the process group (POSIX).
-			pgidInt, _ := strconv.Atoi(pgid)
-			killProcessGroup(pgidInt)
+		// Walk the process tree for all descendants (catches processes that
+		// called setsid() and created their own process groups)
+		descendants := getAllDescendants(pid)
+
+		// Build known PID set for group membership verification
+		knownPIDs := make(map[string]bool, len(descendants)+1)
+		knownPIDs[pid] = true
+		for _, d := range descendants {
+			knownPIDs[d] = true
 		}
 
-		// Also walk the process tree for any descendants that might have called setsid()
-		// and created their own process groups (rare but possible)
-		descendants := getAllDescendants(pid)
+		// Find reparented processes from our process group. Instead of killing
+		// the entire group blindly with syscall.Kill(-pgid, ...) — which could
+		// hit unrelated processes sharing the same PGID — we enumerate group
+		// members and only include those reparented to init (PPID == 1), which
+		// indicates they were likely children in our tree that outlived their parent.
+		pgid := getProcessGroupID(pid)
+		if pgid != "" && pgid != "0" && pgid != "1" {
+			reparented := collectReparentedGroupMembers(pgid, knownPIDs)
+			descendants = append(descendants, reparented...)
+		}
 
 		// Send SIGTERM to all descendants (deepest first to avoid orphaning)
 		for _, dpid := range descendants {
@@ -250,20 +253,28 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 		// Collect all PIDs to kill (from multiple sources)
 		toKill := make(map[string]bool)
 
-		// 1. Get all process group members (catches reparented processes)
-		if pgid != "" && pgid != "0" && pgid != "1" {
-			for _, member := range getProcessGroupMembers(pgid) {
-				if !exclude[member] {
-					toKill[member] = true
-				}
-			}
-		}
-
-		// 2. Get all descendant PIDs recursively (catches processes that called setsid())
+		// 1. Get all descendant PIDs recursively (catches processes that called setsid())
 		descendants := getAllDescendants(pid)
+
+		// Build known PID set for group membership verification
+		knownPIDs := make(map[string]bool, len(descendants)+1)
+		knownPIDs[pid] = true
 		for _, dpid := range descendants {
 			if !exclude[dpid] {
 				toKill[dpid] = true
+			}
+			knownPIDs[dpid] = true
+		}
+
+		// 2. Get verified process group members (only reparented-to-init processes).
+		// Instead of adding ALL group members — which could include unrelated
+		// processes sharing the same PGID — we only add those that were reparented
+		// to init (PPID == 1), indicating they were likely children in our tree.
+		if pgid != "" && pgid != "0" && pgid != "1" {
+			for _, member := range collectReparentedGroupMembers(pgid, knownPIDs) {
+				if !exclude[member] {
+					toKill[member] = true
+				}
 			}
 		}
 
@@ -303,6 +314,32 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 		return nil
 	}
 	return err
+}
+
+// collectReparentedGroupMembers returns process group members that have been
+// reparented to init (PPID == 1) but are not in the known descendant set.
+// These are processes that were likely children in our tree but outlived their
+// parent and got reparented to init while keeping the original PGID.
+//
+// This is safer than killing the entire process group blindly with
+// syscall.Kill(-pgid, ...), which could hit unrelated processes if the PGID
+// is shared or has been reused after the group leader exited.
+func collectReparentedGroupMembers(pgid string, knownPIDs map[string]bool) []string {
+	members := getProcessGroupMembers(pgid)
+	var reparented []string
+	for _, member := range members {
+		if knownPIDs[member] {
+			continue // Already in descendant list, will be handled there
+		}
+		// Check if reparented to init — probably was our child
+		ppid := getParentPID(member)
+		if ppid == "1" {
+			reparented = append(reparented, member)
+		}
+		// Otherwise skip — this process is not in our tree and not reparented,
+		// so it's likely unrelated and should not be killed
+	}
+	return reparented
 }
 
 // getAllDescendants recursively finds all descendant PIDs of a process.
@@ -350,19 +387,26 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 		return fmt.Errorf("pane PID is empty")
 	}
 
-	// First, kill the entire process group. This catches processes that:
-	// - Reparented to init (PID 1) when their parent died
-	// - Are not direct children but stayed in the same process group
-	pgid := getProcessGroupID(pid)
-	if pgid != "" && pgid != "0" && pgid != "1" {
-		// Kill process group using syscall.Kill() directly.
-		// See comment in KillSessionWithProcesses for why we avoid exec.Command("kill").
-		pgidInt, _ := strconv.Atoi(pgid)
-		killProcessGroup(pgidInt)
+	// Walk the process tree for all descendants (catches processes that
+	// called setsid() and created their own process groups)
+	descendants := getAllDescendants(pid)
+
+	// Build known PID set for group membership verification
+	knownPIDs := make(map[string]bool, len(descendants)+1)
+	knownPIDs[pid] = true
+	for _, d := range descendants {
+		knownPIDs[d] = true
 	}
 
-	// Also walk the process tree for any descendants that might have called setsid()
-	descendants := getAllDescendants(pid)
+	// Find reparented processes from our process group. Instead of killing
+	// the entire group blindly with syscall.Kill(-pgid, ...) — which could
+	// hit unrelated processes sharing the same PGID — we enumerate group
+	// members and only include those reparented to init (PPID == 1).
+	pgid := getProcessGroupID(pid)
+	if pgid != "" && pgid != "0" && pgid != "1" {
+		reparented := collectReparentedGroupMembers(pgid, knownPIDs)
+		descendants = append(descendants, reparented...)
+	}
 
 	// Send SIGTERM to all descendants (deepest first to avoid orphaning)
 	for _, dpid := range descendants {
