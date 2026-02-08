@@ -1,10 +1,17 @@
 package protocol
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/steveyegge/gastown/internal/mail"
 )
+
+// ErrNoHandler is returned when a message is a recognized protocol message
+// but no handler is registered for its type. This lets callers distinguish
+// between "not a protocol message" (false, nil) and "protocol message but
+// misrouted/unhandled" (true, ErrNoHandler).
+var ErrNoHandler = errors.New("no handler registered for protocol message type")
 
 // Handler processes a protocol message and returns an error if processing failed.
 type Handler func(msg *mail.Message) error
@@ -109,14 +116,16 @@ func WrapRefineryHandlers(h RefineryHandler) *HandlerRegistry {
 
 // ProcessProtocolMessage processes a protocol message using the registry.
 // It returns (true, nil) if the message was handled successfully,
-// (true, error) if handling failed, or (false, nil) if not a protocol message.
+// (true, error) if handling failed, (true, ErrNoHandler) if the message is
+// a recognized protocol message but no handler is registered, or
+// (false, nil) if not a protocol message.
 func (r *HandlerRegistry) ProcessProtocolMessage(msg *mail.Message) (bool, error) {
 	if !IsProtocolMessage(msg.Subject) {
 		return false, nil
 	}
 
 	if !r.CanHandle(msg) {
-		return false, nil
+		return true, ErrNoHandler
 	}
 
 	err := r.Handle(msg)
