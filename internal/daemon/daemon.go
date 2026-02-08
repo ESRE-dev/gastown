@@ -1077,8 +1077,9 @@ func (d *Daemon) Stop() {
 // This prevents the daemon from fighting shutdown by auto-restarting killed agents.
 //
 // Uses flock to check actual lock status rather than file existence, since
-// the lock file may persist after shutdown completes. If the file exists but
-// is not locked, it is removed as self-healing cleanup.
+// the lock file persists after shutdown completes. The file is intentionally
+// never removed: flock works on file descriptors, not paths, and removing
+// the file while another process waits on the flock defeats mutual exclusion.
 func (d *Daemon) isShutdownInProgress() bool {
 	lockPath := filepath.Join(d.config.TownRoot, "daemon", "shutdown.lock")
 
@@ -1097,9 +1098,9 @@ func (d *Daemon) isShutdownInProgress() bool {
 
 	if locked {
 		// We acquired the lock, so no shutdown is holding it
-		// Release immediately and clean up stale file
+		// Release immediately; leave the file in place so all
+		// concurrent callers flock the same inode.
 		_ = lock.Unlock()
-		_ = os.Remove(lockPath) // Self-healing: remove orphaned lock file
 		return false
 	}
 
