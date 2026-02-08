@@ -752,7 +752,13 @@ func setSyncModeForAllRigs(townRoot string) []error {
 	var errs []error
 	var set []string
 	for _, dbName := range databases {
-		beadsDir := findRigBeadsDir(townRoot, dbName)
+		// Use FindOrCreateRigBeadsDir to atomically resolve and ensure the
+		// directory exists, avoiding TOCTOU races in the stat-then-use pattern.
+		beadsDir, err := doltserver.FindOrCreateRigBeadsDir(townRoot, dbName)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: resolving beads dir: %w", dbName, err))
+			continue
+		}
 
 		cmd := exec.Command("bd", "sync", "mode", "set", "dolt-native")
 		cmd.Dir = filepath.Dir(beadsDir) // run from parent of .beads
@@ -773,7 +779,3 @@ func setSyncModeForAllRigs(townRoot string) []error {
 	return errs
 }
 
-// findRigBeadsDir delegates to the canonical implementation in doltserver.
-func findRigBeadsDir(townRoot, rigName string) string {
-	return doltserver.FindRigBeadsDir(townRoot, rigName)
-}

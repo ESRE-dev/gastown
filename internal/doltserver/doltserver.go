@@ -729,9 +729,12 @@ func MigrateRigFromBeads(townRoot, rigName, sourcePath string) error {
 // For the "hq" rig, it writes to <townRoot>/.beads/metadata.json.
 // For other rigs, it writes to <townRoot>/<rigName>/mayor/rig/.beads/metadata.json.
 func EnsureMetadata(townRoot, rigName string) error {
-	beadsDir := FindRigBeadsDir(townRoot, rigName)
-	if beadsDir == "" {
-		return fmt.Errorf("could not find .beads directory for rig %q", rigName)
+	// Use FindOrCreateRigBeadsDir to atomically resolve and create the directory,
+	// avoiding the TOCTOU race where the directory state changes between
+	// FindRigBeadsDir's Stat check and our subsequent file operations.
+	beadsDir, err := FindOrCreateRigBeadsDir(townRoot, rigName)
+	if err != nil {
+		return fmt.Errorf("resolving beads directory for rig %q: %w", rigName, err)
 	}
 
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
@@ -742,12 +745,6 @@ func EnsureMetadata(townRoot, rigName string) error {
 	mu := getMetadataMu(metadataPath)
 	mu.Lock()
 	defer mu.Unlock()
-
-	// Ensure directory exists inside the lock to prevent TOCTOU races where
-	// one goroutine creates the dir and reads stale data before another finishes.
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
-		return fmt.Errorf("creating beads directory: %w", err)
-	}
 
 	// Load existing metadata if present (preserve any extra fields)
 	existing := make(map[string]interface{})
@@ -798,11 +795,16 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 	return updated, errs
 }
 
-// FindRigBeadsDir returns the canonical .beads directory path for a rig.
+// FindRigBeadsDir returns the .beads directory path for a rig (read-only lookup).
 // For "hq", returns <townRoot>/.beads.
 // For other rigs, returns <townRoot>/<rigName>/mayor/rig/.beads if it exists,
 // otherwise <townRoot>/<rigName>/.beads if it exists,
 // otherwise <townRoot>/<rigName>/mayor/rig/.beads (for creation by caller).
+//
+// WARNING: This function has a TOCTOU race — the returned directory may change
+// state between the Stat check and the caller's operation. For write operations
+// that need the directory to exist, use FindOrCreateRigBeadsDir instead.
+// For read-only operations, handle errors on the returned path gracefully.
 func FindRigBeadsDir(townRoot, rigName string) string {
 	if rigName == "hq" {
 		return filepath.Join(townRoot, ".beads")
@@ -822,6 +824,45 @@ func FindRigBeadsDir(townRoot, rigName string) string {
 
 	// Neither exists; return mayor path (caller will create it)
 	return mayorBeads
+}
+
+// FindOrCreateRigBeadsDir atomically resolves and ensures the .beads directory
+// exists for a rig. Unlike FindRigBeadsDir, this combines directory resolution
+// with creation to avoid TOCTOU races where the directory state changes between
+// the existence check and the caller's write operation.
+//
+// Use this for write operations (EnsureMetadata, etc.) where the directory must
+// exist. Use FindRigBeadsDir for read-only lookups where graceful failure on
+// missing directories is acceptable.
+func FindOrCreateRigBeadsDir(townRoot, rigName string) (string, error) {
+	if rigName == "hq" {
+		dir := filepath.Join(townRoot, ".beads")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return "", fmt.Errorf("creating HQ beads dir: %w", err)
+		}
+		return dir, nil
+	}
+
+	// Check mayor/rig/.beads first (canonical location)
+	mayorBeads := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
+	if _, err := os.Stat(mayorBeads); err == nil {
+		return mayorBeads, nil
+	}
+
+	// Check rig-root .beads
+	rigBeads := filepath.Join(townRoot, rigName, ".beads")
+	if _, err := os.Stat(rigBeads); err == nil {
+		return rigBeads, nil
+	}
+
+	// Neither exists — atomically create the canonical mayor path.
+	// MkdirAll uses mkdir(2) which is atomic per POSIX, so concurrent
+	// callers creating the same path won't race.
+	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+		return "", fmt.Errorf("creating beads dir: %w", err)
+	}
+
+	return mayorBeads, nil
 }
 
 // GetActiveConnectionCount queries the Dolt server to get the number of active connections.

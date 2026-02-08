@@ -485,9 +485,11 @@ func (c *DoltMetadataCheck) hasDoltMetadata(beadsDir, expectedDB string) bool {
 
 // writeDoltMetadata writes dolt server config to a rig's metadata.json.
 func (c *DoltMetadataCheck) writeDoltMetadata(townRoot, rigName string) error {
-	beadsDir := c.findRigBeadsDir(townRoot, rigName)
-	if beadsDir == "" {
-		return fmt.Errorf("could not find .beads directory for rig %q", rigName)
+	// Use FindOrCreateRigBeadsDir to atomically resolve and create the directory,
+	// avoiding the TOCTOU race in the stat-then-use pattern.
+	beadsDir, err := c.findOrCreateRigBeadsDir(townRoot, rigName)
+	if err != nil {
+		return fmt.Errorf("resolving beads directory for rig %q: %w", rigName, err)
 	}
 
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
@@ -513,10 +515,6 @@ func (c *DoltMetadataCheck) writeDoltMetadata(townRoot, rigName string) error {
 		return fmt.Errorf("marshaling metadata: %w", err)
 	}
 
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
-		return fmt.Errorf("creating beads directory: %w", err)
-	}
-
 	if err := util.AtomicWriteFile(metadataPath, append(data, '\n'), 0600); err != nil {
 		return fmt.Errorf("writing metadata.json: %w", err)
 	}
@@ -524,9 +522,14 @@ func (c *DoltMetadataCheck) writeDoltMetadata(townRoot, rigName string) error {
 	return nil
 }
 
-// findRigBeadsDir delegates to the canonical implementation in doltserver.
+// findRigBeadsDir delegates to the canonical read-only implementation in doltserver.
 func (c *DoltMetadataCheck) findRigBeadsDir(townRoot, rigName string) string {
 	return doltserver.FindRigBeadsDir(townRoot, rigName)
+}
+
+// findOrCreateRigBeadsDir delegates to the atomic resolve-and-create implementation.
+func (c *DoltMetadataCheck) findOrCreateRigBeadsDir(townRoot, rigName string) (string, error) {
+	return doltserver.FindOrCreateRigBeadsDir(townRoot, rigName)
 }
 
 // loadRigs loads the rigs configuration from rigs.json.

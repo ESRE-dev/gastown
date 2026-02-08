@@ -375,6 +375,102 @@ func TestFindRigBeadsDir(t *testing.T) {
 	}
 }
 
+func TestFindOrCreateRigBeadsDir(t *testing.T) {
+	t.Run("hq creates directory", func(t *testing.T) {
+		townRoot := t.TempDir()
+		dir, err := FindOrCreateRigBeadsDir(townRoot, "hq")
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := filepath.Join(townRoot, ".beads")
+		if dir != expected {
+			t.Errorf("hq beads dir = %q, want %q", dir, expected)
+		}
+		// Verify directory was actually created
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			t.Error("hq .beads directory was not created")
+		}
+	})
+
+	t.Run("existing mayor path returned as-is", func(t *testing.T) {
+		townRoot := t.TempDir()
+		mayorBeads := filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads")
+		if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+			t.Fatal(err)
+		}
+		dir, err := FindOrCreateRigBeadsDir(townRoot, "myrig")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dir != mayorBeads {
+			t.Errorf("myrig beads dir = %q, want %q", dir, mayorBeads)
+		}
+	})
+
+	t.Run("existing rig-root path returned", func(t *testing.T) {
+		townRoot := t.TempDir()
+		rigBeads := filepath.Join(townRoot, "otherrig", ".beads")
+		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+			t.Fatal(err)
+		}
+		dir, err := FindOrCreateRigBeadsDir(townRoot, "otherrig")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dir != rigBeads {
+			t.Errorf("otherrig beads dir = %q, want %q", dir, rigBeads)
+		}
+	})
+
+	t.Run("neither exists creates mayor path", func(t *testing.T) {
+		townRoot := t.TempDir()
+		dir, err := FindOrCreateRigBeadsDir(townRoot, "newrig")
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedMayor := filepath.Join(townRoot, "newrig", "mayor", "rig", ".beads")
+		if dir != expectedMayor {
+			t.Errorf("newrig beads dir = %q, want %q", dir, expectedMayor)
+		}
+		// Verify directory was actually created
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			t.Error("mayor .beads directory was not created")
+		}
+	})
+
+	t.Run("concurrent callers for same rig don't race", func(t *testing.T) {
+		townRoot := t.TempDir()
+		const goroutines = 10
+		results := make([]string, goroutines)
+		errs := make([]error, goroutines)
+
+		var wg sync.WaitGroup
+		wg.Add(goroutines)
+		for i := 0; i < goroutines; i++ {
+			go func(idx int) {
+				defer wg.Done()
+				results[idx], errs[idx] = FindOrCreateRigBeadsDir(townRoot, "racerig")
+			}(i)
+		}
+		wg.Wait()
+
+		expectedMayor := filepath.Join(townRoot, "racerig", "mayor", "rig", ".beads")
+		for i := 0; i < goroutines; i++ {
+			if errs[i] != nil {
+				t.Errorf("goroutine %d: unexpected error: %v", i, errs[i])
+			}
+			if results[i] != expectedMayor {
+				t.Errorf("goroutine %d: got %q, want %q", i, results[i], expectedMayor)
+			}
+		}
+
+		// Verify directory exists
+		if _, err := os.Stat(expectedMayor); os.IsNotExist(err) {
+			t.Error("directory was not created after concurrent calls")
+		}
+	})
+}
+
 func TestMoveDir_SameFilesystem(t *testing.T) {
 	tmpDir := t.TempDir()
 
