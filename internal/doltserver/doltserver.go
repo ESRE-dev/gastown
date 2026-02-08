@@ -721,6 +721,139 @@ func MigrateRigFromBeads(townRoot, rigName, sourcePath string) error {
 	return nil
 }
 
+// DatabaseExists checks whether a rig database exists in the centralized .dolt-data/ directory.
+func DatabaseExists(townRoot, rigName string) bool {
+	config := DefaultConfig(townRoot)
+	doltDir := filepath.Join(config.DataDir, rigName, ".dolt")
+	_, err := os.Stat(doltDir)
+	return err == nil
+}
+
+// BrokenWorkspace represents a workspace whose metadata.json points to a
+// nonexistent database on the Dolt server.
+type BrokenWorkspace struct {
+	// RigName is the rig whose database is missing.
+	RigName string
+
+	// BeadsDir is the path to the .beads directory with the broken metadata.
+	BeadsDir string
+
+	// ConfiguredDB is the dolt_database value from metadata.json.
+	ConfiguredDB string
+
+	// HasLocalData is true if .beads/dolt/<dbname> exists locally and can be migrated.
+	HasLocalData bool
+
+	// LocalDataPath is the path to local Dolt data, if present.
+	LocalDataPath string
+}
+
+// FindBrokenWorkspaces scans all rig metadata.json files for Dolt server
+// configuration where the referenced database doesn't exist in .dolt-data/.
+// These workspaces are broken: bd commands will fail or silently create
+// isolated local databases instead of connecting to the centralized server.
+func FindBrokenWorkspaces(townRoot string) []BrokenWorkspace {
+	var broken []BrokenWorkspace
+
+	// Check town-level beads (hq)
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if ws := checkWorkspace(townRoot, "hq", townBeadsDir); ws != nil {
+		broken = append(broken, *ws)
+	}
+
+	// Check rig-level beads via rigs.json
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	data, err := os.ReadFile(rigsPath)
+	if err != nil {
+		return broken
+	}
+	var config struct {
+		Rigs map[string]interface{} `json:"rigs"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return broken
+	}
+
+	for rigName := range config.Rigs {
+		beadsDir := FindRigBeadsDir(townRoot, rigName)
+		if beadsDir == "" {
+			continue
+		}
+		if ws := checkWorkspace(townRoot, rigName, beadsDir); ws != nil {
+			broken = append(broken, *ws)
+		}
+	}
+
+	return broken
+}
+
+// checkWorkspace checks a single rig's metadata.json for broken Dolt configuration.
+// Returns nil if the workspace is healthy or not configured for Dolt server mode.
+func checkWorkspace(townRoot, rigName, beadsDir string) *BrokenWorkspace {
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return nil
+	}
+
+	var metadata struct {
+		DoltMode     string `json:"dolt_mode"`
+		DoltDatabase string `json:"dolt_database"`
+		Backend      string `json:"backend"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil
+	}
+
+	// Only check workspaces configured for Dolt server mode
+	if metadata.DoltMode != "server" || metadata.Backend != "dolt" {
+		return nil
+	}
+
+	dbName := metadata.DoltDatabase
+	if dbName == "" {
+		dbName = rigName
+	}
+
+	// Check if the database actually exists
+	if DatabaseExists(townRoot, dbName) {
+		return nil // healthy
+	}
+
+	ws := &BrokenWorkspace{
+		RigName:      rigName,
+		BeadsDir:     beadsDir,
+		ConfiguredDB: dbName,
+	}
+
+	// Check for local data that could be migrated
+	localDoltPath := filepath.Join(beadsDir, "dolt", "beads")
+	if _, err := os.Stat(filepath.Join(localDoltPath, ".dolt")); err == nil {
+		ws.HasLocalData = true
+		ws.LocalDataPath = localDoltPath
+	}
+
+	return ws
+}
+
+// RepairWorkspace fixes a broken workspace by creating the missing database
+// or migrating local data if present. Returns a description of what was done.
+func RepairWorkspace(townRoot string, ws BrokenWorkspace) (string, error) {
+	if ws.HasLocalData {
+		// Migrate local data to centralized location
+		if err := MigrateRigFromBeads(townRoot, ws.ConfiguredDB, ws.LocalDataPath); err != nil {
+			return "", fmt.Errorf("migrating local data for %s: %w", ws.RigName, err)
+		}
+		return fmt.Sprintf("migrated local data from %s", ws.LocalDataPath), nil
+	}
+
+	// No local data — create a fresh database
+	if err := InitRig(townRoot, ws.ConfiguredDB); err != nil {
+		return "", fmt.Errorf("creating database for %s: %w", ws.RigName, err)
+	}
+	return "created new database", nil
+}
+
 // EnsureMetadata writes or updates the metadata.json for a rig's beads directory
 // to include proper Dolt server configuration. This prevents the split-brain problem
 // where bd falls back to local embedded databases instead of connecting to the
