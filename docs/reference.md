@@ -327,7 +327,7 @@ Understanding this hierarchy is essential for proper configuration.
 | **Witness** | `~/gt/<rig>/witness/` | No git clone, monitors polecats only |
 | **Refinery** | `~/gt/<rig>/refinery/rig/` | Worktree on main branch |
 | **Crew** | `~/gt/<rig>/crew/<name>/rig/` | Persistent human workspace clone |
-| **Polecat** | `~/gt/<rig>/polecats/<name>/rig/` | Ephemeral worker worktree |
+| **Polecat** | `~/gt/<rig>/polecats/<name>/rig/` | Polecat worktree (ephemeral sandbox) |
 
 Note: The per-rig `<rig>/mayor/rig/` directory is NOT a working directory—it's
 a git clone that holds the canonical `.beads/` database for that rig.

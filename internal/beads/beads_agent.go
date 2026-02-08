@@ -508,14 +508,15 @@ func (b *Beads) DeleteAgentBead(id string) error {
 }
 
 // CloseAndClearAgentBead closes an agent bead (soft delete).
-// This is the recommended way to clean up agent beads because CreateOrReopenAgentBead
-// can reopen closed beads when re-spawning polecats with the same name.
 //
-// This is a workaround for the bd tombstone bug where DeleteAgentBead creates
-// tombstones that cannot be reopened.
+// Deprecated: Use ResetAgentBeadForReuse instead. Agent beads represent persistent
+// identity (not lifecycle artifacts) and should not be closed during nuke cycles.
+// Closing destroys work history continuity. ResetAgentBeadForReuse keeps the bead
+// open with agent_state="nuked", preserving the CV chain across assignments.
 //
-// To emulate the clean slate of delete --force --hard, this clears all mutable
-// fields (hook_bead, active_mr, cleanup_status, agent_state) before closing.
+// This function remains for backward compatibility with older cleanup paths.
+// CreateOrReopenAgentBead can reopen closed beads when re-spawning polecats,
+// but the preferred path avoids close/reopen entirely.
 func (b *Beads) CloseAndClearAgentBead(id, reason string) error {
 	// Clear mutable fields to emulate delete --force --hard behavior.
 	// This ensures reopened agent beads don't have stale state.
