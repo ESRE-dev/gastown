@@ -903,10 +903,10 @@ func TestConcurrentMetadataSameFile(t *testing.T) {
 		t.Errorf("version = %v, want 42 (field was clobbered)", meta["version"])
 	}
 
-	// Lock file should exist (cleanup is caller's responsibility)
+	// No lock file should be left behind (sync.Mutex is used instead of flock)
 	lockPath := metadataPath + ".lock"
-	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
-		t.Error("lock file should exist after locking")
+	if _, err := os.Stat(lockPath); err == nil {
+		t.Error("lock file should not exist — EnsureMetadata uses sync.Mutex, not flock")
 	}
 }
 

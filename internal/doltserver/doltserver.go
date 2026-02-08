@@ -39,6 +39,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -53,6 +54,17 @@ const (
 	DefaultUser           = "root" // Default Dolt user (no password for local access)
 	DefaultMaxConnections = 50     // Conservative default to prevent connection storms
 )
+
+// metadataMu provides per-path mutexes for EnsureMetadata goroutine synchronization.
+// flock is inter-process only and cannot reliably synchronize goroutines within the
+// same process (the same process may acquire the same flock twice without blocking).
+var metadataMu sync.Map // map[string]*sync.Mutex
+
+// getMetadataMu returns a mutex for the given metadata file path, creating one if needed.
+func getMetadataMu(path string) *sync.Mutex {
+	mu, _ := metadataMu.LoadOrStore(path, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
 
 // Config holds Dolt server configuration.
 type Config struct {
@@ -708,22 +720,20 @@ func EnsureMetadata(townRoot, rigName string) error {
 		return fmt.Errorf("could not find .beads directory for rig %q", rigName)
 	}
 
-	// Ensure directory exists before locking
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+
+	// Acquire per-path mutex for goroutine synchronization.
+	// EnsureAllMetadata calls EnsureMetadata concurrently; flock (inter-process)
+	// cannot reliably synchronize goroutines within the same process.
+	mu := getMetadataMu(metadataPath)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Ensure directory exists inside the lock to prevent TOCTOU races where
+	// one goroutine creates the dir and reads stale data before another finishes.
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		return fmt.Errorf("creating beads directory: %w", err)
 	}
-
-	metadataPath := filepath.Join(beadsDir, "metadata.json")
-
-	// Acquire file lock to prevent concurrent read-modify-write races.
-	// Multiple goroutines (via EnsureAllMetadata) can target the same
-	// metadata.json if rig resolution overlaps.
-	lockPath := metadataPath + ".lock"
-	fileLock := flock.New(lockPath)
-	if err := fileLock.Lock(); err != nil {
-		return fmt.Errorf("acquiring metadata lock: %w", err)
-	}
-	defer func() { _ = fileLock.Unlock() }()
 
 	// Load existing metadata if present (preserve any extra fields)
 	existing := make(map[string]interface{})
