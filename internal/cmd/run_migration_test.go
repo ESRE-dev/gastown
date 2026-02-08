@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -740,5 +741,133 @@ func TestExecuteMigrationStep_NoTimeout(t *testing.T) {
 	}
 	if sr.Status != "completed" {
 		t.Errorf("step status = %q, want completed", sr.Status)
+	}
+}
+
+// =============================================================================
+// Per-command progress tracking tests (gt-1e907)
+// =============================================================================
+
+func TestCheckpoint_CommandsCompletedRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cp := &MigrationCheckpoint{
+		FormulaVersion: 1,
+		TownRoot:       tmpDir,
+		Steps: map[string]StepRun{
+			"migrate": {
+				ID:                "migrate",
+				Status:            "failed",
+				CommandsCompleted: 3,
+				Error:             "command 4 failed",
+			},
+		},
+	}
+
+	if err := saveMigrationCheckpoint(tmpDir, cp); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+
+	loaded, err := loadMigrationCheckpoint(tmpDir)
+	if err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+
+	if loaded.Steps["migrate"].CommandsCompleted != 3 {
+		t.Errorf("commands_completed = %d, want 3", loaded.Steps["migrate"].CommandsCompleted)
+	}
+}
+
+func TestExecuteMigrationStep_TracksPerCommandProgress(t *testing.T) {
+	townRoot := t.TempDir()
+
+	origTimeout := runMigrationTimeout
+	runMigrationTimeout = 5 * time.Second
+	defer func() { runMigrationTimeout = origTimeout }()
+
+	cp := &MigrationCheckpoint{
+		TownRoot:  townRoot,
+		StartedAt: time.Now(),
+		Steps:     make(map[string]StepRun),
+	}
+
+	// Step with 3 commands: first two succeed, third fails
+	step := &formula.Step{
+		ID:    "multi-cmd",
+		Title: "Multi-command step",
+		Description: "Run multiple commands.\n\n```bash\necho cmd1\n```\n\n```bash\necho cmd2\n```\n\n```bash\nfalse\n```\n",
+	}
+
+	err := executeMigrationStep(nil, cp, step, townRoot)
+	if err == nil {
+		t.Fatal("expected error from failing 3rd command, got nil")
+	}
+
+	sr := cp.Steps["multi-cmd"]
+	if sr.Status != "failed" {
+		t.Errorf("status = %q, want failed", sr.Status)
+	}
+	if sr.CommandsCompleted != 2 {
+		t.Errorf("commands_completed = %d, want 2 (first two succeeded)", sr.CommandsCompleted)
+	}
+}
+
+func TestExecuteMigrationStep_SkipsCompletedCommandsOnRetry(t *testing.T) {
+	townRoot := t.TempDir()
+
+	origTimeout := runMigrationTimeout
+	runMigrationTimeout = 5 * time.Second
+	defer func() { runMigrationTimeout = origTimeout }()
+
+	// Simulate a prior failed run where 2 commands completed
+	cp := &MigrationCheckpoint{
+		TownRoot:  townRoot,
+		StartedAt: time.Now(),
+		Steps: map[string]StepRun{
+			"retry-step": {
+				ID:                "retry-step",
+				Status:            "failed",
+				CommandsCompleted: 2,
+				Error:             "previous failure",
+			},
+		},
+	}
+
+	// Step has 3 commands. The first two write marker files, the third succeeds.
+	// On retry, the first two should be skipped (markers NOT created), third runs.
+	marker1 := filepath.Join(townRoot, "marker1.txt")
+	marker2 := filepath.Join(townRoot, "marker2.txt")
+	marker3 := filepath.Join(townRoot, "marker3.txt")
+
+	step := &formula.Step{
+		ID:    "retry-step",
+		Title: "Retry step",
+		Description: fmt.Sprintf("Commands.\n\n```bash\ntouch %s\n```\n\n```bash\ntouch %s\n```\n\n```bash\ntouch %s\n```\n",
+			marker1, marker2, marker3),
+	}
+
+	err := executeMigrationStep(nil, cp, step, townRoot)
+	if err != nil {
+		t.Fatalf("expected success on retry, got: %v", err)
+	}
+
+	// First two commands should have been skipped — no marker files
+	if _, err := os.Stat(marker1); err == nil {
+		t.Error("marker1 should NOT exist (command was skipped on retry)")
+	}
+	if _, err := os.Stat(marker2); err == nil {
+		t.Error("marker2 should NOT exist (command was skipped on retry)")
+	}
+	// Third command should have executed
+	if _, err := os.Stat(marker3); err != nil {
+		t.Error("marker3 should exist (command ran on retry)")
+	}
+
+	sr := cp.Steps["retry-step"]
+	if sr.Status != "completed" {
+		t.Errorf("status = %q, want completed", sr.Status)
+	}
+	if sr.CommandsCompleted != 3 {
+		t.Errorf("commands_completed = %d, want 3", sr.CommandsCompleted)
 	}
 }
