@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -224,6 +225,44 @@ func TestHandlerRegistry(t *testing.T) {
 	unknownMsg := &mail.Message{Subject: "UNKNOWN message"}
 	if registry.CanHandle(unknownMsg) {
 		t.Error("Registry should not handle unknown message type")
+	}
+}
+
+func TestProcessProtocolMessage(t *testing.T) {
+	registry := NewHandlerRegistry()
+
+	handled := false
+	registry.Register(TypeMergeReady, func(msg *mail.Message) error {
+		handled = true
+		return nil
+	})
+
+	// Test 1: Non-protocol message returns (false, nil)
+	nonProto := &mail.Message{Subject: "Hello world"}
+	isProto, err := registry.ProcessProtocolMessage(nonProto)
+	if isProto || err != nil {
+		t.Errorf("Non-protocol message: got (%v, %v), want (false, nil)", isProto, err)
+	}
+
+	// Test 2: Recognized protocol message with handler returns (true, nil)
+	readyMsg := &mail.Message{Subject: "MERGE_READY nux"}
+	isProto, err = registry.ProcessProtocolMessage(readyMsg)
+	if !isProto || err != nil {
+		t.Errorf("Handled protocol message: got (%v, %v), want (true, nil)", isProto, err)
+	}
+	if !handled {
+		t.Error("Handler was not called for MERGE_READY")
+	}
+
+	// Test 3: Recognized protocol message WITHOUT handler returns (true, ErrNoHandler)
+	// MERGED is a valid protocol type but no handler is registered for it
+	misrouted := &mail.Message{Subject: "MERGED nux"}
+	isProto, err = registry.ProcessProtocolMessage(misrouted)
+	if !isProto {
+		t.Error("Recognized protocol message should return isProtocol=true even without handler")
+	}
+	if !errors.Is(err, ErrNoHandler) {
+		t.Errorf("Unhandled protocol message: got error %v, want ErrNoHandler", err)
 	}
 }
 
