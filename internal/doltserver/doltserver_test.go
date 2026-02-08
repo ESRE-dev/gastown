@@ -1571,7 +1571,7 @@ func TestEnsureMetadata_CreatesBeadsDir(t *testing.T) {
 	}
 }
 
-func TestEnsureMetadata_PreservesJSONLExport(t *testing.T) {
+func TestEnsureMetadata_CorrectsStaleJSONLExport(t *testing.T) {
 	townRoot := t.TempDir()
 
 	beadsDir := filepath.Join(townRoot, ".beads")
@@ -1579,7 +1579,8 @@ func TestEnsureMetadata_PreservesJSONLExport(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	existing := map[string]interface{}{"jsonl_export": "custom-issues.jsonl"}
+	// Simulate a stale jsonl_export value left by a historical migration
+	existing := map[string]interface{}{"jsonl_export": "beads.jsonl"}
 	data, _ := json.Marshal(existing)
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), data, 0600); err != nil {
 		t.Fatal(err)
@@ -1592,8 +1593,8 @@ func TestEnsureMetadata_PreservesJSONLExport(t *testing.T) {
 	updated, _ := os.ReadFile(filepath.Join(beadsDir, "metadata.json"))
 	var meta map[string]interface{}
 	json.Unmarshal(updated, &meta)
-	if meta["jsonl_export"] != "custom-issues.jsonl" {
-		t.Errorf("jsonl_export = %v, want custom-issues.jsonl", meta["jsonl_export"])
+	if meta["jsonl_export"] != "issues.jsonl" {
+		t.Errorf("jsonl_export = %v, want issues.jsonl (stale value should be corrected)", meta["jsonl_export"])
 	}
 }
 

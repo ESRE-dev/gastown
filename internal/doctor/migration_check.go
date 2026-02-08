@@ -473,6 +473,7 @@ func (c *DoltMetadataCheck) hasDoltMetadata(beadsDir, expectedDB string) bool {
 		Backend      string `json:"backend"`
 		DoltMode     string `json:"dolt_mode"`
 		DoltDatabase string `json:"dolt_database"`
+		JsonlExport  string `json:"jsonl_export"`
 	}
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return false
@@ -480,7 +481,8 @@ func (c *DoltMetadataCheck) hasDoltMetadata(beadsDir, expectedDB string) bool {
 
 	return metadata.Backend == "dolt" &&
 		metadata.DoltMode == "server" &&
-		metadata.DoltDatabase == expectedDB
+		metadata.DoltDatabase == expectedDB &&
+		metadata.JsonlExport == "issues.jsonl"
 }
 
 // writeDoltMetadata writes dolt server config to a rig's metadata.json.
@@ -506,9 +508,9 @@ func (c *DoltMetadataCheck) writeDoltMetadata(townRoot, rigName string) error {
 	existing["dolt_mode"] = "server"
 	existing["dolt_database"] = rigName
 
-	if _, ok := existing["jsonl_export"]; !ok {
-		existing["jsonl_export"] = "issues.jsonl"
-	}
+	// Always set jsonl_export to the canonical filename.
+	// Historical migrations may have left stale values (e.g., "beads.jsonl").
+	existing["jsonl_export"] = "issues.jsonl"
 
 	data, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
