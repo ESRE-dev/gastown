@@ -236,7 +236,7 @@ func HasServerModeMetadata(townRoot string) []string {
 	}
 
 	for rigName := range config.Rigs {
-		beadsDir := findRigBeadsDir(townRoot, rigName)
+		beadsDir := FindRigBeadsDir(townRoot, rigName)
 		if beadsDir != "" && hasServerMode(beadsDir) {
 			serverRigs = append(serverRigs, rigName)
 		}
@@ -702,7 +702,7 @@ func MigrateRigFromBeads(townRoot, rigName, sourcePath string) error {
 // For the "hq" rig, it writes to <townRoot>/.beads/metadata.json.
 // For other rigs, it writes to <townRoot>/<rigName>/mayor/rig/.beads/metadata.json.
 func EnsureMetadata(townRoot, rigName string) error {
-	beadsDir := findRigBeadsDir(townRoot, rigName)
+	beadsDir := FindRigBeadsDir(townRoot, rigName)
 	if beadsDir == "" {
 		return fmt.Errorf("could not find .beads directory for rig %q", rigName)
 	}
@@ -773,11 +773,12 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 	return updated, errs
 }
 
-// findRigBeadsDir returns the canonical .beads directory path for a rig.
+// FindRigBeadsDir returns the canonical .beads directory path for a rig.
 // For "hq", returns <townRoot>/.beads.
 // For other rigs, returns <townRoot>/<rigName>/mayor/rig/.beads if it exists,
-// otherwise <townRoot>/<rigName>/.beads.
-func findRigBeadsDir(townRoot, rigName string) string {
+// otherwise <townRoot>/<rigName>/.beads if it exists,
+// otherwise <townRoot>/<rigName>/mayor/rig/.beads (for creation by caller).
+func FindRigBeadsDir(townRoot, rigName string) string {
 	if rigName == "hq" {
 		return filepath.Join(townRoot, ".beads")
 	}

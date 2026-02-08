@@ -345,7 +345,7 @@ func TestFindRigBeadsDir(t *testing.T) {
 	townRoot := t.TempDir()
 
 	// Test HQ
-	if dir := findRigBeadsDir(townRoot, "hq"); dir != filepath.Join(townRoot, ".beads") {
+	if dir := FindRigBeadsDir(townRoot, "hq"); dir != filepath.Join(townRoot, ".beads") {
 		t.Errorf("hq beads dir = %q, want %q", dir, filepath.Join(townRoot, ".beads"))
 	}
 
@@ -354,7 +354,7 @@ func TestFindRigBeadsDir(t *testing.T) {
 	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if dir := findRigBeadsDir(townRoot, "myrig"); dir != mayorBeads {
+	if dir := FindRigBeadsDir(townRoot, "myrig"); dir != mayorBeads {
 		t.Errorf("myrig beads dir = %q, want %q", dir, mayorBeads)
 	}
 
@@ -363,8 +363,15 @@ func TestFindRigBeadsDir(t *testing.T) {
 	if err := os.MkdirAll(rigBeads, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if dir := findRigBeadsDir(townRoot, "otherrig"); dir != rigBeads {
+	if dir := FindRigBeadsDir(townRoot, "otherrig"); dir != rigBeads {
 		t.Errorf("otherrig beads dir = %q, want %q", dir, rigBeads)
+	}
+
+	// Test rig with neither directory existing — should return mayor path for creation
+	neitherRig := "newrig"
+	expectedMayor := filepath.Join(townRoot, neitherRig, "mayor", "rig", ".beads")
+	if dir := FindRigBeadsDir(townRoot, neitherRig); dir != expectedMayor {
+		t.Errorf("newrig (neither exists) beads dir = %q, want %q (mayor path for creation)", dir, expectedMayor)
 	}
 }
 

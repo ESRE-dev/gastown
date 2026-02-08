@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -523,25 +524,9 @@ func (c *DoltMetadataCheck) writeDoltMetadata(townRoot, rigName string) error {
 	return nil
 }
 
-// findRigBeadsDir returns the canonical .beads directory for a rig.
+// findRigBeadsDir delegates to the canonical implementation in doltserver.
 func (c *DoltMetadataCheck) findRigBeadsDir(townRoot, rigName string) string {
-	if rigName == "hq" {
-		return filepath.Join(townRoot, ".beads")
-	}
-
-	// Prefer mayor/rig/.beads (canonical)
-	mayorBeads := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
-	if _, err := os.Stat(mayorBeads); err == nil {
-		return mayorBeads
-	}
-
-	// Fall back to rig-root .beads
-	rigBeads := filepath.Join(townRoot, rigName, ".beads")
-	if _, err := os.Stat(rigBeads); err == nil {
-		return rigBeads
-	}
-
-	return ""
+	return doltserver.FindRigBeadsDir(townRoot, rigName)
 }
 
 // loadRigs loads the rigs configuration from rigs.json.

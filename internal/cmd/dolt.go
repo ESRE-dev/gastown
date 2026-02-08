@@ -767,19 +767,7 @@ func setSyncModeForAllRigs(townRoot string) []error {
 	return errs
 }
 
-// findRigBeadsDir returns the .beads directory for a rig name.
-// Delegates to doltserver.FindRigBeadsDir if available, otherwise uses heuristics.
+// findRigBeadsDir delegates to the canonical implementation in doltserver.
 func findRigBeadsDir(townRoot, rigName string) string {
-	if rigName == "hq" {
-		return filepath.Join(townRoot, ".beads")
-	}
-
-	// Prefer mayor/rig/.beads (canonical location for tracked beads)
-	mayorBeads := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
-	if _, err := os.Stat(mayorBeads); err == nil {
-		return mayorBeads
-	}
-
-	// Fall back to rig-root .beads
-	return filepath.Join(townRoot, rigName, ".beads")
+	return doltserver.FindRigBeadsDir(townRoot, rigName)
 }
