@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,6 +59,17 @@ Natural Language Args:
 The --args string is stored in the bead and shown via gt prime. Since the
 executor is an LLM, it interprets these instructions naturally.
 
+Stdin Mode (for shell-quoting-safe multi-line content):
+  echo "review for security issues" | gt sling gt-abc gastown --stdin
+  gt sling gt-abc gastown --stdin <<'EOF'
+  Focus on:
+  1. SQL injection in query builders
+  2. XSS in template rendering
+  EOF
+
+  # With --args on CLI, stdin goes to --message:
+  echo "Extra context here" | gt sling gt-abc gastown --args "patch release" --stdin
+
 Formula Slinging:
   gt sling mol-release mayor/           # Cook + wisp + attach + nudge
   gt sling towers-of-hanoi --var disks=3
@@ -89,6 +101,7 @@ var (
 	slingOnTarget    string   // --on flag: target bead when slinging a formula
 	slingVars        []string // --var flag: formula variables (key=value)
 	slingArgs        string   // --args flag: natural language instructions for executor
+	slingStdin       bool     // --stdin: read --message and/or --args from stdin
 	slingHookRawBead bool     // --hook-raw-bead: hook raw bead without default formula (expert mode)
 
 	// Flags migrated for polecat spawning (used by sling for work assignment)
@@ -108,6 +121,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingOnTarget, "on", "", "Apply formula to existing bead (implies wisp scaffolding)")
 	slingCmd.Flags().StringArrayVar(&slingVars, "var", nil, "Formula variable (key=value), can be repeated")
 	slingCmd.Flags().StringVarP(&slingArgs, "args", "a", "", "Natural language instructions for the executor (e.g., 'patch release')")
+	slingCmd.Flags().BoolVar(&slingStdin, "stdin", false, "Read --message and/or --args from stdin (avoids shell quoting issues)")
 
 	// Flags for polecat spawning (when target is a rig)
 	slingCmd.Flags().BoolVar(&slingCreate, "create", false, "Create polecat if it doesn't exist")
@@ -126,6 +140,25 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Polecats cannot sling - check early before writing anything
 	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
 		return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
+	}
+
+	// Handle --stdin: read message/args from stdin (avoids shell quoting issues)
+	if slingStdin {
+		if slingMessage != "" && slingArgs != "" {
+			return fmt.Errorf("cannot use --stdin when both --message and --args are already provided")
+		}
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("reading stdin: %w", err)
+		}
+		stdinContent := strings.TrimRight(string(data), "\n")
+		if slingArgs == "" {
+			// Default: stdin populates --args (the primary instruction channel)
+			slingArgs = stdinContent
+		} else {
+			// --args already set on CLI, stdin goes to --message
+			slingMessage = stdinContent
+		}
 	}
 
 	// Get town root early - needed for BEADS_DIR when running bd commands
