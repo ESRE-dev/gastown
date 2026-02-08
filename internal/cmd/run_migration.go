@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -376,13 +375,9 @@ func executeMigrationStep(_ *formula.Formula, cp *MigrationCheckpoint, step *for
 			c := exec.CommandContext(ctx, "bash", "-c", cmdStr)
 			c.Dir = townRoot
 			c.Env = append(os.Environ(), "GT_MIGRATION=1")
-			// Put the process in its own process group so we can kill
-			// all children on timeout, not just the bash process.
-			c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			c.Cancel = func() error {
-				// Kill the entire process group to prevent orphaned children.
-				return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
-			}
+			// Set platform-specific process group attributes so we can
+			// kill all children on timeout, not just the bash process.
+			setMigrationProcAttr(c)
 
 			output, err := c.CombinedOutput()
 			// Capture ctx.Err() before cancel() could modify context state
