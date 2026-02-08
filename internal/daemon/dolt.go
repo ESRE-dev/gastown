@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"sync"
 	"time"
 )
+
+const doltCmdTimeout = 15 * time.Second
 
 // DoltServerConfig holds configuration for the Dolt SQL server.
 type DoltServerConfig struct {
@@ -100,6 +103,7 @@ type DoltServerManager struct {
 	restartTimes    []time.Time   // Timestamps of recent restarts within window
 	lastHealthyTime time.Time     // Last time the server was confirmed healthy
 	escalated       bool          // Whether we've already escalated (avoid spamming)
+	restarting      bool          // Whether a restart is in progress (guards against concurrent restarts)
 }
 
 // NewDoltServerManager creates a new Dolt server manager.
@@ -208,7 +212,9 @@ func (m *DoltServerManager) isRunning() (int, bool) {
 
 // isDoltSqlServer checks if a PID is actually a dolt sql-server process.
 func isDoltSqlServer(pid int) bool {
-	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "command=")
 	output, err := cmd.Output()
 	if err != nil {
 		return false
@@ -233,6 +239,12 @@ func (m *DoltServerManager) EnsureRunning() error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Another goroutine is already restarting — skip to avoid double-starts
+	if m.restarting {
+		m.logger("Dolt server restart already in progress, skipping")
+		return nil
+	}
 
 	pid, running := m.isRunning()
 	if running {
@@ -279,6 +291,10 @@ func (m *DoltServerManager) restartWithBackoff() error {
 		return fmt.Errorf("dolt server restart cap exceeded (%d restarts in %v); escalated to mayor",
 			len(m.restartTimes), m.config.RestartWindow)
 	}
+
+	// Mark restart in progress to prevent concurrent restarts during backoff sleep
+	m.restarting = true
+	defer func() { m.restarting = false }()
 
 	// Apply exponential backoff delay
 	delay := m.getBackoffDelay()
@@ -373,6 +389,7 @@ func (m *DoltServerManager) maybeResetBackoff() {
 
 // sendEscalationMail sends a mail to the mayor when the Dolt server has
 // exceeded its restart cap, indicating a systemic issue.
+// Runs the mail command asynchronously to avoid blocking the mutex.
 func (m *DoltServerManager) sendEscalationMail(restartCount int) {
 	subject := fmt.Sprintf("ESCALATION: Dolt server crash-looping (%d restarts)", restartCount)
 	body := fmt.Sprintf(`The Dolt server has restarted %d times within %v and has been capped.
@@ -394,15 +411,22 @@ Action needed: Investigate and fix the root cause, then restart the daemon or th
 		m.config.DataDir, m.config.LogFile,
 		m.config.Host, m.config.Port)
 
-	cmd := exec.Command("gt", "mail", "send", "mayor/", "-s", subject, "-m", body) //nolint:gosec // G204: args are constructed internally
-	cmd.Dir = m.townRoot
-	cmd.Env = os.Environ()
+	townRoot := m.townRoot
+	logger := m.logger
 
-	if err := cmd.Run(); err != nil {
-		m.logger("Warning: failed to send escalation mail to mayor: %v", err)
-	} else {
-		m.logger("Sent escalation mail to mayor about Dolt server crash-loop")
-	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "gt", "mail", "send", "mayor/", "-s", subject, "-m", body) //nolint:gosec // G204: args are constructed internally
+		cmd.Dir = townRoot
+		cmd.Env = os.Environ()
+
+		if err := cmd.Run(); err != nil {
+			logger("Warning: failed to send escalation mail to mayor: %v", err)
+		} else {
+			logger("Sent escalation mail to mayor about Dolt server crash-loop")
+		}
+	}()
 }
 
 // Start starts the Dolt SQL server.
@@ -548,7 +572,9 @@ func (m *DoltServerManager) checkHealth() error {
 func (m *DoltServerManager) checkHealthLocked() error {
 	// Try to connect via MySQL protocol
 	// Use dolt sql -q to test connectivity
-	cmd := exec.Command("dolt", "sql",
+	ctx, cancel := context.WithTimeout(context.Background(), doltCmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "dolt", "sql",
 		"--host", m.config.Host,
 		"--port", strconv.Itoa(m.config.Port),
 		"--no-auto-commit",
@@ -567,7 +593,9 @@ func (m *DoltServerManager) checkHealthLocked() error {
 
 // getDoltVersion returns the Dolt server version.
 func (m *DoltServerManager) getDoltVersion() (string, error) {
-	cmd := exec.Command("dolt", "version")
+	ctx, cancel := context.WithTimeout(context.Background(), doltCmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "dolt", "version")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -584,7 +612,9 @@ func (m *DoltServerManager) getDoltVersion() (string, error) {
 
 // listDatabases returns the list of databases in the Dolt server.
 func (m *DoltServerManager) listDatabases() ([]string, error) {
-	cmd := exec.Command("dolt", "sql",
+	ctx, cancel := context.WithTimeout(context.Background(), doltCmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "dolt", "sql",
 		"--host", m.config.Host,
 		"--port", strconv.Itoa(m.config.Port),
 		"--no-auto-commit",
