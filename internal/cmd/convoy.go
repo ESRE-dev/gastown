@@ -1368,6 +1368,29 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 		deps[i].ID = extractIssueID(deps[i].ID)
 	}
 
+	// Refresh status via cross-rig lookup. bd dep list returns status from
+	// the dependency record in HQ beads which is never updated when cross-rig
+	// issues (e.g., gt-* tracked by hq-* convoys) are closed in their home rig.
+	issueIDs := make([]string, len(deps))
+	for i, dep := range deps {
+		issueIDs[i] = dep.ID
+	}
+	freshDetails := getIssueDetailsBatch(issueIDs)
+	for i, dep := range deps {
+		if details, ok := freshDetails[dep.ID]; ok {
+			deps[i].Status = details.Status
+			if deps[i].Title == "" {
+				deps[i].Title = details.Title
+			}
+			if deps[i].Assignee == "" {
+				deps[i].Assignee = details.Assignee
+			}
+			if deps[i].IssueType == "" {
+				deps[i].IssueType = details.IssueType
+			}
+		}
+	}
+
 	// Collect non-closed issue IDs for worker lookup
 	openIssueIDs := make([]string, 0, len(deps))
 	for _, dep := range deps {
