@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -158,5 +160,47 @@ func TestDefaultConfig_BackoffFields(t *testing.T) {
 	}
 	if cfg.HealthyResetInterval != 5*time.Minute {
 		t.Errorf("expected HealthyResetInterval 5m, got %v", cfg.HealthyResetInterval)
+	}
+}
+
+func TestRestartingFlag_PreventsConcurrentRestarts(t *testing.T) {
+	// Verify the restarting flag prevents concurrent calls to EnsureRunning
+	// from both entering restartWithBackoff.
+	var callCount atomic.Int32
+	m := &DoltServerManager{
+		config: &DoltServerConfig{
+			Enabled:             true,
+			Port:                13306, // Non-standard port to avoid conflicts
+			Host:                "127.0.0.1",
+			RestartDelay:        50 * time.Millisecond,
+			MaxRestartDelay:     100 * time.Millisecond,
+			MaxRestartsInWindow: 10,
+			RestartWindow:       10 * time.Minute,
+		},
+		logger: func(format string, v ...interface{}) {},
+	}
+
+	// Simulate: set restarting=true as if restartWithBackoff is sleeping
+	m.mu.Lock()
+	m.restarting = true
+	m.mu.Unlock()
+
+	// Multiple concurrent EnsureRunning calls should all return immediately
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := m.EnsureRunning()
+			if err == nil {
+				callCount.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// All 5 should have returned nil (skipped because restarting=true)
+	if got := callCount.Load(); got != 5 {
+		t.Errorf("expected all 5 goroutines to return nil (skipped), got %d", got)
 	}
 }
