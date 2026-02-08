@@ -18,6 +18,7 @@ import (
 var (
 	ErrDogExists   = errors.New("dog already exists")
 	ErrDogNotFound = errors.New("dog not found")
+	ErrDogWorking  = errors.New("dog is currently working")
 	ErrNoRigs      = errors.New("no rigs configured")
 )
 
@@ -342,6 +343,8 @@ func (m *Manager) ClearWork(name string) error {
 
 // Refresh recreates all worktrees for a dog with fresh branches.
 // This is useful when worktrees have drifted or become stale.
+// Each rig is refreshed atomically with a state save, so a failure at rig N
+// leaves rigs 1..N-1 correctly updated and rigs N+1..M untouched.
 func (m *Manager) Refresh(name string) error {
 	if !m.exists(name) {
 		return ErrDogNotFound
@@ -352,14 +355,14 @@ func (m *Manager) Refresh(name string) error {
 		return fmt.Errorf("loading state: %w", err)
 	}
 
-	// Refuse to refresh a working dog
+	// Refuse to refresh a working dog — its agent is using the worktrees.
 	if state.State == StateWorking {
-		return fmt.Errorf("dog %s is currently working; stop it first or use --force", name)
+		return ErrDogWorking
 	}
 
 	dogPath := m.dogDir(name)
 
-	// Recreate each worktree, saving progress as we go
+	// Refresh each rig atomically: remove old, create new, persist state.
 	for rigName := range m.rigsConfig.Rigs {
 		rigPath := filepath.Join(m.townRoot, rigName)
 		oldWorktreePath := state.Worktrees[rigName]
@@ -387,21 +390,25 @@ func (m *Manager) Refresh(name string) error {
 		// Create fresh worktree
 		worktreePath, err := m.createRigWorktree(dogPath, name, rigName)
 		if err != nil {
-			// Save partial progress before returning
-			state.Worktrees[rigName] = "" // old removed, new failed
-			state.LastActive = time.Now()
+			// Old worktree is gone but new one failed. Remove stale path
+			// from state so it doesn't reference a deleted directory.
+			delete(state.Worktrees, rigName)
 			state.UpdatedAt = time.Now()
 			_ = m.saveState(name, state)
 			return fmt.Errorf("creating worktree for %s: %w", rigName, err)
 		}
+
+		// Persist state after each rig so completed rigs aren't lost on
+		// a later failure.
 		state.Worktrees[rigName] = worktreePath
+		state.LastActive = time.Now()
+		state.UpdatedAt = time.Now()
+		if err := m.saveState(name, state); err != nil {
+			return fmt.Errorf("saving state after refreshing %s: %w", rigName, err)
+		}
 	}
 
-	// Update state
-	state.LastActive = time.Now()
-	state.UpdatedAt = time.Now()
-
-	return m.saveState(name, state)
+	return nil
 }
 
 // RefreshRig recreates the worktree for a specific rig.
@@ -419,9 +426,9 @@ func (m *Manager) RefreshRig(name, rigName string) error {
 		return fmt.Errorf("loading state: %w", err)
 	}
 
-	// Refuse to refresh a working dog
+	// Refuse to refresh a working dog — its agent is using the worktrees.
 	if state.State == StateWorking {
-		return fmt.Errorf("dog %s is currently working; stop it first or use --force", name)
+		return ErrDogWorking
 	}
 
 	dogPath := m.dogDir(name)
@@ -447,9 +454,9 @@ func (m *Manager) RefreshRig(name, rigName string) error {
 	// Create fresh worktree
 	worktreePath, err := m.createRigWorktree(dogPath, name, rigName)
 	if err != nil {
-		// Save state reflecting old worktree is gone
-		state.Worktrees[rigName] = ""
-		state.LastActive = time.Now()
+		// Old worktree is gone but new one failed. Remove stale path
+		// from state so it doesn't reference a deleted directory.
+		delete(state.Worktrees, rigName)
 		state.UpdatedAt = time.Now()
 		_ = m.saveState(name, state)
 		return fmt.Errorf("creating worktree: %w", err)
