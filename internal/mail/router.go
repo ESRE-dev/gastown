@@ -1175,11 +1175,9 @@ func (r *Router) pruneAnnounce(announceName string, retainCount int) error {
 }
 
 // isSelfMail returns true if sender and recipient are the same identity.
-// Normalizes addresses by removing trailing slashes for comparison.
+// Uses AddressToIdentity for canonical normalization (handles crew/, polecats/ paths).
 func isSelfMail(from, to string) bool {
-	fromNorm := strings.TrimSuffix(from, "/")
-	toNorm := strings.TrimSuffix(to, "/")
-	return fromNorm == toNorm
+	return AddressToIdentity(from) == AddressToIdentity(to)
 }
 
 // GetMailbox returns a Mailbox for the given address.
