@@ -361,6 +361,13 @@ func (m *DoltServerManager) restartWithBackoff() error {
 		m.mu.Unlock()
 		m.doSleep(delay)
 		m.mu.Lock()
+
+		// Re-check after re-acquiring the lock: another goroutine may have
+		// started the server while we were sleeping (TOCTOU guard).
+		if _, running := m.isRunning(); running {
+			m.logger("Dolt server started by another goroutine during backoff, skipping")
+			return nil
+		}
 	}
 
 	// Record this restart attempt
@@ -628,6 +635,15 @@ func (m *DoltServerManager) startLocked() error {
 	if m.startFn != nil {
 		return m.startFn()
 	}
+
+	// Re-check if the server is already running to close the TOCTOU window.
+	// Another goroutine may have started the server while we were waiting
+	// for the mutex (via Start()) or during backoff sleep (via restartWithBackoff()).
+	if _, running := m.isRunning(); running {
+		m.logger("Dolt server already running, skipping start")
+		return nil
+	}
+
 	// Ensure data directory exists
 	if err := os.MkdirAll(m.config.DataDir, 0755); err != nil {
 		return fmt.Errorf("creating data directory: %w", err)
