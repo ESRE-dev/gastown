@@ -257,3 +257,43 @@ or retire the dog if pool is oversized.
 [vars.convoy]
 description = "The convoy ID to feed"
 required = true
+
+[vars.available_count]
+description = "Computed: number of available polecats"
+default = ""
+
+[vars.dispatch_count]
+description = "Computed: number of dispatched issues"
+default = ""
+
+[vars.error]
+description = "Computed: error message if dispatch fails"
+default = ""
+
+[vars.error_count]
+description = "Computed: number of errors during feed"
+default = ""
+
+[vars.issue_id]
+description = "Computed: current issue being dispatched"
+default = ""
+
+[vars.polecat]
+description = "Computed: polecat assigned to current issue"
+default = ""
+
+[vars.ready_count]
+description = "Computed: number of ready issues in convoy"
+default = ""
+
+[vars.report_summary]
+description = "Computed: summary of feed results"
+default = ""
+
+[vars.rig]
+description = "Computed: rig name for dispatch"
+default = ""
+
+[vars.title]
+description = "Computed: title of current issue"
+default = ""
