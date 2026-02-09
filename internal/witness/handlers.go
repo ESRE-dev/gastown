@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -925,14 +926,56 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 				fmt.Errorf("checking session %s: %w", sessionName, err))
 			continue
 		}
-		if sessionAlive {
-			continue // Session exists — not a zombie
-		}
-
-		// Session is dead. Check agent bead state.
+		// Read agent bead labels for done-intent detection.
+		// Done early because we need it for both live and dead session paths.
 		prefix := beads.GetPrefixForRig(townRoot, rigName)
 		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+		labels := getAgentBeadLabels(workDir, agentBeadID)
+		doneIntent := extractDoneIntent(labels)
 
+		if sessionAlive {
+			// Live session — normally not a zombie. But check for done-intent
+			// that's been stuck too long (polecat hung in gt done).
+			if doneIntent != nil && time.Since(doneIntent.Timestamp) > 60*time.Second {
+				// Polecat has been stuck in gt done for >60s — kill session.
+				zombie := ZombieResult{
+					PolecatName: polecatName,
+					AgentState:  "stuck-in-done",
+					Action:      fmt.Sprintf("killed-stuck-session (done-intent age=%v)", time.Since(doneIntent.Timestamp).Round(time.Second)),
+				}
+				if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+					zombie.Error = err
+					zombie.Action = fmt.Sprintf("kill-stuck-session-failed: %v", err)
+				}
+				result.Zombies = append(result.Zombies, zombie)
+			}
+			continue // Either handled or not a zombie
+		}
+
+		// Session is dead. Check for done-intent first (faster path).
+		if doneIntent != nil {
+			age := time.Since(doneIntent.Timestamp)
+			if age < 30*time.Second {
+				// Recent done-intent — polecat is still working through gt done.
+				// Skip, don't interfere.
+				continue
+			}
+			// Old done-intent + dead session = polecat tried to exit but session
+			// died mid-gt-done. Auto-nuke without further checks.
+			zombie := ZombieResult{
+				PolecatName: polecatName,
+				AgentState:  "done-intent-dead",
+				Action:      fmt.Sprintf("auto-nuked (done-intent age=%v, type=%s)", age.Round(time.Second), doneIntent.ExitType),
+			}
+			if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+				zombie.Error = err
+				zombie.Action = fmt.Sprintf("nuke-failed (done-intent): %v", err)
+			}
+			result.Zombies = append(result.Zombies, zombie)
+			continue
+		}
+
+		// No done-intent. Fall back to standard zombie detection.
 		agentState, hookBead := getAgentBeadState(workDir, agentBeadID)
 
 		// A zombie has a dead session but agent_state suggests it should be alive,
@@ -1056,6 +1099,53 @@ func getAgentBeadState(workDir, agentBeadID string) (agentState, hookBead string
 	}
 
 	return issues[0].AgentState, issues[0].HookBead
+}
+
+// DoneIntent represents a parsed done-intent label from an agent bead.
+type DoneIntent struct {
+	ExitType  string
+	Timestamp time.Time
+}
+
+// extractDoneIntent parses a done-intent:<type>:<unix-ts> label from a label list.
+// Returns nil if no done-intent label is found or if the label is malformed.
+func extractDoneIntent(labels []string) *DoneIntent {
+	for _, label := range labels {
+		if !strings.HasPrefix(label, "done-intent:") {
+			continue
+		}
+		// Format: done-intent:<type>:<unix-ts>
+		parts := strings.SplitN(label, ":", 3)
+		if len(parts) != 3 {
+			return nil // Malformed
+		}
+		ts, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil {
+			return nil // Malformed timestamp
+		}
+		return &DoneIntent{
+			ExitType:  parts[1],
+			Timestamp: time.Unix(ts, 0),
+		}
+	}
+	return nil
+}
+
+// getAgentBeadLabels reads the labels from an agent bead.
+func getAgentBeadLabels(workDir, agentBeadID string) []string {
+	output, err := util.ExecWithOutput(workDir, "bd", "show", agentBeadID, "--json")
+	if err != nil || output == "" {
+		return nil
+	}
+
+	var issues []struct {
+		Labels []string `json:"labels"`
+	}
+	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
+		return nil
+	}
+
+	return issues[0].Labels
 }
 
 // sessionRecreated checks whether a tmux session was (re)created after the
