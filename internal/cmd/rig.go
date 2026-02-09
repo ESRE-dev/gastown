@@ -688,23 +688,29 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			f.Close()
 		}
 
-		// Init beads.db if missing
+		// Init beads database if missing.
+		// Check for both SQLite (beads.db) and Dolt (dolt/ directory) backends.
 		beadsDB := filepath.Join(beadsDir, "beads.db")
-		if _, err := os.Stat(beadsDB); os.IsNotExist(err) {
+		doltDir := filepath.Join(beadsDir, "dolt")
+		_, sqliteErr := os.Stat(beadsDB)
+		_, doltErr := os.Stat(doltDir)
+		if os.IsNotExist(sqliteErr) && os.IsNotExist(doltErr) {
 			prefix := result.BeadsPrefix
 			if prefix == "" {
 				break
 			}
-			// Remove stale WAL/SHM files that could cause SQLite errors
+			// Remove stale WAL/SHM files that could cause SQLite errors on re-init
 			os.Remove(filepath.Join(beadsDir, "beads.db-wal"))
 			os.Remove(filepath.Join(beadsDir, "beads.db-shm"))
 			workDir := filepath.Dir(beadsDir) // directory containing .beads/
-			initCmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
+			// IMPORTANT: Use --backend dolt --server to prevent SQLite creation.
+			// Gas Town rigs use Dolt server mode via the shared town Dolt sql-server.
+			initCmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix, "--backend", "dolt", "--server")
 			initCmd.Dir = workDir
 			if output, initErr := initCmd.CombinedOutput(); initErr != nil {
 				fmt.Printf("  %s Could not init bd database: %v (%s)\n", style.Warning.Render("!"), initErr, strings.TrimSpace(string(output)))
 			} else {
-				fmt.Printf("  %s Initialized beads database\n", style.Success.Render("✓"))
+				fmt.Printf("  %s Initialized beads database (Dolt)\n", style.Success.Render("✓"))
 			}
 		}
 		break
