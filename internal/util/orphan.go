@@ -369,14 +369,10 @@ type ZombieProcess struct {
 	TTY string // TTY column from ps (may be "?" or a session like "s024")
 }
 
-// FindZombieClaudeProcesses finds Claude processes NOT in any active tmux session.
-// This catches "zombie" processes that have a TTY but whose tmux session is dead.
-//
-// Unlike FindOrphanedClaudeProcesses (which uses TTY="?" detection), this function
-// uses tmux pane verification: a process is a zombie if it's NOT the pane PID of
-// any active tmux session AND not a child of any pane PID.
-//
-// This is the definitive zombie check because it verifies against tmux reality.
+// FindZombieClaudeProcesses finds Claude processes with no TTY that are NOT in
+// any active tmux session. This catches "zombie" processes whose tmux session
+// has died. Processes with a real TTY (e.g. pts/*) are skipped because those
+// are interactive terminal sessions, not zombies.
 func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 	// Get ALL valid PIDs (panes + their children) from active tmux sessions
 	validPIDs := getTmuxSessionPIDs()
@@ -424,6 +420,13 @@ func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 
 		// Skip processes that belong to valid Gas Town tmux sessions
 		if validPIDs[pid] {
+			continue
+		}
+
+		// Skip processes with a real TTY that are NOT in any tmux session.
+		// These are interactive terminal sessions (e.g. user running claude
+		// in a regular terminal), not zombies from dead tmux sessions.
+		if tty != "?" && tty != "??" {
 			continue
 		}
 
