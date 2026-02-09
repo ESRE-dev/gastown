@@ -108,11 +108,18 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 			msg.Type = mail.TypeReply
 		}
 
-		// Look up original message to get thread ID
+		// Look up original message in current user's mailbox to get thread ID.
+		// The message we're replying to lives in our inbox (we received it),
+		// so we look it up via our own identity (from), not the recipient (to).
 		router := mail.NewRouter(workDir)
 		mailbox, err := router.GetMailbox(from)
-		if err == nil {
-			if original, err := mailbox.Get(mailReplyTo); err == nil {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠ Could not open mailbox for thread lookup: %v\n", err)
+		} else {
+			original, err := mailbox.Get(mailReplyTo)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "⚠ Could not find original message %s for threading (new thread will be created)\n", mailReplyTo)
+			} else {
 				msg.ThreadID = original.ThreadID
 			}
 		}
