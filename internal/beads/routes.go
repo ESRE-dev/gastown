@@ -241,6 +241,31 @@ func GetRigPathForPrefix(townRoot, prefix string) string {
 	return ""
 }
 
+// GetRigNameForPrefix returns the rig name that owns a given bead prefix.
+// For example, "gt-" returns "gastown", "bd-" returns "beads".
+// Returns empty string if the prefix is town-level (path=".") or not found in routes.
+func GetRigNameForPrefix(townRoot, prefix string) string {
+	beadsDir := filepath.Join(townRoot, ".beads")
+	routes, err := LoadRoutes(beadsDir)
+	if err != nil || routes == nil {
+		return ""
+	}
+
+	for _, r := range routes {
+		if r.Prefix == prefix {
+			if r.Path == "." {
+				return "" // Town-level bead, no specific rig
+			}
+			parts := strings.SplitN(r.Path, "/", 2)
+			if len(parts) > 0 {
+				return parts[0]
+			}
+		}
+	}
+
+	return ""
+}
+
 // ResolveHookDir determines the directory for running bd update on a bead.
 // Since bd update doesn't support routing or redirects, we must resolve the
 // actual rig directory from the bead's prefix. hookWorkDir is only used as

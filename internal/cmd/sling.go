@@ -288,6 +288,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 				fmt.Printf("Dispatched to dog %s (session start delayed)\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
+			// Cross-rig guard: check before spawning (gt-myecw)
+			if !slingForce {
+				if err := checkCrossRigGuard(beadID, rigName+"/polecats/_", townRoot); err != nil {
+					return err
+				}
+			}
 			// Check if target is a rig name (auto-spawn polecat)
 			if slingDryRun {
 				// Dry run - just indicate what would happen
@@ -329,6 +335,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 					parts := strings.Split(target, "/")
 					if len(parts) >= 3 && parts[1] == "polecats" {
 						rigName := parts[0]
+						// Cross-rig guard: check before spawning (gt-myecw)
+						if !slingForce {
+							if err := checkCrossRigGuard(beadID, rigName+"/polecats/_", townRoot); err != nil {
+								return err
+							}
+						}
 						fmt.Printf("Target polecat has no active session, spawning fresh polecat in rig '%s'...\n", rigName)
 						spawnOpts := SlingSpawnOptions{
 							Force:    slingForce,
@@ -372,6 +384,15 @@ func runSling(cmd *cobra.Command, args []string) error {
 		// Use self's working directory for bd commands
 		if selfWorkDir != "" {
 			hookWorkDir = selfWorkDir
+		}
+	}
+
+	// Cross-rig guard: prevent slinging beads to polecats in the wrong rig (gt-myecw).
+	// Polecats work in their rig's worktree and cannot fix code owned by another rig.
+	// Skip for self-sling (user knows what they're doing) and --force overrides.
+	if strings.Contains(targetAgent, "/polecats/") && !slingForce && !isSelfSling {
+		if err := checkCrossRigGuard(beadID, targetAgent, townRoot); err != nil {
+			return err
 		}
 	}
 
@@ -696,6 +717,36 @@ func slingBackoff(attempt int, base, max time.Duration) time.Duration { //nolint
 		result = max
 	}
 	return result
+}
+
+// checkCrossRigGuard validates that a bead's prefix matches the target rig.
+// Polecats work in their rig's worktree and cannot fix code owned by another rig.
+// Returns an error if the bead belongs to a different rig than the target polecat.
+// Skips the check for town-level beads (hq-*) or beads with unknown prefixes.
+func checkCrossRigGuard(beadID, targetAgent, townRoot string) error {
+	beadPrefix := beads.ExtractPrefix(beadID)
+	if beadPrefix == "" {
+		return nil // Can't determine prefix, skip check
+	}
+
+	beadRig := beads.GetRigNameForPrefix(townRoot, beadPrefix)
+	if beadRig == "" {
+		return nil // Town-level or unknown prefix, skip check
+	}
+
+	// Extract target rig from agent path (e.g., "gastown/polecats/Toast" → "gastown")
+	targetRig := strings.SplitN(targetAgent, "/", 2)[0]
+	if targetRig == "" {
+		return nil
+	}
+
+	if targetRig != beadRig {
+		return fmt.Errorf("cross-rig mismatch: bead %s (prefix %q) belongs to rig %q, but target is rig %q\n"+
+			"Polecats work in their rig's worktree and cannot fix code from another rig.\n"+
+			"Use --force to override this check", beadID, strings.TrimSuffix(beadPrefix, "-"), beadRig, targetRig)
+	}
+
+	return nil
 }
 
 // rollbackSlingArtifacts cleans up artifacts left by a partial sling when session start fails.

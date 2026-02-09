@@ -1040,6 +1040,94 @@ exit /b 0
 // from individual bd writes cause manifest contention and 'database is read only'
 // errors. The Dolt server handles commits — individual auto-commits are unnecessary.
 // Fixes: gt-u6n6a
+
+// TestCheckCrossRigGuard verifies that cross-rig sling is rejected when a bead's
+// prefix doesn't match the target rig. This prevents slinging beads-codebase issues
+// to gastown polecats, which cannot fix code in a different rig's repo.
+// Fixes: gt-myecw
+func TestCheckCrossRigGuard(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"bd-","path":"beads/mayor/rig"}
+{"prefix":"hq-","path":"."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		beadID      string
+		targetAgent string
+		wantErr     bool
+	}{
+		{
+			name:        "same rig: gt bead to gastown polecat",
+			beadID:      "gt-abc123",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+		{
+			name:        "same rig: bd bead to beads polecat",
+			beadID:      "bd-ka761",
+			targetAgent: "beads/polecats/obsidian",
+			wantErr:     false,
+		},
+		{
+			name:        "cross-rig: bd bead to gastown polecat",
+			beadID:      "bd-ka761",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     true,
+		},
+		{
+			name:        "cross-rig: gt bead to beads polecat",
+			beadID:      "gt-abc123",
+			targetAgent: "beads/polecats/obsidian",
+			wantErr:     true,
+		},
+		{
+			name:        "town-level: hq bead to any rig (allowed)",
+			beadID:      "hq-abc123",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+		{
+			name:        "unknown prefix: allowed (no route to check)",
+			beadID:      "xx-unknown",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+		{
+			name:        "empty bead prefix: allowed",
+			beadID:      "nohyphen",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkCrossRigGuard(tc.beadID, tc.targetAgent, tmpDir)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("checkCrossRigGuard(%q, %q) error = %v, wantErr %v", tc.beadID, tc.targetAgent, err, tc.wantErr)
+			}
+			if err != nil && tc.wantErr {
+				if !strings.Contains(err.Error(), "cross-rig mismatch") {
+					t.Errorf("expected cross-rig mismatch error, got: %v", err)
+				}
+				if !strings.Contains(err.Error(), "--force") {
+					t.Errorf("error should mention --force override, got: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestSlingSetsDoltAutoCommitOff(t *testing.T) {
 	townRoot := t.TempDir()
 
