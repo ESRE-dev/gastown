@@ -147,6 +147,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
 	}
 
+	// Disable Dolt auto-commit for all bd commands run during sling (gt-u6n6a).
+	// Under concurrent load (batch slinging), auto-commits from individual bd writes
+	// cause manifest contention and 'database is read only' errors. The Dolt server
+	// handles commits — individual auto-commits are unnecessary.
+	os.Setenv("BD_DOLT_AUTO_COMMIT", "off")
+
 	// Handle --stdin: read message/args from stdin (avoids shell quoting issues)
 	if slingStdin {
 		if slingMessage != "" && slingArgs != "" {

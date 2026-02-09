@@ -1034,3 +1034,113 @@ exit /b 0
 		t.Errorf("--no-merge flag not stored in bead description\nDescription:\n%s", molContent)
 	}
 }
+
+// TestSlingSetsDoltAutoCommitOff verifies that gt sling sets BD_DOLT_AUTO_COMMIT=off
+// for all child bd processes. Under concurrent load (batch slinging), auto-commits
+// from individual bd writes cause manifest contention and 'database is read only'
+// errors. The Dolt server handles commits — individual auto-commits are unnecessary.
+// Fixes: gt-u6n6a
+func TestSlingSetsDoltAutoCommitOff(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create stub bd that logs BD_DOLT_AUTO_COMMIT env var
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	bdScript := `#!/bin/sh
+set -e
+echo "ENV:BD_DOLT_AUTO_COMMIT=${BD_DOLT_AUTO_COMMIT}|$*" >> "${BD_LOG}"
+if [ "$1" = "--no-daemon" ]; then
+  shift
+fi
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+    ;;
+  update)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo ENV:BD_DOLT_AUTO_COMMIT=%BD_DOLT_AUTO_COMMIT%^|%*>>"%BD_LOG%"
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" set "cmd=%2"
+if not "%cmd%"=="show" goto :notshow
+echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+exit /b 0
+:notshow
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	molLogPath := filepath.Join(townRoot, "mol.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", molLogPath)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1")
+	// Ensure BD_DOLT_AUTO_COMMIT is NOT set before sling runs
+	t.Setenv("BD_DOLT_AUTO_COMMIT", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flags
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	t.Cleanup(func() {
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true
+
+	if err := runSling(nil, []string{"gt-test456"}); err != nil {
+		t.Fatalf("runSling: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read bd log: %v", err)
+	}
+
+	// Verify that ALL bd commands received BD_DOLT_AUTO_COMMIT=off
+	logLines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+	if len(logLines) == 0 {
+		t.Fatal("no bd commands logged")
+	}
+
+	for _, line := range logLines {
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(line, "ENV:BD_DOLT_AUTO_COMMIT=off|") {
+			t.Errorf("bd command missing BD_DOLT_AUTO_COMMIT=off: %s", line)
+		}
+	}
+}
