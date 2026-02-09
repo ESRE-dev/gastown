@@ -37,7 +37,9 @@ func LoadRoutes(beadsDir string) ([]Route, error) {
 
 	var routes []Route
 	scanner := bufio.NewScanner(file)
+	lineNum := 0
 	for scanner.Scan() {
+		lineNum++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue // Skip empty lines and comments
@@ -45,7 +47,8 @@ func LoadRoutes(beadsDir string) ([]Route, error) {
 
 		var route Route
 		if err := json.Unmarshal([]byte(line), &route); err != nil {
-			continue // Skip malformed lines
+			fmt.Fprintf(os.Stderr, "Warning: skipping malformed route at %s:%d: %v\n", routesPath, lineNum, err)
+			continue
 		}
 		if route.Prefix != "" && route.Path != "" {
 			routes = append(routes, route)
