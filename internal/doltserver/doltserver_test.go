@@ -2169,6 +2169,52 @@ func TestFindBrokenWorkspaces_MultipleRigs(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Read-only detection tests
+// =============================================================================
+
+func TestIsReadOnlyError(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		{"cannot update manifest: database is read only", true},
+		{"database is read only", true},
+		{"Database Is Read Only", true},
+		{"error: read-only mode", true},
+		{"server is readonly", true},
+		{"READ ONLY transaction", true},
+		{"connection refused", false},
+		{"timeout", false},
+		{"", false},
+		{"table not found", false},
+		{"permission denied", false},
+	}
+
+	for _, tt := range tests {
+		if got := IsReadOnlyError(tt.msg); got != tt.want {
+			t.Errorf("IsReadOnlyError(%q) = %v, want %v", tt.msg, got, tt.want)
+		}
+	}
+}
+
+func TestHealthMetrics_ReadOnlyField(t *testing.T) {
+	// Verify that the ReadOnly field is properly included in HealthMetrics.
+	// We can't test actual read-only detection without a running Dolt server,
+	// but we can verify the field is populated.
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".dolt-data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	metrics := GetHealthMetrics(townRoot)
+
+	// Without a running server, ReadOnly should be false (can't probe)
+	if metrics.ReadOnly {
+		t.Error("expected ReadOnly=false when no server is running")
+	}
+}
+
 func TestValidateBranchName_InvalidNames(t *testing.T) {
 	invalid := []string{
 		"",                          // empty

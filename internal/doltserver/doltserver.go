@@ -1078,6 +1078,10 @@ type HealthMetrics struct {
 	// QueryLatency is the time taken for a SELECT 1 round-trip.
 	QueryLatency time.Duration `json:"query_latency_ms"`
 
+	// ReadOnly indicates whether the server is in read-only mode.
+	// When true, the server accepts reads but rejects all writes.
+	ReadOnly bool `json:"read_only"`
+
 	// Healthy indicates whether the server is within acceptable resource limits.
 	Healthy bool `json:"healthy"`
 
@@ -1125,7 +1129,63 @@ func GetHealthMetrics(townRoot string) *HealthMetrics {
 	metrics.DiskUsageBytes = diskBytes
 	metrics.DiskUsageHuman = formatBytes(diskBytes)
 
+	// 4. Read-only probe: attempt a test write
+	readOnly, _ := CheckReadOnly(townRoot)
+	metrics.ReadOnly = readOnly
+	if readOnly {
+		metrics.Healthy = false
+		metrics.Warnings = append(metrics.Warnings,
+			"server is in READ-ONLY mode — requires restart to recover")
+	}
+
 	return metrics
+}
+
+// CheckReadOnly probes the Dolt server to detect read-only state by attempting
+// a test write. The server can enter read-only mode under concurrent write load
+// ("cannot update manifest: database is read only") and will NOT self-recover.
+// Returns (true, nil) if read-only, (false, nil) if writable, (false, err) on probe failure.
+func CheckReadOnly(townRoot string) (bool, error) {
+	config := DefaultConfig(townRoot)
+
+	// Need a database to test writes against
+	databases, err := ListDatabases(townRoot)
+	if err != nil || len(databases) == 0 {
+		return false, nil // Can't probe without a database
+	}
+
+	db := databases[0]
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Attempt a write operation: create a temp table, write a row, drop it.
+	// If the server is in read-only mode, this will fail with a characteristic error.
+	query := fmt.Sprintf(
+		"USE `%s`; CREATE TABLE IF NOT EXISTS `__gt_health_probe` (v INT PRIMARY KEY); REPLACE INTO `__gt_health_probe` VALUES (1); DROP TABLE IF EXISTS `__gt_health_probe`",
+		db,
+	)
+	cmd := exec.CommandContext(ctx, "dolt", "sql", "-q", query)
+	cmd.Dir = config.DataDir
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(output))
+		if IsReadOnlyError(msg) {
+			return true, nil
+		}
+		return false, fmt.Errorf("write probe failed: %w (%s)", err, msg)
+	}
+
+	return false, nil
+}
+
+// IsReadOnlyError checks if an error message indicates a Dolt read-only state.
+// The characteristic error is "cannot update manifest: database is read only".
+func IsReadOnlyError(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "read only") ||
+		strings.Contains(lower, "read-only") ||
+		strings.Contains(lower, "readonly")
 }
 
 // MeasureQueryLatency times a SELECT 1 query against the Dolt server.

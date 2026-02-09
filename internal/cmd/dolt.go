@@ -281,6 +281,11 @@ func runDoltStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("    Connections:   %d / %d (%.0f%%)\n",
 			metrics.Connections, metrics.MaxConnections, metrics.ConnectionPct)
 		fmt.Printf("    Disk usage:    %s\n", metrics.DiskUsageHuman)
+		if metrics.ReadOnly {
+			fmt.Printf("\n  %s %s\n",
+				style.Bold.Render("!!!"),
+				style.Bold.Render("SERVER IS READ-ONLY — restart required (gt dolt stop && gt dolt start)"))
+		}
 		if len(metrics.Warnings) > 0 {
 			fmt.Printf("\n  %s\n", style.Bold.Render("Warnings:"))
 			for _, w := range metrics.Warnings {
