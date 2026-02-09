@@ -453,8 +453,13 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 			sessionStatus = style.Success.Render("●")
 		}
 
-		// Display actual state (no normalization - idle means idle)
+		// Display actual state, reconciled with tmux session liveness.
+		// Per gt-zecmc design: tmux is ground truth for observable states.
+		// If session is running but beads says done, the polecat is still alive.
 		displayState := p.State
+		if p.SessionRunning && displayState == polecat.StateDone {
+			displayState = polecat.StateWorking
+		}
 
 		// State color
 		stateStr := string(displayState)
