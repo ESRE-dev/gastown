@@ -170,6 +170,7 @@ func listUnclaimedQueueMessages(beadsDir, queueName string) ([]queueMessage, err
 		"--status", "open",
 		"--type", "message",
 		"--json",
+		"--limit", "0",
 	}
 
 	cmd := exec.Command("bd", args...)
