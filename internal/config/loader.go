@@ -1545,7 +1545,7 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	var townRoot string
 
 	// Extract role from envVars for role-based agent resolution (when no override)
-	role := extractSimpleRole(envVars["GT_ROLE"])
+	role := ExtractSimpleRole(envVars["GT_ROLE"])
 
 	if rigPath != "" {
 		townRoot = filepath.Dir(rigPath)
