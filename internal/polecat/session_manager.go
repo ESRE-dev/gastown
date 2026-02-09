@@ -350,7 +350,7 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 	// Try graceful shutdown first
 	if !force {
 		_ = m.tmux.SendKeysRaw(sessionID, "C-c")
-		time.Sleep(100 * time.Millisecond)
+		session.WaitForSessionExit(m.tmux, sessionID, constants.GracefulShutdownTimeout)
 	}
 
 	// Use KillSessionWithProcesses to ensure all descendant processes are killed.

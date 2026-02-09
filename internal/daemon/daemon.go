@@ -1192,6 +1192,30 @@ func (d *Daemon) isShutdownInProgress() bool {
 	return true
 }
 
+// IsShutdownInProgress checks if a shutdown is currently in progress for the given town.
+// This is the exported version of isShutdownInProgress for use by other packages
+// (e.g., Boot triage) that need to avoid restarting sessions during shutdown.
+func IsShutdownInProgress(townRoot string) bool {
+	lockPath := filepath.Join(townRoot, "daemon", "shutdown.lock")
+
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		return false
+	}
+
+	lock := flock.New(lockPath)
+	locked, err := lock.TryLock()
+	if err != nil {
+		return true
+	}
+
+	if locked {
+		_ = lock.Unlock()
+		return false
+	}
+
+	return true
+}
+
 // IsRunning checks if a daemon is running for the given town.
 // It checks the PID file and verifies the process is alive.
 // Note: The file lock in Run() is the authoritative mechanism for preventing

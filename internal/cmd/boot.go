@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/boot"
+	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -278,6 +279,14 @@ func runBootTriage(cmd *cobra.Command, args []string) error {
 // runDegradedTriage performs basic Deacon health check without AI reasoning.
 // This is a mechanical fallback when full Claude sessions aren't available.
 func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
+	// Abort triage if a shutdown is in progress. Without this check, Boot could
+	// detect Deacon as "down" during the graceful shutdown window and restart it,
+	// creating a zombie Deacon that survives gt down.
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" && daemon.IsShutdownInProgress(townRoot) {
+		return "nothing", "shutdown-in-progress", nil
+	}
+
 	tm := b.Tmux()
 
 	// Check if Deacon session exists
@@ -305,7 +314,6 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 
 	// Deacon exists - check heartbeat to detect stuck sessions
 	// A session can exist but be stuck (not making progress)
-	townRoot, _ := workspace.FindFromCwd()
 	if townRoot != "" {
 		hb := deacon.ReadHeartbeat(townRoot)
 		if hb.ShouldPoke() {

@@ -199,7 +199,7 @@ func (m *SessionManager) Stop(dogName string, force bool) error {
 	// Try graceful shutdown first
 	if !force {
 		_ = m.tmux.SendKeysRaw(sessionID, "C-c")
-		time.Sleep(100 * time.Millisecond)
+		session.WaitForSessionExit(m.tmux, sessionID, constants.GracefulShutdownTimeout)
 	}
 
 	if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
