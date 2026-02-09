@@ -742,3 +742,78 @@ func TestMessageIsClaimed(t *testing.T) {
 		t.Error("Claimed message should be claimed")
 	}
 }
+
+func TestParseLabelsIdempotent(t *testing.T) {
+	bm := BeadsMessage{
+		ID:    "hq-test",
+		Title: "Test",
+		Labels: []string{
+			"from:mayor/",
+			"thread:t-001",
+			"reply-to:orig-001",
+			"msg-type:task",
+			"cc:gastown/Toast",
+			"cc:gastown/nux",
+			"queue:work-requests",
+			"channel:alerts",
+			"claimed-by:gastown/nux",
+		},
+	}
+
+	// Call ParseLabels multiple times
+	bm.ParseLabels()
+	bm.ParseLabels()
+	bm.ParseLabels()
+
+	// CC list should not accumulate duplicates
+	if len(bm.cc) != 2 {
+		t.Errorf("cc should have 2 entries after multiple ParseLabels calls, got %d: %v", len(bm.cc), bm.cc)
+	}
+
+	// Other fields should remain correct
+	if bm.sender != "mayor/" {
+		t.Errorf("sender = %q, want 'mayor/'", bm.sender)
+	}
+	if bm.threadID != "t-001" {
+		t.Errorf("threadID = %q, want 't-001'", bm.threadID)
+	}
+	if bm.replyTo != "orig-001" {
+		t.Errorf("replyTo = %q, want 'orig-001'", bm.replyTo)
+	}
+	if bm.msgType != "task" {
+		t.Errorf("msgType = %q, want 'task'", bm.msgType)
+	}
+	if bm.queue != "work-requests" {
+		t.Errorf("queue = %q, want 'work-requests'", bm.queue)
+	}
+	if bm.channel != "alerts" {
+		t.Errorf("channel = %q, want 'alerts'", bm.channel)
+	}
+	if bm.claimedBy != "gastown/nux" {
+		t.Errorf("claimedBy = %q, want 'gastown/nux'", bm.claimedBy)
+	}
+}
+
+func TestParseLabelsIdempotentViaPublicMethods(t *testing.T) {
+	bm := BeadsMessage{
+		ID:       "hq-test",
+		Title:    "Test",
+		Assignee: "gastown/Toast",
+		Labels: []string{
+			"from:mayor/",
+			"cc:gastown/nux",
+			"cc:gastown/slit",
+		},
+	}
+
+	// Simulate the bug: calling IsDirectMessage then ToMessage
+	// Both call ParseLabels internally
+	_ = bm.IsDirectMessage()
+	_ = bm.IsQueueMessage()
+	_ = bm.IsChannelMessage()
+	msg := bm.ToMessage()
+
+	if len(msg.CC) != 2 {
+		t.Errorf("CC should have 2 entries after multiple method calls, got %d: %v", len(msg.CC), msg.CC)
+	}
+}
