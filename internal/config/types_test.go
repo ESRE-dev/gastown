@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -412,7 +413,7 @@ func TestTownSettings_OmitemptyNilFields(t *testing.T) {
 
 	jsonStr := string(data)
 	for _, key := range []string{"web_timeouts", "worker_status", "feed_curator"} {
-		if contains(jsonStr, key) {
+		if strings.Contains(jsonStr, key) {
 			t.Errorf("JSON should not contain %q when field is nil, got:\n%s", key, jsonStr)
 		}
 	}
@@ -432,12 +433,12 @@ func TestTownSettings_OmitemptyEmptyDurations(t *testing.T) {
 
 	jsonStr := string(data)
 	// The "web_timeouts" key SHOULD appear (pointer is non-nil)
-	if !contains(jsonStr, "web_timeouts") {
+	if !strings.Contains(jsonStr, "web_timeouts") {
 		t.Error("JSON should contain web_timeouts when struct is non-nil")
 	}
 	// But individual empty string fields should be omitted
 	for _, key := range []string{"cmd_timeout", "gh_cmd_timeout", "tmux_cmd_timeout"} {
-		if contains(jsonStr, key) {
+		if strings.Contains(jsonStr, key) {
 			t.Errorf("JSON should not contain %q when field is empty string, got:\n%s", key, jsonStr)
 		}
 	}
@@ -456,7 +457,7 @@ func TestFeedCuratorConfig_OmitemptyZeroCount(t *testing.T) {
 	}
 
 	jsonStr := string(data)
-	if contains(jsonStr, "min_aggregate_count") {
+	if strings.Contains(jsonStr, "min_aggregate_count") {
 		t.Errorf("JSON should not contain min_aggregate_count when 0, got: %s", jsonStr)
 	}
 }
@@ -500,16 +501,3 @@ func TestParseDurationOrDefault_AllWebTimeoutDefaults(t *testing.T) {
 	}
 }
 
-// helper
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

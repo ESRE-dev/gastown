@@ -279,6 +279,33 @@ func TestCurator_PartialFeedCuratorConfig_EmptyDurations(t *testing.T) {
 	}
 }
 
+func TestCurator_PartialFeedCuratorConfig_ZeroMinAggregate(t *testing.T) {
+	// FeedCurator section exists with durations but MinAggregateCount is omitted (zero value).
+	// Must fall back to default 3, NOT use 0 (which would aggregate every sling event).
+	tmpDir := t.TempDir()
+	settingsDir := filepath.Join(tmpDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	ts := config.NewTownSettings()
+	ts.FeedCurator = &config.FeedCuratorConfig{
+		DoneDedupeWindow:     "25s",
+		SlingAggregateWindow: "1m",
+		// MinAggregateCount intentionally omitted (zero value)
+	}
+	if err := config.SaveTownSettings(filepath.Join(settingsDir, "config.json"), ts); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	curator := NewCurator(tmpDir)
+	defer curator.Stop()
+
+	if curator.minAggregateCount != 3 {
+		t.Errorf("minAggregateCount = %d, want 3 (default for zero/omitted value)", curator.minAggregateCount)
+	}
+}
+
 func TestCurator_InvalidDurationString_FallsBack(t *testing.T) {
 	// Invalid duration string in config → falls back to default.
 	tmpDir := t.TempDir()

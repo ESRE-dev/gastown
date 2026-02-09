@@ -65,13 +65,18 @@ func NewCurator(townRoot string) *Curator {
 		}
 	}
 
+	minAgg := cfg.MinAggregateCount
+	if minAgg <= 0 {
+		minAgg = 3 // default: aggregate after 3+ events
+	}
+
 	return &Curator{
 		townRoot:             townRoot,
 		ctx:                  ctx,
 		cancel:               cancel,
 		doneDedupeWindow:     config.ParseDurationOrDefault(cfg.DoneDedupeWindow, 10*time.Second),
 		slingAggregateWindow: config.ParseDurationOrDefault(cfg.SlingAggregateWindow, 30*time.Second),
-		minAggregateCount:    cfg.MinAggregateCount,
+		minAggregateCount:    minAgg,
 	}
 }
 
