@@ -3,6 +3,7 @@ package beads
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -105,6 +106,98 @@ func (b *Beads) CreateRigBead(id, title string, fields *RigFields) (*Issue, erro
 	}
 
 	return &issue, nil
+}
+
+// GetRigBead retrieves a rig bead by name.
+// Returns ErrNotFound if the rig does not exist.
+func (b *Beads) GetRigBead(name string) (*Issue, *RigFields, error) {
+	id := RigBeadID(name)
+	issue, err := b.Show(id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, err
+	}
+
+	if !HasLabel(issue, "gt:rig") {
+		return nil, nil, fmt.Errorf("bead %s is not a rig bead (missing gt:rig label)", id)
+	}
+
+	fields := ParseRigFields(issue.Description)
+	return issue, fields, nil
+}
+
+// GetRigByID retrieves a rig bead by its full ID.
+// Returns ErrNotFound if the rig does not exist.
+func (b *Beads) GetRigByID(id string) (*Issue, *RigFields, error) {
+	issue, err := b.Show(id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, err
+	}
+
+	if !HasLabel(issue, "gt:rig") {
+		return nil, nil, fmt.Errorf("bead %s is not a rig bead (missing gt:rig label)", id)
+	}
+
+	fields := ParseRigFields(issue.Description)
+	return issue, fields, nil
+}
+
+// UpdateRigBead updates the fields for a rig bead.
+func (b *Beads) UpdateRigBead(name string, fields *RigFields) (*Issue, error) {
+	issue, _, err := b.GetRigBead(name)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("rig %q not found", name)
+		}
+		return nil, err
+	}
+
+	description := FormatRigDescription(name, fields)
+
+	if err := b.Update(issue.ID, UpdateOptions{Description: &description}); err != nil {
+		return nil, err
+	}
+
+	updated, err := b.Show(issue.ID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching updated rig: %w", err)
+	}
+	return updated, nil
+}
+
+// DeleteRigBead permanently deletes a rig bead.
+func (b *Beads) DeleteRigBead(name string) error {
+	id := RigBeadID(name)
+	_, err := b.run("delete", id, "--hard", "--force")
+	return err
+}
+
+// ListRigBeads returns all rig beads.
+func (b *Beads) ListRigBeads() (map[string]*RigFields, error) {
+	out, err := b.run("list", "--label=gt:rig", "--json")
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []*Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	}
+
+	result := make(map[string]*RigFields, len(issues))
+	for _, issue := range issues {
+		fields := ParseRigFields(issue.Description)
+		if fields.Prefix != "" {
+			result[fields.Prefix] = fields
+		}
+	}
+
+	return result, nil
 }
 
 // RigBeadIDWithPrefix generates a rig identity bead ID using the specified prefix.
