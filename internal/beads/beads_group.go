@@ -96,10 +96,17 @@ func ParseGroupFields(description string) *GroupFields {
 	return fields
 }
 
-// GroupBeadID returns the bead ID for a group name.
-// Format: hq-group-<name> (town-level, groups span rigs)
+// GroupBeadIDWithPrefix generates a group bead ID using the specified prefix.
+// Format: <prefix>-group-<name> (e.g., hq-group-ops-team)
+func GroupBeadIDWithPrefix(prefix, name string) string {
+	return fmt.Sprintf("%s-group-%s", prefix, name)
+}
+
+// GroupBeadID returns the bead ID for a group name using "hq" prefix.
+// Groups are town-level entities (hq- prefix) because they span rigs.
+// For non-standard prefixes, use GroupBeadIDWithPrefix.
 func GroupBeadID(name string) string {
-	return "hq-group-" + name
+	return GroupBeadIDWithPrefix("hq", name)
 }
 
 // CreateGroupBead creates a group bead for mail distribution.

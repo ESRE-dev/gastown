@@ -158,6 +158,26 @@ members: a, b , c`,
 	}
 }
 
+func TestGroupBeadIDWithPrefix(t *testing.T) {
+	tests := []struct {
+		prefix string
+		name   string
+		want   string
+	}{
+		{"hq", "ops-team", "hq-group-ops-team"},
+		{"gt", "ops-team", "gt-group-ops-team"},
+		{"bd", "all", "bd-group-all"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.prefix+"-"+tt.name, func(t *testing.T) {
+			if got := GroupBeadIDWithPrefix(tt.prefix, tt.name); got != tt.want {
+				t.Errorf("GroupBeadIDWithPrefix(%q, %q) = %q, want %q", tt.prefix, tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGroupBeadID(t *testing.T) {
 	tests := []struct {
 		name string
