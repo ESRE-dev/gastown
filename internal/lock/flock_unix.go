@@ -8,6 +8,14 @@ import (
 	"syscall"
 )
 
+// FlockAcquire opens a flock file and acquires an exclusive advisory lock.
+// Returns a cleanup function that releases the lock and closes the file.
+// This is a general-purpose cross-process lock suitable for any read-modify-write
+// operation that needs serialization across separate CLI invocations.
+func FlockAcquire(path string) (func(), error) {
+	return flockAcquire(path)
+}
+
 // flockAcquire opens a flock file and acquires an exclusive advisory lock.
 // Returns a cleanup function that releases the lock and closes the file.
 // The flock prevents concurrent Acquire() calls from racing on the same lock path.
