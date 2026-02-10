@@ -147,9 +147,9 @@ func (b *Beads) CreateGroupBead(name string, members []string, createdBy string)
 	return &issue, nil
 }
 
-// GetGroupBead retrieves a group bead by name.
+// GetGroupByName retrieves a group bead by name.
 // Returns ErrNotFound if the group does not exist.
-func (b *Beads) GetGroupBead(name string) (*Issue, *GroupFields, error) {
+func (b *Beads) GetGroupByName(name string) (*Issue, *GroupFields, error) {
 	id := GroupBeadID(name)
 	issue, err := b.Show(id)
 	if err != nil {
@@ -188,7 +188,7 @@ func (b *Beads) GetGroupByID(id string) (*Issue, *GroupFields, error) {
 
 // UpdateGroupMembers updates the members list for a group.
 func (b *Beads) UpdateGroupMembers(name string, members []string) (*Issue, error) {
-	issue, fields, err := b.GetGroupBead(name)
+	issue, fields, err := b.GetGroupByName(name)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("group %q not found", name)
@@ -212,7 +212,7 @@ func (b *Beads) UpdateGroupMembers(name string, members []string) (*Issue, error
 
 // AddGroupMember adds a member to a group if not already present.
 func (b *Beads) AddGroupMember(name string, member string) (*Issue, error) {
-	issue, fields, err := b.GetGroupBead(name)
+	issue, fields, err := b.GetGroupByName(name)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("group %q not found", name)
@@ -243,7 +243,7 @@ func (b *Beads) AddGroupMember(name string, member string) (*Issue, error) {
 
 // RemoveGroupMember removes a member from a group.
 func (b *Beads) RemoveGroupMember(name string, member string) (*Issue, error) {
-	issue, fields, err := b.GetGroupBead(name)
+	issue, fields, err := b.GetGroupByName(name)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("group %q not found", name)
@@ -308,7 +308,7 @@ func (b *Beads) ListGroupBeads() (map[string]*GroupFields, error) {
 // Returns ErrNotFound if no group with the given name exists.
 func (b *Beads) LookupGroupByName(name string) (*Issue, *GroupFields, error) {
 	// First try direct lookup by standard ID format
-	issue, fields, err := b.GetGroupBead(name)
+	issue, fields, err := b.GetGroupByName(name)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, nil, err
 	}
