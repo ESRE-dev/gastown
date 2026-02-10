@@ -162,7 +162,7 @@ func (c *RigBeadsCheck) Fix(ctx *CheckContext) error {
 				State:  beads.RigStateActive,
 			}
 
-			if _, err := bd.CreateRigBead(rigBeadID, rigName, fields); err != nil {
+			if _, err := bd.CreateRigBead(rigName, fields); err != nil {
 				return fmt.Errorf("creating %s: %w", rigBeadID, err)
 			}
 		}

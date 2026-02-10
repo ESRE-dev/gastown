@@ -113,15 +113,16 @@ func GroupBeadID(name string) string {
 // The ID format is: hq-group-<name> (e.g., hq-group-ops-team)
 // Groups are town-level entities (hq- prefix) because they span rigs.
 // The created_by field is populated from BD_ACTOR env var for provenance tracking.
-func (b *Beads) CreateGroupBead(name string, members []string, createdBy string) (*Issue, error) {
+func (b *Beads) CreateGroupBead(name string, fields *GroupFields) (*Issue, error) {
 	id := GroupBeadID(name)
 	title := fmt.Sprintf("Group: %s", name)
 
-	fields := &GroupFields{
-		Name:      name,
-		Members:   members,
-		CreatedBy: createdBy,
-		CreatedAt: time.Now().Format(time.RFC3339),
+	if fields == nil {
+		fields = &GroupFields{}
+	}
+	fields.Name = name
+	if fields.CreatedAt == "" {
+		fields.CreatedAt = time.Now().Format(time.RFC3339)
 	}
 
 	description := FormatGroupDescription(title, fields)

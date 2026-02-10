@@ -231,7 +231,10 @@ func runGroupCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("group already exists: %s", name)
 	}
 
-	_, err = b.CreateGroupBead(name, members, createdBy)
+	_, err = b.CreateGroupBead(name, &beads.GroupFields{
+		Members:   members,
+		CreatedBy: createdBy,
+	})
 	if err != nil {
 		return fmt.Errorf("creating group: %w", err)
 	}
