@@ -127,13 +127,21 @@ type WorkerStatusConfig struct {
 	// StuckThreshold is the activity age after which a worker is considered "stuck".
 	// Default: "30m".
 	StuckThreshold string `json:"stuck_threshold,omitempty"`
+	// HeartbeatFreshThreshold is the max age for a Deacon heartbeat to be considered fresh.
+	// Default: "5m".
+	HeartbeatFreshThreshold string `json:"heartbeat_fresh_threshold,omitempty"`
+	// MayorActiveThreshold is the max session inactivity for the Mayor to be considered active.
+	// Default: "5m".
+	MayorActiveThreshold string `json:"mayor_active_threshold,omitempty"`
 }
 
 // DefaultWorkerStatusConfig returns a WorkerStatusConfig with sensible defaults.
 func DefaultWorkerStatusConfig() *WorkerStatusConfig {
 	return &WorkerStatusConfig{
-		StaleThreshold: "5m",
-		StuckThreshold: "30m",
+		StaleThreshold:          "5m",
+		StuckThreshold:          "30m",
+		HeartbeatFreshThreshold: "5m",
+		MayorActiveThreshold:    "5m",
 	}
 }
 

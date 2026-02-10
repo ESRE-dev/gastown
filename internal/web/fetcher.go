@@ -77,8 +77,10 @@ type LiveConvoyFetcher struct {
 	tmuxCmdTimeout time.Duration
 
 	// Configurable worker status thresholds (from TownSettings.WorkerStatus)
-	staleThreshold time.Duration
-	stuckThreshold time.Duration
+	staleThreshold          time.Duration
+	stuckThreshold          time.Duration
+	heartbeatFreshThreshold time.Duration
+	mayorActiveThreshold    time.Duration
 }
 
 // NewLiveConvoyFetcher creates a fetcher for the current workspace.
@@ -108,8 +110,10 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 		cmdTimeout:     config.ParseDurationOrDefault(webCfg.CmdTimeout, 15*time.Second),
 		ghCmdTimeout:   config.ParseDurationOrDefault(webCfg.GhCmdTimeout, 10*time.Second),
 		tmuxCmdTimeout: config.ParseDurationOrDefault(webCfg.TmuxCmdTimeout, 2*time.Second),
-		staleThreshold: config.ParseDurationOrDefault(workerCfg.StaleThreshold, 5*time.Minute),
-		stuckThreshold: config.ParseDurationOrDefault(workerCfg.StuckThreshold, 30*time.Minute),
+		staleThreshold:          config.ParseDurationOrDefault(workerCfg.StaleThreshold, 5*time.Minute),
+		stuckThreshold:          config.ParseDurationOrDefault(workerCfg.StuckThreshold, 30*time.Minute),
+		heartbeatFreshThreshold: config.ParseDurationOrDefault(workerCfg.HeartbeatFreshThreshold, 5*time.Minute),
+		mayorActiveThreshold:    config.ParseDurationOrDefault(workerCfg.MayorActiveThreshold, 5*time.Minute),
 	}, nil
 }
 
@@ -1233,7 +1237,7 @@ func (f *LiveConvoyFetcher) FetchHealth() (*HealthRow, error) {
 			if !hb.LastHeartbeat.IsZero() {
 				age := time.Since(hb.LastHeartbeat)
 				row.DeaconHeartbeat = formatMailAge(age)
-				row.HeartbeatFresh = age < f.staleThreshold
+				row.HeartbeatFresh = age < f.heartbeatFreshThreshold
 			} else {
 				row.DeaconHeartbeat = "no timestamp"
 			}
@@ -1473,7 +1477,7 @@ func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
 				if activityTs, ok := parseActivityTimestamp(parts[1]); ok {
 					age := time.Since(time.Unix(activityTs, 0))
 					status.LastActivity = formatMailAge(age)
-					status.IsActive = age < f.staleThreshold
+					status.IsActive = age < f.mayorActiveThreshold
 				}
 			}
 			break
