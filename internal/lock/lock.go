@@ -202,8 +202,17 @@ func (l *Lock) write(sessionID string) error {
 		return fmt.Errorf("marshaling lock info: %w", err)
 	}
 
-	if err := os.WriteFile(l.lockPath, data, 0644); err != nil { //nolint:gosec // G306: lock files are non-sensitive operational data
-		return fmt.Errorf("writing lock file: %w", err)
+	// Write to temp file then rename atomically to prevent partial lock files
+	// on crash. os.Rename is atomic on POSIX when src and dst are on the same
+	// filesystem (guaranteed here — same directory).
+	tmpPath := l.lockPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil { //nolint:gosec // G306: lock files are non-sensitive operational data
+		return fmt.Errorf("writing temp lock file: %w", err)
+	}
+	if err := os.Rename(tmpPath, l.lockPath); err != nil {
+		// Clean up temp file on rename failure
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("renaming lock file: %w", err)
 	}
 
 	return nil
