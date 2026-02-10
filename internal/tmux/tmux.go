@@ -143,34 +143,45 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 // - The tmux session exists
 // - But Claude (node process) is not running in it
 //
-// Returns nil if session was created successfully.
+// Uses create-first approach to avoid TOCTOU race conditions in multi-agent
+// environments where another agent could create the same session between a
+// check and create call.
+//
+// Returns nil if session was created successfully or already exists with a running agent.
 func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 	if err := validateSessionName(name); err != nil {
 		return err
 	}
-	// Check if session already exists
-	exists, err := t.HasSession(name)
-	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+
+	// Try to create the session first (atomic — avoids check-then-create race)
+	err := t.NewSession(name, workDir)
+	if err == nil {
+		return nil // Created successfully
+	}
+	if err != ErrSessionExists {
+		return fmt.Errorf("creating session: %w", err)
 	}
 
-	if exists {
-		// Session exists - check if it's a zombie
-		if !t.IsAgentRunning(name) {
-			// Zombie session: tmux alive but Claude dead
-			// Kill it so we can create a fresh one
-			// Use KillSessionWithProcesses to ensure all descendant processes are killed
-			if err := t.KillSessionWithProcesses(name); err != nil {
-				return fmt.Errorf("killing zombie session: %w", err)
-			}
-		} else {
-			// Session is healthy (Claude running) - nothing to do
-			return nil
-		}
+	// Session already exists — check if it's a zombie
+	if t.IsAgentRunning(name) {
+		// Session is healthy (agent running) — nothing to do
+		return nil
 	}
 
-	// Create fresh session
-	return t.NewSession(name, workDir)
+	// Zombie session: tmux alive but agent dead
+	// Kill it so we can create a fresh one
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed
+	if err := t.KillSessionWithProcesses(name); err != nil {
+		return fmt.Errorf("killing zombie session: %w", err)
+	}
+
+	// Create fresh session (handle race: another agent may have created it
+	// between our kill and this create — that's fine, treat as success)
+	err = t.NewSession(name, workDir)
+	if err == ErrSessionExists {
+		return nil
+	}
+	return err
 }
 
 // KillSession terminates a tmux session.
