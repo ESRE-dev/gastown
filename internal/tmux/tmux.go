@@ -36,10 +36,21 @@ var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // Common errors
 var (
-	ErrNoServer        = errors.New("no tmux server running")
-	ErrSessionExists   = errors.New("session already exists")
-	ErrSessionNotFound = errors.New("session not found")
+	ErrNoServer            = errors.New("no tmux server running")
+	ErrSessionExists       = errors.New("session already exists")
+	ErrSessionNotFound     = errors.New("session not found")
+	ErrInvalidSessionName  = errors.New("invalid session name")
 )
+
+// validateSessionName checks that a session name contains only safe characters.
+// Returns ErrInvalidSessionName if the name contains dots, colons, or other
+// characters that cause tmux to silently fail or produce cryptic errors.
+func validateSessionName(name string) error {
+	if name == "" || !validSessionNameRe.MatchString(name) {
+		return fmt.Errorf("%w %q: must match %s", ErrInvalidSessionName, name, validSessionNameRe.String())
+	}
+	return nil
+}
 
 // Tmux wraps tmux operations.
 type Tmux struct{}
@@ -94,6 +105,9 @@ func (t *Tmux) wrapError(err error, stderr string, args []string) error {
 
 // NewSession creates a new detached tmux session.
 func (t *Tmux) NewSession(name, workDir string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
 	args := []string{"new-session", "-d", "-s", name}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
@@ -108,6 +122,9 @@ func (t *Tmux) NewSession(name, workDir string) error {
 // initial process of the pane.
 // See: https://github.com/anthropics/gastown/issues/280
 func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
 	args := []string{"new-session", "-d", "-s", name}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
@@ -128,6 +145,9 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 //
 // Returns nil if session was created successfully.
 func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
 	// Check if session already exists
 	exists, err := t.HasSession(name)
 	if err != nil {
@@ -1230,6 +1250,9 @@ func (t *Tmux) GetAllEnvironment(session string) (map[string]string, error) {
 
 // RenameSession renames a session.
 func (t *Tmux) RenameSession(oldName, newName string) error {
+	if err := validateSessionName(newName); err != nil {
+		return err
+	}
 	_, err := t.run("rename-session", "-t", oldName, newName)
 	return err
 }
@@ -1567,9 +1590,8 @@ func (t *Tmux) SetStatusFormat(session, rig, worker, role string) error {
 // SetDynamicStatus configures the right side with dynamic content.
 // Uses a shell command that tmux calls periodically to get current status.
 func (t *Tmux) SetDynamicStatus(session string) error {
-	// Validate session name to prevent shell injection
-	if !validSessionNameRe.MatchString(session) {
-		return fmt.Errorf("invalid session name %q: must match %s", session, validSessionNameRe.String())
+	if err := validateSessionName(session); err != nil {
+		return err
 	}
 
 	// tmux calls this command every status-interval seconds
@@ -1846,9 +1868,12 @@ func (t *Tmux) CleanupOrphanedSessions() (cleaned int, err error) {
 // When the pane exits, tmux runs the hook command with exit status info.
 // The agentID is used to identify the agent in crash logs (e.g., "gastown/Toast").
 func (t *Tmux) SetPaneDiedHook(session, agentID string) error {
-	// Sanitize inputs to prevent shell injection
-	session = strings.ReplaceAll(session, "'", "'\\''")
+	if err := validateSessionName(session); err != nil {
+		return err
+	}
+	// Sanitize agentID to prevent shell injection (session already validated by regex)
 	agentID = strings.ReplaceAll(agentID, "'", "'\\''")
+	session = strings.ReplaceAll(session, "'", "'\\''") // safe after validation, but keep for consistency
 
 	// Hook command logs the crash with exit status
 	// #{pane_dead_status} is the exit code of the process that died
@@ -1872,6 +1897,9 @@ func (t *Tmux) SetPaneDiedHook(session, agentID string) error {
 //
 // Requires remain-on-exit to be set first (called automatically by this function).
 func (t *Tmux) SetAutoRespawnHook(session string) error {
+	if err := validateSessionName(session); err != nil {
+		return err
+	}
 	// First, enable remain-on-exit so the pane stays after process exit
 	if err := t.SetRemainOnExit(session, true); err != nil {
 		return fmt.Errorf("setting remain-on-exit: %w", err)
