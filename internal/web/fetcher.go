@@ -22,6 +22,9 @@ import (
 
 // runCmd executes a command with a timeout and returns stdout.
 // Returns empty buffer on timeout or error.
+// Security: errors from this function are logged server-side only (via log.Printf
+// in callers) and never included in HTTP responses. The handler renders templates
+// with whatever data was successfully fetched; fetch failures result in empty panels.
 func runCmd(timeout time.Duration, name string, args ...string) (*bytes.Buffer, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
