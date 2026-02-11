@@ -392,17 +392,32 @@ This becomes the digest when the patrol is squashed."""
 
 [[steps]]
 id = "context-check"
-title = "Check own context limit"
+title = "Check context limit and session age"
 needs = ["generate-summary"]
 description = """
-Check own context usage.
+Check own context usage AND session wall-clock time.
 
-If context is HIGH (>80%):
+**Step 1: Check session age**
+
+```bash
+# Get session start time from tmux
+CREATED=$(tmux display-message -t $(tmux display-message -p '#S') -p '#{session_created}')
+AGE_HOURS=$(( ($(date +%s) - CREATED) / 3600 ))
+echo "Session age: ${AGE_HOURS}h"
+```
+
+**Step 2: Decision**
+
+If session age > 4 hours OR context is HIGH (>80%):
 - Write handoff summary
-- Prepare for burn/respawn
+- Prepare for burn/respawn (proceed to burn-or-loop as EXIT)
 
-If context is LOW:
-- Can continue processing"""
+If session age <= 4 hours AND context is LOW:
+- Can continue processing
+
+**Why time matters**: Long-running Claude sessions accumulate memory (1-2 GB RSS).
+Even idle sessions bloat over time. A 4-hour cap prevents resource waste and keeps
+the system healthy. Fresh sessions are cheap — memory bloat is not."""
 
 [[steps]]
 id = "patrol-cleanup"
@@ -461,19 +476,46 @@ needs = ["patrol-cleanup"]
 description = """
 End of patrol cycle decision.
 
-**Step 1: Estimate remaining context**
+**Step 1: Check session age and context**
 
-Ask yourself:
-- Have I processed many branches this cycle?
-- Is the conversation getting long?
-- Am I starting to lose track of earlier context?
-
-Rule of thumb: If you've done 3+ merges or processed significant cleanup work,
-it's time for a fresh session.
+```bash
+# Session age from context-check step
+CREATED=$(tmux display-message -t $(tmux display-message -p '#S') -p '#{session_created}')
+AGE_HOURS=$(( ($(date +%s) - CREATED) / 3600 ))
+```
 
 **Step 2: Decision tree**
 
-If context LOW (can continue patrolling):
+**EXIT if ANY of these are true:**
+- Session age > 4 hours (MANDATORY — prevents memory bloat)
+- Context HIGH (>80%)
+- 3+ merges processed this cycle
+
+**LOOP if ALL of these are true:**
+- Session age <= 4 hours
+- Context LOW
+- Fewer than 3 merges this cycle
+
+### EXIT path (handoff to fresh session):
+
+Squash wisp with summary digest, then use `gt handoff` for clean session transition:
+
+```bash
+gt handoff -s "Patrol complete" -m "Merged X branches, Y tests passed.
+Queue: empty/N remaining
+Session age: Xh
+Next: [any notes for successor]"
+```
+
+**Why gt handoff?**
+- Sends handoff mail to yourself with context
+- Respawns with fresh Claude instance
+- SessionStart hook runs gt prime
+- Successor picks up from your hook
+
+**DO NOT just exit.** Always use `gt handoff` for proper lifecycle.
+
+### LOOP path (continue patrolling):
 
 Use await-signal with exponential backoff to wait for MQ activity:
 
@@ -503,7 +545,7 @@ The idle counter was auto-incremented. Continue to next patrol cycle
 (the longer backoff will apply next time).
 
 After await-signal returns (either by signal or timeout):
-1. Generate a brief summary of this patrol cycle
+1. **RE-CHECK session age** — if now > 4h, EXIT instead of looping
 2. Squash the current wisp:
 ```bash
 bd mol squash <mol-id> --summary "<patrol-summary>"
@@ -514,20 +556,5 @@ bd mol wisp mol-refinery-patrol
 ```
 4. Continue executing from the inbox-check step of the new wisp
 
-If context HIGH (approaching limit):
-- Squash wisp with summary digest
-- Use `gt handoff` for clean session transition:
-
-```bash
-gt handoff -s "Patrol complete" -m "Merged X branches, Y tests passed.
-Queue: empty/N remaining
-Next: [any notes for successor]"
-```
-
-**Why gt handoff?**
-- Sends handoff mail to yourself with context
-- Respawns with fresh Claude instance
-- SessionStart hook runs gt prime
-- Successor picks up from your hook
-
-**DO NOT just exit.** Always use `gt handoff` for proper lifecycle."""
+**IMPORTANT**: Never sleep-poll manually (e.g., `sleep 30 && bd list`).
+Always use `gt mol step await-signal` — it's event-driven and tracks backoff state."""
