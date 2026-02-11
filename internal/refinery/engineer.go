@@ -112,13 +112,16 @@ const (
 // Engineer is the merge queue processor that polls for ready merge-requests
 // and processes them according to the merge queue design.
 type Engineer struct {
-	rig     *rig.Rig
-	beads   *beads.Beads
-	git     *git.Git
-	config  *MergeQueueConfig
-	workDir string
-	output  io.Writer    // Output destination for user-facing messages
-	router  *mail.Router // Mail router for sending protocol messages
+	rig                   *rig.Rig
+	beads                 *beads.Beads
+	git                   *git.Git
+	config                *MergeQueueConfig
+	workDir               string
+	output                io.Writer    // Output destination for user-facing messages
+	router                *mail.Router // Mail router for sending protocol messages
+	mergeSlotEnsureExists func() (string, error)
+	mergeSlotAcquire      func(holder string, addWaiter bool) (*beads.MergeSlotStatus, error)
+	mergeSlotRelease      func(holder string) error
 }
 
 // NewEngineer creates a new Engineer for the given rig.
@@ -132,15 +135,25 @@ func NewEngineer(r *rig.Rig) *Engineer {
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
 		gitDir = filepath.Join(r.Path, "mayor", "rig")
 	}
+	beadsClient := beads.New(r.Path)
 
 	return &Engineer{
 		rig:     r,
-		beads:   beads.New(r.Path),
+		beads:   beadsClient,
 		git:     git.NewGit(gitDir),
 		config:  cfg,
 		workDir: gitDir,
 		output:  os.Stdout,
 		router:  mail.NewRouter(r.Path),
+		mergeSlotEnsureExists: func() (string, error) {
+			return beadsClient.MergeSlotEnsureExists()
+		},
+		mergeSlotAcquire: func(holder string, addWaiter bool) (*beads.MergeSlotStatus, error) {
+			return beadsClient.MergeSlotAcquire(holder, addWaiter)
+		},
+		mergeSlotRelease: func(holder string) error {
+			return beadsClient.MergeSlotRelease(holder)
+		},
 	}
 }
 
@@ -365,7 +378,21 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		}
 	}
 
-	// Step 7: Push to origin
+	// Step 7: Acquire merge slot before push so only one writer updates main at a time.
+	pushHolder, err := e.acquireMainPushSlot()
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to acquire merge slot before push: %v", err),
+		}
+	}
+	defer func() {
+		if releaseErr := e.mergeSlotRelease(pushHolder); releaseErr != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to release merge slot for push (%s): %v\n", pushHolder, releaseErr)
+		}
+	}()
+
+	// Step 8: Push to origin
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing to origin/%s...\n", target)
 	if err := e.git.Push("origin", target, false); err != nil {
 		return ProcessResult{
@@ -379,6 +406,26 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		Success:     true,
 		MergeCommit: mergeCommit,
 	}
+}
+
+func (e *Engineer) acquireMainPushSlot() (string, error) {
+	slotID, err := e.mergeSlotEnsureExists()
+	if err != nil {
+		return "", fmt.Errorf("ensure merge slot exists: %w", err)
+	}
+
+	holder := fmt.Sprintf("%s/refinery/push/%d", e.rig.Name, time.Now().UnixNano())
+	status, err := e.mergeSlotAcquire(holder, false)
+	if err != nil {
+		return "", fmt.Errorf("acquire merge slot %s (%s): %w", slotID, holder, err)
+	}
+	if status == nil {
+		return "", fmt.Errorf("acquire merge slot %s (%s): empty status", slotID, holder)
+	}
+	if !status.Available && status.Holder != "" && status.Holder != holder {
+		return "", fmt.Errorf("merge slot %s held by %s", slotID, status.Holder)
+	}
+	return holder, nil
 }
 
 // ValidateTestCommand validates that a test command is safe to execute.
