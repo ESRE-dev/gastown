@@ -27,8 +27,8 @@ jobs:
           git config --global user.name "CI Bot"
           git config --global user.email "ci@gastown.test"
 
-      - name: Install ICU (required by dolt CGo dependency)
-        run: C:\msys64\usr\bin\pacman.exe -S --noconfirm mingw-w64-x86_64-icu
+      - name: Install MSYS2 packages (GCC + ICU for dolt CGo dependency)
+        run: C:\msys64\usr\bin\pacman.exe -Sy --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-icu
 
       - name: Install beads (bd)
         # Clone and build to handle replace directives that break go install @version
