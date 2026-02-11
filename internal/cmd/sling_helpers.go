@@ -216,7 +216,7 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 	} else if subject != "" {
 		prompt = fmt.Sprintf("Work slung: %s (%s). Start working on it now - no questions, just begin.", beadID, subject)
 	} else {
-		prompt = fmt.Sprintf("Work slung: %s. Start working on it now - run `" + cli.Name() + " hook` to see the hook, then begin.", beadID)
+		prompt = fmt.Sprintf("Work slung: %s. Start working on it now - run `"+cli.Name()+" hook` to see the hook, then begin.", beadID)
 	}
 
 	// Use the reliable nudge pattern (same as gt nudge / tmux.NudgeSession)

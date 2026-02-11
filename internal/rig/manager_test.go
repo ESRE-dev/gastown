@@ -826,14 +826,14 @@ func TestDetectBeadsPrefixFromConfig_FallbackIssuesJSONL(t *testing.T) {
 			want: "gt",
 		},
 		{
-			name: "skips agent bead when only entry",
+			name:       "skips agent bead when only entry",
 			issuesJSON: `{"id":"gt-demo-witness","title":"agent"}`,
-			want: "",
+			want:       "",
 		},
 		{
-			name: "multi-hyphen prefix with regular hash",
+			name:       "multi-hyphen prefix with regular hash",
 			issuesJSON: `{"id":"baseball-v3-abc12","title":"test"}`,
-			want: "baseball-v3",
+			want:       "baseball-v3",
 		},
 		{
 			name: "multiple regular issues agree on prefix",
@@ -893,11 +893,11 @@ func TestIsStandardBeadHash(t *testing.T) {
 		{"z0ixd", true},
 		{"00000", true},
 		{"abcde", true},
-		{"witness", false},  // too long (agent role)
-		{"abc", false},      // too short
-		{"ABC12", false},    // uppercase
-		{"abc-1", false},    // contains hyphen
-		{"", false},         // empty
+		{"witness", false},    // too long (agent role)
+		{"abc", false},        // too short
+		{"ABC12", false},      // uppercase
+		{"abc-1", false},      // contains hyphen
+		{"", false},           // empty
 		{"abc1234567", false}, // 10 chars (MR hash)
 	}
 

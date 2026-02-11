@@ -31,7 +31,6 @@ type AgentEnvConfig struct {
 	// SessionIDEnv is the environment variable name that holds the session ID.
 	// Sets GT_SESSION_ID_ENV so the runtime knows where to find the session ID.
 	SessionIDEnv string
-
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -130,7 +129,7 @@ func AgentEnvSimple(role, rig, agentName string) map[string]string {
 
 // ShellQuote returns a shell-safe quoted string.
 // Values containing special characters are wrapped in single quotes.
-// Single quotes within the value are escaped using the '\'' idiom.
+// Single quotes within the value are escaped using the '\” idiom.
 func ShellQuote(s string) string {
 	// Check if quoting is needed (contains shell special chars)
 	needsQuoting := false
