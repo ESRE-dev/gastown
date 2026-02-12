@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -775,22 +776,11 @@ func runRefineryReadyAll(eng *refinery.Engineer, rigName string) error {
 			flags = append(flags, "no-branch")
 		}
 		if len(flags) > 0 {
-			fmt.Printf("     Flags: %s\n", style.Dim.Render(fmt.Sprintf("[%s]", joinFlags(flags))))
+			fmt.Printf("     Flags: %s\n", style.Dim.Render(fmt.Sprintf("[%s]", strings.Join(flags, ", "))))
 		}
 	}
 
 	return nil
-}
-
-func joinFlags(flags []string) string {
-	result := ""
-	for i, f := range flags {
-		if i > 0 {
-			result += ", "
-		}
-		result += f
-	}
-	return result
 }
 
 func runRefineryBlocked(cmd *cobra.Command, args []string) error {

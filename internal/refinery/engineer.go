@@ -827,6 +827,61 @@ func (e *Engineer) IsBeadOpen(beadID string) (bool, error) {
 	return issue.Status != "closed", nil
 }
 
+// issueToMRInfo converts a beads issue (with parsed MR fields) into an MRInfo.
+// Shared by ListReadyMRs, ListBlockedMRs, and ListAllOpenMRs.
+func issueToMRInfo(issue *beads.Issue, fields *beads.MRFields) *MRInfo {
+	// Parse convoy created_at if present
+	var convoyCreatedAt *time.Time
+	if fields.ConvoyCreatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, fields.ConvoyCreatedAt); err == nil {
+			convoyCreatedAt = &t
+		}
+	}
+
+	// Parse issue timestamps
+	var createdAt, updatedAt time.Time
+	if issue.CreatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
+			createdAt = t
+		}
+	}
+	if issue.UpdatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, issue.UpdatedAt); err == nil {
+			updatedAt = t
+		}
+	}
+
+	return &MRInfo{
+		ID:              issue.ID,
+		Branch:          fields.Branch,
+		Target:          fields.Target,
+		SourceIssue:     fields.SourceIssue,
+		Worker:          fields.Worker,
+		Rig:             fields.Rig,
+		Title:           issue.Title,
+		Priority:        issue.Priority,
+		AgentBead:       fields.AgentBead,
+		RetryCount:      fields.RetryCount,
+		ConvoyID:        fields.ConvoyID,
+		ConvoyCreatedAt: convoyCreatedAt,
+		CreatedAt:       createdAt,
+		UpdatedAt:       updatedAt,
+		Assignee:        issue.Assignee,
+	}
+}
+
+// firstOpenBlocker returns the ID of the first open blocker for an issue,
+// or empty string if none are open.
+func (e *Engineer) firstOpenBlocker(issue *beads.Issue) string {
+	for _, blockerID := range issue.BlockedBy {
+		isOpen, err := e.IsBeadOpen(blockerID)
+		if err == nil && isOpen {
+			return blockerID
+		}
+	}
+	return ""
+}
+
 // ListReadyMRs returns MRs that are ready for processing:
 // - Not claimed by another worker (checked via assignee field)
 // - Not blocked by an open task (handled by bd ready)
@@ -855,48 +910,10 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 
 		// Skip if already assigned (claimed by another worker)
 		if issue.Assignee != "" {
-			// TODO: Add stale claim detection based on updated_at
 			continue
 		}
 
-		// Parse convoy created_at if present
-		var convoyCreatedAt *time.Time
-		if fields.ConvoyCreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, fields.ConvoyCreatedAt); err == nil {
-				convoyCreatedAt = &t
-			}
-		}
-
-		// Parse issue timestamps
-		var createdAt, updatedAt time.Time
-		if issue.CreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
-				createdAt = t
-			}
-		}
-		if issue.UpdatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, issue.UpdatedAt); err == nil {
-				updatedAt = t
-			}
-		}
-
-		mr := &MRInfo{
-			ID:              issue.ID,
-			Branch:          fields.Branch,
-			Target:          fields.Target,
-			SourceIssue:     fields.SourceIssue,
-			Worker:          fields.Worker,
-			Rig:             fields.Rig,
-			Title:           issue.Title,
-			Priority:        issue.Priority,
-			AgentBead:       fields.AgentBead,
-			RetryCount:      fields.RetryCount,
-			ConvoyID:        fields.ConvoyID,
-			ConvoyCreatedAt: convoyCreatedAt,
-			CreatedAt:       createdAt,
-			UpdatedAt:       updatedAt,
-		}
-		mrs = append(mrs, mr)
+		mrs = append(mrs, issueToMRInfo(issue, fields))
 	}
 
 	return mrs, nil
@@ -926,15 +943,8 @@ func (e *Engineer) ListBlockedMRs() ([]*MRInfo, error) {
 		}
 
 		// Check if any blocker is still open
-		hasOpenBlocker := false
-		for _, blockerID := range issue.BlockedBy {
-			isOpen, err := e.IsBeadOpen(blockerID)
-			if err == nil && isOpen {
-				hasOpenBlocker = true
-				break
-			}
-		}
-		if !hasOpenBlocker {
+		blockedBy := e.firstOpenBlocker(issue)
+		if blockedBy == "" {
 			continue // All blockers are closed, not blocked
 		}
 
@@ -943,55 +953,8 @@ func (e *Engineer) ListBlockedMRs() ([]*MRInfo, error) {
 			continue
 		}
 
-		// Parse convoy created_at if present
-		var convoyCreatedAt *time.Time
-		if fields.ConvoyCreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, fields.ConvoyCreatedAt); err == nil {
-				convoyCreatedAt = &t
-			}
-		}
-
-		// Parse issue timestamps
-		var createdAt, updatedAt time.Time
-		if issue.CreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
-				createdAt = t
-			}
-		}
-		if issue.UpdatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, issue.UpdatedAt); err == nil {
-				updatedAt = t
-			}
-		}
-
-		// Use the first open blocker as BlockedBy
-		blockedBy := ""
-		for _, blockerID := range issue.BlockedBy {
-			isOpen, err := e.IsBeadOpen(blockerID)
-			if err == nil && isOpen {
-				blockedBy = blockerID
-				break
-			}
-		}
-
-		mr := &MRInfo{
-			ID:              issue.ID,
-			Branch:          fields.Branch,
-			Target:          fields.Target,
-			SourceIssue:     fields.SourceIssue,
-			Worker:          fields.Worker,
-			Rig:             fields.Rig,
-			Title:           issue.Title,
-			Priority:        issue.Priority,
-			AgentBead:       fields.AgentBead,
-			RetryCount:      fields.RetryCount,
-			ConvoyID:        fields.ConvoyID,
-			ConvoyCreatedAt: convoyCreatedAt,
-			CreatedAt:       createdAt,
-			UpdatedAt:       updatedAt,
-			Assignee:        issue.Assignee,
-			BlockedBy:       blockedBy,
-		}
+		mr := issueToMRInfo(issue, fields)
+		mr.BlockedBy = blockedBy
 		mrs = append(mrs, mr)
 	}
 
@@ -1024,61 +987,13 @@ func (e *Engineer) ListAllOpenMRs() ([]*MRInfo, error) {
 			continue
 		}
 
-		// Parse convoy created_at if present
-		var convoyCreatedAt *time.Time
-		if fields.ConvoyCreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, fields.ConvoyCreatedAt); err == nil {
-				convoyCreatedAt = &t
-			}
-		}
-
-		// Parse issue timestamps
-		var createdAt, updatedAt time.Time
-		if issue.CreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
-				createdAt = t
-			}
-		}
-		if issue.UpdatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, issue.UpdatedAt); err == nil {
-				updatedAt = t
-			}
-		}
+		mr := issueToMRInfo(issue, fields)
 
 		// Check branch existence (local + remote tracking refs)
-		branchLocal, _ := e.git.BranchExists(fields.Branch)
-		branchRemote, _ := e.git.RemoteTrackingBranchExists("origin", fields.Branch)
+		mr.BranchExistsLocal, _ = e.git.BranchExists(fields.Branch)
+		mr.BranchExistsRemote, _ = e.git.RemoteTrackingBranchExists("origin", fields.Branch)
+		mr.BlockedBy = e.firstOpenBlocker(issue)
 
-		// Determine blocked-by (first open blocker)
-		blockedBy := ""
-		for _, blockerID := range issue.BlockedBy {
-			isOpen, checkErr := e.IsBeadOpen(blockerID)
-			if checkErr == nil && isOpen {
-				blockedBy = blockerID
-				break
-			}
-		}
-
-		mr := &MRInfo{
-			ID:                 issue.ID,
-			Branch:             fields.Branch,
-			Target:             fields.Target,
-			SourceIssue:        fields.SourceIssue,
-			Worker:             fields.Worker,
-			Rig:                fields.Rig,
-			Title:              issue.Title,
-			Priority:           issue.Priority,
-			AgentBead:          fields.AgentBead,
-			RetryCount:         fields.RetryCount,
-			ConvoyID:           fields.ConvoyID,
-			ConvoyCreatedAt:    convoyCreatedAt,
-			CreatedAt:          createdAt,
-			UpdatedAt:          updatedAt,
-			Assignee:           issue.Assignee,
-			BranchExistsLocal:  branchLocal,
-			BranchExistsRemote: branchRemote,
-			BlockedBy:          blockedBy,
-		}
 		mrs = append(mrs, mr)
 	}
 
