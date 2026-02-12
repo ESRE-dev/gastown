@@ -263,11 +263,10 @@ func findNextReadyStep(b *beads.Beads, moleculeID string) (*beads.Issue, bool, e
 
 		// Check dependencies using the Dependencies field (from bd show),
 		// not DependsOn (which is empty from bd list).
-		// Only "blocks" type dependencies block progress - ignore "parent-child".
 		allDepsClosed := true
 		hasBlockingDeps := false
 		for _, dep := range step.Dependencies {
-			if dep.DependencyType != "blocks" {
+			if isNonBlockingDepType(dep.DependencyType) {
 				continue // Skip parent-child and other non-blocking relationships
 			}
 			hasBlockingDeps = true
@@ -349,7 +348,7 @@ func findAllReadySteps(b *beads.Beads, moleculeID string) ([]*beads.Issue, bool,
 		allDepsClosed := true
 		hasBlockingDeps := false
 		for _, dep := range step.Dependencies {
-			if dep.DependencyType != "blocks" {
+			if isNonBlockingDepType(dep.DependencyType) {
 				continue
 			}
 			hasBlockingDeps = true
@@ -363,6 +362,9 @@ func findAllReadySteps(b *beads.Beads, moleculeID string) ([]*beads.Issue, bool,
 			readySteps = append(readySteps, step)
 		}
 	}
+
+	// Sort ready steps by sequence number so step 1 comes before step 2, etc.
+	sortStepsBySequence(readySteps)
 
 	return readySteps, false, nil
 }

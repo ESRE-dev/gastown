@@ -228,7 +228,7 @@ func runMoleculeProgress(cmd *cobra.Command, args []string) error {
 				deps = step.Dependencies
 			}
 			for _, dep := range deps {
-				if dep.DependencyType != "blocks" {
+				if isNonBlockingDepType(dep.DependencyType) {
 					continue // Skip parent-child and other non-blocking relationships
 				}
 				hasBlockingDeps = true
@@ -245,6 +245,9 @@ func runMoleculeProgress(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+
+	// Sort ready steps by sequence number so step 1 comes before step 2, etc.
+	sortStepIDsBySequence(progress.ReadySteps)
 
 	// Calculate completion percentage
 	if progress.TotalSteps > 0 {
@@ -601,7 +604,7 @@ func getMoleculeProgressInfo(b *beads.Beads, moleculeRootID string) (*MoleculePr
 				deps = step.Dependencies
 			}
 			for _, dep := range deps {
-				if dep.DependencyType != "blocks" {
+				if isNonBlockingDepType(dep.DependencyType) {
 					continue // Skip parent-child and other non-blocking relationships
 				}
 				hasBlockingDeps = true
@@ -618,6 +621,9 @@ func getMoleculeProgressInfo(b *beads.Beads, moleculeRootID string) (*MoleculePr
 			}
 		}
 	}
+
+	// Sort ready steps by sequence number so step 1 comes before step 2, etc.
+	sortStepIDsBySequence(progress.ReadySteps)
 
 	// Calculate completion percentage
 	if progress.TotalSteps > 0 {
@@ -891,11 +897,10 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 
 		// Check dependencies using Dependencies field (from bd show),
 		// not DependsOn (which is empty from bd list).
-		// Only "blocks" type dependencies block progress - ignore "parent-child".
 		allDepsClosed := true
 		hasBlockingDeps := false
 		for _, dep := range step.Dependencies {
-			if dep.DependencyType != "blocks" {
+			if isNonBlockingDepType(dep.DependencyType) {
 				continue // Skip parent-child and other non-blocking relationships
 			}
 			hasBlockingDeps = true
@@ -908,6 +913,9 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 			readySteps = append(readySteps, step)
 		}
 	}
+
+	// Sort ready steps by sequence number so step 1 comes before step 2, etc.
+	sortStepsBySequence(readySteps)
 
 	// Determine current step and status
 	if info.StepsComplete == info.StepsTotal && info.StepsTotal > 0 {
