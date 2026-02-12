@@ -171,7 +171,18 @@ func LoadPatrolConfig(townRoot string) *DaemonPatrolConfig {
 
 // IsPatrolEnabled checks if a patrol is enabled in the config.
 // Returns true if the config doesn't exist (default enabled for backwards compatibility).
+// Exception: opt-in patrols (dolt_remotes) default to disabled.
 func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
+	// Opt-in patrols: disabled unless explicitly enabled in config.
+	// Must check before the nil-config fallback, otherwise nil config
+	// returns true for patrols that should default to disabled.
+	if patrol == "dolt_remotes" {
+		if config == nil || config.Patrols == nil || config.Patrols.DoltRemotes == nil {
+			return false
+		}
+		return config.Patrols.DoltRemotes.Enabled
+	}
+
 	if config == nil || config.Patrols == nil {
 		return true // Default: enabled
 	}
@@ -189,11 +200,6 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 		if config.Patrols.Deacon != nil {
 			return config.Patrols.Deacon.Enabled
 		}
-	case "dolt_remotes":
-		if config.Patrols.DoltRemotes != nil {
-			return config.Patrols.DoltRemotes.Enabled
-		}
-		return false // Default: disabled (opt-in)
 	}
 	return true // Default: enabled
 }

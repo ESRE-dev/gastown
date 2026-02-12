@@ -53,7 +53,12 @@ func TestIsPatrolEnabled_NilConfig(t *testing.T) {
 }
 
 func TestIsPatrolEnabled_DoltRemotes(t *testing.T) {
-	// dolt_remotes defaults to disabled (opt-in)
+	// dolt_remotes defaults to disabled even with nil config (opt-in patrol)
+	if IsPatrolEnabled(nil, "dolt_remotes") {
+		t.Error("expected dolt_remotes to be disabled with nil config")
+	}
+
+	// dolt_remotes defaults to disabled when patrols section exists but DoltRemotes is nil
 	config := &DaemonPatrolConfig{
 		Patrols: &PatrolsConfig{},
 	}
