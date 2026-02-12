@@ -88,6 +88,12 @@ type MRInfo struct {
 	ConvoyCreatedAt *time.Time // Convoy creation time
 	CreatedAt       time.Time  // MR creation time
 	BlockedBy       string     // Task ID blocking this MR
+
+	// Raw data for agent-side queue health analysis (ZFC: agent decides, Go transports)
+	UpdatedAt          time.Time // When the MR was last updated
+	Assignee           string    // Who claimed this MR (empty = unclaimed)
+	BranchExistsLocal  bool      // Whether the MR branch exists locally
+	BranchExistsRemote bool      // Whether the MR branch exists in remote tracking refs
 }
 
 // Engineer is the merge queue processor that polls for ready merge-requests
@@ -861,11 +867,16 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 			}
 		}
 
-		// Parse issue created_at
-		var createdAt time.Time
+		// Parse issue timestamps
+		var createdAt, updatedAt time.Time
 		if issue.CreatedAt != "" {
 			if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
 				createdAt = t
+			}
+		}
+		if issue.UpdatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, issue.UpdatedAt); err == nil {
+				updatedAt = t
 			}
 		}
 
@@ -883,6 +894,7 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 			ConvoyID:        fields.ConvoyID,
 			ConvoyCreatedAt: convoyCreatedAt,
 			CreatedAt:       createdAt,
+			UpdatedAt:       updatedAt,
 		}
 		mrs = append(mrs, mr)
 	}
@@ -939,11 +951,16 @@ func (e *Engineer) ListBlockedMRs() ([]*MRInfo, error) {
 			}
 		}
 
-		// Parse issue created_at
-		var createdAt time.Time
+		// Parse issue timestamps
+		var createdAt, updatedAt time.Time
 		if issue.CreatedAt != "" {
 			if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
 				createdAt = t
+			}
+		}
+		if issue.UpdatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, issue.UpdatedAt); err == nil {
+				updatedAt = t
 			}
 		}
 
@@ -971,7 +988,96 @@ func (e *Engineer) ListBlockedMRs() ([]*MRInfo, error) {
 			ConvoyID:        fields.ConvoyID,
 			ConvoyCreatedAt: convoyCreatedAt,
 			CreatedAt:       createdAt,
+			UpdatedAt:       updatedAt,
+			Assignee:        issue.Assignee,
 			BlockedBy:       blockedBy,
+		}
+		mrs = append(mrs, mr)
+	}
+
+	return mrs, nil
+}
+
+// ListAllOpenMRs returns all open merge requests with full raw data.
+// Unlike ListReadyMRs/ListBlockedMRs, this performs no filtering — it returns
+// claimed, unclaimed, blocked, and unblocked MRs. It also checks branch existence
+// so agents can detect orphaned MRs. Designed for agent-side queue health analysis
+// (ZFC: Go transports data, agent decides what's interesting).
+func (e *Engineer) ListAllOpenMRs() ([]*MRInfo, error) {
+	issues, err := e.beads.List(beads.ListOptions{
+		Status:   "open",
+		Label:    "gt:merge-request",
+		Priority: -1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("querying beads for merge-requests: %w", err)
+	}
+
+	var mrs []*MRInfo
+	for _, issue := range issues {
+		if issue.Status != "open" {
+			continue
+		}
+
+		fields := beads.ParseMRFields(issue)
+		if fields == nil {
+			continue
+		}
+
+		// Parse convoy created_at if present
+		var convoyCreatedAt *time.Time
+		if fields.ConvoyCreatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, fields.ConvoyCreatedAt); err == nil {
+				convoyCreatedAt = &t
+			}
+		}
+
+		// Parse issue timestamps
+		var createdAt, updatedAt time.Time
+		if issue.CreatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
+				createdAt = t
+			}
+		}
+		if issue.UpdatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, issue.UpdatedAt); err == nil {
+				updatedAt = t
+			}
+		}
+
+		// Check branch existence (local + remote tracking refs)
+		branchLocal, _ := e.git.BranchExists(fields.Branch)
+		branchRemote, _ := e.git.RemoteTrackingBranchExists("origin", fields.Branch)
+
+		// Determine blocked-by (first open blocker)
+		blockedBy := ""
+		for _, blockerID := range issue.BlockedBy {
+			isOpen, checkErr := e.IsBeadOpen(blockerID)
+			if checkErr == nil && isOpen {
+				blockedBy = blockerID
+				break
+			}
+		}
+
+		mr := &MRInfo{
+			ID:                 issue.ID,
+			Branch:             fields.Branch,
+			Target:             fields.Target,
+			SourceIssue:        fields.SourceIssue,
+			Worker:             fields.Worker,
+			Rig:                fields.Rig,
+			Title:              issue.Title,
+			Priority:           issue.Priority,
+			AgentBead:          fields.AgentBead,
+			RetryCount:         fields.RetryCount,
+			ConvoyID:           fields.ConvoyID,
+			ConvoyCreatedAt:    convoyCreatedAt,
+			CreatedAt:          createdAt,
+			UpdatedAt:          updatedAt,
+			Assignee:           issue.Assignee,
+			BranchExistsLocal:  branchLocal,
+			BranchExistsRemote: branchRemote,
+			BlockedBy:          blockedBy,
 		}
 		mrs = append(mrs, mr)
 	}

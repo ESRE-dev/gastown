@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -191,14 +192,20 @@ Shows MRs that are:
 
 This is the preferred command for finding work to process.
 
+Use --all to see ALL open MRs (claimed, blocked, etc.) with raw data
+including timestamps, assignees, and branch existence. Designed for
+agent-side queue health analysis.
+
 Examples:
   gt refinery ready
-  gt refinery ready --json`,
+  gt refinery ready --json
+  gt refinery ready --all --json`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runRefineryReady,
 }
 
 var refineryReadyJSON bool
+var refineryReadyAll bool
 
 var refineryBlockedCmd = &cobra.Command{
 	Use:   "blocked [rig]",
@@ -239,6 +246,7 @@ func init() {
 
 	// Ready flags
 	refineryReadyCmd.Flags().BoolVar(&refineryReadyJSON, "json", false, "Output as JSON")
+	refineryReadyCmd.Flags().BoolVar(&refineryReadyAll, "all", false, "Show all open MRs (claimed, blocked, etc.) with raw data for queue health analysis")
 
 	// Blocked flags
 	refineryBlockedCmd.Flags().BoolVar(&refineryBlockedJSON, "json", false, "Output as JSON")
@@ -690,6 +698,10 @@ func runRefineryReady(cmd *cobra.Command, args []string) error {
 	// Create engineer for the rig (it has beads access for status checking)
 	eng := refinery.NewEngineer(r)
 
+	if refineryReadyAll {
+		return runRefineryReadyAll(eng, rigName)
+	}
+
 	// Get ready MRs (unclaimed AND unblocked)
 	ready, err := eng.ListReadyMRs()
 	if err != nil {
@@ -718,6 +730,67 @@ func runRefineryReady(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runRefineryReadyAll(eng *refinery.Engineer, rigName string) error {
+	mrs, err := eng.ListAllOpenMRs()
+	if err != nil {
+		return fmt.Errorf("listing all open MRs: %w", err)
+	}
+
+	if refineryReadyJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(mrs)
+	}
+
+	// Human-readable output with assignee and updated_at
+	fmt.Printf("%s All Open MRs for '%s':\n\n", style.Bold.Render("📋"), rigName)
+
+	if len(mrs) == 0 {
+		fmt.Printf("  %s\n", style.Dim.Render("(none)"))
+		return nil
+	}
+
+	for i, mr := range mrs {
+		priority := fmt.Sprintf("P%d", mr.Priority)
+		fmt.Printf("  %d. [%s] %s → %s\n", i+1, priority, mr.Branch, mr.Target)
+
+		assignee := mr.Assignee
+		if assignee == "" {
+			assignee = "(unclaimed)"
+		}
+		age := ""
+		if !mr.UpdatedAt.IsZero() {
+			age = fmt.Sprintf(" (updated %s ago)", time.Since(mr.UpdatedAt).Truncate(time.Second))
+		}
+		fmt.Printf("     ID: %s  Worker: %s  Assignee: %s%s\n", mr.ID, mr.Worker, assignee, age)
+
+		// Show branch status and blocked-by for --all mode
+		var flags []string
+		if mr.BlockedBy != "" {
+			flags = append(flags, fmt.Sprintf("blocked-by:%s", mr.BlockedBy))
+		}
+		if !mr.BranchExistsLocal && !mr.BranchExistsRemote {
+			flags = append(flags, "no-branch")
+		}
+		if len(flags) > 0 {
+			fmt.Printf("     Flags: %s\n", style.Dim.Render(fmt.Sprintf("[%s]", joinFlags(flags))))
+		}
+	}
+
+	return nil
+}
+
+func joinFlags(flags []string) string {
+	result := ""
+	for i, f := range flags {
+		if i > 0 {
+			result += ", "
+		}
+		result += f
+	}
+	return result
 }
 
 func runRefineryBlocked(cmd *cobra.Command, args []string) error {
