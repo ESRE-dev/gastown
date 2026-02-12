@@ -472,7 +472,7 @@ set -e
 echo "$@" >> "$BD_CMD_LOG"
 exit 0
 `
-	windowsScript := "@echo off\r\nexit /b 0\r\n"
+	windowsScript := "@echo off\r\nif defined BD_CMD_LOG echo %* >> \"%BD_CMD_LOG%\"\r\nexit /b 0\r\n"
 	binDir := writeFakeBD(t, script, windowsScript)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("BD_CMD_LOG", cmdLog)
