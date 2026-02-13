@@ -12,10 +12,25 @@ import (
 
 // determineRigBeadsPath returns the correct route path for a rig based on its actual layout.
 // Uses ResolveBeadsDir to follow any redirects (e.g., rig/.beads/redirect -> mayor/rig/.beads).
+// Falls back to the default mayor layout path if the resolved path is invalid or escapes the town root.
 func determineRigBeadsPath(townRoot, rigName string) string {
+	defaultPath := rigName + "/mayor/rig"
 	rigPath := filepath.Join(townRoot, rigName)
 	resolved := beads.ResolveBeadsDir(rigPath)
-	rel, _ := filepath.Rel(townRoot, resolved)
+
+	rel, err := filepath.Rel(townRoot, resolved)
+	if err != nil {
+		return defaultPath
+	}
+
+	// Normalize to forward slashes for consistent string operations on all platforms
+	rel = filepath.ToSlash(rel)
+
+	// Validate the resolved path stays within the town root
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return defaultPath
+	}
+
 	return strings.TrimSuffix(rel, "/.beads")
 }
 
