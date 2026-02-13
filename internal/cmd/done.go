@@ -196,7 +196,17 @@ func runDone(cmd *cobra.Command, args []string) error {
 	// g.CurrentBranch() in that case would incorrectly return main/master.
 	if branch == "" {
 		if !cwdAvailable {
-			// We don't have GT_BRANCH and we're using mayor clone - can't determine branch
+			// We don't have GT_BRANCH and we're using mayor clone - can't determine branch.
+			// Arm session cleanup before returning so the polecat doesn't get stranded.
+			if polecatEnv := os.Getenv("GT_POLECAT"); polecatEnv != "" {
+				sessionCleanupNeeded = true
+				deferredTownRoot = townRoot
+				deferredRoleInfo = RoleInfo{
+					Role:    RolePolecat,
+					Rig:     rigName,
+					Polecat: polecatEnv,
+				}
+			}
 			return fmt.Errorf("cannot determine branch: GT_BRANCH not set and working directory unavailable")
 		}
 		var err error

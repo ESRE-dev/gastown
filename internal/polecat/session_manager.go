@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -233,11 +234,26 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// FIX (ga-6s284): Prepend GT_RIG, GT_POLECAT, GT_ROLE to startup command
 	// so they're inherited by Kimi and other agents. Setting via tmux.SetEnvironment
 	// after session creation doesn't work for all agent types.
-	command = config.PrependEnv(command, map[string]string{
-		"GT_RIG":     m.rig.Name,
-		"GT_POLECAT": polecat,
-		"GT_ROLE":    fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat),
-	})
+	//
+	// GT_BRANCH and GT_POLECAT_PATH are critical for gt done's nuked-worktree fallback:
+	// when the polecat's cwd is deleted before gt done finishes, these env vars allow
+	// branch detection and path resolution without a working directory.
+	polecatGitBranch := ""
+	if g := git.NewGit(workDir); g != nil {
+		if b, err := g.CurrentBranch(); err == nil {
+			polecatGitBranch = b
+		}
+	}
+	envVarsToInject := map[string]string{
+		"GT_RIG":          m.rig.Name,
+		"GT_POLECAT":      polecat,
+		"GT_ROLE":         fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat),
+		"GT_POLECAT_PATH": workDir,
+	}
+	if polecatGitBranch != "" {
+		envVarsToInject["GT_BRANCH"] = polecatGitBranch
+	}
+	command = config.PrependEnv(command, envVarsToInject)
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
@@ -258,6 +274,13 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
 	}
+
+	// Set GT_BRANCH and GT_POLECAT_PATH in tmux session environment.
+	// This ensures respawned processes also inherit these for gt done fallback.
+	if polecatGitBranch != "" {
+		debugSession("SetEnvironment GT_BRANCH", m.tmux.SetEnvironment(sessionID, "GT_BRANCH", polecatGitBranch))
+	}
+	debugSession("SetEnvironment GT_POLECAT_PATH", m.tmux.SetEnvironment(sessionID, "GT_POLECAT_PATH", workDir))
 
 	// Branch-per-polecat: set BD_BRANCH in tmux session environment
 	// This ensures respawned processes also inherit the branch setting.
