@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
@@ -527,6 +529,11 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 				style.PrintWarning("  couldn't start %s: %v", worker, err)
 				continue
 			}
+			// Minimum readiness guard before injection. Start() handles
+			// runtime-config-aware delays internally, but presets with
+			// ReadyDelayMs=0 (e.g. gemini, cursor) skip the delay entirely.
+			// This floor prevents early-input races on those agents.
+			time.Sleep(1 * time.Second)
 		}
 
 		// Inject work assignment

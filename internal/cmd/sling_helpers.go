@@ -293,6 +293,13 @@ func ensureAgentReady(sessionName string) error {
 			},
 		}
 	}
+	// Ensure a minimum 1s readiness delay for presets without prompt detection.
+	// Without this, agents with ReadyPromptPrefix="" and ReadyDelayMs=0
+	// (e.g. gemini, cursor) would skip the readiness guard entirely,
+	// reintroducing early-input races that this function exists to prevent.
+	if rc.Tmux != nil && rc.Tmux.ReadyPromptPrefix == "" && rc.Tmux.ReadyDelayMs < 1000 {
+		rc.Tmux.ReadyDelayMs = 1000
+	}
 	if err := t.WaitForRuntimeReady(sessionName, rc, constants.ClaudeStartTimeout); err != nil {
 		// Graceful degradation: warn but proceed (matches original behavior of always continuing)
 		fmt.Fprintf(os.Stderr, "Warning: agent readiness detection timed out for %s: %v\n", sessionName, err)
