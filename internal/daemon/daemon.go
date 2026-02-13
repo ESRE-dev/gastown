@@ -24,6 +24,7 @@ import (
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/feed"
+	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -408,6 +409,12 @@ func (d *Daemon) heartbeat(state *State) {
 	// Mayor and Deacon should use town beads (~/gt/.beads) via parent directory walk.
 	// If they have local .beads with databases, bd uses the wrong database.
 	d.cleanupTownServiceBeads()
+
+	// 14. Prune stale local polecat tracking branches across all rig clones.
+	// When polecats push branches to origin, other clones create local tracking
+	// branches via git fetch. After merge, remote branches are deleted but local
+	// branches persist indefinitely. This cleans them up periodically.
+	d.pruneStaleBranches()
 
 	// Update state
 	state.LastHeartbeat = time.Now()
@@ -1674,4 +1681,41 @@ func (d *Daemon) cleanupOrphanedProcesses() {
 			}
 		}
 	}
+}
+
+// pruneStaleBranches removes stale local polecat tracking branches from all rig clones.
+// This runs in every heartbeat but is very fast when there are no stale branches.
+func (d *Daemon) pruneStaleBranches() {
+	// pruneInDir prunes stale polecat branches in a single git directory.
+	pruneInDir := func(dir, label string) {
+		g := gitpkg.NewGit(dir)
+		if !g.IsRepo() {
+			return
+		}
+
+		// Fetch --prune first to clean up stale remote tracking refs
+		_ = g.FetchPrune("origin")
+
+		pruned, err := g.PruneStaleBranches("polecat/*", false)
+		if err != nil {
+			d.logger.Printf("Warning: branch prune failed for %s: %v", label, err)
+			return
+		}
+
+		if len(pruned) > 0 {
+			d.logger.Printf("Branch prune: removed %d stale polecat branch(es) in %s", len(pruned), label)
+			for _, b := range pruned {
+				d.logger.Printf("  %s (%s)", b.Name, b.Reason)
+			}
+		}
+	}
+
+	// Prune in each rig's git directory
+	for _, rigName := range d.getKnownRigs() {
+		rigPath := filepath.Join(d.config.TownRoot, rigName)
+		pruneInDir(rigPath, rigName)
+	}
+
+	// Also prune in the town root itself (mayor clone)
+	pruneInDir(d.config.TownRoot, "town-root")
 }
