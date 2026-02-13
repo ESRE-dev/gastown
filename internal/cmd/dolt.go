@@ -272,6 +272,23 @@ func runDoltStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Databases: %s\n", style.Dim.Render(strings.Join(state.Databases, ", ")))
 	fmt.Printf("  Connection: %s\n", style.Dim.Render(doltserver.GetConnectionString(townRoot)))
 
+	// Verify all filesystem databases are actually served by the SQL server.
+	// Use retry since Start() only waits 500ms — DBs may still be loading.
+	served, missing, verifyErr := doltserver.VerifyDatabasesWithRetry(townRoot, 5)
+	if verifyErr != nil {
+		fmt.Printf("  %s Could not verify databases: %v\n", style.Dim.Render("⚠"), verifyErr)
+	} else if len(missing) > 0 {
+		fmt.Printf("\n%s Some databases exist on disk but are NOT served:\n", style.Bold.Render("⚠"))
+		for _, db := range missing {
+			fmt.Printf("  - %s\n", db)
+		}
+		fmt.Printf("\n  Served: %v\n", served)
+		fmt.Printf("  This usually means the database has a stale manifest.\n")
+		fmt.Printf("  Try: %s\n", style.Dim.Render("cd ~/gt/.dolt-data/<db> && dolt fsck --repair"))
+	} else {
+		fmt.Printf("  %s All %d databases verified\n", style.Bold.Render("✓"), len(served))
+	}
+
 	return nil
 }
 
@@ -337,6 +354,20 @@ func runDoltStatus(cmd *cobra.Command, args []string) error {
 				style.Bold.Render("!!!"),
 				style.Bold.Render("SERVER IS READ-ONLY — run 'gt dolt recover' to restart"))
 		}
+
+		// Verify all filesystem databases are actually served.
+		_, missing, verifyErr := doltserver.VerifyDatabases(townRoot)
+		if verifyErr != nil {
+			fmt.Printf("\n  %s Database verification failed: %v\n", style.Bold.Render("!"), verifyErr)
+		} else if len(missing) > 0 {
+			fmt.Printf("\n  %s %s\n", style.Bold.Render("!!!"),
+				style.Bold.Render("MISSING DATABASES — exist on disk but not served:"))
+			for _, db := range missing {
+				fmt.Printf("    - %s\n", db)
+			}
+			fmt.Printf("  Try: cd ~/gt/.dolt-data/<db> && dolt fsck --repair\n")
+		}
+
 		if len(metrics.Warnings) > 0 {
 			fmt.Printf("\n  %s\n", style.Bold.Render("Warnings:"))
 			for _, w := range metrics.Warnings {
@@ -623,13 +654,40 @@ func runDoltMigrate(cmd *cobra.Command, args []string) error {
 		state, _ := doltserver.LoadState(townRoot)
 		fmt.Printf("%s Dolt server started (PID %d)\n", style.Bold.Render("✓"), state.PID)
 
-		// Set sync.mode=dolt-native in each rig's database.
+		// Set sync.mode=dolt-native in each rig's database BEFORE verification.
 		// ShouldExportJSONL reads sync.mode from the DB (not config.yaml) to decide
 		// whether to export JSONL. Without this, every bd write pays a 10-25s JSONL
 		// export penalty even though the rig is configured for dolt-native in yaml.
+		// This must run unconditionally — even if verification fails, we don't want
+		// to leave the user with the JSONL penalty on top of missing-DB issues.
 		setSyncModeErrs := setSyncModeForAllRigs(townRoot)
 		for _, err := range setSyncModeErrs {
 			fmt.Printf("  %s sync.mode set failed: %v\n", style.Dim.Render("⚠"), err)
+		}
+
+		// Verify the server is actually serving all databases that exist on disk.
+		// Dolt silently skips databases with stale manifests after migration,
+		// so filesystem discovery and SQL discovery can diverge.
+		// Use retry since the server may still be loading databases after Start().
+		served, missing, verifyErr := doltserver.VerifyDatabasesWithRetry(townRoot, 5)
+		if verifyErr != nil {
+			fmt.Printf("  %s Could not verify databases: %v\n", style.Dim.Render("⚠"), verifyErr)
+			fmt.Printf("  Migration may be incomplete. Verify manually with: %s\n", style.Dim.Render("gt dolt status"))
+			return fmt.Errorf("database verification failed after migration: %w", verifyErr)
+		} else if len(missing) > 0 {
+			fmt.Printf("\n%s Some databases exist on disk but are NOT served by Dolt:\n", style.Bold.Render("⚠"))
+			for _, db := range missing {
+				fmt.Printf("  - %s\n", db)
+			}
+			fmt.Printf("\n  Served databases: %v\n", served)
+			fmt.Printf("\n  This usually means the database has a stale manifest from migration.\n")
+			fmt.Printf("  To fix, try:\n")
+			fmt.Printf("    1. Stop the server:  %s\n", style.Dim.Render("gt dolt stop"))
+			fmt.Printf("    2. Repair the DB:    %s\n", style.Dim.Render("cd ~/gt/.dolt-data/<db> && dolt fsck --repair"))
+			fmt.Printf("    3. Restart:           %s\n", style.Dim.Render("gt dolt start"))
+			return fmt.Errorf("migration incomplete: %d database(s) exist on disk but are not served: %v", len(missing), missing)
+		} else {
+			fmt.Printf("  %s All %d databases verified as served\n", style.Bold.Render("✓"), len(served))
 		}
 	}
 
