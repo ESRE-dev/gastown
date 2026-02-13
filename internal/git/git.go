@@ -813,8 +813,17 @@ func (g *Git) ListBranches(pattern string) ([]string, error) {
 
 // ResetBranch force-updates a branch to point to a ref.
 // This is useful for resetting stale polecat branches to main.
+// NOTE: This uses `git branch -f` which fails on the currently checked-out branch.
+// Use ResetHard instead when the target branch is checked out.
 func (g *Git) ResetBranch(name, ref string) error {
 	_, err := g.run("branch", "-f", name, ref)
+	return err
+}
+
+// ResetHard resets the current working tree and index to the given ref.
+// Unlike ResetBranch, this works on the currently checked-out branch.
+func (g *Git) ResetHard(ref string) error {
+	_, err := g.run("reset", "--hard", ref)
 	return err
 }
 
