@@ -109,7 +109,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			Agent:      slingAgent,
 			BaseBranch: slingBaseBranch,
 		}
-		spawnInfo, err := SpawnPolecatForSling(rigName, spawnOpts)
+		spawnInfo, err := spawnPolecatForSling(rigName, spawnOpts)
 		if err != nil {
 			results = append(results, slingResult{beadID: beadID, success: false, errMsg: err.Error()})
 			fmt.Printf("  %s Failed to spawn polecat: %v\n", style.Dim.Render("✗"), err)
@@ -158,6 +158,8 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			}
 			result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, true, batchVars)
 			if err != nil {
+				// Best-effort: in batch mode, a formula instantiation failure should not abort or rollback the
+				// spawned polecat. We still hook the raw bead so work can proceed (e.g., missing required vars).
 				fmt.Printf("  %s Could not apply formula: %v (hooking raw bead)\n", style.Dim.Render("Warning:"), err)
 			} else {
 				fmt.Printf("  %s Formula %s applied\n", style.Bold.Render("✓"), formulaName)
@@ -205,7 +207,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		if spawnInfo.DoltBranch != "" {
 			if err := spawnInfo.CreateDoltBranch(); err != nil {
 				fmt.Printf("  %s Could not create Dolt branch: %v, cleaning up...\n", style.Dim.Render("✗"), err)
-				rollbackSlingArtifacts(spawnInfo, beadToHook, hookWorkDir)
+				rollbackSlingArtifactsFn(spawnInfo, beadToHook, hookWorkDir)
 				results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: false})
 				continue
 			}
@@ -216,7 +218,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		pane, err := spawnInfo.StartSession()
 		if err != nil {
 			fmt.Printf("  %s Could not start session: %v, cleaning up partial state...\n", style.Dim.Render("✗"), err)
-			rollbackSlingArtifacts(spawnInfo, beadToHook, hookWorkDir)
+			rollbackSlingArtifactsFn(spawnInfo, beadToHook, hookWorkDir)
 			results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: false})
 			continue
 		} else {
