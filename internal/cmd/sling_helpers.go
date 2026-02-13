@@ -276,9 +276,15 @@ func ensureAgentReady(sessionName string) error {
 	// Use prompt-detection polling instead of fixed sleep.
 	// For known presets: uses ReadyPromptPrefix (e.g. "❯ " for Claude) polled every 200ms.
 	// For unknown/custom agents: falls back to a 1s fixed delay (mirrors old behavior).
+	// Note: uses preset-only resolution (not ResolveRoleAgentConfig) because
+	// ensureAgentReady lacks rig/town context — only has the session name.
+	effectiveName := agentName
+	if effectiveName == "" {
+		effectiveName = "claude" // Default sessions without GT_AGENT are Claude
+	}
 	var rc *config.RuntimeConfig
-	if preset := config.GetAgentPreset(config.AgentPreset(agentName)); preset != nil {
-		rc = config.RuntimeConfigFromPreset(config.AgentPreset(agentName))
+	if preset := config.GetAgentPreset(config.AgentPreset(effectiveName)); preset != nil {
+		rc = config.RuntimeConfigFromPreset(config.AgentPreset(effectiveName))
 	} else {
 		// Unknown agent — use minimal config: no prompt detection, short fixed delay.
 		rc = &config.RuntimeConfig{
