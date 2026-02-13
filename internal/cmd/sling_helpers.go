@@ -274,12 +274,18 @@ func ensureAgentReady(sessionName string) error {
 	}
 
 	// Use prompt-detection polling instead of fixed sleep.
-	// Resolves runtime config for the agent to get ReadyPromptPrefix and ReadyDelayMs.
-	// For Claude: polls for "❯ " prompt prefix every 200ms (typically detects in <1s).
-	// For agents without prompt prefix: falls back to ReadyDelayMs (configurable per agent).
-	rc := config.RuntimeConfigFromPreset(config.AgentPreset(agentName))
-	if rc == nil {
-		rc = config.DefaultRuntimeConfig()
+	// For known presets: uses ReadyPromptPrefix (e.g. "❯ " for Claude) polled every 200ms.
+	// For unknown/custom agents: falls back to a 1s fixed delay (mirrors old behavior).
+	var rc *config.RuntimeConfig
+	if preset := config.GetAgentPreset(config.AgentPreset(agentName)); preset != nil {
+		rc = config.RuntimeConfigFromPreset(config.AgentPreset(agentName))
+	} else {
+		// Unknown agent — use minimal config: no prompt detection, short fixed delay.
+		rc = &config.RuntimeConfig{
+			Tmux: &config.RuntimeTmuxConfig{
+				ReadyDelayMs: 1000,
+			},
+		}
 	}
 	if err := t.WaitForRuntimeReady(sessionName, rc, constants.ClaudeStartTimeout); err != nil {
 		// Graceful degradation: warn but proceed (matches original behavior of always continuing)
