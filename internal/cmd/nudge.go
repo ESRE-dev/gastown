@@ -531,42 +531,11 @@ func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string
 //   - "hq-mayor" -> "mayor"
 //   - "hq-deacon" -> "deacon"
 func sessionNameToAddress(sessionName string) string {
-	if sessionName == session.MayorSessionName() {
-		return "mayor"
-	}
-	if sessionName == session.DeaconSessionName() {
-		return "deacon"
-	}
-
-	// Expected format: gt-<rig>-<rest>
-	if !strings.HasPrefix(sessionName, "gt-") {
+	identity, err := session.ParseSessionName(sessionName)
+	if err != nil {
 		return ""
 	}
-	rest := strings.TrimPrefix(sessionName, "gt-")
-
-	// Try to split into rig and target components
-	// Format: rig-crew-name or rig-witness or rig-refinery or rig-name
-	parts := strings.SplitN(rest, "-", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-
-	rig := parts[0]
-	target := parts[1]
-
-	// Check for crew prefix: crew-<name>
-	if strings.HasPrefix(target, "crew-") {
-		crewName := strings.TrimPrefix(target, "crew-")
-		return fmt.Sprintf("%s/crew/%s", rig, crewName)
-	}
-
-	// Infrastructure roles
-	if target == "witness" || target == "refinery" {
-		return fmt.Sprintf("%s/%s", rig, target)
-	}
-
-	// Polecat (simple name after rig)
-	return fmt.Sprintf("%s/%s", rig, target)
+	return identity.Address()
 }
 
 // addressToAgentBeadID converts a target address to an agent bead ID.

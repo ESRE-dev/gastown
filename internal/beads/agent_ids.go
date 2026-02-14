@@ -415,34 +415,47 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 	rest := id[hyphenIdx+1:]
 	parts := strings.Split(rest, "-")
 
-	switch len(parts) {
-	case 1:
-		// Town-level: gt-mayor, bd-deacon
-		return "", parts[0], "", true
-	case 2:
-		// Could be rig-level singleton (gt-gastown-witness) or
-		// town-level named (gt-dog-alpha for dogs)
-		if parts[0] == "dog" {
-			// Dogs are town-level named agents: gt-dog-<name>
-			return "", "dog", parts[1], true
-		}
-		// Rig-level singleton: gt-gastown-witness
-		return parts[0], parts[1], "", true
-	case 3:
-		// Rig-level named: gt-gastown-crew-max, bd-beads-polecat-pearl
-		return parts[0], parts[1], parts[2], true
-	default:
-		// Handle names with hyphens: gt-gastown-polecat-my-agent-name
-		// or gt-dog-my-agent-name
-		if len(parts) >= 3 {
-			if parts[0] == "dog" {
-				// Dog with hyphenated name: gt-dog-my-dog-name
-				return "", "dog", strings.Join(parts[1:], "-"), true
-			}
-			return parts[0], parts[1], strings.Join(parts[2:], "-"), true
+	if len(parts) == 0 {
+		return "", "", "", false
+	}
+
+	// Single part: town-level role (gt-mayor, bd-deacon)
+	if len(parts) == 1 {
+		if isTownLevelRole(parts[0]) {
+			return "", parts[0], "", true
 		}
 		return "", "", "", false
 	}
+
+	// Check for town-level named roles (dog) first
+	if parts[0] == "dog" {
+		return "", "dog", strings.Join(parts[1:], "-"), true
+	}
+
+	// Scan from right for known role markers to handle hyphenated rig names.
+	// Format: <rig>-<role>[-<name>] where rig may contain hyphens.
+	for i := len(parts) - 1; i >= 1; i-- {
+		p := parts[i]
+		if isRigLevelRole(p) {
+			// Singleton roles: witness, refinery
+			return strings.Join(parts[:i], "-"), p, "", true
+		}
+		if isNamedRole(p) && i < len(parts)-1 {
+			// Named roles with a name following: crew, polecat
+			return strings.Join(parts[:i], "-"), p, strings.Join(parts[i+1:], "-"), true
+		}
+		if isNamedRole(p) && i == len(parts)-1 {
+			// Named role without a name (invalid but handle gracefully)
+			return strings.Join(parts[:i], "-"), p, "", true
+		}
+	}
+
+	// Fallback: assume 2-part rig/role pattern
+	if len(parts) == 2 {
+		return parts[0], parts[1], "", true
+	}
+
+	return "", "", "", false
 }
 
 // IsAgentSessionBead returns true if the bead ID represents an agent session molecule.

@@ -1816,20 +1816,26 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 }
 
 // parseWorkerFromAgentBead extracts worker identity from agent bead ID.
-// Input: "gt-gastown-polecat-nux" -> Output: "gastown/nux"
+// Input: "gt-gastown-polecat-nux" -> Output: "gastown/polecat/nux"
 // Input: "gt-beads-crew-amber" -> Output: "beads/crew/amber"
 func parseWorkerFromAgentBead(agentID string) string {
-	// Remove prefix (gt-, bd-, etc.)
-	parts := strings.Split(agentID, "-")
-	if len(parts) < 3 {
+	rig, role, name, ok := beads.ParseAgentBeadID(agentID)
+	if !ok {
 		return ""
 	}
 
-	// Skip prefix
-	parts = parts[1:]
-
-	// Reconstruct as path
-	return strings.Join(parts, "/")
+	// Build path from parsed components
+	if rig == "" {
+		// Town-level
+		if name != "" {
+			return role + "/" + name
+		}
+		return role
+	}
+	if name != "" {
+		return rig + "/" + role + "/" + name
+	}
+	return rig + "/" + role
 }
 
 // formatWorkerAge formats a duration as a short string (e.g., "5m", "2h", "1d")

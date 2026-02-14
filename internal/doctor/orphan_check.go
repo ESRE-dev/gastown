@@ -160,14 +160,12 @@ func (c *OrphanSessionCheck) Fix(ctx *CheckContext) error {
 
 // isCrewSession returns true if the session name matches the crew pattern.
 // Crew sessions are gt-<rig>-crew-<name> and are protected from auto-cleanup.
-func isCrewSession(session string) bool {
-	// Pattern: gt-<rig>-crew-<name>
-	// Example: gt-gastown-crew-joe
-	parts := strings.Split(session, "-")
-	if len(parts) >= 4 && parts[0] == "gt" && parts[2] == "crew" {
-		return true
+func isCrewSession(sess string) bool {
+	identity, err := session.ParseSessionName(sess)
+	if err != nil {
+		return false
 	}
-	return false
+	return identity.Role == session.RoleCrew
 }
 
 // getValidRigs returns a list of valid rig names from the workspace.
@@ -224,15 +222,17 @@ func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, may
 		return true
 	}
 
-	// For rig-specific sessions, extract rig name
-	// Pattern: gt-<rig>-<role>
-	parts := strings.SplitN(sess, "-", 3)
-	if len(parts) < 3 {
-		// Invalid format - must be gt-<rig>-<something>
+	// For rig-specific sessions, extract rig name using canonical parser
+	identity, err := session.ParseSessionName(sess)
+	if err != nil {
 		return false
 	}
 
-	rigName := parts[1]
+	rigName := identity.Rig
+	if rigName == "" {
+		// Town-level session - not orphaned
+		return true
+	}
 
 	// Check if this rig exists
 	rigFound := false
@@ -248,14 +248,13 @@ func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, may
 		return false
 	}
 
-	role := parts[2]
-
-	// witness and refinery are valid roles
-	if role == "witness" || role == "refinery" {
+	// witness, refinery, crew, and polecat are all valid roles
+	switch identity.Role {
+	case session.RoleWitness, session.RoleRefinery, session.RoleCrew, session.RolePolecat:
 		return true
 	}
 
-	// Any other name is assumed to be a polecat or crew member
+	// Any other role is assumed valid if the rig exists
 	// We can't easily verify without reading state, so accept it
 	return true
 }
