@@ -16,7 +16,6 @@ import (
 
 var (
 	themeListFlag     bool
-	themeApplyFlag    bool
 	themeApplyAllFlag bool
 )
 
