@@ -521,7 +521,11 @@ func init() {
 	configAgentCmd := &cobra.Command{
 		Use:   "agent",
 		Short: "Manage agent configuration",
-		RunE:  requireSubcommand,
+		Long: `Manage per-agent configuration settings.
+
+Subcommands allow listing, getting, setting, and removing agent-specific
+config values such as the default AI model or provider.`,
+		RunE: requireSubcommand,
 	}
 	configAgentCmd.AddCommand(configAgentListCmd)
 	configAgentCmd.AddCommand(configAgentGetCmd)

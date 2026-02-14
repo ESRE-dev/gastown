@@ -35,13 +35,20 @@ Run this after upgrading gt to get the latest shell hook features.`,
 var shellRemoveCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "Remove shell integration",
-	RunE:  runShellRemove,
+	Long: `Remove the Gas Town shell integration from your shell RC file.
+
+Removes the hook that was added by 'gt shell install'. You may need
+to restart your shell or source the RC file for the change to take effect.`,
+	RunE: runShellRemove,
 }
 
 var shellStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show shell integration status",
-	RunE:  runShellStatus,
+	Long: `Show whether Gas Town is enabled and whether shell integration is installed.
+
+Displays the current state and which shell RC file contains the integration hook.`,
+	RunE: runShellStatus,
 }
 
 func init() {
