@@ -352,17 +352,8 @@ func Start(townRoot string) error {
 		return fmt.Errorf("creating data directory: %w", err)
 	}
 
-	// List available databases
-	databases, err := ListDatabases(townRoot)
-	if err != nil {
-		return fmt.Errorf("listing databases: %w", err)
-	}
-
-	if len(databases) == 0 {
-		return fmt.Errorf("no databases found in %s\nInitialize with: gt dolt init-rig <name>", config.DataDir)
-	}
-
 	// Clean up stale Dolt LOCK files in all database directories
+	databases, _ := ListDatabases(townRoot)
 	for _, db := range databases {
 		dbDir := filepath.Join(config.DataDir, db)
 		if err := cleanupStaleDoltLock(dbDir); err != nil {
@@ -1122,11 +1113,15 @@ func EnsureMetadata(townRoot, rigName string) error {
 		_ = json.Unmarshal(data, &existing) // best effort
 	}
 
-	// Set/update the dolt server fields
+	// Patch dolt server fields. Only set fields that are gastown's responsibility
+	// (ensuring server mode). dolt_database is owned by bd init — only set it as
+	// a fallback when bd init hasn't run yet (no existing value).
 	existing["database"] = "dolt"
 	existing["backend"] = "dolt"
 	existing["dolt_mode"] = "server"
-	existing["dolt_database"] = rigName
+	if existing["dolt_database"] == nil || existing["dolt_database"] == "" {
+		existing["dolt_database"] = rigName
+	}
 
 	// Always set jsonl_export to the canonical filename.
 	// Historical migrations may have left stale values (e.g., "beads.jsonl").
