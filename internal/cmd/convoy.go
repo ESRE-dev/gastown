@@ -65,6 +65,7 @@ var (
 	convoyNotify       string
 	convoyOwner        string
 	convoyOwned        bool
+	convoyMerge        string
 	convoyStatusJSON   bool
 	convoyListJSON     bool
 	convoyListStatus   string
@@ -130,13 +131,19 @@ The --owner flag specifies who requested the convoy (receives completion
 notification by default). If not specified, defaults to created_by.
 The --notify flag adds additional subscribers beyond the owner.
 
+The --merge flag sets the merge strategy for all work in the convoy:
+  direct  Push branch directly to main (no MR, no refinery)
+  mr      Create merge-request bead, refinery processes (default)
+  local   Keep on feature branch (for upstream PRs, human review)
+
 Examples:
   gt convoy create "Deploy v2.0" gt-abc bd-xyz
   gt convoy create "Release prep" gt-abc --notify           # defaults to mayor/
   gt convoy create "Release prep" gt-abc --notify ops/      # notify ops/
   gt convoy create "Feature rollout" gt-a gt-b --owner mayor/ --notify ops/
   gt convoy create "Feature rollout" gt-a gt-b gt-c --molecule mol-release
-  gt convoy create --owned "Manual deploy" gt-abc           # caller-managed lifecycle`,
+  gt convoy create --owned "Manual deploy" gt-abc           # caller-managed lifecycle
+  gt convoy create "Quick fix" gt-abc --merge=direct        # bypass refinery`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runConvoyCreate,
 }
@@ -247,6 +254,7 @@ func init() {
 	convoyCreateCmd.Flags().StringVar(&convoyNotify, "notify", "", "Additional address to notify on completion (default: mayor/ if flag used without value)")
 	convoyCreateCmd.Flags().Lookup("notify").NoOptDefVal = "mayor/"
 	convoyCreateCmd.Flags().BoolVar(&convoyOwned, "owned", false, "Mark convoy as caller-managed lifecycle (no automatic witness/refinery registration)")
+	convoyCreateCmd.Flags().StringVar(&convoyMerge, "merge", "", "Merge strategy: direct (push to main), mr (merge queue, default), local (keep on branch)")
 
 
 	// Status flags
@@ -297,6 +305,16 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	trackedIssues := args[1:]
 
+	// Validate --merge flag if provided
+	if convoyMerge != "" {
+		switch convoyMerge {
+		case "direct", "mr", "local":
+			// Valid
+		default:
+			return fmt.Errorf("invalid --merge value %q: must be direct, mr, or local", convoyMerge)
+		}
+	}
+
 	// If first arg looks like an issue ID (has beads prefix), treat all args as issues
 	// and auto-generate a name from the first issue's title
 	if looksLikeIssueID(name) {
@@ -338,6 +356,9 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	}
 	if convoyNotify != "" {
 		description += fmt.Sprintf("\nNotify: %s", convoyNotify)
+	}
+	if convoyMerge != "" {
+		description += fmt.Sprintf("\nMerge: %s", convoyMerge)
 	}
 	if convoyMolecule != "" {
 		description += fmt.Sprintf("\nMolecule: %s", convoyMolecule)
@@ -407,6 +428,9 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	}
 	if convoyNotify != "" {
 		fmt.Printf("  Notify:   %s\n", convoyNotify)
+	}
+	if convoyMerge != "" {
+		fmt.Printf("  Merge:    %s\n", convoyMerge)
 	}
 	if convoyMolecule != "" {
 		fmt.Printf("  Molecule: %s\n", convoyMolecule)
@@ -1167,6 +1191,9 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Lifecycle: %s\n", style.Warning.Render("caller-managed (owned)"))
 	}
 	fmt.Printf("  Progress:  %d/%d completed\n", completed, len(tracked))
+	if merge := parseConvoyMergeStrategy(convoy.Description); merge != "" {
+		fmt.Printf("  Merge:     %s\n", merge)
+	}
 	fmt.Printf("  Created:   %s\n", convoy.CreatedAt)
 	if convoy.ClosedAt != "" {
 		fmt.Printf("  Closed:    %s\n", convoy.ClosedAt)
@@ -1414,6 +1441,18 @@ func hasLabel(labels []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// parseConvoyMergeStrategy extracts the merge strategy from a convoy description.
+// Returns the strategy string ("direct", "mr", "local") or empty string if not set.
+func parseConvoyMergeStrategy(description string) string {
+	for _, line := range strings.Split(description, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Merge: ") {
+			return strings.TrimPrefix(line, "Merge: ")
+		}
+	}
+	return ""
 }
 
 func formatConvoyStatus(status string) string {

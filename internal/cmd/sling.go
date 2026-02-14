@@ -38,6 +38,12 @@ Auto-Convoy:
   gt sling gt-abc gastown              # Creates "Work: <issue-title>" convoy
   gt sling gt-abc gastown --no-convoy  # Skip auto-convoy creation
 
+Merge Strategy (--merge):
+  Controls how completed work lands. Stored on the auto-convoy.
+  gt sling gt-abc gastown --merge=direct  # Push branch directly to main
+  gt sling gt-abc gastown --merge=mr      # Merge queue (default)
+  gt sling gt-abc gastown --merge=local   # Keep on feature branch
+
 Target Resolution:
   gt sling gt-abc                       # Self (current agent)
   gt sling gt-abc crew                  # Crew worker in current rig
@@ -114,6 +120,7 @@ var (
 	slingNoConvoy      bool   // --no-convoy: skip auto-convoy creation
 	slingOwned         bool   // --owned: mark auto-convoy as caller-managed lifecycle
 	slingNoMerge       bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
+	slingMerge         string // --merge: merge strategy for convoy (direct/mr/local)
 	slingNoBoot        bool   // --no-boot: skip wakeRigAgents (avoid witness/refinery boot and lock contention)
 	slingMaxConcurrent int    // --max-concurrent: limit concurrent spawns in batch mode
 	slingBaseBranch    string // --base-branch: override base branch for polecat worktree
@@ -137,6 +144,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingOwned, "owned", false, "Mark auto-convoy as caller-managed lifecycle (no automatic witness/refinery registration)")
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
 	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
+	slingCmd.Flags().StringVar(&slingMerge, "merge", "", "Merge strategy: direct (push to main), mr (merge queue, default), local (keep on branch)")
 	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip rig boot after polecat spawn (avoids witness/refinery lock contention)")
 	slingCmd.Flags().IntVar(&slingMaxConcurrent, "max-concurrent", 0, "Limit concurrent polecat spawns in batch mode (0 = no limit)")
 	slingCmd.Flags().StringVar(&slingBaseBranch, "base-branch", "", "Override base branch for polecat worktree (e.g., 'develop', 'release/v2')")
@@ -148,6 +156,16 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Polecats cannot sling - check early before writing anything
 	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
 		return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
+	}
+
+	// Validate --merge flag if provided
+	if slingMerge != "" {
+		switch slingMerge {
+		case "direct", "mr", "local":
+			// Valid
+		default:
+			return fmt.Errorf("invalid --merge value %q: must be direct, mr, or local", slingMerge)
+		}
 	}
 
 	// Disable Dolt auto-commit for all bd commands run during sling (gt-u6n6a).
@@ -380,8 +398,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 			if slingDryRun {
 				fmt.Printf("Would create convoy 'Work: %s'\n", info.Title)
 				fmt.Printf("Would add tracking relation to %s\n", beadID)
+				if slingMerge != "" {
+					fmt.Printf("Would set convoy merge strategy: %s\n", slingMerge)
+				}
 			} else {
-				convoyID, err := createAutoConvoy(beadID, info.Title, slingOwned)
+				convoyID, err := createAutoConvoy(beadID, info.Title, slingOwned, slingMerge)
 				if err != nil {
 					// Log warning but don't fail - convoy is optional
 					fmt.Printf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
@@ -390,6 +411,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 					fmt.Printf("  Tracking: %s\n", beadID)
 					if slingOwned {
 						fmt.Printf("  Lifecycle: caller-managed (owned)\n")
+					}
+					if slingMerge != "" {
+						fmt.Printf("  Merge:    %s\n", slingMerge)
 					}
 				}
 			}
