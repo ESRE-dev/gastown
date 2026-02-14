@@ -225,6 +225,132 @@
             transition: width 0.3s ease;
         }
 
+        /* Convoy detail view */
+        #convoy-detail {
+            padding: 8px;
+        }
+
+        .convoy-detail-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .convoy-detail-content {
+            margin-top: 12px;
+        }
+
+        .convoy-detail-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            font-size: 0.85rem;
+        }
+
+        .convoy-detail-section {
+            margin-top: 12px;
+        }
+
+        .convoy-detail-section h4 {
+            margin: 0;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .convoy-issues-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .convoy-add-issue-btn {
+            background: var(--green);
+            border: none;
+            border-radius: 4px;
+            color: #000;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            transition: all 0.15s ease;
+        }
+
+        .convoy-add-issue-btn:hover {
+            background: var(--cyan);
+        }
+
+        .convoy-add-issue-form {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .convoy-add-issue-input {
+            flex: 1;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-family: inherit;
+        }
+
+        .convoy-add-issue-input:focus {
+            outline: none;
+            border-color: var(--blue);
+        }
+
+        .convoy-add-issue-submit {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+
+        .convoy-add-issue-cancel {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+
+        /* Convoy issue status icons in sub-table */
+        #convoy-issues-table .convoy-issue-status {
+            text-align: center;
+        }
+
+        /* New Convoy button */
+        .new-convoy-btn {
+            background: var(--green);
+            border: none;
+            border-radius: 4px;
+            color: #000;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            margin-right: 8px;
+            transition: all 0.15s ease;
+        }
+
+        .new-convoy-btn:hover {
+            background: var(--cyan);
+            color: #000;
+            transform: scale(1.05);
+        }
+
+        /* New convoy form */
+        .convoy-create-form {
+            padding: 8px;
+        }
+
+        .convoy-create-fields {
+            margin-top: 12px;
+        }
+
         /* Expandable issues */
         .tracked-issues {
             background: var(--bg-dark);
