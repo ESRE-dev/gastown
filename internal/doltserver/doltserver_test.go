@@ -434,6 +434,41 @@ func TestEnsureMetadata_Idempotent(t *testing.T) {
 	}
 }
 
+func TestEnsureMetadataWithDB_SharedHQ(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create rig with mayor/rig/.beads (no tracked beads, shares HQ)
+	beadsDir := filepath.Join(townRoot, "newrig", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set dolt_database to "hq" (shared database)
+	if err := EnsureMetadataWithDB(townRoot, "newrig", "hq"); err != nil {
+		t.Fatalf("EnsureMetadataWithDB failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(beadsDir, "metadata.json"))
+	if err != nil {
+		t.Fatalf("reading metadata: %v", err)
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("parsing metadata: %v", err)
+	}
+
+	if metadata["dolt_database"] != "hq" {
+		t.Errorf("dolt_database = %v, want hq", metadata["dolt_database"])
+	}
+	if metadata["backend"] != "dolt" {
+		t.Errorf("backend = %v, want dolt", metadata["backend"])
+	}
+	if metadata["dolt_mode"] != "server" {
+		t.Errorf("dolt_mode = %v, want server", metadata["dolt_mode"])
+	}
+}
+
 func TestEnsureAllMetadata(t *testing.T) {
 	townRoot := t.TempDir()
 
@@ -459,6 +494,57 @@ func TestEnsureAllMetadata(t *testing.T) {
 	}
 	if len(updated) != 2 {
 		t.Errorf("expected 2 updated, got %d: %v", len(updated), updated)
+	}
+}
+
+func TestEnsureAllMetadata_PreservesSharedHQ(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create databases: hq and a rig that shares hq
+	for _, name := range []string{"hq", "sharedrig"} {
+		doltDir := filepath.Join(townRoot, ".dolt-data", name, ".dolt")
+		if err := os.MkdirAll(doltDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create beads dirs
+	hqBeads := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(hqBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+	rigBeads := filepath.Join(townRoot, "sharedrig", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-set the rig's metadata to point to "hq" (intentional shared database)
+	if err := EnsureMetadataWithDB(townRoot, "sharedrig", "hq"); err != nil {
+		t.Fatalf("setting up shared metadata: %v", err)
+	}
+
+	// Run EnsureAllMetadata - should preserve the "hq" reference
+	updated, errs := EnsureAllMetadata(townRoot)
+	if len(errs) > 0 {
+		t.Errorf("unexpected errors: %v", errs)
+	}
+	if len(updated) != 2 {
+		t.Errorf("expected 2 updated, got %d: %v", len(updated), updated)
+	}
+
+	// Verify the rig still points to "hq", not "sharedrig"
+	data, err := os.ReadFile(filepath.Join(rigBeads, "metadata.json"))
+	if err != nil {
+		t.Fatalf("reading metadata: %v", err)
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("parsing metadata: %v", err)
+	}
+
+	if metadata["dolt_database"] != "hq" {
+		t.Errorf("dolt_database = %v, want hq (EnsureAllMetadata should preserve shared database reference)", metadata["dolt_database"])
 	}
 }
 

@@ -1089,7 +1089,21 @@ func RepairWorkspace(townRoot string, ws BrokenWorkspace) (string, error) {
 //
 // For the "hq" rig, it writes to <townRoot>/.beads/metadata.json.
 // For other rigs, it writes to <townRoot>/<rigName>/mayor/rig/.beads/metadata.json.
+//
+// The dolt_database field is set to rigName, meaning each rig gets its own database.
+// For rigs that should share the HQ database, use EnsureMetadataWithDB instead.
 func EnsureMetadata(townRoot, rigName string) error {
+	return EnsureMetadataWithDB(townRoot, rigName, rigName)
+}
+
+// EnsureMetadataWithDB writes or updates the metadata.json for a rig's beads directory
+// to include proper Dolt server configuration, using the specified doltDatabase name.
+//
+// This is useful for rigs that don't have their own tracked beads and should share
+// the HQ database. For example, a new rig without a source repo's .beads/ directory
+// should use doltDatabase="hq" so that beads dispatched from HQ are visible to
+// bd ready, bd list, and other commands that don't have cross-database routing.
+func EnsureMetadataWithDB(townRoot, rigName, doltDatabase string) error {
 	// Use FindOrCreateRigBeadsDir to atomically resolve and create the directory,
 	// avoiding the TOCTOU race where the directory state changes between
 	// FindRigBeadsDir's Stat check and our subsequent file operations.
@@ -1113,15 +1127,11 @@ func EnsureMetadata(townRoot, rigName string) error {
 		_ = json.Unmarshal(data, &existing) // best effort
 	}
 
-	// Patch dolt server fields. Only set fields that are gastown's responsibility
-	// (ensuring server mode). dolt_database is owned by bd init — only set it as
-	// a fallback when bd init hasn't run yet (no existing value).
+	// Patch dolt server fields: ensure server mode and set database target.
 	existing["database"] = "dolt"
 	existing["backend"] = "dolt"
 	existing["dolt_mode"] = "server"
-	if existing["dolt_database"] == nil || existing["dolt_database"] == "" {
-		existing["dolt_database"] = rigName
-	}
+	existing["dolt_database"] = doltDatabase
 
 	// Always set jsonl_export to the canonical filename.
 	// Historical migrations may have left stale values (e.g., "beads.jsonl").
@@ -1142,14 +1152,34 @@ func EnsureMetadata(townRoot, rigName string) error {
 // EnsureAllMetadata updates metadata.json for all rig databases known to the
 // Dolt server. This is the fix for the split-brain problem where worktrees
 // each have their own isolated database.
+//
+// If a rig's metadata already has dolt_database set to a different valid database
+// (e.g., "hq" for rigs sharing the HQ database), that value is preserved rather
+// than overwritten. This prevents EnsureAllMetadata from breaking rigs that
+// intentionally share a database (see gt-42zaq).
 func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 	databases, err := ListDatabases(townRoot)
 	if err != nil {
 		return nil, []error{fmt.Errorf("listing databases: %w", err)}
 	}
 
+	// Build set of valid databases for cross-reference
+	dbSet := make(map[string]bool, len(databases))
+	for _, db := range databases {
+		dbSet[db] = true
+	}
+
 	for _, dbName := range databases {
-		if err := EnsureMetadata(townRoot, dbName); err != nil {
+		// Check if the rig's metadata already points to a different valid database.
+		// This happens when a rig shares the HQ database (dolt_database: "hq").
+		// We preserve that setting instead of overwriting it with the rig's own name.
+		doltDB := dbName
+		beadsDir := FindRigBeadsDir(townRoot, dbName)
+		if existing := readExistingDoltDatabase(beadsDir); existing != "" && existing != dbName && dbSet[existing] {
+			doltDB = existing // Preserve intentional cross-database reference
+		}
+
+		if err := EnsureMetadataWithDB(townRoot, dbName, doltDB); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", dbName, err))
 		} else {
 			updated = append(updated, dbName)
@@ -1157,6 +1187,24 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 	}
 
 	return updated, errs
+}
+
+// readExistingDoltDatabase reads the dolt_database field from an existing metadata.json.
+// Returns empty string if the file doesn't exist or can't be read.
+func readExistingDoltDatabase(beadsDir string) string {
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return ""
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return ""
+	}
+	if db, ok := meta["dolt_database"].(string); ok {
+		return db
+	}
+	return ""
 }
 
 // FindRigBeadsDir returns the .beads directory path for a rig (read-only lookup).

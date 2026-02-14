@@ -487,10 +487,24 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}
 	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
 
-	// Ensure metadata.json has dolt_mode=server and dolt_database=<rigName>.
+	// Ensure metadata.json has dolt_mode=server and the correct dolt_database.
 	// bd init --server sets dolt_mode but not dolt_database. EnsureMetadata
 	// writes both fields so bd connects to the correct centralized database.
-	if err := doltserver.EnsureMetadata(m.townRoot, opts.Name); err != nil {
+	//
+	// Rigs with tracked beads (redirect to mayor/rig/.beads) get their own database.
+	// Rigs without tracked beads share the HQ database so that beads dispatched
+	// from HQ (e.g., molecules, assigned work) are visible to bd ready/list.
+	// Without this, a new rig's empty database causes hook resolution and
+	// bd ready to fail (see gt-42zaq).
+	redirectPath := filepath.Join(rigPath, ".beads", "redirect")
+	doltDatabase := opts.Name
+	if _, err := os.Stat(redirectPath); os.IsNotExist(err) {
+		// No redirect = no tracked beads from source repo.
+		// Share HQ database so dispatched beads are queryable.
+		doltDatabase = "hq"
+		fmt.Printf("   ℹ No tracked beads — sharing HQ database\n")
+	}
+	if err := doltserver.EnsureMetadataWithDB(m.townRoot, opts.Name, doltDatabase); err != nil {
 		// Non-fatal: daemon's EnsureAllMetadata self-heals on next startup,
 		// or user can run gt doctor --fix to repair manually.
 		fmt.Printf("  Warning: Could not set Dolt server metadata: %v\n", err)
