@@ -338,12 +338,32 @@ func Start(townRoot string) error {
 	}
 	defer func() { _ = fileLock.Unlock() }()
 
-	// Check if already running
+	// Check if already running (checks both PID file AND port)
 	running, pid, err := IsRunning(townRoot)
 	if err != nil {
 		return fmt.Errorf("checking server status: %w", err)
 	}
 	if running {
+		// Server is running - verify PID file is correct (gm-ouur fix)
+		// If PID file is stale/missing but server is on port, update it
+		pidFromFile := 0
+		if data, err := os.ReadFile(config.PidFile); err == nil {
+			pidFromFile, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+		}
+		if pidFromFile != pid {
+			// PID file is stale/wrong - update it
+			fmt.Printf("Updating stale PID file (was %d, actual %d)\n", pidFromFile, pid)
+			if err := os.WriteFile(config.PidFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not update PID file: %v\n", err)
+			}
+			// Update state too
+			state, _ := LoadState(townRoot)
+			if state != nil && state.PID != pid {
+				state.PID = pid
+				state.Running = true
+				_ = SaveState(townRoot, state)
+			}
+		}
 		return fmt.Errorf("Dolt server already running (PID %d)", pid)
 	}
 
