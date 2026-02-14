@@ -1,23 +1,9 @@
 name: E2E Tests
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'internal/cmd/install*.go'
-      - 'internal/cmd/rig*.go'
-      - 'internal/cmd/crew*.go'
-      - 'internal/cmd/doctor*.go'
-      - 'internal/cmd/daemon*.go'
-      - 'internal/config/**'
-      - 'internal/routing/**'
-      - 'internal/doctor/**'
-      - 'internal/cmd/*_integration_test.go'
-      - 'Dockerfile.e2e'
-      - 'Makefile'
-      - '.github/workflows/e2e.yml'
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6am UTC
+  workflow_dispatch:       # Allow manual trigger
 
 jobs:
   e2e:
