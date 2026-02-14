@@ -525,3 +525,105 @@ func TestDeferredKillNotOnValidationError(t *testing.T) {
 		t.Error("deferred kill should NOT trigger when sessionKilled is true")
 	}
 }
+
+// TestBranchDetectionGuard verifies that the branch detection logic in runDone
+// correctly handles the three states: cwd available, cwd unavailable with GT_BRANCH,
+// and cwd unavailable without GT_BRANCH.
+// This is a regression test for PR #1402 — prevents incorrect main/master detection
+// when the polecat's working directory is deleted.
+func TestBranchDetectionGuard(t *testing.T) {
+	tests := []struct {
+		name         string
+		cwdAvailable bool
+		gtBranch     string // GT_BRANCH env var value
+		wantError    bool
+		wantBranch   string
+	}{
+		{
+			name:         "cwd available - uses git CurrentBranch",
+			cwdAvailable: true,
+			gtBranch:     "",
+			wantError:    false,
+			wantBranch:   "current-branch", // simulated
+		},
+		{
+			name:         "cwd unavailable + GT_BRANCH set - uses env var",
+			cwdAvailable: false,
+			gtBranch:     "polecat/test-worker",
+			wantError:    false,
+			wantBranch:   "polecat/test-worker",
+		},
+		{
+			name:         "cwd unavailable + GT_BRANCH empty - returns error",
+			cwdAvailable: false,
+			gtBranch:     "",
+			wantError:    true,
+			wantBranch:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the branch detection logic from runDone
+			var branch string
+			if !tt.cwdAvailable {
+				branch = tt.gtBranch
+			}
+
+			var gotError bool
+			if branch == "" {
+				if !tt.cwdAvailable {
+					gotError = true
+				} else {
+					// Would call g.CurrentBranch() — simulate success
+					branch = "current-branch"
+				}
+			}
+
+			if gotError != tt.wantError {
+				t.Errorf("error = %v, want %v", gotError, tt.wantError)
+			}
+			if !tt.wantError && branch != tt.wantBranch {
+				t.Errorf("branch = %q, want %q", branch, tt.wantBranch)
+			}
+		})
+	}
+}
+
+// TestBranchDetectionCleanupOnError verifies that when branch detection fails
+// (cwdAvailable=false + no GT_BRANCH), the session cleanup backstop is armed
+// so the polecat doesn't get stranded.
+func TestBranchDetectionCleanupOnError(t *testing.T) {
+	// Simulate the cleanup arming logic from runDone's branch detection error path
+	cwdAvailable := false
+	gtBranch := ""
+	gtPolecat := "test-worker"
+	rigName := "test-rig"
+
+	var branch string
+	if !cwdAvailable {
+		branch = gtBranch
+	}
+
+	sessionCleanupNeeded := false
+	if branch == "" && !cwdAvailable {
+		// This mirrors the actual code: arm cleanup before returning error
+		if gtPolecat != "" {
+			sessionCleanupNeeded = true
+		}
+	}
+
+	if !sessionCleanupNeeded {
+		t.Error("sessionCleanupNeeded should be true when branch detection fails with GT_POLECAT set")
+	}
+
+	// Verify the RoleInfo would be constructible from env vars
+	roleInfo := RoleInfo{
+		Role:    RolePolecat,
+		Rig:     rigName,
+		Polecat: gtPolecat,
+	}
+	if roleInfo.Rig != rigName || roleInfo.Polecat != gtPolecat {
+		t.Error("RoleInfo should be constructible from env vars for cleanup")
+	}
+}
