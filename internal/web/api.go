@@ -99,6 +99,10 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleIssueShow(w, r)
 	case path == "/issues/create" && r.Method == http.MethodPost:
 		h.handleIssueCreate(w, r)
+	case path == "/issues/close" && r.Method == http.MethodPost:
+		h.handleIssueClose(w, r)
+	case path == "/issues/update" && r.Method == http.MethodPost:
+		h.handleIssueUpdate(w, r)
 	case path == "/pr/show" && r.Method == http.MethodGet:
 		h.handlePRShow(w, r)
 	case path == "/crew" && r.Method == http.MethodGet:
@@ -786,6 +790,7 @@ type IssueShowResponse struct {
 	Type        string   `json:"type,omitempty"`
 	Status      string   `json:"status,omitempty"`
 	Priority    string   `json:"priority,omitempty"`
+	Owner       string   `json:"owner,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Created     string   `json:"created,omitempty"`
 	Updated     string   `json:"updated,omitempty"`
@@ -951,6 +956,124 @@ func (h *APIHandler) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// IssueCloseRequest is the request body for closing an issue.
+type IssueCloseRequest struct {
+	ID string `json:"id"`
+}
+
+// handleIssueClose closes an issue via bd close.
+func (h *APIHandler) handleIssueClose(w http.ResponseWriter, r *http.Request) {
+	var req IssueCloseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		h.sendError(w, "Issue ID is required", http.StatusBadRequest)
+		return
+	}
+	if !isValidID(req.ID) {
+		h.sendError(w, "Invalid issue ID format", http.StatusBadRequest)
+		return
+	}
+
+	output, err := h.runBdCommand(r.Context(), 12*time.Second, []string{"close", req.ID})
+
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to close issue: " + err.Error(),
+			"output":  output,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Issue closed",
+		"output":  output,
+	})
+}
+
+// IssueUpdateRequest is the request body for updating an issue.
+type IssueUpdateRequest struct {
+	ID       string `json:"id"`
+	Status   string `json:"status,omitempty"`   // "open", "in_progress"
+	Priority int    `json:"priority,omitempty"` // 1-4
+	Assignee string `json:"assignee,omitempty"`
+}
+
+// handleIssueUpdate updates issue fields via bd update.
+func (h *APIHandler) handleIssueUpdate(w http.ResponseWriter, r *http.Request) {
+	var req IssueUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		h.sendError(w, "Issue ID is required", http.StatusBadRequest)
+		return
+	}
+	if !isValidID(req.ID) {
+		h.sendError(w, "Invalid issue ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Build bd update args
+	args := []string{"update", req.ID}
+	hasUpdate := false
+
+	if req.Status != "" {
+		// Validate allowed status values
+		switch req.Status {
+		case "open", "in_progress":
+			args = append(args, "--status="+req.Status)
+			hasUpdate = true
+		default:
+			h.sendError(w, "Invalid status (allowed: open, in_progress)", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if req.Priority >= 1 && req.Priority <= 4 {
+		args = append(args, fmt.Sprintf("--priority=%d", req.Priority))
+		hasUpdate = true
+	}
+
+	if req.Assignee != "" {
+		if !isValidID(req.Assignee) {
+			h.sendError(w, "Invalid assignee format", http.StatusBadRequest)
+			return
+		}
+		args = append(args, "--assignee="+req.Assignee)
+		hasUpdate = true
+	}
+
+	if !hasUpdate {
+		h.sendError(w, "No update fields provided", http.StatusBadRequest)
+		return
+	}
+
+	output, err := h.runBdCommand(r.Context(), 12*time.Second, args)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to update issue: " + err.Error(),
+			"output":  output,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Issue updated",
+		"output":  output,
+	})
+}
+
 // runBdCommand executes a bd command with the given args.
 func (h *APIHandler) runBdCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -997,6 +1120,7 @@ func parseIssueShowJSON(output string) (IssueShowResponse, bool) {
 		Status      string   `json:"status"`
 		Priority    int      `json:"priority"`
 		Type        string   `json:"issue_type"`
+		Owner       string   `json:"owner"`
 		CreatedAt   string   `json:"created_at"`
 		UpdatedAt   string   `json:"updated_at"`
 		DependsOn   []string `json:"depends_on,omitempty"`
@@ -1018,6 +1142,7 @@ func parseIssueShowJSON(output string) (IssueShowResponse, bool) {
 		Type:        item.Type,
 		Status:      item.Status,
 		Priority:    priority,
+		Owner:       item.Owner,
 		Description: item.Description,
 		Created:     item.CreatedAt,
 		Updated:     item.UpdatedAt,
@@ -1078,7 +1203,16 @@ func parseIssueShowOutput(output string, issueID string) IssueShowResponse {
 			continue
 		}
 
-		if strings.HasPrefix(line, "Type:") {
+		if strings.HasPrefix(line, "Owner:") {
+			// Format: "Owner: mayor · Type: task"
+			ownerLine := strings.TrimPrefix(line, "Owner:")
+			ownerParts := strings.Split(ownerLine, "·")
+			resp.Owner = strings.TrimSpace(ownerParts[0])
+			if len(ownerParts) >= 2 {
+				typePart := strings.TrimSpace(ownerParts[1])
+				resp.Type = strings.TrimSpace(strings.TrimPrefix(typePart, "Type:"))
+			}
+		} else if strings.HasPrefix(line, "Type:") {
 			resp.Type = strings.TrimSpace(strings.TrimPrefix(line, "Type:"))
 		} else if strings.HasPrefix(line, "Created:") {
 			// Split always returns >= 1 element; parts[0] is safe unconditionally
