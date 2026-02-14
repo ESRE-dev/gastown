@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/templates/commands"
 )
 
 // Common errors
@@ -563,14 +565,22 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	// NOTE: Witness hooks are installed by witness/manager.go:Start() via EnsureSettingsForRole.
 	// No need to create patrol hooks here — agents self-install at startup.
 
-	// Create polecats directory (empty)
+	// Create polecats directory with .claude/ settings scaffold.
+	// Settings are passed to Claude Code via --settings flag at session start.
+	// Scaffolding them here ensures the settings file exists before the first
+	// polecat session starts, preventing startup failures from missing hooks.
 	polecatsPath := filepath.Join(rigPath, "polecats")
 	if err := os.MkdirAll(polecatsPath, 0755); err != nil {
 		return nil, fmt.Errorf("creating polecats dir: %w", err)
 	}
-	// NOTE: Runtime settings are installed by each agent in their working directory at startup
-	// via EnsureSettingsForRole. Claude Code does NOT traverse parent directories for settings,
-	// so installing them here (at witness/, refinery/, crew/, polecats/) would create dead files.
+	if err := claude.EnsureSettingsForRole(polecatsPath, "polecat"); err != nil {
+		// Non-fatal: session startup will retry via EnsureSettingsForRole
+		fmt.Printf("  %s Could not scaffold polecat settings: %v\n", "!", err)
+	}
+	if err := commands.ProvisionFor(polecatsPath, "claude"); err != nil {
+		// Non-fatal: commands are convenience, not critical
+		fmt.Printf("  %s Could not scaffold polecat commands: %v\n", "!", err)
+	}
 
 	// Create rig-level agent beads (witness, refinery) in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
