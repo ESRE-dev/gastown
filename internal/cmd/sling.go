@@ -112,6 +112,7 @@ var (
 	slingAccount       string // --account: Claude Code account handle to use
 	slingAgent         string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy      bool   // --no-convoy: skip auto-convoy creation
+	slingOwned         bool   // --owned: mark auto-convoy as caller-managed lifecycle
 	slingNoMerge       bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
 	slingNoBoot        bool   // --no-boot: skip wakeRigAgents (avoid witness/refinery boot and lock contention)
 	slingMaxConcurrent int    // --max-concurrent: limit concurrent spawns in batch mode
@@ -133,6 +134,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
 	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
+	slingCmd.Flags().BoolVar(&slingOwned, "owned", false, "Mark auto-convoy as caller-managed lifecycle (no automatic witness/refinery registration)")
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
 	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
 	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip rig boot after polecat spawn (avoids witness/refinery lock contention)")
@@ -379,13 +381,16 @@ func runSling(cmd *cobra.Command, args []string) error {
 				fmt.Printf("Would create convoy 'Work: %s'\n", info.Title)
 				fmt.Printf("Would add tracking relation to %s\n", beadID)
 			} else {
-				convoyID, err := createAutoConvoy(beadID, info.Title)
+				convoyID, err := createAutoConvoy(beadID, info.Title, slingOwned)
 				if err != nil {
 					// Log warning but don't fail - convoy is optional
 					fmt.Printf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
 				} else {
 					fmt.Printf("%s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
 					fmt.Printf("  Tracking: %s\n", beadID)
+					if slingOwned {
+						fmt.Printf("  Lifecycle: caller-managed (owned)\n")
+					}
 				}
 			}
 		} else {

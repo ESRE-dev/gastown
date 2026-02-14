@@ -137,8 +137,9 @@ func convoyTracksBead(beadsDir, convoyID, beadID string) bool {
 }
 
 // createAutoConvoy creates an auto-convoy for a single issue and tracks it.
+// If owned is true, the convoy is marked with the gt:owned label for caller-managed lifecycle.
 // Returns the created convoy ID.
-func createAutoConvoy(beadID, beadTitle string) (string, error) {
+func createAutoConvoy(beadID, beadTitle string, owned bool) (string, error) {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return "", fmt.Errorf("finding town root: %w", err)
@@ -160,6 +161,9 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 		"--id=" + convoyID,
 		"--title=" + convoyTitle,
 		"--description=" + description,
+	}
+	if owned {
+		createArgs = append(createArgs, "--labels=gt:owned")
 	}
 	if beads.NeedsForceForID(convoyID) {
 		createArgs = append(createArgs, "--force")

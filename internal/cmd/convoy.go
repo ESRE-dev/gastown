@@ -64,6 +64,7 @@ var (
 	convoyMolecule     string
 	convoyNotify       string
 	convoyOwner        string
+	convoyOwned        bool
 	convoyStatusJSON   bool
 	convoyListJSON     bool
 	convoyListStatus   string
@@ -134,7 +135,8 @@ Examples:
   gt convoy create "Release prep" gt-abc --notify           # defaults to mayor/
   gt convoy create "Release prep" gt-abc --notify ops/      # notify ops/
   gt convoy create "Feature rollout" gt-a gt-b --owner mayor/ --notify ops/
-  gt convoy create "Feature rollout" gt-a gt-b gt-c --molecule mol-release`,
+  gt convoy create "Feature rollout" gt-a gt-b gt-c --molecule mol-release
+  gt convoy create --owned "Manual deploy" gt-abc           # caller-managed lifecycle`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runConvoyCreate,
 }
@@ -244,6 +246,8 @@ func init() {
 	convoyCreateCmd.Flags().StringVar(&convoyOwner, "owner", "", "Owner who requested convoy (gets completion notification)")
 	convoyCreateCmd.Flags().StringVar(&convoyNotify, "notify", "", "Additional address to notify on completion (default: mayor/ if flag used without value)")
 	convoyCreateCmd.Flags().Lookup("notify").NoOptDefVal = "mayor/"
+	convoyCreateCmd.Flags().BoolVar(&convoyOwned, "owned", false, "Mark convoy as caller-managed lifecycle (no automatic witness/refinery registration)")
+
 
 	// Status flags
 	convoyStatusCmd.Flags().BoolVar(&convoyStatusJSON, "json", false, "Output as JSON")
@@ -350,6 +354,9 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		"--description=" + description,
 		"--json",
 	}
+	if convoyOwned {
+		createArgs = append(createArgs, "--labels=gt:owned")
+	}
 	if beads.NeedsForceForID(convoyID) {
 		createArgs = append(createArgs, "--force")
 	}
@@ -404,8 +411,15 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	if convoyMolecule != "" {
 		fmt.Printf("  Molecule: %s\n", convoyMolecule)
 	}
+	if convoyOwned {
+		fmt.Printf("  Owned:    %s\n", style.Warning.Render("caller-managed lifecycle"))
+	}
 
-	fmt.Printf("\n  %s\n", style.Dim.Render("Convoy auto-closes when all tracked issues complete"))
+	if convoyOwned {
+		fmt.Printf("\n  %s\n", style.Dim.Render("Owned convoy: caller manages lifecycle via gt convoy land"))
+	} else {
+		fmt.Printf("\n  %s\n", style.Dim.Render("Convoy auto-closes when all tracked issues complete"))
+	}
 
 	return nil
 }
@@ -1094,6 +1108,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 		CreatedAt   string   `json:"created_at"`
 		ClosedAt    string   `json:"closed_at,omitempty"`
 		DependsOn   []string `json:"depends_on,omitempty"`
+		Labels      []string `json:"labels,omitempty"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil {
 		return fmt.Errorf("parsing convoy data: %w", err)
@@ -1105,15 +1120,8 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 
 	convoy := convoys[0]
 
-	// Get tracked issues by querying the database directly
-	// (bd dep list doesn't properly show cross-rig external dependencies)
-	type trackedIssue struct {
-		ID        string `json:"id"`
-		Title     string `json:"title"`
-		Status    string `json:"status"`
-		Type      string `json:"dependency_type"`
-		IssueType string `json:"issue_type"`
-	}
+	// Check if convoy is owned (caller-managed lifecycle)
+	isOwned := hasLabel(convoy.Labels, "gt:owned")
 
 	tracked, err := getTrackedIssues(townBeads, convoyID)
 	if err != nil {
@@ -1133,6 +1141,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 			ID        string             `json:"id"`
 			Title     string             `json:"title"`
 			Status    string             `json:"status"`
+			Owned     bool               `json:"owned"`
 			Tracked   []trackedIssueInfo `json:"tracked"`
 			Completed int                `json:"completed"`
 			Total     int                `json:"total"`
@@ -1141,6 +1150,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 			ID:        convoy.ID,
 			Title:     convoy.Title,
 			Status:    convoy.Status,
+			Owned:     isOwned,
 			Tracked:   tracked,
 			Completed: completed,
 			Total:     len(tracked),
@@ -1153,6 +1163,9 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 	// Human-readable output
 	fmt.Printf("🚚 %s %s\n\n", style.Bold.Render(convoy.ID+":"), convoy.Title)
 	fmt.Printf("  Status:    %s\n", formatConvoyStatus(convoy.Status))
+	if isOwned {
+		fmt.Printf("  Lifecycle: %s\n", style.Warning.Render("caller-managed (owned)"))
+	}
 	fmt.Printf("  Progress:  %d/%d completed\n", completed, len(tracked))
 	fmt.Printf("  Created:   %s\n", convoy.CreatedAt)
 	if convoy.ClosedAt != "" {
@@ -1391,6 +1404,16 @@ func printConvoyTree(townBeads string, convoys []struct {
 	}
 
 	return nil
+}
+
+// hasLabel checks if a label exists in a list of labels.
+func hasLabel(labels []string, target string) bool {
+	for _, l := range labels {
+		if l == target {
+			return true
+		}
+	}
+	return false
 }
 
 func formatConvoyStatus(status string) string {
