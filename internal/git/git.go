@@ -963,9 +963,10 @@ func (g *Git) WorktreeList() ([]Worktree, error) {
 // This uses the committer date of the first commit on the branch.
 // Returns date in YYYY-MM-DD format.
 func (g *Git) BranchCreatedDate(branch string) (string, error) {
-	// Get the date of the first commit on the branch that's not on main
-	// Use merge-base to find where the branch diverged from main
-	mergeBase, err := g.run("merge-base", "main", branch)
+	// Get the date of the first commit on the branch that's not on the default branch
+	// Use merge-base to find where the branch diverged
+	defaultBranch := g.RemoteDefaultBranch()
+	mergeBase, err := g.run("merge-base", defaultBranch, branch)
 	if err != nil {
 		// If merge-base fails, fall back to the branch tip's date
 		out, err := g.run("log", "-1", "--format=%cs", branch)
