@@ -105,7 +105,11 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 			mailID, err := sendMergeReady(router, rigName, payload)
 			if err != nil {
 				// Non-fatal - Refinery will still pick up work on next patrol cycle
-				result.Error = fmt.Errorf("sending MERGE_READY: %w (non-fatal)", err)
+				if result.Error != nil {
+					result.Error = fmt.Errorf("sending MERGE_READY: %w (also: %v)", err, result.Error)
+				} else {
+					result.Error = fmt.Errorf("sending MERGE_READY: %w (non-fatal)", err)
+				}
 			} else {
 				result.MailSent = mailID
 

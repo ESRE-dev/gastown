@@ -796,6 +796,9 @@ func (e *Engineer) createConflictResolutionTaskForMR(mr *MRInfo, _ ProcessResult
 		if err != nil {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not acquire merge slot: %v\n", err)
 			// Continue anyway - slot is optional
+		} else if status == nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: merge slot returned nil status\n")
+			// Continue anyway - slot is optional
 		} else if !status.Available && status.Holder != "" && status.Holder != holder {
 			// Slot is held by someone else - skip creating the task
 			// The MR stays in queue and will retry when slot is released

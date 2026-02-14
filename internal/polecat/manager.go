@@ -855,9 +855,14 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 		cwd, cwdErr := os.Getwd()
 		if cwdErr == nil {
 			// Normalize paths for comparison
-			cwdAbs, _ := filepath.Abs(cwd)
-			cloneAbs, _ := filepath.Abs(clonePath)
-			polecatAbs, _ := filepath.Abs(polecatDir)
+			cwdAbs, absErr1 := filepath.Abs(cwd)
+			cloneAbs, absErr2 := filepath.Abs(clonePath)
+			polecatAbs, absErr3 := filepath.Abs(polecatDir)
+
+			if absErr1 != nil || absErr2 != nil || absErr3 != nil {
+				// If we can't resolve paths, refuse to nuke for safety
+				return fmt.Errorf("cannot verify shell safety: failed to resolve paths")
+			}
 
 			if strings.HasPrefix(cwdAbs, cloneAbs) || strings.HasPrefix(cwdAbs, polecatAbs) {
 				return fmt.Errorf("%w: your shell is in %s\n\nPlease cd elsewhere first, then retry:\n  cd ~/gt\n  gt polecat nuke %s/%s --force",

@@ -73,15 +73,16 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		if slingMaxConcurrent > 0 && activeCount >= slingMaxConcurrent {
 			fmt.Printf("\n%s Max concurrent limit reached (%d), waiting for capacity...\n",
 				style.Warning.Render("⏳"), slingMaxConcurrent)
-			// Wait with exponential backoff for sessions to settle
+			// Wait for sessions to settle before spawning more
 			for wait := 0; wait < 30; wait++ {
 				time.Sleep(2 * time.Second)
-				// Recount active — in practice, polecats become self-sufficient quickly
-				// so we just use a time-based cooldown rather than precise counting
 				if wait >= 2 {
 					break
 				}
 			}
+			// Reset counter after cooldown — polecats become self-sufficient
+			// quickly, so we use time-based batching rather than precise counting
+			activeCount = 0
 		}
 
 		fmt.Printf("\n[%d/%d] Slinging %s...\n", i+1, len(beadIDs), beadID)
