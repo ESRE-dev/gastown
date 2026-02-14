@@ -1552,3 +1552,113 @@ func TestNewSessionWithCommandAndEnvEmpty(t *testing.T) {
 		t.Fatal("expected session to exist after creation with empty env")
 	}
 }
+
+func TestIsTransientSendKeysError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"not in a mode", fmt.Errorf("tmux send-keys: not in a mode"), true},
+		{"not in a mode wrapped", fmt.Errorf("nudge: %w", fmt.Errorf("tmux send-keys: not in a mode")), true},
+		{"session not found", ErrSessionNotFound, false},
+		{"no server", ErrNoServer, false},
+		{"generic error", fmt.Errorf("something else"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTransientSendKeysError(tt.err)
+			if got != tt.want {
+				t.Errorf("isTransientSendKeysError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSendKeysLiteralWithRetry_ImmediateSuccess(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-retry-ok-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	// Create a session that's ready to accept input
+	if err := tm.NewSession(sessionName, os.TempDir()); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Should succeed immediately — no retry needed
+	err := tm.sendKeysLiteralWithRetry(sessionName, "hello", 5*time.Second)
+	if err != nil {
+		t.Errorf("sendKeysLiteralWithRetry() = %v, want nil", err)
+	}
+}
+
+func TestSendKeysLiteralWithRetry_NonTransientFails(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Target a session that doesn't exist — should fail immediately, not retry
+	start := time.Now()
+	err := tm.sendKeysLiteralWithRetry("gt-nonexistent-session-xyz", "hello", 5*time.Second)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error for nonexistent session, got nil")
+	}
+	// Should fail fast (< 1s), not wait the full 5s timeout
+	if elapsed > 2*time.Second {
+		t.Errorf("non-transient error took %v, expected fast failure", elapsed)
+	}
+}
+
+func TestSendKeysLiteralWithRetry_NonTransientFailsFast(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	// Use a nonexistent session — tmux returns "session not found" which is
+	// non-transient, so the function should fail fast (well under the timeout).
+	start := time.Now()
+	err := tm.sendKeysLiteralWithRetry("gt-nonexistent-session-fast-fail", "hello", 5*time.Second)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error for nonexistent session, got nil")
+	}
+	// Non-transient errors should fail immediately, not wait for timeout.
+	if elapsed > 2*time.Second {
+		t.Errorf("non-transient error took %v — should have failed fast, not retried until timeout", elapsed)
+	}
+}
+
+func TestNudgeSession_WithRetry(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-nudge-retry-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	// Create a ready session
+	if err := tm.NewSession(sessionName, os.TempDir()); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Give shell a moment to initialize
+	time.Sleep(200 * time.Millisecond)
+
+	// NudgeSession should succeed on a ready session
+	err := tm.NudgeSession(sessionName, "test message")
+	if err != nil {
+		t.Errorf("NudgeSession() = %v, want nil", err)
+	}
+}
