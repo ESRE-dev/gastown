@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -511,6 +510,16 @@ func TestGetPaneCommand_MultiPane(t *testing.T) {
 		t.Fatalf("expected pane 0 command to be 'sleep', got %q", cmd)
 	}
 
+	// Capture pane 0's PID and working directory before the split
+	pidBefore, err := tm.GetPanePID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPanePID before split: %v", err)
+	}
+	wdBefore, err := tm.GetPaneWorkDir(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneWorkDir before split: %v", err)
+	}
+
 	// Split the window — creates a new pane running a shell, which becomes active
 	if _, err := tm.run("split-window", "-t", sessionName, "-d"); err != nil {
 		t.Fatalf("split-window: %v", err)
@@ -525,19 +534,22 @@ func TestGetPaneCommand_MultiPane(t *testing.T) {
 		t.Errorf("after split, GetPaneCommand should return pane 0 command 'sleep', got %q", cmd)
 	}
 
-	// GetPanePID should return pane 0's PID, not the split pane's
+	// GetPanePID should return pane 0's PID, matching the pre-split value
 	pid, err := tm.GetPanePID(sessionName)
 	if err != nil {
 		t.Fatalf("GetPanePID after split: %v", err)
 	}
-	if pid == "" {
-		t.Error("GetPanePID returned empty after split")
+	if pid != pidBefore {
+		t.Errorf("GetPanePID changed after split: before=%s, after=%s", pidBefore, pid)
 	}
-	// Verify the PID belongs to the sleep process
-	if pidInt, err := strconv.Atoi(pid); err != nil {
-		t.Errorf("GetPanePID returned non-numeric PID %q after split", pid)
-	} else if pidInt <= 0 {
-		t.Errorf("GetPanePID returned invalid PID %d after split", pidInt)
+
+	// GetPaneWorkDir should still return pane 0's working directory
+	wd, err := tm.GetPaneWorkDir(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneWorkDir after split: %v", err)
+	}
+	if wd != wdBefore {
+		t.Errorf("GetPaneWorkDir changed after split: before=%s, after=%s", wdBefore, wd)
 	}
 }
 

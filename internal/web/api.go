@@ -1468,18 +1468,22 @@ func (h *APIHandler) detectCrewState(ctx context.Context, sessionName, hook stri
 
 // isClaudeRunningInSession checks if Claude/agent is actively running.
 func (h *APIHandler) isClaudeRunningInSession(ctx context.Context, sessionName string) bool {
-	// Check for claude, codex, or other agent processes in the pane
-	cmd := exec.CommandContext(ctx, "tmux", "list-panes", "-t", sessionName, "-F", "#{pane_current_command}")
+	// Target pane 0 explicitly (:0.0) to avoid false positives from
+	// user-created split panes running shells or other commands.
+	cmd := exec.CommandContext(ctx, "tmux", "display-message", "-t", sessionName+":0.0", "-p", "#{pane_current_command}")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
 		return false
 	}
-	
-	output := strings.ToLower(stdout.String())
+
+	output := strings.ToLower(strings.TrimSpace(stdout.String()))
+	if output == "" {
+		return false
+	}
 	// Check for common agent commands
-	return strings.Contains(output, "claude") || 
-	       strings.Contains(output, "node") || 
+	return strings.Contains(output, "claude") ||
+	       strings.Contains(output, "node") ||
 	       strings.Contains(output, "codex") ||
 	       strings.Contains(output, "opencode")
 }

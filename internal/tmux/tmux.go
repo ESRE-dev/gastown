@@ -1011,7 +1011,11 @@ func (t *Tmux) GetPaneCommand(session string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	result := strings.TrimSpace(out)
+	if result == "" {
+		return "", fmt.Errorf("empty command for session %s (session may not exist)", session)
+	}
+	return result, nil
 }
 
 // FindAgentPane finds the pane running an agent process within a session.
@@ -1077,16 +1081,18 @@ func (t *Tmux) FindAgentPane(session string) (string, error) {
 
 // GetPaneID returns the pane identifier for a session's first pane.
 // Returns a pane ID like "%0" that can be used with RespawnPane.
+// Targets pane 0 explicitly to be consistent with GetPaneCommand,
+// GetPanePID, and GetPaneWorkDir.
 func (t *Tmux) GetPaneID(session string) (string, error) {
-	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_id}")
+	out, err := t.run("display-message", "-t", session+":0.0", "-p", "#{pane_id}")
 	if err != nil {
 		return "", err
 	}
-	lines := strings.Split(out, "\n")
-	if len(lines) == 0 || lines[0] == "" {
+	result := strings.TrimSpace(out)
+	if result == "" {
 		return "", fmt.Errorf("no panes found in session %s", session)
 	}
-	return lines[0], nil
+	return result, nil
 }
 
 // GetPaneWorkDir returns the current working directory of a pane.
@@ -1097,7 +1103,11 @@ func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	result := strings.TrimSpace(out)
+	if result == "" {
+		return "", fmt.Errorf("empty working directory for session %s (session may not exist)", session)
+	}
+	return result, nil
 }
 
 // GetPanePID returns the PID of the pane's main process.
@@ -1113,7 +1123,11 @@ func (t *Tmux) GetPanePID(target string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	result := strings.TrimSpace(out)
+	if result == "" {
+		return "", fmt.Errorf("empty PID for target %s (session may not exist)", target)
+	}
+	return result, nil
 }
 
 // processMatchesNames checks if a process's binary name matches any of the given names.
