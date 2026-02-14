@@ -869,6 +869,10 @@ type MergeQueueConfig struct {
 
 	// MaxConcurrent is the maximum number of concurrent merges.
 	MaxConcurrent int `json:"max_concurrent"`
+
+	// StaleClaimTimeout is how long a claimed MR can go without updates before
+	// being considered abandoned and eligible for re-claim (e.g., "30m").
+	StaleClaimTimeout string `json:"stale_claim_timeout,omitempty"`
 }
 
 // OnConflict strategy constants.
@@ -941,6 +945,7 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		RetryFlakyTests:                  1,
 		PollInterval:                     "30s",
 		MaxConcurrent:                    1,
+		StaleClaimTimeout:               "30m",
 	}
 }
 

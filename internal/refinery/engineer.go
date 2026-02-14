@@ -24,22 +24,25 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
-// StaleClaimTimeout is how long a claimed MR can sit without updates before
-// being considered abandoned and eligible for re-claim.
-const StaleClaimTimeout = 10 * time.Minute
+// DefaultStaleClaimTimeout is the default duration after which a claimed MR
+// is considered abandoned and eligible for re-claim. This is conservative
+// to avoid re-claiming MRs that are legitimately processing long test suites.
+// Can be overridden per-rig via MergeQueueConfig.StaleClaimTimeout.
+const DefaultStaleClaimTimeout = 30 * time.Minute
 
 // isClaimStale checks if a claimed MR should be considered abandoned based on
-// its UpdatedAt timestamp. Returns true if the claim is stale (eligible for
-// re-claim), false if the claim is recent or the timestamp is invalid/missing.
-func isClaimStale(updatedAt string) bool {
+// its UpdatedAt timestamp and configured timeout. Returns true if the claim
+// is stale (eligible for re-claim), false if the claim is recent or the
+// timestamp is invalid/missing.
+func isClaimStale(updatedAt string, timeout time.Duration) (stale bool, parseErr error) {
 	if updatedAt == "" {
-		return false // No timestamp - assume claim is valid
+		return false, nil // No timestamp - assume claim is valid
 	}
 	t, err := time.Parse(time.RFC3339, updatedAt)
 	if err != nil {
-		return false // Invalid timestamp - assume claim is valid
+		return false, err // Caller should log the parse error
 	}
-	return time.Since(t) >= StaleClaimTimeout
+	return time.Since(t) >= timeout, nil
 }
 
 // MergeQueueConfig holds configuration for the merge queue processor.
@@ -72,6 +75,14 @@ type MergeQueueConfig struct {
 
 	// MaxConcurrent is the maximum number of MRs to process concurrently.
 	MaxConcurrent int `json:"max_concurrent"`
+
+	// StaleClaimTimeout is how long a claimed MR can go without updates before
+	// being considered abandoned and eligible for re-claim. This handles the
+	// case where a refinery crashes mid-merge, leaving an MR permanently claimed.
+	// Set conservatively to avoid re-claiming MRs with long-running test suites.
+	// NOTE: Only one refinery instance runs per rig (enforced by ErrAlreadyRunning
+	// in manager.go), so concurrent re-claim is not a concern in practice.
+	StaleClaimTimeout time.Duration `json:"stale_claim_timeout"`
 }
 
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
@@ -85,6 +96,7 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		RetryFlakyTests:                  1,
 		PollInterval:                     30 * time.Second,
 		MaxConcurrent:                    1,
+		StaleClaimTimeout:               DefaultStaleClaimTimeout,
 	}
 }
 
@@ -234,6 +246,7 @@ func (e *Engineer) LoadConfig() error {
 		RetryFlakyTests                  *int    `json:"retry_flaky_tests"`
 		PollInterval                     *string `json:"poll_interval"`
 		MaxConcurrent                    *int    `json:"max_concurrent"`
+		StaleClaimTimeout                *string `json:"stale_claim_timeout"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -268,6 +281,16 @@ func (e *Engineer) LoadConfig() error {
 			return fmt.Errorf("invalid poll_interval %q: %w", *mqRaw.PollInterval, err)
 		}
 		e.config.PollInterval = dur
+	}
+	if mqRaw.StaleClaimTimeout != nil {
+		dur, err := time.ParseDuration(*mqRaw.StaleClaimTimeout)
+		if err != nil {
+			return fmt.Errorf("invalid stale_claim_timeout %q: %w", *mqRaw.StaleClaimTimeout, err)
+		}
+		if dur <= 0 {
+			return fmt.Errorf("stale_claim_timeout must be positive, got %v", dur)
+		}
+		e.config.StaleClaimTimeout = dur
 	}
 
 	return nil
@@ -951,9 +974,20 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 			continue // Skip issues without MR fields
 		}
 
-		// Skip if already assigned, unless claim is stale (allows re-claim after crash)
-		if issue.Assignee != "" && !isClaimStale(issue.UpdatedAt) {
-			continue
+		// Skip if already assigned, unless claim is stale (allows re-claim after crash).
+		// NOTE: Only one refinery runs per rig (enforced by ErrAlreadyRunning in
+		// manager.go), so concurrent re-claim race conditions are not a concern.
+		if issue.Assignee != "" {
+			stale, parseErr := isClaimStale(issue.UpdatedAt, e.config.StaleClaimTimeout)
+			if parseErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not parse UpdatedAt for %s: %v (treating claim as valid)\n",
+					issue.ID, parseErr)
+			}
+			if !stale {
+				continue
+			}
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Stale claim detected: %s (assignee: %s, updated: %s) — eligible for re-claim\n",
+				issue.ID, issue.Assignee, issue.UpdatedAt)
 		}
 
 		mrs = append(mrs, issueToMRInfo(issue, fields))
