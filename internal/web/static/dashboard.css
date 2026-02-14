@@ -2009,6 +2009,38 @@
             margin-right: 4px;
         }
 
+        /* Command palette section headers */
+        .command-section-header {
+            padding: 6px 16px 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-top: 1px solid var(--border);
+            margin-top: 4px;
+        }
+
+        .command-section-header:first-child {
+            border-top: none;
+            margin-top: 0;
+        }
+
+        /* Recent command icon */
+        .command-recent-icon {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+
+        /* Search match highlight */
+        .command-name mark {
+            background: rgba(255, 196, 0, 0.25);
+            color: var(--text-primary);
+            border-radius: 2px;
+            padding: 0 1px;
+        }
+
         /* Command args hint in list */
         .command-args {
             color: var(--text-muted);

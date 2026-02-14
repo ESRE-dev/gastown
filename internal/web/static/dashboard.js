@@ -130,6 +130,108 @@
     var executionLock = false;
     var pendingCommand = null; // Command waiting for args
     var cachedOptions = null;  // Cached options from /api/options
+    var recentCommands = [];   // Recently executed commands (from localStorage)
+    var MAX_RECENT = 10;
+    var RECENT_STORAGE_KEY = 'gt-palette-recent';
+
+    // Load recent commands from localStorage
+    function loadRecentCommands() {
+        try {
+            var stored = localStorage.getItem(RECENT_STORAGE_KEY);
+            if (stored) {
+                recentCommands = JSON.parse(stored);
+                if (!Array.isArray(recentCommands)) recentCommands = [];
+                // Cap at MAX_RECENT
+                recentCommands = recentCommands.slice(0, MAX_RECENT);
+            }
+        } catch (e) {
+            recentCommands = [];
+        }
+    }
+
+    // Save a command to recent history
+    function saveRecentCommand(cmdName) {
+        // Remove duplicate if exists
+        recentCommands = recentCommands.filter(function(c) { return c !== cmdName; });
+        // Add to front
+        recentCommands.unshift(cmdName);
+        // Cap at MAX_RECENT
+        recentCommands = recentCommands.slice(0, MAX_RECENT);
+        try {
+            localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(recentCommands));
+        } catch (e) {
+            // localStorage full or unavailable, ignore
+        }
+    }
+
+    // Detect active context based on expanded panel or visible detail view
+    function detectActiveContext() {
+        var expandedPanel = document.querySelector('.panel.expanded');
+        if (expandedPanel) {
+            var panelId = expandedPanel.id || '';
+            if (panelId.indexOf('mail') !== -1) return 'Mail';
+            if (panelId.indexOf('crew') !== -1) return 'Crew';
+            if (panelId.indexOf('issue') !== -1 || panelId.indexOf('work') !== -1) return 'Work';
+            if (panelId.indexOf('ready') !== -1) return 'Work';
+            if (panelId.indexOf('pr') !== -1 || panelId.indexOf('merge') !== -1) return 'Status';
+        }
+        // Check detail views
+        var mailDetail = document.getElementById('mail-detail');
+        var mailCompose = document.getElementById('mail-compose');
+        if ((mailDetail && mailDetail.style.display !== 'none') ||
+            (mailCompose && mailCompose.style.display !== 'none')) return 'Mail';
+        var issueDetail = document.getElementById('issue-detail');
+        if (issueDetail && issueDetail.style.display !== 'none') return 'Work';
+        var prDetail = document.getElementById('pr-detail');
+        if (prDetail && prDetail.style.display !== 'none') return 'Status';
+        return null;
+    }
+
+    // Score a command for fuzzy matching. Returns -1 for no match, higher is better.
+    function scoreCommand(cmd, query) {
+        var name = cmd.name.toLowerCase();
+        var desc = cmd.desc.toLowerCase();
+        var cat = cmd.category.toLowerCase();
+        var q = query.toLowerCase();
+
+        // Exact prefix match on name is best
+        if (name.indexOf(q) === 0) return 100 + (50 - name.length);
+        // Prefix match on a word within the name
+        var nameParts = name.split(' ');
+        for (var i = 0; i < nameParts.length; i++) {
+            if (nameParts[i].indexOf(q) === 0) return 80 + (50 - name.length);
+        }
+        // Substring match in name
+        if (name.indexOf(q) !== -1) return 60 + (50 - name.length);
+        // Match in description
+        if (desc.indexOf(q) !== -1) return 40;
+        // Match in category
+        if (cat.indexOf(q) !== -1) return 20;
+        // Fuzzy: all query chars appear in order in name
+        var ni = 0;
+        for (var qi = 0; qi < q.length; qi++) {
+            ni = name.indexOf(q[qi], ni);
+            if (ni === -1) return -1;
+            ni++;
+        }
+        return 10;
+    }
+
+    // Highlight matching portions in text for display
+    function highlightMatch(text, query) {
+        if (!query) return escapeHtml(text);
+        var lowerText = text.toLowerCase();
+        var lowerQuery = query.toLowerCase();
+        var idx = lowerText.indexOf(lowerQuery);
+        if (idx !== -1) {
+            return escapeHtml(text.substring(0, idx)) +
+                '<mark>' + escapeHtml(text.substring(idx, idx + query.length)) + '</mark>' +
+                escapeHtml(text.substring(idx + query.length));
+        }
+        return escapeHtml(text);
+    }
+
+    loadRecentCommands();
 
     var overlay = document.getElementById('command-palette-overlay');
     var searchInput = document.getElementById('command-palette-input');
@@ -329,18 +431,50 @@
             resultsDiv.innerHTML = '<div class="command-palette-empty">No matching commands</div>';
             return;
         }
+        var currentQuery = searchInput ? searchInput.value.trim() : '';
         var html = '';
-        for (var i = 0; i < visibleCommands.length; i++) {
-            var cmd = visibleCommands[i];
-            var cls = 'command-item' + (i === selectedIdx ? ' selected' : '');
-            var argsHint = cmd.args ? ' <span class="command-args">' + escapeHtml(cmd.args) + '</span>' : '';
-            html += '<div class="' + cls + '" data-cmd-name="' + escapeHtml(cmd.name) + '" data-cmd-args="' + escapeHtml(cmd.args || '') + '">' +
-                '<span class="command-name">gt ' + escapeHtml(cmd.name) + argsHint + '</span>' +
-                '<span class="command-desc">' + escapeHtml(cmd.desc) + '</span>' +
-                '<span class="command-category">' + escapeHtml(cmd.category) + '</span>' +
-                '</div>';
+
+        if (currentQuery) {
+            // Search mode: flat list with highlights
+            for (var i = 0; i < visibleCommands.length; i++) {
+                var cmd = visibleCommands[i];
+                var cls = 'command-item' + (i === selectedIdx ? ' selected' : '');
+                var argsHint = cmd.args ? ' <span class="command-args">' + escapeHtml(cmd.args) + '</span>' : '';
+                var nameHtml = highlightMatch('gt ' + cmd.name, currentQuery);
+                html += '<div class="' + cls + '" data-cmd-name="' + escapeHtml(cmd.name) + '" data-cmd-args="' + escapeHtml(cmd.args || '') + '">' +
+                    '<span class="command-name">' + nameHtml + argsHint + '</span>' +
+                    '<span class="command-desc">' + escapeHtml(cmd.desc) + '</span>' +
+                    '<span class="command-category">' + escapeHtml(cmd.category) + '</span>' +
+                    '</div>';
+            }
+        } else {
+            // Browse mode: show Recent, Contextual, then All Commands
+            // visibleCommands was rebuilt by filterCommands with sections baked in
+            for (var j = 0; j < visibleCommands.length; j++) {
+                var item = visibleCommands[j];
+                if (item._section) {
+                    // Section header
+                    html += '<div class="command-section-header">' + escapeHtml(item._section) + '</div>';
+                    continue;
+                }
+                var cls2 = 'command-item' + (j === selectedIdx ? ' selected' : '');
+                var argsHint2 = item.args ? ' <span class="command-args">' + escapeHtml(item.args) + '</span>' : '';
+                var icon = item._recent ? '<span class="command-recent-icon">&#8635;</span>' : '';
+                html += '<div class="' + cls2 + '" data-cmd-name="' + escapeHtml(item.name) + '" data-cmd-args="' + escapeHtml(item.args || '') + '">' +
+                    icon +
+                    '<span class="command-name">gt ' + escapeHtml(item.name) + argsHint2 + '</span>' +
+                    '<span class="command-desc">' + escapeHtml(item.desc) + '</span>' +
+                    '<span class="command-category">' + escapeHtml(item.category) + '</span>' +
+                    '</div>';
+            }
         }
         resultsDiv.innerHTML = html;
+
+        // Scroll selected item into view
+        var selectedEl = resultsDiv.querySelector('.command-item.selected');
+        if (selectedEl) {
+            selectedEl.scrollIntoView({ block: 'nearest' });
+        }
     }
 
     function runWithArgsFromForm(fieldCount) {
@@ -379,17 +513,68 @@
     }
 
     function filterCommands(query) {
-        query = (query || '').toLowerCase();
+        query = (query || '').trim();
         if (!query) {
-            visibleCommands = allCommands.slice();
+            // Build sectioned list: Recent, Contextual, All Commands
+            visibleCommands = [];
+            var shownNames = {};
+
+            // Recent section
+            var recentItems = [];
+            for (var ri = 0; ri < recentCommands.length; ri++) {
+                var recentCmd = allCommands.find(function(c) { return c.name === recentCommands[ri]; });
+                if (recentCmd) recentItems.push(recentCmd);
+            }
+            if (recentItems.length > 0) {
+                visibleCommands.push({ _section: 'Recent' });
+                for (var ri2 = 0; ri2 < recentItems.length; ri2++) {
+                    var rcmd = Object.assign({}, recentItems[ri2], { _recent: true });
+                    visibleCommands.push(rcmd);
+                    shownNames[rcmd.name] = true;
+                }
+            }
+
+            // Contextual section
+            var context = detectActiveContext();
+            if (context) {
+                var contextItems = allCommands.filter(function(c) {
+                    return c.category === context && !shownNames[c.name];
+                });
+                if (contextItems.length > 0) {
+                    visibleCommands.push({ _section: 'Suggested \u2014 ' + context });
+                    for (var ci = 0; ci < contextItems.length; ci++) {
+                        visibleCommands.push(contextItems[ci]);
+                        shownNames[contextItems[ci].name] = true;
+                    }
+                }
+            }
+
+            // All commands section (remaining)
+            var remaining = allCommands.filter(function(c) { return !shownNames[c.name]; });
+            remaining.sort(function(a, b) { return a.name.localeCompare(b.name); });
+            if (remaining.length > 0) {
+                visibleCommands.push({ _section: 'All Commands' });
+                for (var ai = 0; ai < remaining.length; ai++) {
+                    visibleCommands.push(remaining[ai]);
+                }
+            }
         } else {
-            visibleCommands = allCommands.filter(function(cmd) {
-                return cmd.name.toLowerCase().indexOf(query) !== -1 ||
-                       cmd.desc.toLowerCase().indexOf(query) !== -1 ||
-                       cmd.category.toLowerCase().indexOf(query) !== -1;
-            });
+            // Score and sort by relevance
+            var scored = [];
+            for (var i = 0; i < allCommands.length; i++) {
+                var s = scoreCommand(allCommands[i], query);
+                if (s > 0) {
+                    scored.push({ cmd: allCommands[i], score: s });
+                }
+            }
+            scored.sort(function(a, b) { return b.score - a.score; });
+            visibleCommands = scored.map(function(item) { return item.cmd; });
         }
         selectedIdx = 0;
+        // In browse mode, skip section headers for initial selection
+        while (selectedIdx < visibleCommands.length && visibleCommands[selectedIdx]._section) {
+            selectedIdx++;
+        }
         renderResults();
     }
 
@@ -458,6 +643,12 @@
 
         // Close palette FIRST before anything else
         closePalette();
+
+        // Save to recent commands history
+        // Extract base command name (without args) for history
+        var baseName = cmdName.split(' ').slice(0, 3).join(' ');
+        var matchedCmd = allCommands.find(function(c) { return cmdName.indexOf(c.name) === 0; });
+        saveRecentCommand(matchedCmd ? matchedCmd.name : baseName);
 
         executionLock = true;
         console.log('Running command:', cmdName);
@@ -571,7 +762,10 @@
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             if (visibleCommands.length > 0) {
-                selectedIdx = Math.min(selectedIdx + 1, visibleCommands.length - 1);
+                var next = selectedIdx + 1;
+                // Skip section headers
+                while (next < visibleCommands.length && visibleCommands[next]._section) next++;
+                if (next < visibleCommands.length) selectedIdx = next;
                 renderResults();
             }
             return;
@@ -579,16 +773,19 @@
 
         if (e.key === 'ArrowUp') {
             e.preventDefault();
-            selectedIdx = Math.max(selectedIdx - 1, 0);
+            var prev = selectedIdx - 1;
+            // Skip section headers
+            while (prev >= 0 && visibleCommands[prev]._section) prev--;
+            if (prev >= 0) selectedIdx = prev;
             renderResults();
             return;
         }
 
         if (e.key === 'Enter') {
             e.preventDefault();
-            if (visibleCommands[selectedIdx]) {
-                var cmd = visibleCommands[selectedIdx];
-                selectCommand(cmd.name, cmd.args);
+            var selected = visibleCommands[selectedIdx];
+            if (selected && !selected._section) {
+                selectCommand(selected.name, selected.args);
             }
             return;
         }
