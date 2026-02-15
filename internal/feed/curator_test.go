@@ -550,7 +550,7 @@ func TestCurator_ConcurrentStartIsIdempotent(t *testing.T) {
 	}
 	wg.Wait()
 
-	// All calls should succeed (sync.Once returns same result).
+	// All calls should succeed (startErr is nil when init succeeds).
 	for i, err := range errs {
 		if err != nil {
 			t.Errorf("Start() goroutine %d: unexpected error: %v", i, err)
@@ -659,5 +659,31 @@ func TestCurator_ConcurrentFeedReadWrite(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			t.Errorf("line %d: malformed JSON after concurrent writes: %v", i, err)
 		}
+	}
+}
+
+// TestCurator_StartErrorPersistsAcrossCalls verifies that if Start() fails
+// (e.g., events file cannot be created), subsequent calls return the same
+// error rather than silently returning nil.
+//
+// Regression test: startErr must be a struct field (not function-local) so
+// sync.Once's happens-before guarantee makes it visible to all callers.
+func TestCurator_StartErrorPersistsAcrossCalls(t *testing.T) {
+	// Use a non-existent directory so OpenFile fails.
+	curator := NewCurator("/nonexistent/path/that/does/not/exist")
+	defer curator.Stop()
+
+	err1 := curator.Start()
+	if err1 == nil {
+		t.Fatal("first Start() should have failed with a non-existent town root")
+	}
+
+	// Second call must return the same error, not nil.
+	err2 := curator.Start()
+	if err2 == nil {
+		t.Fatal("second Start() returned nil after first call failed — startErr not persisted")
+	}
+	if err1.Error() != err2.Error() {
+		t.Errorf("error mismatch: first=%q, second=%q", err1, err2)
 	}
 }

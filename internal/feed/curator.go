@@ -47,7 +47,8 @@ type Curator struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
-	startOnce       sync.Once // prevents concurrent Start() calls from spawning multiple goroutines
+	startOnce sync.Once // prevents concurrent Start() calls from spawning multiple goroutines
+	startErr  error     // result of the one-shot Start; visible to all callers via sync.Once happens-before
 
 	// feedMu guards in-process access to the feed file. The flock in
 	// readRecentFeedEvents/writeFeedEvent coordinates across processes;
@@ -94,28 +95,27 @@ func NewCurator(townRoot string) *Curator {
 // Start begins the curator goroutine. It is safe to call concurrently;
 // only the first call starts the goroutine — subsequent calls are no-ops.
 func (c *Curator) Start() error {
-	var startErr error
 	c.startOnce.Do(func() {
 		eventsPath := filepath.Join(c.townRoot, events.EventsFile)
 
 		// Open events file, creating if needed
 		file, err := os.OpenFile(eventsPath, os.O_RDONLY|os.O_CREATE, 0600)
 		if err != nil {
-			startErr = fmt.Errorf("opening events file: %w", err)
+			c.startErr = fmt.Errorf("opening events file: %w", err)
 			return
 		}
 
 		// Seek to end to only process new events
 		if _, err := file.Seek(0, io.SeekEnd); err != nil {
 			_ = file.Close() //nolint:gosec // G104: best effort cleanup on error
-			startErr = fmt.Errorf("seeking to end: %w", err)
+			c.startErr = fmt.Errorf("seeking to end: %w", err)
 			return
 		}
 
 		c.wg.Add(1)
 		go c.run(file)
 	})
-	return startErr
+	return c.startErr
 }
 
 // Stop gracefully stops the curator.
