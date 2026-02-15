@@ -962,7 +962,7 @@ This enables the Deacon to burn and respawn cleanly."""
 
 [[steps]]
 id = "loop-or-exit"
-title = "Burn and respawn or loop"
+title = "Loop or exit for respawn"
 needs = ["context-check"]
 description = """
 End of patrol cycle decision.
