@@ -299,6 +299,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 	var target string
 	if len(args) > 1 {
 		target = args[1]
+
+		// Validate target format before resolveTarget, which can have
+		// side-effects like polecat spawning.
+		if err := ValidateTarget(target); err != nil {
+			return err
+		}
 	}
 	resolved, err := resolveTarget(target, ResolveTargetOptions{
 		DryRun:     slingDryRun,
