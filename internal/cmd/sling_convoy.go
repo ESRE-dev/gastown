@@ -141,6 +141,11 @@ func convoyTracksBead(beadsDir, convoyID, beadID string) bool {
 // mergeStrategy is optional: "direct", "mr", or "local" (empty = default mr).
 // Returns the created convoy ID.
 func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy string) (string, error) {
+	// Guard against flag-like titles propagating into convoy names (gt-e0kx5)
+	if beads.IsFlagLikeTitle(beadTitle) {
+		return "", fmt.Errorf("refusing to create convoy: bead title %q looks like a CLI flag", beadTitle)
+	}
+
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return "", fmt.Errorf("finding town root: %w", err)

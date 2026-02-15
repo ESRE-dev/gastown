@@ -151,7 +151,7 @@ func runBeadMove(cmd *cobra.Command, args []string) error {
 	createArgs := []string{
 		"create",
 		"--prefix", targetPrefix,
-		"--title", source.Title,
+		"--title=" + source.Title,
 		"--type", source.Type,
 		"--priority", fmt.Sprintf("%d", source.Priority),
 		"--silent", // Only output the ID
