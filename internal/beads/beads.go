@@ -264,7 +264,7 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 // This is needed for slot operations that reference beads with different prefixes
 // (e.g., setting an hq-* hook bead on a gt-* agent bead).
 // See: sling_helpers.go verifyBeadExists/hookBeadWithRetry for the same pattern.
-func (b *Beads) runWithRouting(args ...string) ([]byte, error) {
+func (b *Beads) runWithRouting(args ...string) ([]byte, error) { //nolint:unparam // mirrors run() signature for consistency
 	fullArgs := append([]string{"--allow-stale"}, args...)
 
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
