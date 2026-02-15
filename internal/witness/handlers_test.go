@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -243,8 +244,16 @@ func installFakeBd(t *testing.T) string {
 	binDir := t.TempDir()
 	argsLog := filepath.Join(binDir, "bd_args.log")
 
-	// Create a fake bd that logs its args and returns valid JSON
-	script := fmt.Sprintf(`#!/bin/sh
+	if runtime.GOOS == "windows" {
+		// Windows: create a .bat file since shell scripts don't work
+		script := fmt.Sprintf("@echo off\r\necho %%* >> %q\r\nif \"%%1\"==\"list\" (\r\n  echo []\r\n) else if \"%%1\"==\"update\" (\r\n  exit /b 0\r\n) else (\r\n  echo {}\r\n)\r\n", argsLog)
+		bdPath := filepath.Join(binDir, "bd.bat")
+		if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
+			t.Fatalf("write fake bd.bat: %v", err)
+		}
+	} else {
+		// Unix: create a shell script
+		script := fmt.Sprintf(`#!/bin/sh
 echo "$@" >> %q
 # Return empty JSON array for list commands, success for others
 case "$1" in
@@ -253,9 +262,10 @@ case "$1" in
   *) echo "{}" ;;
 esac
 `, argsLog)
-	bdPath := filepath.Join(binDir, "bd")
-	if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake bd: %v", err)
+		bdPath := filepath.Join(binDir, "bd")
+		if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
+			t.Fatalf("write fake bd: %v", err)
+		}
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return argsLog
