@@ -368,7 +368,14 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		if led == "🅿️" {
 			space = "  "
 		}
-		rigParts = append(rigParts, led+space+rig.name)
+		// Abbreviate rig names to beads prefix when >2 rigs
+		displayName := rig.name
+		if len(rigs) > 2 && townRoot != "" {
+			if prefix := config.GetRigPrefix(townRoot, rig.name); prefix != "" {
+				displayName = prefix
+			}
+		}
+		rigParts = append(rigParts, led+space+displayName)
 	}
 
 	if len(rigParts) > 0 {
