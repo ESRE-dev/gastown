@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -571,6 +572,9 @@ func TestOrphanedMoleculeResult_Types(t *testing.T) {
 }
 
 func TestDetectOrphanedMolecules_NoBdAvailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix-style PATH override not compatible with Windows")
+	}
 	// When bd is not in PATH, should return empty result with errors.
 	t.Setenv("PATH", "/nonexistent")
 	result := DetectOrphanedMolecules("/tmp/nonexistent", "testrig", nil)
@@ -587,6 +591,9 @@ func TestDetectOrphanedMolecules_NoBdAvailable(t *testing.T) {
 }
 
 func TestDetectOrphanedMolecules_EmptyResult(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mock for bd")
+	}
 	// With a mock bd that returns empty lists, should get empty result.
 	tmpDir := t.TempDir()
 	mockBd := filepath.Join(tmpDir, "bd")
@@ -608,6 +615,9 @@ func TestDetectOrphanedMolecules_EmptyResult(t *testing.T) {
 }
 
 func TestGetAttachedMoleculeID_EmptyOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix-style PATH override not compatible with Windows")
+	}
 	// When bd show returns empty, should return empty string.
 	t.Setenv("PATH", "/nonexistent")
 	result := getAttachedMoleculeID("/tmp", "gt-fake-123")
@@ -617,6 +627,9 @@ func TestGetAttachedMoleculeID_EmptyOutput(t *testing.T) {
 }
 
 func TestDetectOrphanedMolecules_WithMockBd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mock for bd")
+	}
 	// Full test with mock bd returning beads assigned to dead polecats.
 	//
 	// Setup:
