@@ -210,13 +210,13 @@ func (m *Mailbox) listLegacy() ([]*Message, error) {
 	file, err := os.Open(m.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return make([]*Message, 0), nil
 		}
 		return nil, err
 	}
 	defer func() { _ = file.Close() }() // non-fatal: OS will close on exit
 
-	var messages []*Message
+	messages := make([]*Message, 0)
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
 	for scanner.Scan() {

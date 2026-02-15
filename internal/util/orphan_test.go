@@ -82,6 +82,10 @@ func TestGetProcessCwd(t *testing.T) {
 }
 
 func TestIsInGasTownWorkspace(t *testing.T) {
+	// NOTE: This test uses os.Chdir on the process-global cwd.
+	// Do NOT add t.Parallel() here or to any test in this file—concurrent
+	// tests sharing the same process would race on the working directory.
+
 	// Create a temporary directory structure simulating a Gas Town workspace
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
