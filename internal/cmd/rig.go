@@ -21,6 +21,7 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
@@ -102,10 +103,15 @@ var rigRemoveCmd = &cobra.Command{
 This only removes the rig entry from mayor/rigs.json and cleans up
 the beads route. The rig's files on disk are NOT deleted.
 
+If the rig has running tmux sessions (witness, refinery, polecats, crew),
+you must shut them down first with 'gt rig shutdown' or use --force to
+kill them automatically.
+
 To fully remove a rig, delete the directory manually after unregistering.
 
 Examples:
-  gt rig remove myproject                    # Unregister the rig
+  gt rig remove myproject                    # Unregister (fails if sessions running)
+  gt rig remove myproject --force            # Kill sessions then unregister
   gt rig remove myproject && rm -rf myproject # Unregister and delete files`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRigRemove,
@@ -304,6 +310,7 @@ var (
 	rigRestartForce    bool
 	rigRestartNuclear  bool
 	rigListJSON        bool
+	rigRemoveForce     bool
 )
 
 func init() {
@@ -321,6 +328,8 @@ func init() {
 	rigCmd.AddCommand(rigStopCmd)
 
 	rigListCmd.Flags().BoolVar(&rigListJSON, "json", false, "Output as JSON")
+
+	rigRemoveCmd.Flags().BoolVarP(&rigRemoveForce, "force", "f", false, "Kill running tmux sessions before removing")
 
 	rigAddCmd.Flags().StringVar(&rigAddPrefix, "prefix", "", "Beads issue prefix (default: derived from name)")
 	rigAddCmd.Flags().StringVar(&rigAddLocalRepo, "local-repo", "", "Local repo path to share git objects (optional)")
@@ -625,6 +634,34 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 	// Create rig manager
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
+
+	// Check for running tmux sessions before removing
+	t := tmux.NewTmux()
+	sessions := findRigSessions(t, name)
+	if len(sessions) > 0 {
+		if !rigRemoveForce {
+			fmt.Printf("%s Rig %s has %d running tmux session(s):\n",
+				style.Warning.Render("⚠"), name, len(sessions))
+			for _, s := range sessions {
+				fmt.Printf("  - %s\n", s)
+			}
+			fmt.Printf("\nShut them down first:\n")
+			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("gt rig shutdown %s", name)))
+			fmt.Printf("Or force removal:\n")
+			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("gt rig remove %s --force", name)))
+			return fmt.Errorf("refusing to remove rig with running sessions")
+		}
+
+		// --force: kill all rig sessions
+		fmt.Printf("Killing %d tmux session(s) for rig %s...\n", len(sessions), name)
+		for _, s := range sessions {
+			if err := t.KillSessionWithProcesses(s); err != nil {
+				fmt.Printf("  %s Failed to kill session %s: %v\n", style.Warning.Render("!"), s, err)
+			} else {
+				fmt.Printf("  Killed %s\n", s)
+			}
+		}
+	}
 
 	if err := mgr.RemoveRig(name); err != nil {
 		return fmt.Errorf("removing rig: %w", err)
@@ -1899,6 +1936,24 @@ func syncRigHooks(townRoot, rigName string) error {
 		fmt.Printf("  Synced hooks for %d target(s)\n", synced)
 	}
 	return nil
+}
+
+// findRigSessions returns all tmux sessions belonging to the given rig.
+// All rig sessions share the "gt-{rig}-" prefix, so this catches witness,
+// refinery, polecat, and crew sessions in one pass.
+func findRigSessions(t *tmux.Tmux, rigName string) []string {
+	prefix := session.Prefix + rigName + "-"
+	all, err := t.ListSessions()
+	if err != nil {
+		return nil
+	}
+	var matches []string
+	for _, name := range all {
+		if strings.HasPrefix(name, prefix) {
+			matches = append(matches, name)
+		}
+	}
+	return matches
 }
 
 // isGitRemoteURL returns true if s looks like a remote git URL
