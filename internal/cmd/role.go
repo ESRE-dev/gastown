@@ -257,12 +257,13 @@ func detectRole(cwd, townRoot string) RoleInfo {
 	relPath = filepath.ToSlash(relPath)
 	parts := strings.Split(relPath, "/")
 
-	// Check for mayor role
-	// At town root, or in mayor/ or mayor/rig/
+	// Town root is a neutral location — don't infer any role from it.
+	// The mayor's actual home is mayor/ (matched below).
 	if relPath == "." || relPath == "" {
-		ctx.Role = RoleMayor
 		return ctx
 	}
+
+	// Check for mayor role: mayor/ or mayor/rig/
 	if len(parts) >= 1 && parts[0] == "mayor" {
 		ctx.Role = RoleMayor
 		return ctx
