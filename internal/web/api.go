@@ -202,7 +202,7 @@ func (h *APIHandler) runGtCommand(ctx context.Context, timeout time.Duration, ar
 	case h.cmdSem <- struct{}{}:
 		defer func() { <-h.cmdSem }()
 	case <-ctx.Done():
-		return "", fmt.Errorf("context cancelled waiting for command slot: %w", ctx.Err())
+		return "", fmt.Errorf("context canceled waiting for command slot: %w", ctx.Err())
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
