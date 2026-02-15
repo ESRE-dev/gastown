@@ -823,3 +823,41 @@ func TestRunGtCommandSemaphoreContextCancel(t *testing.T) {
 	// Drain the slot we manually added.
 	<-h.cmdSem
 }
+
+// TestRunGtCommandSemaphoreTimeoutBudget verifies that the timeout parameter
+// bounds total latency including semaphore wait time. A call with a short
+// timeout should fail within that budget even if the semaphore is full.
+//
+// Regression test: timeout context must be created before semaphore acquisition.
+func TestRunGtCommandSemaphoreTimeoutBudget(t *testing.T) {
+	h := &APIHandler{
+		gtPath:            "sleep",
+		workDir:           t.TempDir(),
+		defaultRunTimeout: 5 * time.Second,
+		maxRunTimeout:     10 * time.Second,
+		cmdSem:            make(chan struct{}, 1), // 1 slot
+	}
+
+	// Fill the semaphore so the call must wait.
+	h.cmdSem <- struct{}{}
+
+	start := time.Now()
+	// Use a background context (no external deadline) but a short timeout.
+	// The timeout should bound the semaphore wait.
+	_, err := h.runGtCommand(context.Background(), 200*time.Millisecond, []string{"10"})
+	elapsed := time.Since(start)
+
+	// Drain the slot we manually added.
+	<-h.cmdSem
+
+	if err == nil {
+		t.Fatal("expected error when semaphore full and timeout expires")
+	}
+	if !strings.Contains(err.Error(), "command slot unavailable") {
+		t.Errorf("error = %q, want 'command slot unavailable'", err)
+	}
+	// The call should have returned within the timeout budget (200ms + margin).
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("elapsed = %v, want < 500ms (timeout should bound semaphore wait)", elapsed)
+	}
+}
