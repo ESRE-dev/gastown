@@ -80,6 +80,49 @@ var (
 	convoyCheckDryRun  bool
 )
 
+const (
+	convoyStatusOpen   = "open"
+	convoyStatusClosed = "closed"
+)
+
+func normalizeConvoyStatus(status string) string {
+	return strings.ToLower(strings.TrimSpace(status))
+}
+
+func ensureKnownConvoyStatus(status string) error {
+	switch normalizeConvoyStatus(status) {
+	case convoyStatusOpen, convoyStatusClosed:
+		return nil
+	default:
+		return fmt.Errorf(
+			"unsupported convoy status %q (expected %q or %q)",
+			status,
+			convoyStatusOpen,
+			convoyStatusClosed,
+		)
+	}
+}
+
+func validateConvoyStatusTransition(currentStatus, targetStatus string) error {
+	current := normalizeConvoyStatus(currentStatus)
+	target := normalizeConvoyStatus(targetStatus)
+
+	if err := ensureKnownConvoyStatus(current); err != nil {
+		return err
+	}
+	if err := ensureKnownConvoyStatus(target); err != nil {
+		return err
+	}
+	if current == target {
+		return nil
+	}
+	if (current == convoyStatusOpen && target == convoyStatusClosed) ||
+		(current == convoyStatusClosed && target == convoyStatusOpen) {
+		return nil
+	}
+	return fmt.Errorf("illegal convoy status transition %q -> %q", currentStatus, targetStatus)
+}
+
 var convoyCmd = &cobra.Command{
 	Use:     "convoy",
 	GroupID: GroupWork,
@@ -489,10 +532,16 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 	if convoy.Type != "convoy" {
 		return fmt.Errorf("'%s' is not a convoy (type: %s)", convoyID, convoy.Type)
 	}
+	if err := ensureKnownConvoyStatus(convoy.Status); err != nil {
+		return fmt.Errorf("convoy '%s' has invalid lifecycle state: %w", convoyID, err)
+	}
 
 	// If convoy is closed, reopen it
 	reopened := false
-	if convoy.Status == "closed" {
+	if normalizeConvoyStatus(convoy.Status) == convoyStatusClosed {
+		if err := validateConvoyStatusTransition(convoy.Status, convoyStatusOpen); err != nil {
+			return fmt.Errorf("can't reopen convoy '%s': %w", convoyID, err)
+		}
 		reopenArgs := []string{"update", convoyID, "--status=open"}
 		reopenCmd := exec.Command("bd", reopenArgs...)
 		reopenCmd.Dir = townBeads
@@ -603,9 +652,12 @@ func checkSingleConvoy(townBeads, convoyID string, dryRun bool) error {
 	if convoy.Type != "convoy" {
 		return fmt.Errorf("'%s' is not a convoy (type: %s)", convoyID, convoy.Type)
 	}
+	if err := ensureKnownConvoyStatus(convoy.Status); err != nil {
+		return fmt.Errorf("convoy '%s' has invalid lifecycle state: %w", convoyID, err)
+	}
 
 	// Check if convoy is already closed
-	if convoy.Status == "closed" {
+	if normalizeConvoyStatus(convoy.Status) == convoyStatusClosed {
 		fmt.Printf("%s Convoy %s is already closed\n", style.Dim.Render("○"), convoyID)
 		return nil
 	}
@@ -698,11 +750,17 @@ func runConvoyClose(cmd *cobra.Command, args []string) error {
 	if convoy.Type != "convoy" {
 		return fmt.Errorf("'%s' is not a convoy (type: %s)", convoyID, convoy.Type)
 	}
+	if err := ensureKnownConvoyStatus(convoy.Status); err != nil {
+		return fmt.Errorf("convoy '%s' has invalid lifecycle state: %w", convoyID, err)
+	}
 
 	// Idempotent: if already closed, just report it
-	if convoy.Status == "closed" {
+	if normalizeConvoyStatus(convoy.Status) == convoyStatusClosed {
 		fmt.Printf("%s Convoy %s is already closed\n", style.Dim.Render("○"), convoyID)
 		return nil
+	}
+	if err := validateConvoyStatusTransition(convoy.Status, convoyStatusClosed); err != nil {
+		return fmt.Errorf("can't close convoy '%s': %w", convoyID, err)
 	}
 
 	// Verify all tracked issues are done (unless --force)
