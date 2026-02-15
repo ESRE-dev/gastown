@@ -338,6 +338,9 @@ This helps the Deacon understand which recovered beads need attention.`,
 var (
 	triggerTimeout time.Duration
 
+	// Status flags
+	deaconStatusJSON bool
+
 	// Health check flags
 	healthCheckTimeout  time.Duration
 	healthCheckFailures int
@@ -381,6 +384,9 @@ func init() {
 	deaconCmd.AddCommand(deaconZombieScanCmd)
 	deaconCmd.AddCommand(deaconRedispatchCmd)
 	deaconCmd.AddCommand(deaconRedispatchStateCmd)
+
+	// Flags for status
+	deaconStatusCmd.Flags().BoolVar(&deaconStatusJSON, "json", false, "Output as JSON")
 
 	// Flags for trigger-pending
 	deaconTriggerPendingCmd.Flags().DurationVar(&triggerTimeout, "timeout", 2*time.Second,
@@ -579,31 +585,87 @@ func runDeaconAttach(cmd *cobra.Command, args []string) error {
 	return attachToTmuxSession(sessionName)
 }
 
+// DeaconStatusOutput is the JSON-serializable status of the Deacon.
+type DeaconStatusOutput struct {
+	Running   bool             `json:"running"`
+	Paused    bool             `json:"paused"`
+	Session   string           `json:"session"`
+	Heartbeat *HeartbeatStatus `json:"heartbeat,omitempty"`
+}
+
+// HeartbeatStatus is the JSON-serializable heartbeat info.
+type HeartbeatStatus struct {
+	Timestamp  time.Time `json:"timestamp"`
+	AgeSec     float64   `json:"age_seconds"`
+	Cycle      int64     `json:"cycle"`
+	LastAction string    `json:"last_action,omitempty"`
+	Fresh      bool      `json:"fresh"`
+	Stale      bool      `json:"stale"`
+	VeryStale  bool      `json:"very_stale"`
+}
+
 func runDeaconStatus(cmd *cobra.Command, args []string) error {
 	t := tmux.NewTmux()
 
 	sessionName := getDeaconSessionName()
-
-	// Check pause state first (most important)
 	townRoot, _ := workspace.FindFromCwdOrError()
+
+	// Gather state
+	paused := false
+	var pauseState *deacon.PauseState
 	if townRoot != "" {
-		paused, state, err := deacon.IsPaused(townRoot)
-		if err == nil && paused {
-			fmt.Printf("%s DEACON PAUSED\n", style.Bold.Render("⏸️"))
-			if state.Reason != "" {
-				fmt.Printf("  Reason: %s\n", state.Reason)
-			}
-			fmt.Printf("  Paused at: %s\n", state.PausedAt.Format(time.RFC3339))
-			fmt.Printf("  Paused by: %s\n", state.PausedBy)
-			fmt.Println()
-			fmt.Printf("Resume with: %s\n", style.Dim.Render("gt deacon resume"))
-			fmt.Println()
+		var err error
+		paused, pauseState, err = deacon.IsPaused(townRoot)
+		if err != nil {
+			paused = false
 		}
 	}
 
 	running, err := t.HasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
+	}
+
+	// Read heartbeat
+	var hbStatus *HeartbeatStatus
+	if townRoot != "" {
+		if hb := deacon.ReadHeartbeat(townRoot); hb != nil {
+			hbStatus = &HeartbeatStatus{
+				Timestamp:  hb.Timestamp,
+				AgeSec:     hb.Age().Seconds(),
+				Cycle:      hb.Cycle,
+				LastAction: hb.LastAction,
+				Fresh:      hb.IsFresh(),
+				Stale:      hb.IsStale(),
+				VeryStale:  hb.IsVeryStale(),
+			}
+		}
+	}
+
+	// JSON output
+	if deaconStatusJSON {
+		out := DeaconStatusOutput{
+			Running:   running,
+			Paused:    paused,
+			Session:   sessionName,
+			Heartbeat: hbStatus,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+
+	// Human-readable output
+	if paused && pauseState != nil {
+		fmt.Printf("%s DEACON PAUSED\n", style.Bold.Render("⏸️"))
+		if pauseState.Reason != "" {
+			fmt.Printf("  Reason: %s\n", pauseState.Reason)
+		}
+		fmt.Printf("  Paused at: %s\n", pauseState.PausedAt.Format(time.RFC3339))
+		fmt.Printf("  Paused by: %s\n", pauseState.PausedBy)
+		fmt.Println()
+		fmt.Printf("Resume with: %s\n", style.Dim.Render("gt deacon resume"))
+		fmt.Println()
 	}
 
 	if running {
@@ -619,7 +681,6 @@ func runDeaconStatus(cmd *cobra.Command, args []string) error {
 				style.Bold.Render("running"))
 			fmt.Printf("  Status: %s\n", status)
 			fmt.Printf("  Created: %s\n", info.Created)
-			fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt deacon attach"))
 		} else {
 			fmt.Printf("%s Deacon session is %s\n",
 				style.Bold.Render("●"),
@@ -630,6 +691,31 @@ func runDeaconStatus(cmd *cobra.Command, args []string) error {
 			style.Dim.Render("○"),
 			"not running")
 		fmt.Printf("\nStart with: %s\n", style.Dim.Render("gt deacon start"))
+	}
+
+	// Heartbeat info (shown after session status)
+	if hbStatus != nil {
+		fmt.Println()
+		ageDur := time.Duration(hbStatus.AgeSec * float64(time.Second))
+		fmt.Printf("  Heartbeat: %s ago (cycle %d)\n",
+			ageDur.Round(time.Second), hbStatus.Cycle)
+		if hbStatus.LastAction != "" {
+			fmt.Printf("  Last action: %s\n", hbStatus.LastAction)
+		}
+		health := "fresh"
+		if hbStatus.VeryStale {
+			health = "very stale"
+		} else if hbStatus.Stale {
+			health = "stale"
+		}
+		fmt.Printf("  Health: %s\n", health)
+	} else if townRoot != "" {
+		fmt.Println()
+		fmt.Printf("  Heartbeat: %s\n", style.Dim.Render("no heartbeat file"))
+	}
+
+	if running {
+		fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt deacon attach"))
 	}
 
 	return nil
