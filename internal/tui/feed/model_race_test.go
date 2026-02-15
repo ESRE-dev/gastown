@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // TestAddEventConcurrentWithView verifies that addEvent and View can run
@@ -107,8 +109,10 @@ func TestSetTownRootConcurrentWithFetch(t *testing.T) {
 // events concurrently don't cause data races on the events slice or rigs map.
 func TestMultipleWritersConcurrent(t *testing.T) {
 	m := NewModel()
+	m.mu.Lock()
 	m.width = 80
 	m.height = 40
+	m.mu.Unlock()
 
 	var wg sync.WaitGroup
 
@@ -245,4 +249,69 @@ func TestEventsHistoryLimit(t *testing.T) {
 		t.Errorf("events exceeded maxEventHistory: got %d, max %d",
 			len(m.events), maxEventHistory)
 	}
+}
+
+// TestViewConcurrentWithWindowResize verifies that View and WindowSizeMsg
+// updates can run concurrently without data races on width/height.
+func TestViewConcurrentWithWindowResize(t *testing.T) {
+	m := NewModel()
+	m.mu.Lock()
+	m.width = 80
+	m.height = 40
+	m.mu.Unlock()
+
+	var wg sync.WaitGroup
+
+	// Writer goroutine: send WindowSizeMsg updates
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			m.Update(tea.WindowSizeMsg{Width: 80 + i, Height: 40 + i})
+		}
+	}()
+
+	// Reader goroutine: call View() concurrently
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			_ = m.View()
+		}
+	}()
+
+	wg.Wait()
+}
+
+// TestViewConcurrentWithKeyHandling verifies that View and handleKey
+// focus/help toggles can run concurrently without data races.
+func TestViewConcurrentWithKeyHandling(t *testing.T) {
+	m := NewModel()
+	m.mu.Lock()
+	m.width = 80
+	m.height = 40
+	m.mu.Unlock()
+
+	var wg sync.WaitGroup
+
+	// Writer goroutine: toggle help and cycle panels
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			m.Update(tea.KeyMsg{Type: tea.KeyTab})
+			m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+		}
+	}()
+
+	// Reader goroutine: call View() concurrently
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			_ = m.View()
+		}
+	}()
+
+	wg.Wait()
 }

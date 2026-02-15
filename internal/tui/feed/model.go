@@ -87,9 +87,11 @@ type Model struct {
 	done      chan struct{}
 	closeOnce sync.Once
 
-	// mu protects events, rigs, convoyState, eventChan, and townRoot
-	// from concurrent access (e.g. SetEventChannel called outside the
-	// Bubble Tea event loop, or View called from a separate goroutine).
+	// mu protects all fields read by View() from concurrent access:
+	// events, rigs, convoyState, eventChan, townRoot, width, height,
+	// focusedPanel, showHelp, help, filter, and the three viewports.
+	// Write lock is held during Update/handleKey mutations; read lock
+	// is held during View/render.
 	mu sync.RWMutex
 }
 
@@ -202,8 +204,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case tea.WindowSizeMsg:
+		m.mu.Lock()
 		m.width = msg.Width
 		m.height = msg.Height
+		m.mu.Unlock()
 		m.updateViewportSizes()
 
 	case eventMsg:
@@ -252,12 +256,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case key.Matches(msg, m.keys.Help):
+		m.mu.Lock()
 		m.showHelp = !m.showHelp
 		m.help.ShowAll = m.showHelp
+		m.mu.Unlock()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Tab):
 		// Cycle: Tree -> Convoy -> Feed -> Tree
+		m.mu.Lock()
 		switch m.focusedPanel {
 		case PanelTree:
 			m.focusedPanel = PanelConvoy
@@ -266,18 +273,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case PanelFeed:
 			m.focusedPanel = PanelTree
 		}
+		m.mu.Unlock()
 		return m, nil
 
 	case key.Matches(msg, m.keys.FocusTree):
+		m.mu.Lock()
 		m.focusedPanel = PanelTree
+		m.mu.Unlock()
 		return m, nil
 
 	case key.Matches(msg, m.keys.FocusFeed):
+		m.mu.Lock()
 		m.focusedPanel = PanelFeed
+		m.mu.Unlock()
 		return m, nil
 
 	case key.Matches(msg, m.keys.FocusConvoy):
+		m.mu.Lock()
 		m.focusedPanel = PanelConvoy
+		m.mu.Unlock()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Refresh):
@@ -301,8 +315,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // updateViewportSizes recalculates viewport dimensions.
-// Acquires the lock to protect viewport state from concurrent View() calls.
+// Acquires the write lock for the entire operation so that reads of
+// width/height/showHelp and writes to viewports are atomic with View().
 func (m *Model) updateViewportSizes() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Reserve space: header (1) + borders (6 for 3 panels) + status bar (1) + help (1-2)
 	headerHeight := 1
 	statusHeight := 1
@@ -338,7 +356,6 @@ func (m *Model) updateViewportSizes() {
 		contentWidth = 20
 	}
 
-	m.mu.Lock()
 	m.treeViewport.Width = contentWidth
 	m.treeViewport.Height = treeHeight
 	m.convoyViewport.Width = contentWidth
@@ -346,7 +363,6 @@ func (m *Model) updateViewportSizes() {
 	m.feedViewport.Width = contentWidth
 	m.feedViewport.Height = feedHeight
 	m.updateViewContentLocked()
-	m.mu.Unlock()
 }
 
 // updateViewContent refreshes the content of all viewports.
