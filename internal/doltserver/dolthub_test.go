@@ -74,6 +74,9 @@ func TestCreateDoltHubRepo_Success(t *testing.T) {
 		if r.Method != "POST" {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
+		if r.URL.Path != "/database" {
+			t.Errorf("expected path /database, got %s", r.URL.Path)
+		}
 		if r.Header.Get("authorization") != "token test-token" {
 			t.Errorf("expected auth header, got %q", r.Header.Get("authorization"))
 		}
@@ -113,6 +116,9 @@ func TestCreateDoltHubRepo_Success(t *testing.T) {
 
 func TestCreateDoltHubRepo_AlreadyExists(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/database" {
+			t.Errorf("expected path /database, got %s", r.URL.Path)
+		}
 		w.WriteHeader(409)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status":  "Error",
