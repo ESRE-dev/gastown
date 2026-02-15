@@ -1,6 +1,11 @@
 package cmd
 
-import "testing"
+import (
+	"os/exec"
+	"testing"
+
+	"github.com/steveyegge/gastown/internal/tmux"
+)
 
 func TestIsGitRemoteURL(t *testing.T) {
 	tests := []struct {
@@ -50,5 +55,70 @@ func TestIsGitRemoteURL(t *testing.T) {
 				t.Errorf("isGitRemoteURL(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFindRigSessions(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	tm := tmux.NewTmux()
+
+	// Create sessions that match our test rig prefix
+	matching := []string{
+		"gt-testrig1223-witness",
+		"gt-testrig1223-refinery",
+		"gt-testrig1223-alpha",
+	}
+	// Create a non-matching session
+	nonMatching := "gt-otherrig-witness"
+
+	for _, name := range append(matching, nonMatching) {
+		_ = tm.KillSession(name) // clean up any leftovers
+		if err := tm.NewSessionWithCommand(name, "", "sleep 300"); err != nil {
+			t.Fatalf("creating session %s: %v", name, err)
+		}
+	}
+	defer func() {
+		for _, name := range append(matching, nonMatching) {
+			_ = tm.KillSession(name)
+		}
+	}()
+
+	got := findRigSessions(tm, "testrig1223")
+
+	// Verify all matching sessions are returned
+	gotSet := make(map[string]bool, len(got))
+	for _, s := range got {
+		gotSet[s] = true
+	}
+
+	for _, want := range matching {
+		if !gotSet[want] {
+			t.Errorf("expected session %q in results, got %v", want, got)
+		}
+	}
+
+	// Verify non-matching session is excluded
+	if gotSet[nonMatching] {
+		t.Errorf("did not expect session %q in results, got %v", nonMatching, got)
+	}
+
+	// Verify count
+	if len(got) != len(matching) {
+		t.Errorf("expected %d sessions, got %d: %v", len(matching), len(got), got)
+	}
+}
+
+func TestFindRigSessions_NoSessions(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	tm := tmux.NewTmux()
+	got := findRigSessions(tm, "nonexistentrig999")
+	if len(got) != 0 {
+		t.Errorf("expected 0 sessions, got %d: %v", len(got), got)
 	}
 }
