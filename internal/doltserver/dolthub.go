@@ -13,6 +13,7 @@ import (
 
 // dolthubAPIBase is the DoltHub REST API base URL.
 // It is a var (not const) so tests can override it with httptest servers.
+// Not safe for parallel tests — tests that mutate this must not use t.Parallel().
 var dolthubAPIBase = "https://www.dolthub.com/api/v1alpha1"
 
 const (
