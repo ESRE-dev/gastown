@@ -515,8 +515,7 @@ func createSwarmWisp(workDir string, payload *SwarmStartPayload) (string, error)
 // findCleanupWisp finds an existing cleanup wisp for a polecat.
 func findCleanupWisp(workDir, polecatName string) (string, error) {
 	output, err := util.ExecWithOutput(workDir, "bd", "list",
-		"--ephemeral",
-		"--labels", fmt.Sprintf("polecat:%s,state:merge-requested", polecatName),
+		"--label", fmt.Sprintf("polecat:%s,state:merge-requested", polecatName),
 		"--status", "open",
 		"--json",
 	)
@@ -750,10 +749,14 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 		polecatName = "unknown"
 	}
 
-	// Update with new state
-	newLabels := strings.Join(CleanupWispLabels(polecatName, newState), ",")
-
-	return util.ExecRun(workDir, "bd", "update", wispID, "--labels", newLabels)
+	// Update with new state — pass one --set-labels=<label> per label,
+	// matching the pattern used in agent_state.go and molecule_await_signal.go.
+	labels := CleanupWispLabels(polecatName, newState)
+	args := []string{"update", wispID}
+	for _, l := range labels {
+		args = append(args, "--set-labels="+l)
+	}
+	return util.ExecRun(workDir, "bd", args...)
 }
 
 // extractPolecatFromJSON extracts the polecat name from bd show --json output.
@@ -1404,8 +1407,7 @@ func sessionRecreated(t *tmux.Tmux, sessionName string, detectedAt time.Time) bo
 // cycles for the same zombie.
 func findAnyCleanupWisp(workDir, polecatName string) string {
 	output, err := util.ExecWithOutput(workDir, "bd", "list",
-		"--ephemeral",
-		"--labels", fmt.Sprintf("cleanup,polecat:%s", polecatName),
+		"--label", fmt.Sprintf("cleanup,polecat:%s", polecatName),
 		"--status", "open",
 		"--json",
 	)
