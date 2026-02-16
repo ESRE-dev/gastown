@@ -1352,7 +1352,8 @@ func RepairWorkspace(townRoot string, ws BrokenWorkspace) (string, error) {
 // centralized Dolt server.
 //
 // For the "hq" rig, it writes to <townRoot>/.beads/metadata.json.
-// For other rigs, it writes to <townRoot>/<rigName>/mayor/rig/.beads/metadata.json.
+// For other rigs, it writes to mayor/rig/.beads/metadata.json if that path exists,
+// otherwise to <townRoot>/<rigName>/.beads/metadata.json.
 func EnsureMetadata(townRoot, rigName string) error {
 	// Use FindOrCreateRigBeadsDir to atomically resolve and create the directory,
 	// avoiding the TOCTOU race where the directory state changes between
@@ -1453,8 +1454,8 @@ func FindRigBeadsDir(townRoot, rigName string) string {
 		return rigBeads
 	}
 
-	// Neither exists; return mayor path (caller will create it)
-	return mayorBeads
+	// Neither exists; return rig-root path (consistent with FindOrCreateRigBeadsDir)
+	return rigBeads
 }
 
 // FindOrCreateRigBeadsDir atomically resolves and ensures the .beads directory
@@ -1501,14 +1502,17 @@ func FindOrCreateRigBeadsDir(townRoot, rigName string) (string, error) {
 		return rigBeads, nil
 	}
 
-	// Neither exists — atomically create the canonical mayor path.
-	// MkdirAll uses mkdir(2) which is atomic per POSIX, so concurrent
-	// callers creating the same path won't race.
-	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+	// Neither exists — create rig-root .beads (NOT mayor path).
+	// The mayor/rig/.beads path should only be used when the source repo
+	// has tracked beads (checked out via git clone). Creating it here would
+	// cause InitBeads to misdetect an untracked repo as having tracked beads,
+	// taking the redirect early-return and skipping config.yaml/issues.jsonl
+	// creation (see rig/manager.go InitBeads).
+	if err := os.MkdirAll(rigBeads, 0755); err != nil {
 		return "", fmt.Errorf("creating beads dir: %w", err)
 	}
 
-	return mayorBeads, nil
+	return rigBeads, nil
 }
 
 // GetActiveConnectionCount queries the Dolt server to get the number of active connections.
