@@ -7,6 +7,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-15
+
+### Added
+
+#### Convoy Ownership & Merge Strategies
+- **Convoy ownership model** — `--owned` flag for `gt convoy create` and `gt sling`
+- **Merge strategy selection** — `--merge` flag with `direct`, `mr`, and `local` strategies
+- **`gt convoy land`** — New command for owned convoy cleanup and completion
+- **Skip witness/refinery registration** for owned+direct convoys (faster dispatch)
+- **Ownership and merge strategy display** in `gt convoy status` and `gt convoy list`
+
+#### Agent Resilience & Lifecycle
+- **`gt done` checkpoint-based resilience** — Recovery from session death mid-completion
+- **Agent factory** — Data-driven preset registry replaces provider switch statements
+- **Gemini CLI integration** — First-class Gemini CLI as runtime adapter
+- **GitHub Copilot CLI integration** — Copilot CLI as runtime adapter
+- **Non-destructive nudge delivery** — Queue and wait-idle modes prevent message loss
+- **Auto-dismiss stalled polecat permission prompts** — Witness detects and clears stuck prompts
+- **Dead crew agent detection** — Detect dead crew agents on startup and restart them
+- **Remote hook attach** — `gt hook attach` with remote target support
+
+#### Dashboard & Web UI
+- **Rich activity timeline** — Chronological view with filtering
+- **Mobile-friendly responsive layout** — Dashboard works on small screens
+- **Toast notifications and escalation actions** — Interactive escalation UI
+- **Escape key closes expanded panels** — Keyboard navigation improvement
+
+#### Witness & Patrol
+- **JSON patrol receipts** for stale/orphan verdicts — Structured patrol output
+- **Orphaned molecule detection** — Detect and close orphaned `mol-polecat-work` molecules
+- **IN_PROGRESS beads assigned to dead polecats** — Automatic detection and recovery
+- **Deterministic stale/orphan receipt ordering** — Consistent patrol results
+
+#### Infrastructure
+- **Submodule support** — Worktree and refinery merge queue support for git submodules
+- **Merge queue `--verify` flag** — Detect orphaned/missing merge queue entries
+- **Cost digest aggregate-only payload** — Fixes Dolt column overflow
+- **Rig-specific beads prefix for tmux session names** — Better multi-rig session isolation
+- **Mayor GT_ROLE Task tool guard** — Block Task tool for Mayor via GT_ROLE check
+- **Server-side database creation** during `gt rig add` with issue_prefix setup
+
+### Changed
+
+- **Beads Classic dead code removed** — -924 lines of SQLite/JSONL/sync code eliminated
+- **Agent provider consolidated** — Data-driven preset registry replaces switch statements
+- **Session prefix renamed** — Registry-based prefixes replace hardcoded `gt-*` patterns
+- **Agent config resolution** — Moved mutex to package config for thread safety
+- **Molecule step readiness** — Delegated to `bd ready --mol` instead of custom logic
+
+### Fixed
+
+#### Reliability & Race Conditions
+- **Options cache and command concurrency** race conditions in web dashboard
+- **Feed curator** race conditions with RWMutex protection
+- **TUI convoy** concurrent access guarded with RWMutex
+- **TUI feed** concurrent access guarded with RWMutex
+- **Dolt backoff** — Thread-safe jitter using `math/rand/v2`
+- **Concurrent Start()** and feed file access protection
+- **Witness manager** race condition fix
+
+#### Agent & Session Management
+- **Nudge delivery** — Unique claim suffix prevents Windows race in concurrent Drain
+- **Signal stop hook** — Prevent infinite loop with state-based dedup
+- **Polecat zero-commit completion** blocked — Must have at least one commit
+- **Molecule step instructions** — Use `bd mol current` instead of `bd ready`
+- **Role inference** — Don't infer RoleMayor from town root cwd
+- **Boot role bead ID** — Add RoleBoot case to buildAgentBeadID and ActorString
+- **IsAgentRunning replaced with IsAgentAlive** — More accurate agent status
+- **Stale prime help text** updated with town root regression tests
+- **Sling validation** — Allow polecat/crew shorthand, validate before dispatch fork
+
+#### Convoy & Workflow
+- **Convoy lifecycle guards** — Extended to batch auto-close and synthesis paths
+- **Empty convoy handling** — Auto-close and flag in stranded detection
+- **Formalized lifecycle transition guards** for convoys
+
+#### Rig & Infrastructure
+- **Rig remove kills tmux sessions** — Clean up sessions on rig removal
+- **Rig adopt** — Init `.beads/` when no existing database found
+- **Revert shared-DB for untracked-beads rigs** — Fixes bead creation breakage
+- **Install preserves existing configs** — `town.json` and `rigs.json` kept on re-install
+- **Orphaned dolt server** detected and stopped during `gt install`
+- **Doctor dolt check** — Uses platform-appropriate mock binaries, adds dolt binary check
+- **Doctor dolt-server-reachable** reads host/port from metadata instead of hardcoding
+- **IPv6 safety** and accurate rig count in doctor
+- **Rig remove** aborts on kill failures, propagates session check errors
+- **Spurious `go build` warning** fixed for Homebrew installs
+
+#### Deacon & Dogs
+- **Deacon scoped zombie/orphan detection** to Gas Town workspace only
+- **Deacon heartbeat** surfaced in `gt deacon status`
+- **Deacon loop-or-exit** step updated with squash/create-wisp/hook cycle
+- **Dog agent beads** — Added description for mail routing
+
+#### Other Fixes
+- **Overflow polecat names** — Remove rig prefix
+- **Witness per-label `--set-labels=` pattern** — Improved tests
+- **Feed auto-disable follow** when stdout is not a TTY
+- **Mail inject** — Improved output wording and test coverage
+- **Codex config** — Replace invalid `--yolo` with `--dangerously-bypass-approvals-and-sandbox`
+- **Cross-prefix beads routing** via `runWithRouting` for slot ops
+- **Tmux `-u` flag** added to remaining client-side callsites
+- **JSON output** — Return `[]` instead of `null` for empty slices
+- **Windows CI** cut from ~13 min to ~4 min
+- **Dolt server auto-start** in `gt start`
+- 50+ additional bug fixes from community contributions
+
 ## [0.6.0] - 2026-02-15
 
 ### Added

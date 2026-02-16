@@ -75,6 +75,35 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.7.0",
+		Date:    "2026-02-15",
+		Changes: []string{
+			"NEW: Convoy ownership — --owned flag, --merge strategy (direct/mr/local), gt convoy land",
+			"NEW: gt done checkpoint-based resilience — recovery from session death mid-completion",
+			"NEW: Agent factory — data-driven preset registry (no more provider switch statements)",
+			"NEW: Gemini CLI and GitHub Copilot CLI integrations as runtime adapters",
+			"NEW: Non-destructive nudge delivery — queue and wait-idle modes",
+			"NEW: Submodule support for worktrees and refinery merge queue",
+			"NEW: Dashboard rich activity timeline, mobile layout, toast notifications",
+			"NEW: Auto-dismiss stalled polecat permission prompts",
+			"NEW: JSON patrol receipts for stale/orphan verdicts",
+			"NEW: Orphaned molecule detection and auto-close (mol-polecat-work)",
+			"NEW: Merge queue --verify flag to detect orphaned entries",
+			"NEW: Mayor GT_ROLE Task tool guard",
+			"NEW: Remote hook attach (gt hook attach with remote target)",
+			"CHANGED: Beads Classic dead code removed (-924 lines SQLite/JSONL/sync)",
+			"CHANGED: Session prefixes now registry-based (replaces hardcoded gt-* patterns)",
+			"CHANGED: Molecule step readiness delegated to bd ready --mol",
+			"FIX: Race conditions in web dashboard, feed curator, TUI convoy/feed",
+			"FIX: Convoy lifecycle guards extended to batch auto-close and synthesis",
+			"FIX: Rig remove now kills tmux sessions, aborts on kill failures",
+			"FIX: Don't infer RoleMayor from town root cwd",
+			"FIX: Polecat zero-commit completion blocked",
+			"FIX: Signal stop hook infinite loop prevention",
+			"FIX: 50+ additional bug fixes from community contributions",
+		},
+	},
+	{
 		Version: "0.6.0",
 		Date:    "2026-02-15",
 		Changes: []string{
