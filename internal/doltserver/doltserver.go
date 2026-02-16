@@ -143,11 +143,19 @@ type Config struct {
 	// TownRoot is the Gas Town workspace root.
 	TownRoot string
 
+	// Host is the Dolt server hostname or IP.
+	// Empty means localhost (backward-compatible default).
+	Host string
+
 	// Port is the MySQL protocol port.
 	Port int
 
 	// User is the MySQL user name.
 	User string
+
+	// Password is the MySQL password.
+	// Empty means no password (backward-compatible default for local access).
+	Password string
 
 	// DataDir is the root directory containing all rig databases.
 	// Each subdirectory is a separate database that will be served.
@@ -166,9 +174,14 @@ type Config struct {
 }
 
 // DefaultConfig returns the default Dolt server configuration.
+// Environment variables override defaults when set:
+//   - GT_DOLT_HOST → Host
+//   - GT_DOLT_PORT → Port
+//   - GT_DOLT_USER → User
+//   - GT_DOLT_PASSWORD → Password
 func DefaultConfig(townRoot string) *Config {
 	daemonDir := filepath.Join(townRoot, "daemon")
-	return &Config{
+	config := &Config{
 		TownRoot:       townRoot,
 		Port:           DefaultPort,
 		User:           DefaultUser,
@@ -177,6 +190,87 @@ func DefaultConfig(townRoot string) *Config {
 		PidFile:        filepath.Join(daemonDir, "dolt.pid"),
 		MaxConnections: DefaultMaxConnections,
 	}
+
+	if h := os.Getenv("GT_DOLT_HOST"); h != "" {
+		config.Host = h
+	}
+	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+		if port, err := strconv.Atoi(p); err == nil {
+			config.Port = port
+		}
+	}
+	if u := os.Getenv("GT_DOLT_USER"); u != "" {
+		config.User = u
+	}
+	if pw := os.Getenv("GT_DOLT_PASSWORD"); pw != "" {
+		config.Password = pw
+	}
+
+	return config
+}
+
+// IsRemote returns true when the config points to a non-local Dolt server.
+// Empty host, "127.0.0.1", "localhost", "::1", and "[::1]" are all considered local.
+func (c *Config) IsRemote() bool {
+	switch strings.ToLower(c.Host) {
+	case "", "127.0.0.1", "localhost", "::1", "[::1]":
+		return false
+	}
+	return true
+}
+
+// SQLArgs returns the dolt CLI flags needed to connect to a remote server.
+// Returns nil for local servers (dolt auto-detects the running local server).
+func (c *Config) SQLArgs() []string {
+	if !c.IsRemote() {
+		return nil
+	}
+	return []string{
+		"--host", c.Host,
+		"--port", strconv.Itoa(c.Port),
+		"--user", c.User,
+		"--no-tls",
+	}
+}
+
+// userDSN returns the user[:password] portion of a MySQL DSN.
+func (c *Config) userDSN() string {
+	if c.Password != "" {
+		return c.User + ":" + c.Password
+	}
+	return c.User
+}
+
+// HostPort returns "host:port", defaulting host to "127.0.0.1" when empty.
+func (c *Config) HostPort() string {
+	host := c.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("%s:%d", host, c.Port)
+}
+
+// buildDoltSQLCmd constructs a dolt sql command that works for both local and remote servers.
+// For local: runs from config.DataDir so dolt auto-detects the running server.
+// For remote: prepends connection flags and passes password via DOLT_CLI_PASSWORD env var.
+func buildDoltSQLCmd(ctx context.Context, config *Config, args ...string) *exec.Cmd {
+	sqlArgs := config.SQLArgs()
+	fullArgs := make([]string, 0, len(sqlArgs)+1+len(args))
+	fullArgs = append(fullArgs, "sql")
+	fullArgs = append(fullArgs, sqlArgs...)
+	fullArgs = append(fullArgs, args...)
+
+	cmd := exec.CommandContext(ctx, "dolt", fullArgs...)
+
+	if !config.IsRemote() {
+		cmd.Dir = config.DataDir
+	}
+
+	if config.IsRemote() && config.Password != "" {
+		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+config.Password)
+	}
+
+	return cmd
 }
 
 // RigDatabaseDir returns the database directory for a specific rig.
@@ -244,8 +338,19 @@ func SaveState(townRoot string, state *State) error {
 // IsRunning checks if a Dolt server is running for the given town.
 // Returns (running, pid, error).
 // Checks both PID file AND port to detect externally-started servers.
+// For remote servers, skips PID/port scan and just does TCP reachability.
 func IsRunning(townRoot string) (bool, int, error) {
 	config := DefaultConfig(townRoot)
+
+	// Remote server: no local PID/process to check — just TCP reachability.
+	if config.IsRemote() {
+		conn, err := net.DialTimeout("tcp", config.HostPort(), 2*time.Second)
+		if err != nil {
+			return false, 0, nil
+		}
+		_ = conn.Close()
+		return true, 0, nil
+	}
 
 	// First check PID file
 	data, err := os.ReadFile(config.PidFile)
@@ -285,10 +390,14 @@ func IsRunning(townRoot string) (bool, int, error) {
 // Returns nil if reachable, error describing the problem otherwise.
 func CheckServerReachable(townRoot string) error {
 	config := DefaultConfig(townRoot)
-	addr := fmt.Sprintf("127.0.0.1:%d", config.Port)
+	addr := config.HostPort()
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
-		return fmt.Errorf("Dolt server not reachable at %s: %w\n\nStart with: gt dolt start", addr, err)
+		hint := ""
+		if !config.IsRemote() {
+			hint = "\n\nStart with: gt dolt start"
+		}
+		return fmt.Errorf("Dolt server not reachable at %s: %w%s", addr, err, hint)
 	}
 	_ = conn.Close()
 	return nil
@@ -629,18 +738,32 @@ func Stop(townRoot string) error {
 // Use GetConnectionStringForRig for a specific database.
 func GetConnectionString(townRoot string) string {
 	config := DefaultConfig(townRoot)
-	return fmt.Sprintf("%s@tcp(127.0.0.1:%d)/", config.User, config.Port)
+	return fmt.Sprintf("%s@tcp(%s)/", config.displayDSN(), config.HostPort())
 }
 
 // GetConnectionStringForRig returns the MySQL connection string for a specific rig database.
 func GetConnectionStringForRig(townRoot, rigName string) string {
 	config := DefaultConfig(townRoot)
-	return fmt.Sprintf("%s@tcp(127.0.0.1:%d)/%s", config.User, config.Port, rigName)
+	return fmt.Sprintf("%s@tcp(%s)/%s", config.displayDSN(), config.HostPort(), rigName)
 }
 
-// ListDatabases returns the list of available rig databases in the data directory.
+// displayDSN returns the user[:password] portion for display, masking any password.
+func (c *Config) displayDSN() string {
+	if c.Password != "" {
+		return c.User + ":****"
+	}
+	return c.User
+}
+
+// ListDatabases returns the list of available rig databases.
+// For local servers, scans the data directory on disk.
+// For remote servers, queries SHOW DATABASES via SQL.
 func ListDatabases(townRoot string) ([]string, error) {
 	config := DefaultConfig(townRoot)
+
+	if config.IsRemote() {
+		return listDatabasesRemote(config)
+	}
 
 	entries, err := os.ReadDir(config.DataDir)
 	if err != nil {
@@ -662,6 +785,39 @@ func ListDatabases(townRoot string) ([]string, error) {
 		}
 	}
 
+	return databases, nil
+}
+
+// listDatabasesRemote queries SHOW DATABASES on a remote Dolt server.
+func listDatabasesRemote(config *Config) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := buildDoltSQLCmd(ctx, config, "-r", "json", "-q", "SHOW DATABASES")
+
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("querying remote SHOW DATABASES: %w (stderr: %s)", err, strings.TrimSpace(stderrBuf.String()))
+	}
+
+	var result struct {
+		Rows []struct {
+			Database string `json:"Database"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return nil, fmt.Errorf("parsing SHOW DATABASES JSON: %w", err)
+	}
+
+	var databases []string
+	for _, row := range result.Rows {
+		db := row.Database
+		if db != "information_schema" && db != "mysql" {
+			databases = append(databases, db)
+		}
+	}
 	return databases, nil
 }
 
@@ -716,11 +872,10 @@ func verifyDatabasesWithRetry(townRoot string, maxAttempts int) (served, missing
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		cmd := exec.CommandContext(ctx, "dolt", "sql",
+		cmd := buildDoltSQLCmd(ctx, config,
 			"-r", "json",
 			"-q", "SHOW DATABASES",
 		)
-		cmd.Dir = config.DataDir
 
 		// Capture stderr separately so it doesn't corrupt JSON parsing.
 		// Dolt commonly writes deprecation/manifest warnings to stderr.
@@ -1526,12 +1681,10 @@ func GetActiveConnectionCount(townRoot string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx,
-		"dolt", "sql",
+	cmd := buildDoltSQLCmd(ctx, config,
 		"-r", "csv",
 		"-q", "SELECT COUNT(*) AS cnt FROM information_schema.PROCESSLIST",
 	)
-	cmd.Dir = config.DataDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("querying connection count: %w (output: %s)", err, strings.TrimSpace(string(output)))
@@ -1682,8 +1835,7 @@ func CheckReadOnly(townRoot string) (bool, error) {
 		"USE `%s`; CREATE TABLE IF NOT EXISTS `__gt_health_probe` (v INT PRIMARY KEY); REPLACE INTO `__gt_health_probe` VALUES (1); DROP TABLE IF EXISTS `__gt_health_probe`",
 		db,
 	)
-	cmd := exec.CommandContext(ctx, "dolt", "sql", "-q", query)
-	cmd.Dir = config.DataDir
+	cmd := buildDoltSQLCmd(ctx, config, "-q", query)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1800,8 +1952,8 @@ func MeasureQueryLatency(townRoot string) (time.Duration, error) {
 	config := DefaultConfig(townRoot)
 
 	start := time.Now()
-	cmd := exec.Command("dolt", "sql", "-q", "SELECT 1")
-	cmd.Dir = config.DataDir
+	ctx := context.Background()
+	cmd := buildDoltSQLCmd(ctx, config, "-q", "SELECT 1")
 	output, err := cmd.CombinedOutput()
 	elapsed := time.Since(start)
 
@@ -1885,8 +2037,7 @@ func serverExecSQL(townRoot, query string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "dolt", "sql", "-q", query)
-	cmd.Dir = config.DataDir
+	cmd := buildDoltSQLCmd(ctx, config, "-q", query)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w (output: %s)", err, strings.TrimSpace(string(output)))
@@ -1904,8 +2055,7 @@ func doltSQL(townRoot, rigDB, query string) error {
 
 	// Prepend USE <db> to select the target database.
 	fullQuery := fmt.Sprintf("USE %s; %s", rigDB, query)
-	cmd := exec.CommandContext(ctx, "dolt", "sql", "-q", fullQuery)
-	cmd.Dir = config.DataDir
+	cmd := buildDoltSQLCmd(ctx, config, "-q", fullQuery)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w (output: %s)", err, strings.TrimSpace(string(output)))
@@ -2104,8 +2254,7 @@ func doltSQLScript(townRoot, script string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "dolt", "sql", "--file", tmpFile.Name())
-	cmd.Dir = config.DataDir
+	cmd := buildDoltSQLCmd(ctx, config, "--file", tmpFile.Name())
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w (output: %s)", err, strings.TrimSpace(string(output)))
