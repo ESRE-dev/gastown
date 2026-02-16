@@ -433,10 +433,12 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 		mayorRig := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig")
 		templatesDir := filepath.Join(mayorRig, "internal", "templates", "roles")
 
-		// Skip rigs that don't have internal/templates structure.
+		// Skip rigs that don't have internal/templates/roles structure.
 		// Most repos won't have this - templates are embedded in gastown binary.
 		// Only check rigs that explicitly have their own template overrides.
-		if _, err := os.Stat(filepath.Join(mayorRig, "internal", "templates")); os.IsNotExist(err) {
+		// We check for "roles" specifically (not just "internal/templates") to avoid
+		// false positives on external repos that happen to have internal/templates/.
+		if _, err := os.Stat(templatesDir); os.IsNotExist(err) {
 			continue
 		}
 		rigsChecked++

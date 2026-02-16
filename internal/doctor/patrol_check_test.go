@@ -316,6 +316,79 @@ func TestPatrolRolesHavePromptsCheck_FixMultipleRigs(t *testing.T) {
 	}
 }
 
+func TestPatrolRolesHavePromptsCheck_ExternalRepoWithTemplatesDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	setupRigConfig(t, tmpDir, []string{"externalproject"})
+
+	// Simulate an external Go repo that has internal/templates/ but NOT internal/templates/roles/
+	externalTemplatesDir := filepath.Join(tmpDir, "externalproject", "mayor", "rig", "internal", "templates")
+	if err := os.MkdirAll(externalTemplatesDir, 0755); err != nil {
+		t.Fatalf("mkdir templates: %v", err)
+	}
+	// Write a non-gastown template file (common in Go projects)
+	if err := os.WriteFile(filepath.Join(externalTemplatesDir, "page.html"), []byte("<html>"), 0644); err != nil {
+		t.Fatalf("write page.html: %v", err)
+	}
+
+	check := NewPatrolRolesHavePromptsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("Status = %v, want OK (external repo skipped)", result.Status)
+	}
+	if len(check.missingByRig) != 0 {
+		t.Errorf("missingByRig count = %d, want 0 (external repo should be skipped)", len(check.missingByRig))
+	}
+}
+
+func TestPatrolRolesHavePromptsCheck_FixDoesNotPollute(t *testing.T) {
+	tmpDir := t.TempDir()
+	setupRigConfig(t, tmpDir, []string{"externalproject", "gastownproject"})
+
+	// External repo: has internal/templates/ but NOT roles/
+	externalTemplatesDir := filepath.Join(tmpDir, "externalproject", "mayor", "rig", "internal", "templates")
+	if err := os.MkdirAll(externalTemplatesDir, 0755); err != nil {
+		t.Fatalf("mkdir external templates: %v", err)
+	}
+
+	// Gastown project: has internal/templates/roles/ (legitimate custom overrides)
+	setupRigTemplatesDir(t, tmpDir, "gastownproject")
+
+	check := NewPatrolRolesHavePromptsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Fatalf("Initial Status = %v, want OK", result.Status)
+	}
+	// Only gastownproject should be in missingByRig, not externalproject
+	if _, ok := check.missingByRig["externalproject"]; ok {
+		t.Error("externalproject should NOT be in missingByRig")
+	}
+	if len(check.missingByRig["gastownproject"]) != 3 {
+		t.Fatalf("gastownproject missing = %d, want 3", len(check.missingByRig["gastownproject"]))
+	}
+
+	err := check.Fix(ctx)
+	if err != nil {
+		t.Fatalf("Fix() error = %v", err)
+	}
+
+	// Verify no gastown files leaked into external repo
+	rolesDir := filepath.Join(externalTemplatesDir, "roles")
+	if _, err := os.Stat(rolesDir); !os.IsNotExist(err) {
+		t.Errorf("Fix() created roles/ directory in external repo worktree")
+	}
+	for _, tmpl := range requiredRolePrompts {
+		path := filepath.Join(externalTemplatesDir, "roles", tmpl)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("Fix() created %s in external repo worktree", tmpl)
+		}
+	}
+}
+
 func TestPatrolRolesHavePromptsCheck_DetailsFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupRigConfig(t, tmpDir, []string{"myproject"})
