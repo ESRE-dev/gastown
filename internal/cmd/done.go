@@ -380,7 +380,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	var mrID string
 	var pushFailed bool
 	var doneErrors []string
-	var mergeStrategy string // convoy merge strategy: "direct", "mr", "local", or "" (default mr)
+	var convoyInfo *ConvoyInfo // Populated if issue is tracked by a convoy
 	if exitType == ExitCompleted {
 		if branch == defaultBranch || branch == "master" {
 			return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
@@ -477,10 +477,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		//   direct: push commits straight to target branch, bypass refinery
 		//   mr:     default — create merge-request bead, refinery merges
 		//   local:  keep on feature branch, no push, no MR (for human review/upstream PRs)
-		mergeStrategy = getConvoyMergeStrategyForIssue(issueID)
+		convoyInfo = getConvoyInfoForIssue(issueID)
 
 		// Handle "local" strategy: skip push and MR entirely
-		if mergeStrategy == "local" {
+		if convoyInfo != nil && convoyInfo.MergeStrategy == "local" {
 			fmt.Printf("%s Local merge strategy: skipping push and merge queue\n", style.Bold.Render("→"))
 			fmt.Printf("  Branch: %s\n", branch)
 			if issueID != "" {
@@ -492,7 +492,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		// Handle "direct" strategy: push to target branch, skip MR
-		if mergeStrategy == "direct" {
+		if convoyInfo != nil && convoyInfo.MergeStrategy == "direct" {
 			fmt.Printf("%s Direct merge strategy: pushing to %s\n", style.Bold.Render("→"), defaultBranch)
 			directRefspec := branch + ":" + defaultBranch
 			directPushErr := g.Push("origin", directRefspec, false)
@@ -662,6 +662,39 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				// Skip MR creation, go to witness notification
 				goto notifyWitness
 			}
+		}
+
+		// Check if issue belongs to an owned+direct convoy.
+		// Owned convoys with direct merge strategy bypass the refinery pipeline —
+		// the polecat already pushed to main. Skip MR creation and close directly.
+		convoyInfo = getConvoyInfoForIssue(issueID)
+		if convoyInfo.IsOwnedDirect() {
+			fmt.Printf("%s Owned convoy (direct merge): skipping merge queue\n", style.Bold.Render("→"))
+			fmt.Printf("  Convoy: %s\n", convoyInfo.ID)
+			fmt.Printf("  Branch: %s\n", branch)
+			fmt.Printf("  Issue: %s\n", issueID)
+			fmt.Println()
+			fmt.Printf("%s\n", style.Dim.Render("Polecat already pushed to main. No MR needed."))
+
+			// Close the issue directly — refinery won't process it.
+			// Retry with backoff handles transient dolt lock contention.
+			var closeErr error
+			for attempt := 1; attempt <= 3; attempt++ {
+				closeErr = bd.ForceCloseWithReason("Completed via owned+direct convoy (no MR needed)", issueID)
+				if closeErr == nil {
+					fmt.Printf("%s Issue %s closed (owned+direct)\n", style.Bold.Render("✓"), issueID)
+					break
+				}
+				if attempt < 3 {
+					style.PrintWarning("close attempt %d/3 failed: %v (retrying in %ds)", attempt, closeErr, attempt*2)
+					time.Sleep(time.Duration(attempt*2) * time.Second)
+				}
+			}
+			if closeErr != nil {
+				style.PrintWarning("could not close issue %s after 3 attempts: %v", issueID, closeErr)
+			}
+
+			goto notifyWitness
 		}
 
 		// Determine target branch (auto-detect integration branch if applicable)
@@ -857,8 +890,15 @@ afterDoltMerge:
 		bodyLines = append(bodyLines, fmt.Sprintf("Gate: %s", doneGate))
 	}
 	bodyLines = append(bodyLines, fmt.Sprintf("Branch: %s", branch))
-	if mergeStrategy != "" && mergeStrategy != "mr" {
-		bodyLines = append(bodyLines, fmt.Sprintf("MergeStrategy: %s", mergeStrategy))
+	// Include convoy ownership info so witness can skip merge flow registration
+	if convoyInfo != nil {
+		bodyLines = append(bodyLines, fmt.Sprintf("ConvoyID: %s", convoyInfo.ID))
+		if convoyInfo.Owned {
+			bodyLines = append(bodyLines, "ConvoyOwned: true")
+		}
+		if convoyInfo.MergeStrategy != "" {
+			bodyLines = append(bodyLines, fmt.Sprintf("MergeStrategy: %s", convoyInfo.MergeStrategy))
+		}
 	}
 	if len(doneErrors) > 0 {
 		bodyLines = append(bodyLines, fmt.Sprintf("Errors: %s", strings.Join(doneErrors, "; ")))
