@@ -58,6 +58,7 @@ Examples:
 func init() {
 	patrolCmd.AddCommand(patrolDigestCmd)
 	patrolCmd.AddCommand(patrolNewCmd)
+	patrolCmd.AddCommand(patrolStepDriftCmd)
 	rootCmd.AddCommand(patrolCmd)
 
 	// Patrol digest flags
