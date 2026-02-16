@@ -935,10 +935,27 @@ func verifyDatabasesWithRetry(townRoot string, maxAttempts int) (served, missing
 	return nil, nil, lastErr
 }
 
+// systemDatabases is the set of Dolt/MySQL internal databases that should be
+// filtered from SHOW DATABASES results. These are not user rig databases:
+//   - information_schema: MySQL standard metadata
+//   - mysql: MySQL system database (privileges, users)
+//   - dolt_cluster: Dolt clustering internal database (present when clustering is configured)
+var systemDatabases = map[string]bool{
+	"information_schema": true,
+	"mysql":              true,
+	"dolt_cluster":       true,
+}
+
+// IsSystemDatabase returns true if the given database name is a Dolt/MySQL
+// internal database that should be excluded from user-facing database lists.
+func IsSystemDatabase(name string) bool {
+	return systemDatabases[strings.ToLower(name)]
+}
+
 // parseShowDatabases parses the output of SHOW DATABASES from dolt sql.
 // It tries JSON parsing first, falling back to line-based parsing for
 // plain-text output. Returns an error if the output format is unrecognized.
-// Filters out the information_schema database.
+// Filters out system databases (information_schema, mysql, dolt_cluster).
 func parseShowDatabases(output []byte) ([]string, error) {
 	// Try JSON first. Use a raw map to detect schema presence.
 	var raw map[string]json.RawMessage
@@ -955,7 +972,7 @@ func parseShowDatabases(output []byte) ([]string, error) {
 		for _, line := range strings.Split(string(output), "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" && line != "Database" && !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "|") {
-				if line != "information_schema" {
+				if !IsSystemDatabase(line) {
 					databases = append(databases, line)
 				}
 			}
@@ -981,7 +998,7 @@ func parseShowDatabases(output []byte) ([]string, error) {
 
 	var databases []string
 	for _, row := range rows {
-		if row.Database != "" && row.Database != "information_schema" {
+		if row.Database != "" && !IsSystemDatabase(row.Database) {
 			databases = append(databases, row.Database)
 		}
 	}
