@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 func TestCheckHelpFlag(t *testing.T) {
@@ -124,4 +128,76 @@ func TestCheckHelpFlag_EdgeCases(t *testing.T) {
 			t.Error("should not show help for empty string arg")
 		}
 	})
+}
+
+func TestPersistentPreRunLoadsAgentRegistry(t *testing.T) {
+	// Regression test: persistentPreRun must load settings/agents.json so that
+	// GetProcessNames (used by IsAgentAlive, daemon heartbeat, cleanup) respects
+	// user-configured process_names overrides.
+	//
+	// Without this, NixOS users whose Claude binary is ".claude-unwrapped" get
+	// their sessions killed every 3 minutes because the builtin preset only
+	// lists ["node", "claude"].
+	config.ResetRegistryForTesting()
+	t.Cleanup(config.ResetRegistryForTesting)
+
+	// Build a minimal fake town root with mayor/town.json (PrimaryMarker)
+	// and settings/agents.json containing a process_names override.
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "settings"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	registry := config.AgentRegistry{
+		Version: config.CurrentAgentRegistryVersion,
+		Agents: map[string]*config.AgentPresetInfo{
+			"claude": {
+				Name:         "claude",
+				Command:      "claude",
+				Args:         []string{"--dangerously-skip-permissions"},
+				ProcessNames: []string{"node", "claude", ".claude-unwrapped"},
+			},
+		},
+	}
+	data, err := json.Marshal(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "settings", "agents.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// cd into the fake town root so workspace.FindFromCwd() finds it.
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	// Run persistentPreRun (the function under test).
+	cmd := &cobra.Command{Use: "version"}
+	if err := persistentPreRun(cmd, nil); err != nil {
+		t.Fatalf("persistentPreRun: %v", err)
+	}
+
+	// Verify GetProcessNames returns the override from settings/agents.json.
+	got := config.GetProcessNames("claude")
+	want := []string{"node", "claude", ".claude-unwrapped"}
+	if len(got) != len(want) {
+		t.Fatalf("GetProcessNames(claude) = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("GetProcessNames(claude)[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
 }

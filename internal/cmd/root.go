@@ -100,6 +100,7 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 	// Best-effort: if town root not found, the default "gt" prefix is used.
 	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
 		_ = session.InitRegistry(townRoot)
+		_ = config.LoadAgentRegistry(config.DefaultAgentRegistryPath(townRoot))
 	}
 
 	// Get the root command name being run
