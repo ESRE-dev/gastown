@@ -176,7 +176,7 @@ func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
 			continue
 		}
 		// Skip boot sessions (utility session, not a user-facing agent)
-		if agent.Name == "hq-boot" {
+		if agent.Name == session.BootSessionName() {
 			continue
 		}
 		agents = append(agents, agent)
