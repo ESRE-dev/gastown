@@ -127,36 +127,18 @@ func TestAwaitSignalResult(t *testing.T) {
 	}
 }
 
-func TestAwaitSignalResult_FeedError(t *testing.T) {
-	// Test that feed_error reason carries error detail and is treated like timeout
-	result := AwaitSignalResult{
-		Reason:     "feed_error",
-		Elapsed:    0,
-		IdleCycles: 29,
-		Error:      "starting bd activity: context deadline exceeded",
-	}
-
-	if result.Reason != "feed_error" {
-		t.Errorf("expected reason 'feed_error', got %q", result.Reason)
-	}
-	if result.Error == "" {
-		t.Error("expected error detail to be set for feed_error")
-	}
-	// feed_error should be treated like timeout for idle counter purposes
-	if result.Reason != "feed_error" && result.Reason != "timeout" {
-		t.Error("feed_error should be handled alongside timeout in idle counter logic")
-	}
-}
-
 func TestWaitForEventsFile_MissingFile(t *testing.T) {
-	// When the events file doesn't exist, waitForEventsFile should return
-	// an error. The caller (runMoleculeAwaitSignal) treats this as feed_error.
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	// When the events file doesn't exist, waitForEventsFile creates it and
+	// waits for new events. With no events, it should return timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
 	result, err := waitForEventsFile(ctx, filepath.Join(t.TempDir(), "nonexistent.jsonl"))
-	if err == nil {
-		t.Fatalf("expected error for missing events file, got result: %+v", result)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Reason != "timeout" {
+		t.Errorf("expected reason 'timeout', got %q", result.Reason)
 	}
 }
 
@@ -210,6 +192,38 @@ func TestWaitForEventsFile_Signal(t *testing.T) {
 	}
 	if result.Signal == "" {
 		t.Error("expected signal line to be set")
+	}
+}
+
+func TestWaitForActivitySignal_PathWiring(t *testing.T) {
+	// Verify waitForActivitySignal constructs the correct events path from
+	// townRoot. The events file should be at <townRoot>/.events.jsonl.
+	townRoot := t.TempDir()
+	eventsPath := filepath.Join(townRoot, ".events.jsonl")
+	if err := os.WriteFile(eventsPath, []byte(`{"ts":"old","type":"ignore"}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	// Append a new event after a short delay
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		f, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		_, _ = f.WriteString(`{"ts":"new","type":"sling"}` + "\n")
+	}()
+
+	result, err := waitForActivitySignal(ctx, townRoot)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Reason != "signal" {
+		t.Errorf("expected reason 'signal', got %q", result.Reason)
 	}
 }
 

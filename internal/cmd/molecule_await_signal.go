@@ -52,11 +52,8 @@ exponential backoff that persists across invocations. When a signal is
 received, the caller should reset idle:0 on the agent bead.
 
 EXIT CODES:
-  0 - Signal received, timeout, or feed error (check output for which)
-
-If the feed subscription fails (e.g., bd activity not available), the command
-treats it as a degraded timeout: logs a warning, increments the idle counter,
-and returns exit 0 so backoff logic works correctly.
+  0 - Signal received or timeout (check output for which)
+  1 - Error opening events file
 
 EXAMPLES:
   # Simple wait with 60s timeout
@@ -76,11 +73,10 @@ EXAMPLES:
 
 // AwaitSignalResult is the result of an await-signal operation.
 type AwaitSignalResult struct {
-	Reason     string        `json:"reason"`               // "signal", "timeout", or "feed_error"
+	Reason     string        `json:"reason"`               // "signal" or "timeout"
 	Elapsed    time.Duration `json:"elapsed"`              // how long we waited
 	Signal     string        `json:"signal,omitempty"`     // the line that woke us (if signal)
 	IdleCycles int           `json:"idle_cycles,omitempty"` // current idle cycle count (after update)
-	Error      string        `json:"error,omitempty"`      // error detail (if feed_error)
 }
 
 func init() {
@@ -103,10 +99,16 @@ func init() {
 }
 
 func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
-	// Find beads directory
+	// Find beads directory (rig-local for bead operations)
 	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
+	}
+
+	// Find town root for events file (events are always at <townRoot>/.events.jsonl)
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	beadsDir := beads.ResolveBeadsDir(workDir)
@@ -189,25 +191,15 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	result, err := waitForActivitySignal(ctx, workDir)
+	result, err := waitForActivitySignal(ctx, townRoot)
 	if err != nil {
-		// Feed subscription failed (e.g., bd activity command missing or Dolt
-		// connection issue). Treat as degraded timeout so idle counter and
-		// backoff logic still work correctly instead of hard-failing.
-		if !awaitSignalQuiet {
-			fmt.Printf("%s Feed subscription failed (treating as timeout): %v\n",
-				style.Dim.Render("⚠"), err)
-		}
-		result = &AwaitSignalResult{
-			Reason: "feed_error",
-			Error:  err.Error(),
-		}
+		return fmt.Errorf("feed subscription failed: %w", err)
 	}
 
 	result.Elapsed = time.Since(startTime)
 
-	// On timeout or feed error, increment idle cycles and clear backoff window
-	if (result.Reason == "timeout" || result.Reason == "feed_error") && awaitSignalAgentBead != "" {
+	// On timeout, increment idle cycles and clear backoff window
+	if result.Reason == "timeout" && awaitSignalAgentBead != "" {
 		newIdleCycles := idleCycles + 1
 		if err := setAgentIdleCycles(awaitSignalAgentBead, beadsDir, newIdleCycles); err != nil {
 			if !awaitSignalQuiet {
@@ -261,14 +253,6 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 				fmt.Printf("%s Timeout after %v (no activity)\n",
 					style.Dim.Render("⏱"), result.Elapsed.Round(time.Millisecond))
 			}
-		case "feed_error":
-			if awaitSignalAgentBead != "" {
-				fmt.Printf("%s Feed unavailable, backoff as timeout (idle cycle: %d)\n",
-					style.Dim.Render("⚠"), result.IdleCycles)
-			} else {
-				fmt.Printf("%s Feed unavailable, treated as timeout\n",
-					style.Dim.Render("⚠"))
-			}
 		}
 	}
 
@@ -311,25 +295,19 @@ func calculateEffectiveTimeout(idleCycles int) (time.Duration, error) {
 	return time.ParseDuration(awaitSignalTimeout)
 }
 
-// waitForActivitySignal tails ~/gt/.events.jsonl for new activity.
-// Returns immediately when a new event line is appended, or when context is canceled.
-func waitForActivitySignal(ctx context.Context, _ string) (*AwaitSignalResult, error) {
-	return waitForEventsFile(ctx, "")
+// waitForActivitySignal tails the events file for new activity.
+// townRoot is the Gas Town workspace root; the events file is at
+// <townRoot>/.events.jsonl. Returns immediately when a new event line is
+// appended, or when context is canceled.
+func waitForActivitySignal(ctx context.Context, townRoot string) (*AwaitSignalResult, error) {
+	return waitForEventsFile(ctx, filepath.Join(townRoot, events.EventsFile))
 }
 
-// waitForEventsFile tails the events file for new lines. If eventsPath is empty,
-// it auto-discovers ~/gt/.events.jsonl from the workspace root.
+// waitForEventsFile tails the events file for new lines.
 // This replaces the former bd activity --follow subprocess approach.
 func waitForEventsFile(ctx context.Context, eventsPath string) (*AwaitSignalResult, error) {
-	if eventsPath == "" {
-		townRoot, err := workspace.FindFromCwd()
-		if err != nil || townRoot == "" {
-			return nil, fmt.Errorf("finding town root for events file: %w", err)
-		}
-		eventsPath = filepath.Join(townRoot, events.EventsFile)
-	}
 
-	f, err := os.Open(eventsPath)
+	f, err := os.OpenFile(eventsPath, os.O_RDONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("opening events file %s: %w", eventsPath, err)
 	}
