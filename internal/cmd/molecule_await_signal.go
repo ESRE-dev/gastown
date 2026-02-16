@@ -287,8 +287,13 @@ func calculateEffectiveTimeout(idleCycles int) (time.Duration, error) {
 // waitForActivitySignal starts bd activity --follow and waits for any output.
 // Returns immediately when a line is received, or when context is canceled.
 func waitForActivitySignal(ctx context.Context, workDir string) (*AwaitSignalResult, error) {
-	// Start bd activity --follow
-	cmd := exec.CommandContext(ctx, "bd", "activity", "--follow")
+	// Start bd activity --follow --since 0s
+	// The --since 0s flag ensures we only receive events that occur AFTER the
+	// subscription starts. Without it, stale events (including self-generated
+	// mutations from setAgentBackoffUntil) cause await-signal to fire immediately.
+	// Using 0s instead of 1s avoids the race where our own label update happens
+	// within the 1-second window.
+	cmd := exec.CommandContext(ctx, "bd", "activity", "--follow", "--since", "0s")
 	cmd.Dir = workDir
 
 	stdout, err := cmd.StdoutPipe()
