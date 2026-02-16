@@ -287,6 +287,17 @@ func runSling(cmd *cobra.Command, args []string) error {
 	originalAssignee := info.Assignee
 	force := slingForce // local copy to avoid mutating package-level flag
 	if (info.Status == "pinned" || info.Status == "hooked") && !force {
+		target := ""
+		if len(args) > 1 {
+			target = args[1]
+		}
+		selfAgent, _, _, _ := resolveSelfTarget()
+		if matchesSlingTarget(target, info.Assignee, selfAgent) {
+			fmt.Printf("%s Bead %s is already %s to %s, no-op\n",
+				style.Dim.Render("○"), beadID, info.Status, info.Assignee)
+			return nil
+		}
+
 		// Auto-force when hooked agent's session is confirmed dead (gt-pqf9x).
 		// This eliminates the #1 friction in convoy feeding: stale hooks from
 		// dead polecats blocking re-sling without --force.
