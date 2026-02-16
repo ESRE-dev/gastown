@@ -535,24 +535,6 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not set allowed_prefixes: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(prefixOutput)))
 	}
 
-	// Ensure database has repository fingerprint (GH #25).
-	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
-	// Without fingerprint, the bd daemon fails to start silently.
-	if err := ensureRepoFingerprint(townPath); err != nil {
-		// Non-fatal: fingerprint is optional for functionality, just daemon optimization
-		fmt.Printf("   %s Could not verify repo fingerprint: %v\n", style.Dim.Render("⚠"), err)
-	}
-
-	// Ensure issues.jsonl exists BEFORE creating routes.jsonl.
-	// If routes.jsonl is created first, bd's auto-export will write issues to routes.jsonl,
-	// corrupting it. Creating an empty issues.jsonl prevents this.
-	issuesJSONL := filepath.Join(townPath, ".beads", "issues.jsonl")
-	if _, err := os.Stat(issuesJSONL); os.IsNotExist(err) {
-		if err := os.WriteFile(issuesJSONL, []byte{}, 0644); err != nil {
-			fmt.Printf("   %s Could not create issues.jsonl: %v\n", style.Dim.Render("⚠"), err)
-		}
-	}
-
 	// Ensure routes.jsonl has an explicit town-level mapping for hq-* beads.
 	// This keeps hq-* operations stable even when invoked from rig worktrees.
 	if err := beads.AppendRoute(townPath, beads.Route{Prefix: "hq-", Path: "."}); err != nil {
@@ -566,19 +548,6 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not register convoy prefix: %v\n", style.Dim.Render("⚠"), err)
 	}
 
-	return nil
-}
-
-// ensureRepoFingerprint runs bd migrate --update-repo-id to ensure the database
-// has a repository fingerprint. Legacy databases (pre-0.17.5) lack this, which
-// prevents the daemon from starting properly.
-func ensureRepoFingerprint(beadsPath string) error {
-	cmd := exec.Command("bd", "migrate", "--update-repo-id")
-	cmd.Dir = beadsPath
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("bd migrate --update-repo-id: %s", strings.TrimSpace(string(output)))
-	}
 	return nil
 }
 
