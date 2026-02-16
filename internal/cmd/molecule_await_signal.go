@@ -284,17 +284,23 @@ func calculateEffectiveTimeout(idleCycles int) (time.Duration, error) {
 	return time.ParseDuration(awaitSignalTimeout)
 }
 
-// waitForActivitySignal starts bd activity --follow and waits for any output.
-// Returns immediately when a line is received, or when context is canceled.
-func waitForActivitySignal(ctx context.Context, workDir string) (*AwaitSignalResult, error) {
-	// Start bd activity --follow --since 0s
-	// The --since 0s flag ensures we only receive events that occur AFTER the
-	// subscription starts. Without it, stale events (including self-generated
-	// mutations from setAgentBackoffUntil) cause await-signal to fire immediately.
-	// Using 0s instead of 1s avoids the race where our own label update happens
-	// within the 1-second window.
+// activityFollowCmd builds the exec.Cmd for subscribing to new beads activity.
+// Uses --since 0s to scope the feed to post-subscription events only,
+// preventing stale replay from causing immediate spurious wakes.
+// Using 0s instead of 1s avoids the race where our own label update
+// (from setAgentBackoffUntil) happens within the lookback window.
+func activityFollowCmd(ctx context.Context, workDir string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "bd", "activity", "--follow", "--since", "0s")
 	cmd.Dir = workDir
+	return cmd
+}
+
+// waitForActivitySignal starts bd activity --follow --since 0s and waits for any output.
+// The --since 0s flag scopes the feed to post-subscription events only,
+// preventing stale replay from causing immediate spurious wakes.
+// Returns immediately when a line is received, or when context is canceled.
+func waitForActivitySignal(ctx context.Context, workDir string) (*AwaitSignalResult, error) {
+	cmd := activityFollowCmd(ctx, workDir)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
