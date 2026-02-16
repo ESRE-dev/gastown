@@ -72,7 +72,7 @@ Examples:
 }
 
 func init() {
-	installCmd.Flags().BoolVarP(&installForce, "force", "f", false, "Overwrite existing HQ")
+	installCmd.Flags().BoolVarP(&installForce, "force", "f", false, "Re-run install in existing HQ (preserves town.json and rigs.json)")
 	installCmd.Flags().StringVarP(&installName, "name", "n", "", "Town name (defaults to directory name)")
 	installCmd.Flags().StringVar(&installOwner, "owner", "", "Owner email for entity identity (defaults to git config user.email)")
 	installCmd.Flags().StringVar(&installPublicName, "public-name", "", "Public display name (defaults to town name)")
@@ -184,7 +184,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	// Create town.json in mayor/ (only if it doesn't already exist).
 	townPath := filepath.Join(mayorDir, "town.json")
-	if _, err := os.Stat(townPath); os.IsNotExist(err) {
+	if townInfo, err := os.Stat(townPath); os.IsNotExist(err) {
 		townConfig := &config.TownConfig{
 			Type:       "town",
 			Version:    config.CurrentTownVersion,
@@ -197,6 +197,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("writing town.json: %w", err)
 		}
 		fmt.Printf("   ✓ Created mayor/town.json\n")
+	} else if err != nil {
+		return fmt.Errorf("checking town.json: %w", err)
+	} else if !townInfo.Mode().IsRegular() {
+		return fmt.Errorf("town.json exists but is not a regular file")
 	} else {
 		fmt.Printf("   • mayor/town.json already exists, preserving\n")
 	}
@@ -204,7 +208,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Create rigs.json in mayor/ (only if it doesn't already exist).
 	// Re-running install must NOT clobber existing rig registrations.
 	rigsPath := filepath.Join(mayorDir, "rigs.json")
-	if _, err := os.Stat(rigsPath); os.IsNotExist(err) {
+	if rigsInfo, err := os.Stat(rigsPath); os.IsNotExist(err) {
 		rigsConfig := &config.RigsConfig{
 			Version: config.CurrentRigsVersion,
 			Rigs:    make(map[string]config.RigEntry),
@@ -213,6 +217,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("writing rigs.json: %w", err)
 		}
 		fmt.Printf("   ✓ Created mayor/rigs.json\n")
+	} else if err != nil {
+		return fmt.Errorf("checking rigs.json: %w", err)
+	} else if !rigsInfo.Mode().IsRegular() {
+		return fmt.Errorf("rigs.json exists but is not a regular file")
 	} else {
 		fmt.Printf("   • mayor/rigs.json already exists, preserving\n")
 	}
