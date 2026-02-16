@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -41,6 +42,8 @@ type Router struct {
 	// IdleNotifyTimeout controls how long to wait for a session to become
 	// idle before falling back to a queued nudge. Zero uses the default.
 	IdleNotifyTimeout time.Duration
+
+	notifyWg sync.WaitGroup // tracks in-flight async notifications
 }
 
 // NewRouter creates a new mail router.
@@ -64,6 +67,13 @@ func NewRouterWithTownRoot(workDir, townRoot string) *Router {
 		townRoot: townRoot,
 		tmux:     tmux.NewTmux(),
 	}
+}
+
+// WaitPendingNotifications blocks until all in-flight async notifications
+// have completed. CLI commands should call this before exiting to avoid
+// losing notifications that are still being delivered.
+func (r *Router) WaitPendingNotifications() {
+	r.notifyWg.Wait()
 }
 
 // isListAddress returns true if the address uses list:name syntax.
@@ -949,8 +959,16 @@ func (r *Router) sendToSingle(msg *Message) error {
 	// Notify recipient if they have an active session (best-effort notification).
 	// Skip when the caller explicitly suppressed notification (--no-notify)
 	// or for self-mail (handoffs to future-self don't need present-self notified).
+	// Notification is async: the durable write is complete, so the caller
+	// doesn't block on idle probing (up to 1s per recipient in fan-out).
+	// Callers that exit soon after Send should call WaitPendingNotifications.
 	if !msg.SuppressNotify && !isSelfMail(msg.From, msg.To) {
-		_ = r.notifyRecipient(msg)
+		msgCopy := *msg // copy to avoid data race if caller mutates msg
+		r.notifyWg.Add(1)
+		go func() {
+			defer r.notifyWg.Done()
+			r.notifyRecipient(&msgCopy) //nolint:errcheck
+		}()
 	}
 
 	return nil
@@ -1375,11 +1393,24 @@ func (r *Router) notifyRecipient(msg *Message) error {
 		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
 
 		// Idle-aware notification: try immediate nudge first, fall back to queue.
-		if err := r.tmux.WaitForIdle(sessionID, timeout); err == nil {
+		waitErr := r.tmux.WaitForIdle(sessionID, timeout)
+		if waitErr == nil {
 			// Session is idle → send immediate nudge
 			if err := r.tmux.NudgeSession(sessionID, notification); err == nil {
 				return nil
+			} else if errors.Is(err, tmux.ErrSessionNotFound) {
+				// Session disappeared between idle check and nudge — try next candidate
+				continue
+			} else if errors.Is(err, tmux.ErrNoServer) {
+				return nil
 			}
+			// NudgeSession failed for non-terminal reason — fall through to queue
+		} else if errors.Is(waitErr, tmux.ErrNoServer) {
+			// No tmux server — no point trying other candidates
+			return nil
+		} else if errors.Is(waitErr, tmux.ErrSessionNotFound) {
+			// Session disappeared — try next candidate
+			continue
 		}
 
 		// Busy or nudge failed → enqueue for cooperative delivery at the
