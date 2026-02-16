@@ -50,11 +50,13 @@ func runMailDirectory(cmd *cobra.Command, args []string) error {
 
 	b := beads.New(townRoot)
 	var entries []DirectoryEntry
+	var warnings int
 
 	// 1. Agent addresses
 	agents, err := b.ListAgentBeads()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not list agents: %v\n", err)
+		warnings++
 	} else {
 		for id := range agents {
 			addr := mail.AgentBeadIDToAddress(id)
@@ -68,6 +70,7 @@ func runMailDirectory(cmd *cobra.Command, args []string) error {
 	groups, err := b.ListGroupBeads()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not list groups: %v\n", err)
+		warnings++
 	} else {
 		for name := range groups {
 			entries = append(entries, DirectoryEntry{Address: "group:" + name, Type: "group"})
@@ -78,15 +81,18 @@ func runMailDirectory(cmd *cobra.Command, args []string) error {
 	queues, err := b.ListQueueBeads()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not list queues: %v\n", err)
+		warnings++
 	} else {
 		for id, issue := range queues {
-			name := ""
-			if issue != nil && issue.Title != "" {
-				name = issue.Title
-			} else {
-				name = id
+			if issue == nil {
+				continue
 			}
-			entries = append(entries, DirectoryEntry{Address: "queue:" + name, Type: "queue"})
+			fields := beads.ParseQueueFields(issue.Description)
+			if fields.Name == "" {
+				fmt.Fprintf(os.Stderr, "warning: queue %s has no name field, skipping\n", id)
+				continue
+			}
+			entries = append(entries, DirectoryEntry{Address: "queue:" + fields.Name, Type: "queue"})
 		}
 	}
 
@@ -94,6 +100,7 @@ func runMailDirectory(cmd *cobra.Command, args []string) error {
 	channels, err := b.ListChannelBeads()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not list channels: %v\n", err)
+		warnings++
 	} else {
 		for name := range channels {
 			entries = append(entries, DirectoryEntry{Address: "channel:" + name, Type: "channel"})
@@ -143,5 +150,13 @@ func runMailDirectory(cmd *cobra.Command, args []string) error {
 	for _, e := range entries {
 		fmt.Fprintf(w, "%s\t%s\n", e.Address, e.Type)
 	}
-	return w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if warnings > 0 {
+		fmt.Fprintf(os.Stdout, "\nListed %d addresses (%d warnings)\n", len(entries), warnings)
+	} else {
+		fmt.Fprintf(os.Stdout, "\nListed %d addresses\n", len(entries))
+	}
+	return nil
 }

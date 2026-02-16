@@ -33,7 +33,7 @@ func runCrewList(cmd *cobra.Command, args []string) error {
 	}
 
 	if crewListAll && crewRig != "" {
-		return fmt.Errorf("cannot use --all with --rig")
+		return fmt.Errorf("cannot use --all with a rig filter (--rig flag or positional argument)")
 	}
 
 	var rigs []*rig.Rig
