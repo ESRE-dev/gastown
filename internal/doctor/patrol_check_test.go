@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -46,9 +47,15 @@ func setupRigConfig(t *testing.T, tmpDir string, rigNames []string) {
 
 func setupRigTemplatesDir(t *testing.T, tmpDir, rigName string) string {
 	t.Helper()
-	templatesDir := filepath.Join(tmpDir, rigName, "mayor", "rig", "internal", "templates", "roles")
+	repoRoot := filepath.Join(tmpDir, rigName, "mayor", "rig")
+	templatesDir := filepath.Join(repoRoot, "internal", "templates", "roles")
 	if err := os.MkdirAll(templatesDir, 0755); err != nil {
 		t.Fatalf("mkdir templates: %v", err)
+	}
+	// Mark test rig as a Gas Town-like repo so role-template checks apply.
+	goMod := "module github.com/steveyegge/gastown\n\ngo 1.24\n"
+	if err := os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
 	}
 	return templatesDir
 }
@@ -343,6 +350,43 @@ func TestPatrolRolesHavePromptsCheck_ExternalRepoWithTemplatesDir(t *testing.T) 
 	}
 }
 
+func TestPatrolRolesHavePromptsCheck_ExternalRepoWithRolesDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	setupRigConfig(t, tmpDir, []string{"externalproject"})
+
+	repoRoot := filepath.Join(tmpDir, "externalproject", "mayor", "rig")
+	rolesDir := filepath.Join(repoRoot, "internal", "templates", "roles")
+	if err := os.MkdirAll(rolesDir, 0755); err != nil {
+		t.Fatalf("mkdir roles: %v", err)
+	}
+	// External (non-gastown) module should be skipped even with roles dir present.
+	goMod := "module github.com/example/externalproject\n\ngo 1.24\n"
+	if err := os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+
+	check := NewPatrolRolesHavePromptsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Fatalf("Status = %v, want OK", result.Status)
+	}
+	if len(check.missingByRig) != 0 {
+		t.Fatalf("missingByRig count = %d, want 0", len(check.missingByRig))
+	}
+
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix() error = %v", err)
+	}
+	for _, tmpl := range requiredRolePrompts {
+		path := filepath.Join(rolesDir, tmpl)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("Fix() created %s in external repo", tmpl)
+		}
+	}
+}
+
 func TestPatrolRolesHavePromptsCheck_FixDoesNotPollute(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupRigConfig(t, tmpDir, []string{"externalproject", "gastownproject"})
@@ -386,6 +430,37 @@ func TestPatrolRolesHavePromptsCheck_FixDoesNotPollute(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Errorf("Fix() created %s in external repo worktree", tmpl)
 		}
+	}
+}
+
+func TestPatrolRolesHavePromptsCheck_RolesPathNotDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	setupRigConfig(t, tmpDir, []string{"myproject"})
+
+	repoRoot := filepath.Join(tmpDir, "myproject", "mayor", "rig")
+	templatesParent := filepath.Join(repoRoot, "internal", "templates")
+	if err := os.MkdirAll(templatesParent, 0755); err != nil {
+		t.Fatalf("mkdir templates parent: %v", err)
+	}
+	// Mark as Gas Town-like to ensure check inspects this rig.
+	goMod := "module github.com/steveyegge/gastown\n\ngo 1.24\n"
+	if err := os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	// roles is a file, not a directory.
+	if err := os.WriteFile(filepath.Join(templatesParent, "roles"), []byte("not a dir"), 0644); err != nil {
+		t.Fatalf("write roles file: %v", err)
+	}
+
+	check := NewPatrolRolesHavePromptsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Fatalf("Status = %v, want Error", result.Status)
+	}
+	if !strings.Contains(result.Message, "not a directory") {
+		t.Fatalf("Message = %q, want to mention non-directory path", result.Message)
 	}
 }
 

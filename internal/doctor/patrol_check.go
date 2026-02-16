@@ -405,6 +405,46 @@ var requiredRolePrompts = []string{
 	"refinery.md.tmpl",
 }
 
+// hasAnyRequiredRolePrompt returns true if at least one canonical role template
+// already exists in templatesDir.
+func hasAnyRequiredRolePrompt(templatesDir string) bool {
+	for _, roleFile := range requiredRolePrompts {
+		if _, err := os.Stat(filepath.Join(templatesDir, roleFile)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// isLikelyGastownRepo returns true when a rig clone appears to be a Gas Town repo.
+// We use go.mod module path as a heuristic and require "gastown" in the module name.
+func isLikelyGastownRepo(repoRoot string) (bool, error) {
+	goModPath := filepath.Join(repoRoot, "go.mod")
+	data, err := os.ReadFile(goModPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "//") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "module" {
+			return strings.Contains(strings.ToLower(fields[1]), "gastown"), nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 	c.missingByRig = make(map[string][]string)
 
@@ -438,17 +478,59 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 		// Only check rigs that explicitly have their own template overrides.
 		// We check for "roles" specifically (not just "internal/templates") to avoid
 		// false positives on external repos that happen to have internal/templates/.
-		if _, err := os.Stat(templatesDir); os.IsNotExist(err) {
-			continue
+		if info, err := os.Stat(templatesDir); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return &CheckResult{
+				Name:    c.Name(),
+				Status:  StatusError,
+				Message: "Failed to inspect role templates directory",
+				Details: []string{fmt.Sprintf("%s: %v", templatesDir, err)},
+			}
+		} else if !info.IsDir() {
+			return &CheckResult{
+				Name:    c.Name(),
+				Status:  StatusError,
+				Message: "Role templates path is not a directory",
+				Details: []string{templatesDir},
+			}
+		}
+
+		// Guard against writing Gas Town role templates into unrelated repos:
+		// only manage this directory if it's clearly a Gas Town repo, or if it
+		// already contains at least one canonical role template.
+		if !hasAnyRequiredRolePrompt(templatesDir) {
+			isGastown, err := isLikelyGastownRepo(mayorRig)
+			if err != nil {
+				return &CheckResult{
+					Name:    c.Name(),
+					Status:  StatusError,
+					Message: "Failed to inspect rig module metadata",
+					Details: []string{fmt.Sprintf("%s: %v", filepath.Join(mayorRig, "go.mod"), err)},
+				}
+			}
+			if !isGastown {
+				continue
+			}
 		}
 		rigsChecked++
 
 		var rigMissing []string
 		for _, roleFile := range requiredRolePrompts {
 			promptPath := filepath.Join(templatesDir, roleFile)
-			if _, err := os.Stat(promptPath); os.IsNotExist(err) {
-				missingPrompts = append(missingPrompts, fmt.Sprintf("%s: %s", rigName, roleFile))
-				rigMissing = append(rigMissing, roleFile)
+			if _, err := os.Stat(promptPath); err != nil {
+				if os.IsNotExist(err) {
+					missingPrompts = append(missingPrompts, fmt.Sprintf("%s: %s", rigName, roleFile))
+					rigMissing = append(rigMissing, roleFile)
+					continue
+				}
+				return &CheckResult{
+					Name:    c.Name(),
+					Status:  StatusError,
+					Message: "Failed to inspect role template",
+					Details: []string{fmt.Sprintf("%s: %v", promptPath, err)},
+				}
 			}
 		}
 		if len(rigMissing) > 0 {
