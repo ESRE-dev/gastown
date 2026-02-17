@@ -482,13 +482,19 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Checks both dependency bonds (ground truth) and description metadata.
 	// When re-slinging with --force, burn ALL existing molecules before creating a new one.
 	// Without this, each sling creates a new wisp bonded to the bead, leaving orphaned molecules.
+	// NOTE: Uses local `force` (not `slingForce`) to respect auto-force paths (dead agent detection).
 	if formulaName != "" {
 		existingMolecules := collectExistingMolecules(info)
 		if len(existingMolecules) > 0 {
-			if slingForce {
+			if slingDryRun {
+				fmt.Printf("  Would burn %d stale molecule(s): %s\n",
+					len(existingMolecules), strings.Join(existingMolecules, ", "))
+			} else if force {
 				fmt.Printf("  %s Burning %d stale molecule(s) from previous assignment: %s\n",
 					style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
-				burnExistingMolecules(existingMolecules, beadID, townRoot)
+				if err := burnExistingMolecules(existingMolecules, beadID, townRoot); err != nil {
+					return fmt.Errorf("burning stale molecules: %w", err)
+				}
 			} else {
 				return fmt.Errorf("bead %s already has %d attached molecule(s): %s\nUse --force to replace, or --hook-raw-bead to skip formula",
 					beadID, len(existingMolecules), strings.Join(existingMolecules, ", "))

@@ -102,6 +102,29 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			continue
 		}
 
+		// Guard: burn existing molecules before applying new formula.
+		// Runs before polecat spawn to avoid wasted spawn/cleanup on rejected beads.
+		if formulaName != "" {
+			existingMolecules := collectExistingMolecules(info)
+			if len(existingMolecules) > 0 {
+				if slingForce {
+					fmt.Printf("  %s Burning %d stale molecule(s): %s\n",
+						style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
+					if err := burnExistingMolecules(existingMolecules, beadID, townRoot); err != nil {
+						fmt.Printf("  %s Skipping %s: burn failed: %v\n",
+							style.Dim.Render("✗"), beadID, err)
+						results = append(results, slingResult{beadID: beadID, success: false, errMsg: fmt.Sprintf("burn failed: %v", err)})
+						continue
+					}
+				} else {
+					fmt.Printf("  %s Skipping %s: has existing molecule(s) (use --force)\n",
+						style.Dim.Render("✗"), beadID)
+					results = append(results, slingResult{beadID: beadID, success: false, errMsg: "has existing molecule(s)"})
+					continue
+				}
+			}
+		}
+
 		// Spawn a fresh polecat
 		spawnOpts := SlingSpawnOptions{
 			Force:      slingForce,
@@ -133,22 +156,6 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 				}
 			} else {
 				fmt.Printf("  %s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
-			}
-		}
-
-		// Guard: burn existing molecules before applying new formula
-		existingMolecules := collectExistingMolecules(info)
-		if len(existingMolecules) > 0 {
-			if slingForce {
-				fmt.Printf("  %s Burning %d stale molecule(s): %s\n",
-					style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
-				burnExistingMolecules(existingMolecules, beadID, townRoot)
-			} else {
-				fmt.Printf("  %s Skipping %s: has existing molecule(s) (use --force)\n",
-					style.Dim.Render("✗"), beadID)
-				results = append(results, slingResult{beadID: beadID, success: false, errMsg: "has existing molecule(s)"})
-				cleanupSpawnedPolecat(spawnInfo, rigName)
-				continue
 			}
 		}
 
