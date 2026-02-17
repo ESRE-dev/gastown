@@ -1110,7 +1110,10 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 		}
 	}
 
-	// Build labels for type, from/thread/reply-to/cc plus announce metadata
+	// Build labels for type, from/thread/reply-to/cc plus announce metadata.
+	// Note: delivery:pending is intentionally omitted for announce messages —
+	// broadcast messages have no single recipient to ack against. Subscriber
+	// fan-out copies go through sendToSingle which adds delivery tracking.
 	var labels []string
 	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
@@ -1193,7 +1196,10 @@ func (r *Router) sendToChannel(msg *Message) error {
 		return fmt.Errorf("channel %s is closed", channelName)
 	}
 
-	// Build labels for type, from/thread/reply-to/cc plus channel metadata
+	// Build labels for type, from/thread/reply-to/cc plus channel metadata.
+	// Note: delivery:pending is intentionally omitted for the channel-origin
+	// copy — it has no single recipient to ack. Subscriber fan-out copies go
+	// through sendToSingle which adds delivery tracking.
 	var labels []string
 	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)

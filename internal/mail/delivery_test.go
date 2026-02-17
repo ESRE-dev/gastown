@@ -63,4 +63,120 @@ func TestParseDeliveryLabels_CrashAndRetryStates(t *testing.T) {
 			t.Fatal("ackedAt should be populated for acked state")
 		}
 	})
+
+	t.Run("lexicographic label order still parses correctly", func(t *testing.T) {
+		// bd show --json returns labels in lexicographic order.
+		state, by, at := ParseDeliveryLabels([]string{
+			"delivery-acked-at:2026-02-17T12:00:00Z",
+			"delivery-acked-by:gastown/worker",
+			"delivery:acked",
+			"delivery:pending",
+		})
+		if state != DeliveryStateAcked {
+			t.Fatalf("state = %q, want %q", state, DeliveryStateAcked)
+		}
+		if by != "gastown/worker" {
+			t.Fatalf("ackedBy = %q, want %q", by, "gastown/worker")
+		}
+		if at == nil {
+			t.Fatal("ackedAt should be populated for acked state with lex-ordered labels")
+		}
+	})
+}
+
+func TestDeliveryAckLabelSequenceIdempotent(t *testing.T) {
+	t.Run("no existing labels uses new timestamp", func(t *testing.T) {
+		at := time.Date(2026, 2, 17, 14, 0, 0, 0, time.UTC)
+		got := DeliveryAckLabelSequenceIdempotent("gastown/worker", at, nil)
+		want := []string{
+			"delivery-acked-by:gastown/worker",
+			"delivery-acked-at:2026-02-17T14:00:00Z",
+			"delivery:acked",
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("existing timestamp is reused on retry", func(t *testing.T) {
+		existing := []string{
+			"delivery:pending",
+			"delivery-acked-by:gastown/worker",
+			"delivery-acked-at:2026-02-17T12:00:00Z",
+		}
+		// Use a different time — should be ignored in favor of existing.
+		at := time.Date(2026, 2, 17, 14, 0, 0, 0, time.UTC)
+		got := DeliveryAckLabelSequenceIdempotent("gastown/worker", at, existing)
+		want := []string{
+			"delivery-acked-by:gastown/worker",
+			"delivery-acked-at:2026-02-17T12:00:00Z",
+			"delivery:acked",
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("lexicographic label order still reuses timestamp", func(t *testing.T) {
+		// bd show --json returns labels in lexicographic order, so acked-at
+		// appears before acked-by. The function must be order-independent.
+		existing := []string{
+			"delivery-acked-at:2026-02-17T12:00:00Z",
+			"delivery-acked-by:gastown/worker",
+			"delivery:acked",
+			"delivery:pending",
+		}
+		at := time.Date(2026, 2, 17, 14, 0, 0, 0, time.UTC)
+		got := DeliveryAckLabelSequenceIdempotent("gastown/worker", at, existing)
+		want := []string{
+			"delivery-acked-by:gastown/worker",
+			"delivery-acked-at:2026-02-17T12:00:00Z",
+			"delivery:acked",
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("different recipient gets fresh timestamp", func(t *testing.T) {
+		existing := []string{
+			"delivery:pending",
+			"delivery-acked-by:gastown/workerA",
+			"delivery-acked-at:2026-02-17T12:00:00Z",
+		}
+		// Different recipient — should NOT reuse workerA's timestamp.
+		at := time.Date(2026, 2, 17, 14, 0, 0, 0, time.UTC)
+		got := DeliveryAckLabelSequenceIdempotent("gastown/workerB", at, existing)
+		want := []string{
+			"delivery-acked-by:gastown/workerB",
+			"delivery-acked-at:2026-02-17T14:00:00Z",
+			"delivery:acked",
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("mixed labels after crash: B must not reuse A's timestamp", func(t *testing.T) {
+		// Scenario: A acked fully, then B started acking but crashed after
+		// writing acked-by:B (before acked-at). Labels accumulated:
+		existing := []string{
+			"delivery:pending",
+			"delivery-acked-by:gastown/workerA",
+			"delivery-acked-at:2026-02-17T12:00:00Z",
+			"delivery:acked",
+			"delivery-acked-by:gastown/workerB",
+		}
+		// B retries — must generate a fresh timestamp, not reuse A's t1.
+		at := time.Date(2026, 2, 17, 14, 0, 0, 0, time.UTC)
+		got := DeliveryAckLabelSequenceIdempotent("gastown/workerB", at, existing)
+		want := []string{
+			"delivery-acked-by:gastown/workerB",
+			"delivery-acked-at:2026-02-17T14:00:00Z",
+			"delivery:acked",
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
 }

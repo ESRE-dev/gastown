@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -829,56 +830,57 @@ func (m *Mailbox) Count() (total, unread int, err error) {
 // AcknowledgeDeliveries marks delivery receipt for unread messages where this
 // mailbox is the primary recipient. This is phase-2 of two-phase delivery
 // tracking (phase-1 is written at send time as delivery:pending).
+// Acks are run concurrently (bounded to 8) to avoid N+1 sequential subprocess
+// spawns on the hot path.
 func (m *Mailbox) AcknowledgeDeliveries(recipientAddress string, messages []*Message) error {
 	if m.legacy || len(messages) == 0 {
 		return nil
 	}
 
 	recipientIdentity := AddressToIdentity(recipientAddress)
-	var errs []string
 
+	// Collect messages that need acking.
+	var toAck []*Message
 	for _, msg := range messages {
 		if msg == nil || msg.ID == "" {
 			continue
 		}
-		// Only acknowledge for the direct recipient (not CC readers).
 		if AddressToIdentity(msg.To) != recipientIdentity {
 			continue
 		}
-		if msg.DeliveryState == DeliveryStateAcked {
+		if msg.DeliveryState == "" || msg.DeliveryState == DeliveryStateAcked {
 			continue
 		}
-		if err := m.ackDeliveryBeads(msg.ID, recipientIdentity); err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", msg.ID, err))
-		}
+		toAck = append(toAck, msg)
 	}
+	if len(toAck) == 0 {
+		return nil
+	}
+
+	// Run acks concurrently with bounded parallelism.
+	const maxConcurrentAckOps = 8
+	sem := make(chan struct{}, maxConcurrentAckOps)
+	var mu sync.Mutex
+	var errs []string
+	var wg sync.WaitGroup
+
+	for _, msg := range toAck {
+		wg.Add(1)
+		sem <- struct{}{} // acquire
+		go func(id string) {
+			defer wg.Done()
+			defer func() { <-sem }() // release
+			if err := AcknowledgeDeliveryBead(m.workDir, m.beadsDir, id, recipientIdentity); err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Sprintf("%s: %v", id, err))
+				mu.Unlock()
+			}
+		}(msg.ID)
+	}
+	wg.Wait()
 
 	if len(errs) > 0 {
 		return fmt.Errorf("acknowledging deliveries failed: %s", strings.Join(errs, "; "))
-	}
-	return nil
-}
-
-func (m *Mailbox) ackDeliveryBeads(id, recipientIdentity string) error {
-	// Ordered writes preserve pending state until final ack marker is written.
-	for _, label := range DeliveryAckLabelSequence(recipientIdentity, timeNow().UTC()) {
-		args := []string{"label", "add", id, label}
-		ctx, cancel := bdWriteCtx()
-		_, err := runBdCommand(ctx, args, m.workDir, m.beadsDir)
-		cancel()
-		if err == nil {
-			continue
-		}
-		if bdErr, ok := err.(*bdError); ok {
-			if bdErr.ContainsError("not found") {
-				return ErrMessageNotFound
-			}
-			// Idempotent retry behavior: existing labels are success.
-			if bdErr.ContainsError("already has label") {
-				continue
-			}
-		}
-		return err
 	}
 	return nil
 }
