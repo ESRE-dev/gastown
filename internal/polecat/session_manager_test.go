@@ -250,6 +250,8 @@ func TestPolecatStartInjectsFallbackEnvVars(t *testing.T) {
 	polecatName := "Toast"
 	workDir := "/tmp/fake-worktree"
 
+	townRoot := "/tmp/fake-town"
+
 	// The env vars that should be injected via PrependEnv
 	requiredEnvVars := []string{
 		"GT_BRANCH",       // Git branch for nuked-worktree fallback
@@ -257,6 +259,7 @@ func TestPolecatStartInjectsFallbackEnvVars(t *testing.T) {
 		"GT_RIG",          // Rig name (was already there pre-PR)
 		"GT_POLECAT",      // Polecat name (was already there pre-PR)
 		"GT_ROLE",         // Role address (was already there pre-PR)
+		"GT_TOWN_ROOT",    // Town root for FindFromCwdWithFallback after worktree nuke
 	}
 
 	// Verify the env var map includes all required keys
@@ -265,6 +268,7 @@ func TestPolecatStartInjectsFallbackEnvVars(t *testing.T) {
 		"GT_POLECAT":      polecatName,
 		"GT_ROLE":         rigName + "/polecats/" + polecatName,
 		"GT_POLECAT_PATH": workDir,
+		"GT_TOWN_ROOT":    townRoot,
 	}
 
 	// GT_BRANCH is conditionally added (only if CurrentBranch succeeds)
