@@ -1128,6 +1128,9 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("database %q not found in .dolt-data/\nRun 'gt dolt list' to see available databases", doltSyncDB)
 	}
 
+	// Check server state
+	wasRunning, pid, _ := doltserver.IsRunning(townRoot)
+
 	// GC phase: purge closed ephemeral beads BEFORE stopping the server.
 	// bd purge needs SQL access via the running Dolt server.
 	purgeResults := make(map[string]struct {
@@ -1135,32 +1138,45 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 		err    error
 	})
 	if doltSyncGC {
-		databases, listErr := doltserver.ListDatabases(townRoot)
-		if listErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: --gc: could not list databases: %v\n", listErr)
+		if !wasRunning {
+			fmt.Fprintf(os.Stderr, "Warning: --gc requires a running Dolt server, skipping purge\n")
 		} else {
-			for _, db := range databases {
-				if doltSyncDB != "" && db != doltSyncDB {
-					continue
+			databases, listErr := doltserver.ListDatabases(townRoot)
+			if listErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: --gc: could not list databases: %v\n", listErr)
+			} else {
+				for _, db := range databases {
+					if doltSyncDB != "" && db != doltSyncDB {
+						continue
+					}
+					purged, purgeErr := doltserver.PurgeClosedEphemerals(townRoot, db, doltSyncDry)
+					purgeResults[db] = struct {
+						purged int
+						err    error
+					}{purged, purgeErr}
 				}
-				purged, purgeErr := doltserver.PurgeClosedEphemerals(townRoot, db, doltSyncDry)
-				purgeResults[db] = struct {
-					purged int
-					err    error
-				}{purged, purgeErr}
 			}
 		}
 	}
 
-	// Check server state
-	wasRunning, pid, _ := doltserver.IsRunning(townRoot)
-
 	if wasRunning {
 		fmt.Printf("Stopping Dolt server (PID %d)...\n", pid)
 		if err := doltserver.Stop(townRoot); err != nil {
-			return fmt.Errorf("stopping Dolt server: %w", err)
+			// If --gc ran, the server may have exited during the purge window (TOCTOU).
+			// Re-check actual state rather than matching error strings — Stop() can fail
+			// with various race-related errors (not running, process gone, etc.).
+			if doltSyncGC {
+				if stillRunning, _, _ := doltserver.IsRunning(townRoot); !stillRunning {
+					fmt.Printf("%s Dolt server already stopped (exited during GC)\n", style.Bold.Render("~"))
+				} else {
+					return fmt.Errorf("stopping Dolt server: %w", err)
+				}
+			} else {
+				return fmt.Errorf("stopping Dolt server: %w", err)
+			}
+		} else {
+			fmt.Printf("%s Dolt server stopped\n", style.Bold.Render("✓"))
 		}
-		fmt.Printf("%s Dolt server stopped\n", style.Bold.Render("✓"))
 
 		// Guarantee restart even if push fails
 		defer func() {
@@ -1200,7 +1216,11 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 				if pr.err != nil {
 					fmt.Printf("  %s %s gc: %v\n", style.Bold.Render("!"), r.Database, pr.err)
 				} else if pr.purged > 0 {
-					fmt.Printf("  %s %s gc: purged %d closed ephemeral bead(s)\n", style.Bold.Render("✓"), r.Database, pr.purged)
+					verb := "purged"
+					if doltSyncDry {
+						verb = "would purge"
+					}
+					fmt.Printf("  %s %s gc: %s %d closed ephemeral bead(s)\n", style.Bold.Render("✓"), r.Database, verb, pr.purged)
 					totalPurged += pr.purged
 				}
 			}
@@ -1226,7 +1246,11 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 
 	summary := fmt.Sprintf("Summary: %d pushed, %d skipped, %d failed", pushed, skipped, failed)
 	if doltSyncGC && totalPurged > 0 {
-		summary += fmt.Sprintf(", %d purged", totalPurged)
+		if doltSyncDry {
+			summary += fmt.Sprintf(", %d would be purged", totalPurged)
+		} else {
+			summary += fmt.Sprintf(", %d purged", totalPurged)
+		}
 	}
 	fmt.Printf("\n%s\n", summary)
 
