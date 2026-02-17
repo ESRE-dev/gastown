@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"encoding/csv"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
@@ -106,7 +108,8 @@ func runWLSync(cmd *cobra.Command, args []string) error {
 	summaryCmd.Dir = forkDir
 	out, err := summaryCmd.Output()
 	if err == nil {
-		rows := wlParseCSV(string(out))
+		reader := csv.NewReader(strings.NewReader(string(out)))
+		rows, _ := reader.ReadAll()
 		if len(rows) >= 2 && len(rows[1]) >= 4 {
 			r := rows[1]
 			fmt.Printf("\n  Open wanted:       %s\n", r[0])
