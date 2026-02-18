@@ -1034,8 +1034,11 @@ func (m *Manager) AllocateName() (string, error) {
 	// directory until AddWithOptions removes it after os.MkdirAll succeeds.
 	// Stale markers (process crashed before AddWithOptions) are cleaned up by
 	// cleanupOrphanPolecatState after pendingMaxAge.
-	if err := os.MkdirAll(filepath.Join(m.rig.Path, "polecats"), 0755); err == nil {
-		_ = os.WriteFile(m.pendingPath(name), []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	if err := os.MkdirAll(filepath.Join(m.rig.Path, "polecats"), 0755); err != nil {
+		return "", fmt.Errorf("creating polecats dir for reservation marker: %w", err)
+	}
+	if err := os.WriteFile(m.pendingPath(name), []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+		return "", fmt.Errorf("writing reservation marker: %w", err)
 	}
 
 	// Kill any lingering tmux session for this name (gt-pqf9x).
