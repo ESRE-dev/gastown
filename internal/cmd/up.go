@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +23,6 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
@@ -34,6 +35,63 @@ type agentStartResult struct {
 	name   string // Display name like "Witness (gastown)"
 	ok     bool   // Whether start succeeded
 	detail string // Status detail (session name or error)
+}
+
+// UpOutput represents the JSON output of the up command.
+type UpOutput struct {
+	Success  bool              `json:"success"`
+	Services []ServiceStatus   `json:"services"`
+	Summary  UpSummary         `json:"summary"`
+}
+
+// ServiceStatus represents the status of a single service.
+type ServiceStatus struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"` // daemon, deacon, mayor, witness, refinery, crew, polecat
+	Rig     string `json:"rig,omitempty"`
+	OK      bool   `json:"ok"`
+	Detail  string `json:"detail"`
+}
+
+// UpSummary provides counts for the up command output.
+type UpSummary struct {
+	Total   int `json:"total"`
+	Started int `json:"started"`
+	Failed  int `json:"failed"`
+}
+
+func buildUpSummary(services []ServiceStatus) UpSummary {
+	started := 0
+	failed := 0
+	for _, svc := range services {
+		if svc.OK {
+			started++
+		} else {
+			failed++
+		}
+	}
+	return UpSummary{
+		Total:   len(services),
+		Started: started,
+		Failed:  failed,
+	}
+}
+
+func emitUpJSON(w io.Writer, allOK bool, services []ServiceStatus) error {
+	output := UpOutput{
+		Success:  allOK,
+		Services: services,
+		Summary:  buildUpSummary(services),
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(output); err != nil {
+		return err
+	}
+	if !allOK {
+		return NewSilentExit(1)
+	}
+	return nil
 }
 
 // maxConcurrentAgentStarts limits parallel agent startups to avoid resource exhaustion.
@@ -70,11 +128,13 @@ aren't already running.`,
 var (
 	upQuiet   bool
 	upRestore bool
+	upJSON    bool
 )
 
 func init() {
 	upCmd.Flags().BoolVarP(&upQuiet, "quiet", "q", false, "Only show errors")
 	upCmd.Flags().BoolVar(&upRestore, "restore", false, "Also restore crew (from settings) and polecats (from hooks)")
+	upCmd.Flags().BoolVar(&upJSON, "json", false, "Output as JSON")
 	rootCmd.AddCommand(upCmd)
 }
 
@@ -85,6 +145,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	allOK := true
+	var services []ServiceStatus
 
 	// Discover rigs early so we can prefetch while daemon/deacon/mayor start
 	rigs := discoverRigs(townRoot)
@@ -186,17 +247,21 @@ func runUp(cmd *cobra.Command, args []string) error {
 			_, _ = doltserver.EnsureAllMetadata(townRoot)
 		}
 	}
+
+	// Collect daemon/deacon/mayor results (always append daemon status)
 	if daemonErr != nil {
-		printStatus("Daemon", false, daemonErr.Error())
+		services = append(services, ServiceStatus{Name: "Daemon", Type: "daemon", OK: false, Detail: daemonErr.Error()})
 		allOK = false
 	} else if daemonPID > 0 {
-		printStatus("Daemon", true, fmt.Sprintf("PID %d", daemonPID))
+		services = append(services, ServiceStatus{Name: "Daemon", Type: "daemon", OK: true, Detail: fmt.Sprintf("PID %d", daemonPID)})
+	} else {
+		services = append(services, ServiceStatus{Name: "Daemon", Type: "daemon", OK: true, Detail: "running (PID unknown)"})
 	}
-	printStatus(deaconResult.name, deaconResult.ok, deaconResult.detail)
+	services = append(services, ServiceStatus{Name: deaconResult.name, Type: "deacon", OK: deaconResult.ok, Detail: deaconResult.detail})
 	if !deaconResult.ok {
 		allOK = false
 	}
-	printStatus(mayorResult.name, mayorResult.ok, mayorResult.detail)
+	services = append(services, ServiceStatus{Name: mayorResult.name, Type: "mayor", OK: mayorResult.ok, Detail: mayorResult.detail})
 	if !mayorResult.ok {
 		allOK = false
 	}
@@ -204,10 +269,10 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// 5 & 6. Witnesses and Refineries (using prefetched rigs)
 	witnessResults, refineryResults := startRigAgentsWithPrefetch(rigs, prefetchedRigs, rigErrors)
 
-	// Print results in order: all witnesses first, then all refineries
+	// Collect results in order: all witnesses first, then all refineries
 	for _, rigName := range rigs {
 		if result, ok := witnessResults[rigName]; ok {
-			printStatus(result.name, result.ok, result.detail)
+			services = append(services, ServiceStatus{Name: result.name, Type: "witness", Rig: rigName, OK: result.ok, Detail: result.detail})
 			if !result.ok {
 				allOK = false
 			}
@@ -215,7 +280,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 	for _, rigName := range rigs {
 		if result, ok := refineryResults[rigName]; ok {
-			printStatus(result.name, result.ok, result.detail)
+			services = append(services, ServiceStatus{Name: result.name, Type: "refinery", Rig: rigName, OK: result.ok, Detail: result.detail})
 			if !result.ok {
 				allOK = false
 			}
@@ -227,10 +292,22 @@ func runUp(cmd *cobra.Command, args []string) error {
 		for _, rigName := range rigs {
 			crewStarted, crewErrors := startCrewFromSettings(townRoot, rigName)
 			for _, name := range crewStarted {
-				printStatus(fmt.Sprintf("Crew (%s/%s)", rigName, name), true, session.CrewSessionName(session.PrefixFor(rigName), name))
+				services = append(services, ServiceStatus{
+					Name:   fmt.Sprintf("Crew (%s/%s)", rigName, name),
+					Type:   "crew",
+					Rig:    rigName,
+					OK:     true,
+					Detail: fmt.Sprintf("gt-%s-crew-%s", rigName, name),
+				})
 			}
 			for name, err := range crewErrors {
-				printStatus(fmt.Sprintf("Crew (%s/%s)", rigName, name), false, err.Error())
+				services = append(services, ServiceStatus{
+					Name:   fmt.Sprintf("Crew (%s/%s)", rigName, name),
+					Type:   "crew",
+					Rig:    rigName,
+					OK:     false,
+					Detail: err.Error(),
+				})
 				allOK = false
 			}
 		}
@@ -239,25 +316,50 @@ func runUp(cmd *cobra.Command, args []string) error {
 		for _, rigName := range rigs {
 			polecatsStarted, polecatErrors := startPolecatsWithWork(townRoot, rigName)
 			for _, name := range polecatsStarted {
-				printStatus(fmt.Sprintf("Polecat (%s/%s)", rigName, name), true, session.PolecatSessionName(session.PrefixFor(rigName), name))
+				services = append(services, ServiceStatus{
+					Name:   fmt.Sprintf("Polecat (%s/%s)", rigName, name),
+					Type:   "polecat",
+					Rig:    rigName,
+					OK:     true,
+					Detail: fmt.Sprintf("gt-%s-polecat-%s", rigName, name),
+				})
 			}
 			for name, err := range polecatErrors {
-				printStatus(fmt.Sprintf("Polecat (%s/%s)", rigName, name), false, err.Error())
+				services = append(services, ServiceStatus{
+					Name:   fmt.Sprintf("Polecat (%s/%s)", rigName, name),
+					Type:   "polecat",
+					Rig:    rigName,
+					OK:     false,
+					Detail: err.Error(),
+				})
 				allOK = false
 			}
 		}
 	}
 
-	fmt.Println()
+	// Log boot event for both JSON and text paths
 	if allOK {
-		fmt.Printf("%s All services running\n", style.Bold.Render("✓"))
-		// Log boot event with started services
 		startedServices := []string{"dolt", "daemon", "deacon", "mayor"}
 		for _, rigName := range rigs {
 			startedServices = append(startedServices, fmt.Sprintf("%s/witness", rigName))
 			startedServices = append(startedServices, fmt.Sprintf("%s/refinery", rigName))
 		}
 		_ = events.LogFeed(events.TypeBoot, "gt", events.BootPayload("town", startedServices))
+	}
+
+	// Output JSON or text
+	if upJSON {
+		return emitUpJSON(os.Stdout, allOK, services)
+	}
+
+	// Text output
+	for _, svc := range services {
+		printStatus(svc.Name, svc.OK, svc.Detail)
+	}
+
+	fmt.Println()
+	if allOK {
+		fmt.Printf("%s All services running\n", style.Bold.Render("✓"))
 	} else {
 		fmt.Printf("%s Some services failed to start\n", style.Bold.Render("✗"))
 		return fmt.Errorf("not all services started")
