@@ -138,6 +138,12 @@ func (m *ConvoyManager) runEventPoll() {
 		return
 	}
 
+	// Seed high-water marks if stores are already available so the first
+	// poll tick only sees new events.
+	if len(m.stores) > 0 {
+		m.seedHighWaterMarks()
+	}
+
 	ticker := time.NewTicker(eventPollInterval)
 	defer ticker.Stop()
 
@@ -154,8 +160,31 @@ func (m *ConvoyManager) runEventPoll() {
 				if len(m.stores) == 0 {
 					continue // still not ready, try next tick
 				}
+				m.seedHighWaterMarks()
 			}
 			m.pollAllStores()
+		}
+	}
+}
+
+// seedHighWaterMarks queries the latest event ID from each store so the
+// first poll tick only sees truly new events instead of replaying the
+// entire history.  Called once when stores first become available.
+func (m *ConvoyManager) seedHighWaterMarks() {
+	for name, store := range m.stores {
+		events, err := store.GetAllEventsSince(m.ctx, 0)
+		if err != nil {
+			m.logger("Convoy: seed high-water mark failed (%s): %v", name, err)
+			continue
+		}
+		if len(events) > 0 {
+			maxID := events[len(events)-1].ID
+			for _, e := range events {
+				if e.ID > maxID {
+					maxID = e.ID
+				}
+			}
+			m.lastEventIDs.Store(name, maxID)
 		}
 	}
 }
