@@ -800,7 +800,7 @@ func (m *Manager) InitBeads(rigPath, prefix string) error {
 		// bd might not be installed or failed, create minimal structure
 		// Note: beads currently expects YAML format for config
 		configPath := filepath.Join(beadsDir, "config.yaml")
-		configContent := fmt.Sprintf("prefix: %s\nissue-prefix: %s\n", prefix, prefix)
+		configContent := fmt.Sprintf("prefix: %s\nissue-prefix: %s\nsync.mode: dolt-native\n", prefix, prefix)
 		if writeErr := os.WriteFile(configPath, []byte(configContent), 0644); writeErr != nil {
 			return writeErr
 		}
@@ -823,6 +823,18 @@ func (m *Manager) InitBeads(rigPath, prefix string) error {
 		if prefixOutput, prefixErr := prefixSetCmd.CombinedOutput(); prefixErr != nil {
 			return fmt.Errorf("bd config set issue_prefix failed: %s", strings.TrimSpace(string(prefixOutput)))
 		}
+
+		// Default to Dolt-native sync mode for new Gas Town rig beads.
+		syncModeCmd := exec.Command("bd", "config", "set", "sync.mode", "dolt-native")
+		syncModeCmd.Dir = rigPath
+		syncModeCmd.Env = filteredEnv
+		if syncModeOutput, syncModeErr := syncModeCmd.CombinedOutput(); syncModeErr != nil {
+			return fmt.Errorf("bd config set sync.mode failed: %s", strings.TrimSpace(string(syncModeOutput)))
+		}
+	}
+
+	if err := ensureRigBeadsConfigYAML(beadsDir, prefix); err != nil {
+		return fmt.Errorf("ensuring config.yaml: %w", err)
 	}
 
 	// Ensure database has repository fingerprint (GH #25).
@@ -1159,6 +1171,71 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 	}
 
 	return ""
+}
+
+// ensureRigBeadsConfigYAML ensures config.yaml has required Gas Town defaults for
+// newly initialized local rig beads. Existing non-default sync modes are preserved.
+func ensureRigBeadsConfigYAML(beadsDir, prefix string) error {
+	configPath := filepath.Join(beadsDir, "config.yaml")
+	wantPrefix := "prefix: " + prefix
+	wantIssuePrefix := "issue-prefix: " + prefix
+	wantSyncMode := "sync.mode: dolt-native"
+
+	data, err := os.ReadFile(configPath)
+	if os.IsNotExist(err) {
+		content := wantPrefix + "\n" + wantIssuePrefix + "\n" + wantSyncMode + "\n"
+		return os.WriteFile(configPath, []byte(content), 0644)
+	}
+	if err != nil {
+		return err
+	}
+
+	content := strings.ReplaceAll(string(data), "\r\n", "\n")
+	lines := strings.Split(content, "\n")
+	foundPrefix := false
+	foundIssuePrefix := false
+	foundSyncMode := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "prefix:") {
+			lines[i] = wantPrefix
+			foundPrefix = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "issue-prefix:") {
+			lines[i] = wantIssuePrefix
+			foundIssuePrefix = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "sync.mode:") {
+			foundSyncMode = true
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "sync.mode:"))
+			value = strings.Trim(value, `"'`)
+			if value == "" || value == "git-portable" || value == "dolt-native" {
+				lines[i] = wantSyncMode
+			}
+		}
+	}
+
+	if !foundPrefix {
+		lines = append(lines, wantPrefix)
+	}
+	if !foundIssuePrefix {
+		lines = append(lines, wantIssuePrefix)
+	}
+	if !foundSyncMode {
+		lines = append(lines, wantSyncMode)
+	}
+
+	newContent := strings.Join(lines, "\n")
+	if !strings.HasSuffix(newContent, "\n") {
+		newContent += "\n"
+	}
+	if newContent == content {
+		return nil
+	}
+	return os.WriteFile(configPath, []byte(newContent), 0644)
 }
 
 // RemoveRig unregisters a rig (does not delete files).
