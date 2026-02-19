@@ -181,10 +181,6 @@ These use real beads stores and test the full event→convoy→feed pipeline.
 go test ./internal/convoy/... ./internal/daemon/... ./internal/cmd/... -count=1
 ```
 
-## Design reference
-
-For deeper context on the pre-rewrite system (architecture, all call sites, bugs, limitations), read **[references/upstream-convoy-system.md](references/upstream-convoy-system.md)**. Useful when investigating legacy behavior or understanding why things are the way they are.
-
 ## Common pitfalls
 
 - **`parent-child` is never blocking.** This is a deliberate design choice, not a bug. Consistent with `bd ready`, beads SDK, and molecule step behavior.
