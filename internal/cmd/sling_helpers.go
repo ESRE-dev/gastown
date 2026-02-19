@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -557,10 +558,19 @@ func wakeRigAgents(rigName string) {
 	bootCmd := exec.Command("gt", "rig", "boot", rigName)
 	_ = bootCmd.Run() // Ignore errors - rig might already be running
 
+	// Verify daemon is running — polecat triggering depends on daemon
+	// processing deacon mail. Warn if not running (gt-9wv0).
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" {
+		if running, _, _ := daemon.IsRunning(townRoot); !running {
+			fmt.Fprintf(os.Stderr, "Warning: daemon is not running. Polecat may not auto-start.\n")
+			fmt.Fprintf(os.Stderr, "  Start with: gt daemon start\n")
+		}
+	}
+
 	// Queue nudge to witness for cooperative delivery.
 	// This avoids interrupting in-flight tool calls.
 	witnessSession := session.WitnessSessionName(session.PrefixFor(rigName))
-	townRoot, _ := workspace.FindFromCwd()
 	if townRoot != "" {
 		if err := nudge.Enqueue(townRoot, witnessSession, nudge.QueuedNudge{
 			Sender:  "sling",
