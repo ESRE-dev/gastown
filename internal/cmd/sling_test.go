@@ -1694,7 +1694,7 @@ cmd="$1"
 shift || true
 case "$cmd" in
   show)
-    echo '[{"title":"Test issue","status":"hooked","assignee":"gastown/polecats/toast","description":""}]'
+    echo '[{"title":"Test issue","status":"hooked","assignee":"gastown/polecats/test-dead-polecat-xxxx","description":""}]'
     ;;
   update)
     exit 0
@@ -1706,7 +1706,7 @@ exit 0
 echo %*>>"%BD_LOG%"
 set "cmd=%1"
 if "%cmd%"=="show" (
-  echo [{"title":"Test issue","status":"hooked","assignee":"gastown/polecats/toast","description":""}]
+  echo [{"title":"Test issue","status":"hooked","assignee":"gastown/polecats/test-dead-polecat-xxxx","description":""}]
   exit /b 0
 )
 exit /b 0
@@ -1756,9 +1756,9 @@ exit /b 0
 
 	// Sling with matching target but dead agent — should NOT no-op.
 	// The auto-force path proceeds into resolveTarget which will fail
-	// because the rig doesn't exist in the test environment. The key
-	// assertion: we must NOT get an idempotent no-op (nil error).
-	err = runSling(nil, []string{"gt-test456", "gastown/polecats/toast"})
+	// because the polecat doesn't exist in tmux. Use a unique name that
+	// will never collide with a real running polecat session.
+	err = runSling(nil, []string{"gt-test456", "gastown/polecats/test-dead-polecat-xxxx"})
 
 	w.Close()
 	os.Stdout = origStdout
