@@ -89,50 +89,52 @@ Result: 1 bead, 1 convoy, 1 polecat.
 ### Batch sling (3+ args, last arg is a rig)
 
 ```
-gt sling sh-task-1 sh-task-2 sh-task-3 gastown
+gt sling gt-task-1 gt-task-2 gt-task-3 gastown
 ```
 
-**Each bead gets its own separate auto-convoy.** The batch loop
-(`sling_batch.go:71-241`) iterates each bead ID and runs the same
-auto-convoy logic per bead. There is no grouping.
+**Batch sling creates one convoy tracking all beads.** Before spawning
+any polecats, `runBatchSling` (`sling_batch.go`) calls
+`createBatchConvoy` (`sling_convoy.go`) which creates a single convoy
+with title `"Batch: N beads to <rig>"` and adds `tracks` deps for all
+beads.
 
-Result: 3 beads, **3 convoys**, 3 polecats — all dispatched in parallel
+Result: 3 beads, **1 convoy**, 3 polecats — all dispatched in parallel
 with 2-second delays between spawns.
 
+The convoy ID and merge strategy are stored on each bead via
+`beadFieldUpdates`, so `gt done` can find the convoy via the fast path.
+
 There is no upper limit on the number of beads. `gt sling <10 beads> <rig>`
-spawns 10 polecats with 10 individual convoys. The only throttle is
+spawns 10 polecats sharing 1 convoy. The only throttle is
 `--max-concurrent` (default 0 = unlimited).
 
-### Why this matters
+### Already-tracked bead conflict
 
-- **No dependency ordering.** All beads dispatch simultaneously. Even if
-  `sh-task-2` has a `blocks` dep on `sh-task-1`, both get slung at the same
-  time. The Phase 1 feeder's `isIssueBlocked` check only applies to
+If any bead in the batch is already tracked by another convoy, batch
+sling **errors** before spawning any polecats. It prints:
+
+- Which bead conflicts and which convoy it belongs to
+- All beads in the existing convoy with their statuses
+- The conflicting bead highlighted
+- 4 recommended actions (remove from batch, move bead, close old convoy, add to existing)
+
+### Initial dispatch vs daemon feeding
+
+- **Initial dispatch is parallel.** All beads get polecats simultaneously.
+  Even if `gt-task-2` has a `blocks` dep on `gt-task-1`, both get slung
+  at the same time. The `isIssueBlocked` check only applies to
   daemon-driven convoy feeding (after a close event), not to the initial
   batch sling dispatch.
-- **No convoy-level tracking.** Each convoy tracks exactly 1 bead. There is
-  no single convoy that shows "3/3 tasks complete" for the batch. `gt convoy
-  list` shows 3 independent convoys.
-- **No sequential feeding.** Unlike a manual `gt convoy create "name" <beads>`
-  followed by a single sling, batch sling does not use the convoy's
-  `feedNextReadyIssue` path. All tasks start at once.
+- **Subsequent feeding respects deps.** When a task closes, the daemon's
+  event-driven feeder checks `IsSlingableType` and `isIssueBlocked`
+  before dispatching the next ready issue from the shared convoy.
 
-### How to get grouped convoy behavior
+### No-convoy mode
 
-Create the convoy first, then sling individually (or let the daemon feed):
+Batch sling with `--no-convoy` skips convoy creation entirely:
 
 ```
-gt convoy create "Auth overhaul" sh-task-1 sh-task-2 sh-task-3
-gt sling sh-task-1 gastown
-# daemon auto-feeds sh-task-2 when sh-task-1 closes
-# daemon auto-feeds sh-task-3 when sh-task-2 closes
-# convoy auto-closes when all 3 are done
-```
-
-Or batch sling with `--no-convoy` if convoy tracking is not needed:
-
-```
-gt sling sh-task-1 sh-task-2 sh-task-3 gastown --no-convoy
+gt sling gt-task-1 gt-task-2 gt-task-3 gastown --no-convoy
 ```
 
 ---

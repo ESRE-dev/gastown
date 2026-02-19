@@ -102,12 +102,17 @@ gt convoy
 
 ## Batch sling behavior
 
-`gt sling <bead1> <bead2> <bead3> <rig>` creates **3 separate auto-convoys**, one per bead. There is no grouping. Each convoy tracks exactly 1 issue. To get grouped tracking, create a convoy first, then sling:
+`gt sling <bead1> <bead2> <bead3> <rig>` creates **one convoy** tracking all beads. The convoy title is `"Batch: N beads to <rig>"`. Each bead gets its own polecat, but they share a single convoy for tracking.
+
+The convoy ID and merge strategy are stored on each bead, so `gt done` can find the convoy via the fast path (`getConvoyInfoFromIssue`).
+
+If any bead is already tracked by another convoy, batch sling **errors** with detailed conflict info (which convoy, all beads in it with statuses, and 4 recommended actions). This prevents accidental double-tracking.
 
 ```bash
-gt convoy create "My batch" gt-task1 gt-task2 gt-task3
-gt sling gt-task1 myrig
-# daemon feeds gt-task2 when gt-task1 closes (if not blocked)
+# Batch sling: one convoy, three polecats
+gt sling gt-task1 gt-task2 gt-task3 myrig
+# → Created convoy hq-cv-xxxxx tracking 3 beads
+# daemon feeds next ready task as each closes (respecting blocks deps)
 ```
 
 ## Testing convoy changes
@@ -184,7 +189,7 @@ go test ./internal/convoy/... ./internal/daemon/... ./internal/cmd/... -count=1
 ## Common pitfalls
 
 - **`parent-child` is never blocking.** This is a deliberate design choice, not a bug. Consistent with `bd ready`, beads SDK, and molecule step behavior.
-- **Batch sling doesn't group.** `gt sling a b c rig` = 3 convoys, not 1. To get grouped tracking, create a convoy first.
+- **Batch sling errors on already-tracked beads.** If any bead is already in a convoy, the entire batch sling fails with conflict details. The user must resolve the conflict before proceeding.
 - **The stranded scan has its own blocked check.** `isReadyIssue` in cmd/convoy.go reads `t.Blocked` from issue details. `isIssueBlocked` in operations.go covers the event-driven path. Don't consolidate them without understanding both paths.
 - **Empty IssueType is slingable.** Beads default to type "task" when IssueType is unset. Treating empty as non-slingable would break all legacy beads.
 - **`isIssueBlocked` is fail-open.** Store errors assume not blocked. A transient Dolt error should not permanently stall a convoy — the next feed cycle retries with fresh state.

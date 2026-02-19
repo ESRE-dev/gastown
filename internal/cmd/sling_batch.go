@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -67,6 +68,25 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 	}
 	results := make([]slingResult, 0, len(beadIDs))
 	activeCount := 0 // Track active spawns for --max-concurrent throttling
+
+	// Create a single convoy tracking all beads before spawning polecats.
+	// If any bead is already tracked by another convoy, error with details.
+	var batchConvoyID string
+	if !slingNoConvoy {
+		for _, beadID := range beadIDs {
+			if existing := isTrackedByConvoy(beadID); existing != "" {
+				printConvoyConflict(beadID, existing)
+				return fmt.Errorf("cannot create batch convoy: %s is already tracked by convoy %s", beadID, existing)
+			}
+		}
+		convoyID, err := createBatchConvoy(beadIDs, rigName, slingOwned, slingMerge)
+		if err != nil {
+			fmt.Printf("  %s Could not create batch convoy: %v\n", style.Dim.Render("Warning:"), err)
+		} else {
+			batchConvoyID = convoyID
+			fmt.Printf("  %s Created convoy 🚚 %s tracking %d beads\n", style.Bold.Render("→"), convoyID, len(beadIDs))
+		}
+	}
 
 	// Spawn a polecat for each bead and sling it
 	for i, beadID := range beadIDs {
@@ -151,20 +171,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		targetAgent := spawnInfo.AgentID()
 		hookWorkDir := spawnInfo.ClonePath
 
-		// Auto-convoy: check if issue is already tracked
-		if !slingNoConvoy {
-			existingConvoy := isTrackedByConvoy(beadID)
-			if existingConvoy == "" {
-				convoyID, err := createAutoConvoy(beadID, info.Title, slingOwned, slingMerge)
-				if err != nil {
-					fmt.Printf("  %s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
-				} else {
-					fmt.Printf("  %s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
-				}
-			} else {
-				fmt.Printf("  %s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
-			}
-		}
+		// Convoy ID is created before the loop — nothing to do per-bead here.
 
 		// Issue #288: Apply mol-polecat-work via formula-on-bead pattern
 		// Cook once (lazy), then instantiate for each bead
@@ -227,6 +234,8 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			Args:             slingArgs,
 			AttachedMolecule: attachedMoleculeID,
 			NoMerge:          slingNoMerge,
+			ConvoyID:         batchConvoyID,
+			MergeStrategy:    slingMerge,
 		}
 		// Use beadToHook for the update target (may differ from beadID when formula-on-bead)
 		if err := storeFieldsInBead(beadToHook, fieldUpdates); err != nil {
@@ -289,6 +298,17 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			if !r.success {
 				fmt.Printf("  %s %s: %s\n", style.Dim.Render("✗"), r.beadID, r.errMsg)
 			}
+		}
+	}
+
+	// If no beads succeeded and we created a convoy, clean it up
+	if successCount == 0 && batchConvoyID != "" {
+		closeCmd := exec.Command("bd", "close", batchConvoyID, "-r", "all beads failed to sling")
+		closeCmd.Dir = townBeadsDir
+		if err := closeCmd.Run(); err != nil {
+			fmt.Printf("  %s Could not clean up empty convoy %s: %v\n", style.Dim.Render("Warning:"), batchConvoyID, err)
+		} else {
+			fmt.Printf("  %s Cleaned up empty convoy %s\n", style.Dim.Render("○"), batchConvoyID)
 		}
 	}
 
