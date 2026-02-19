@@ -196,7 +196,6 @@ PR [#1759](https://github.com/steveyegge/gastown/pull/1759) (awaiting review).
 - Batch sling single-convoy fix (one convoy per batch, not N)
 - Rig auto-resolution from bead prefixes (deprecates explicit rig arg)
 - ConvoyID/MergeStrategy storage on beads for `gt done` fast path
-- Skills infrastructure (`.agents/skills/` convention with symlinks)
 
 **What it fixes for Workflow A:**
 - `gt sling <task1> <task2> <task3>` creates **one convoy** tracking all
