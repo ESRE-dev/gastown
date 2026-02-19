@@ -676,13 +676,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 		targetPane = pane
 	}
 
-	// Try to inject the "start now" prompt (graceful if no tmux)
-	// Skip for freshly spawned polecats - SessionManager.Start() already sent StartupNudge.
+	// Try to inject the "start now" prompt with specific work details (graceful if no tmux).
+	// Fresh polecats need this too — SessionManager.Start() only sends a generic
+	// StartupNudge ("check your hook"), not the specific work prompt with bead ID/title.
 	// Skip for self-sling - agent is currently processing the sling command and will see
 	// the hooked work on next turn. Nudging would inject text while agent is busy.
-	if freshlySpawned {
-		// Fresh polecat already got StartupNudge from SessionManager.Start()
-	} else if isSelfSling {
+	if isSelfSling {
 		// Self-sling: agent already knows about the work (just slung it)
 		fmt.Printf("%s Self-sling: work hooked, will process on next turn\n", style.Dim.Render("○"))
 	} else if targetPane == "" {
