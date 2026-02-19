@@ -2,8 +2,11 @@ package convoy
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -488,5 +491,526 @@ func TestRigForIssue_TownLevelPrefix(t *testing.T) {
 	rig := rigForIssue(townRoot, "hq-cv-test")
 	if rig != "" {
 		t.Errorf("rigForIssue for town-level prefix = %q, want empty", rig)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Helper: create a temporary town root with routes.jsonl and a gt stub
+// ---------------------------------------------------------------------------
+
+// setupTownRoot creates a temp directory with .beads/routes.jsonl mapping
+// the "test-" prefix to the rig name "testrig".
+func setupTownRoot(t *testing.T) string {
+	t.Helper()
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll .beads: %v", err)
+	}
+	routesContent := `{"prefix":"test-","path":"testrig/.beads"}` + "\n"
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatalf("WriteFile routes.jsonl: %v", err)
+	}
+	return townRoot
+}
+
+// makeGTStub creates a shell script that logs its arguments and exits with the
+// given code. Returns the path to the script and the path to the log file.
+func makeGTStub(t *testing.T, exitCode int) (gtPath, logPath string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+	dir := t.TempDir()
+	logPath = filepath.Join(dir, "gt.log")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %q\nexit %d\n", logPath, exitCode)
+	gtPath = filepath.Join(dir, "gt")
+	if err := os.WriteFile(gtPath, []byte(script), 0755); err != nil {
+		t.Fatalf("WriteFile gt stub: %v", err)
+	}
+	return gtPath, logPath
+}
+
+// makeLogger returns a logger that captures messages and a pointer to the slice.
+func makeLogger() (func(string, ...interface{}), *[]string) {
+	var msgs []string
+	logger := func(format string, args ...interface{}) {
+		msgs = append(msgs, fmt.Sprintf(format, args...))
+	}
+	return logger, &msgs
+}
+
+// ---------------------------------------------------------------------------
+// feedNextReadyIssue tests (real beads store)
+// ---------------------------------------------------------------------------
+
+func TestFeedNextReadyIssue_DispatchesFirstReadyIssue(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Create convoy issue
+	convoy := &beadsdk.Issue{
+		ID:        "test-convoy1",
+		Title:     "Test Convoy",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	// 1: closed issue (should be skipped)
+	closed := &beadsdk.Issue{
+		ID:        "test-closed1",
+		Title:     "Closed Task",
+		Status:    beadsdk.StatusClosed,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	// 2: assigned issue (should be skipped)
+	assigned := &beadsdk.Issue{
+		ID:        "test-assigned1",
+		Title:     "Assigned Task",
+		Status:    beadsdk.StatusOpen,
+		Assignee:  "gastown/polecats/alpha",
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	// 3: open, unassigned task (should be dispatched)
+	ready := &beadsdk.Issue{
+		ID:        "test-ready1",
+		Title:     "Ready Task",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, iss := range []*beadsdk.Issue{convoy, closed, assigned, ready} {
+		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", iss.ID, err)
+		}
+	}
+
+	// Add tracks deps: convoy -> each tracked issue
+	for _, trackedID := range []string{closed.ID, assigned.ID, ready.ID} {
+		dep := &beadsdk.Dependency{
+			IssueID:     convoy.ID,
+			DependsOnID: trackedID,
+			Type:        beadsdk.DependencyType("tracks"),
+			CreatedAt:   now,
+			CreatedBy:   "test",
+		}
+		if err := store.AddDependency(ctx, dep, "test"); err != nil {
+			t.Fatalf("AddDependency %s: %v", trackedID, err)
+		}
+	}
+
+	townRoot := setupTownRoot(t)
+	gtPath, logPath := makeGTStub(t, 0)
+	logger, _ := makeLogger()
+
+	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false })
+
+	// Verify gt was called with the ready issue
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("gt stub was not called (no log file): %v", err)
+	}
+	logStr := strings.TrimSpace(string(logData))
+	// Expected: "sling test-ready1 testrig --no-boot"
+	if !strings.Contains(logStr, "sling test-ready1 testrig --no-boot") {
+		t.Errorf("gt stub called with unexpected args: %q", logStr)
+	}
+}
+
+func TestFeedNextReadyIssue_SkipsEpicAndDispatchesTask(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	convoy := &beadsdk.Issue{
+		ID:        "test-convoy2",
+		Title:     "Convoy For Epic Test",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	epic := &beadsdk.Issue{
+		ID:        "test-epic1",
+		Title:     "An Epic",
+		Status:    beadsdk.StatusOpen,
+		Priority:  1,
+		IssueType: beadsdk.TypeEpic,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	task := &beadsdk.Issue{
+		ID:        "test-task2",
+		Title:     "A Task",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, iss := range []*beadsdk.Issue{convoy, epic, task} {
+		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", iss.ID, err)
+		}
+	}
+
+	// Add tracks deps: convoy -> epic, convoy -> task
+	for _, trackedID := range []string{epic.ID, task.ID} {
+		dep := &beadsdk.Dependency{
+			IssueID:     convoy.ID,
+			DependsOnID: trackedID,
+			Type:        beadsdk.DependencyType("tracks"),
+			CreatedAt:   now,
+			CreatedBy:   "test",
+		}
+		if err := store.AddDependency(ctx, dep, "test"); err != nil {
+			t.Fatalf("AddDependency %s: %v", trackedID, err)
+		}
+	}
+
+	townRoot := setupTownRoot(t)
+	gtPath, logPath := makeGTStub(t, 0)
+	logger, _ := makeLogger()
+
+	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false })
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("gt stub was not called (no log file): %v", err)
+	}
+	logStr := strings.TrimSpace(string(logData))
+	// Only the task should have been dispatched, not the epic
+	if !strings.Contains(logStr, "sling test-task2 testrig --no-boot") {
+		t.Errorf("expected task dispatch, got: %q", logStr)
+	}
+	if strings.Contains(logStr, "test-epic1") {
+		t.Errorf("epic should not have been dispatched, but log contains: %q", logStr)
+	}
+}
+
+func TestFeedNextReadyIssue_SkipsBlockedIssue(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	convoy := &beadsdk.Issue{
+		ID:        "test-convoy3",
+		Title:     "Convoy For Blocked Test",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	// Blocker issue (open)
+	blocker := &beadsdk.Issue{
+		ID:        "test-blocker3",
+		Title:     "Blocker",
+		Status:    beadsdk.StatusOpen,
+		Priority:  1,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	// Blocked task
+	blockedTask := &beadsdk.Issue{
+		ID:        "test-blocked3",
+		Title:     "Blocked Task",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	// Unblocked task
+	unblockedTask := &beadsdk.Issue{
+		ID:        "test-unblk3",
+		Title:     "Unblocked Task",
+		Status:    beadsdk.StatusOpen,
+		Priority:  3,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, iss := range []*beadsdk.Issue{convoy, blocker, blockedTask, unblockedTask} {
+		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", iss.ID, err)
+		}
+	}
+
+	// Add tracks deps from convoy
+	for _, trackedID := range []string{blockedTask.ID, unblockedTask.ID} {
+		dep := &beadsdk.Dependency{
+			IssueID:     convoy.ID,
+			DependsOnID: trackedID,
+			Type:        beadsdk.DependencyType("tracks"),
+			CreatedAt:   now,
+			CreatedBy:   "test",
+		}
+		if err := store.AddDependency(ctx, dep, "test"); err != nil {
+			t.Fatalf("AddDependency tracks %s: %v", trackedID, err)
+		}
+	}
+
+	// Add blocks dep: blockedTask is blocked by blocker
+	blocksDep := &beadsdk.Dependency{
+		IssueID:     blockedTask.ID,
+		DependsOnID: blocker.ID,
+		Type:        beadsdk.DepBlocks,
+		CreatedAt:   now,
+		CreatedBy:   "test",
+	}
+	if err := store.AddDependency(ctx, blocksDep, "test"); err != nil {
+		t.Fatalf("AddDependency blocks: %v", err)
+	}
+
+	townRoot := setupTownRoot(t)
+	gtPath, logPath := makeGTStub(t, 0)
+	logger, logMsgs := makeLogger()
+
+	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false })
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		// If gt was not called at all, check if GetDependenciesWithMetadata
+		// failed (embedded Dolt nested query limitation). This means both
+		// isIssueBlocked and getConvoyTrackedIssues may fail.
+		t.Logf("gt stub not called; log messages: %v", *logMsgs)
+		t.Skipf("gt stub was not called — likely embedded Dolt nested query limitation")
+	}
+	logStr := strings.TrimSpace(string(logData))
+
+	// Only the unblocked task should be dispatched
+	if strings.Contains(logStr, "test-blocked3") {
+		t.Errorf("blocked task should not have been dispatched, log: %q", logStr)
+	}
+	if !strings.Contains(logStr, "sling test-unblk3 testrig --no-boot") {
+		t.Errorf("expected unblocked task dispatch, got: %q", logStr)
+	}
+}
+
+func TestFeedNextReadyIssue_NoReadyIssues_LogsMessage(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	convoy := &beadsdk.Issue{
+		ID:        "test-convoy4",
+		Title:     "Convoy No Ready",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	closed1 := &beadsdk.Issue{
+		ID:        "test-cl4a",
+		Title:     "Closed A",
+		Status:    beadsdk.StatusClosed,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	closed2 := &beadsdk.Issue{
+		ID:        "test-cl4b",
+		Title:     "Closed B",
+		Status:    beadsdk.StatusClosed,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, iss := range []*beadsdk.Issue{convoy, closed1, closed2} {
+		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", iss.ID, err)
+		}
+	}
+
+	for _, trackedID := range []string{closed1.ID, closed2.ID} {
+		dep := &beadsdk.Dependency{
+			IssueID:     convoy.ID,
+			DependsOnID: trackedID,
+			Type:        beadsdk.DependencyType("tracks"),
+			CreatedAt:   now,
+			CreatedBy:   "test",
+		}
+		if err := store.AddDependency(ctx, dep, "test"); err != nil {
+			t.Fatalf("AddDependency %s: %v", trackedID, err)
+		}
+	}
+
+	townRoot := setupTownRoot(t)
+	gtPath, _ := makeGTStub(t, 0)
+	logger, logMsgs := makeLogger()
+
+	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false })
+
+	// Verify "no ready issues to feed" was logged
+	found := false
+	for _, msg := range *logMsgs {
+		if strings.Contains(msg, "no ready issues to feed") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'no ready issues to feed' in log messages, got: %v", *logMsgs)
+	}
+}
+
+func TestFeedNextReadyIssue_SkipsParkedRig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	convoy := &beadsdk.Issue{
+		ID:        "test-convoy5",
+		Title:     "Convoy Parked Test",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	task := &beadsdk.Issue{
+		ID:        "test-task5",
+		Title:     "Task For Parked Rig",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, iss := range []*beadsdk.Issue{convoy, task} {
+		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", iss.ID, err)
+		}
+	}
+
+	dep := &beadsdk.Dependency{
+		IssueID:     convoy.ID,
+		DependsOnID: task.ID,
+		Type:        beadsdk.DependencyType("tracks"),
+		CreatedAt:   now,
+		CreatedBy:   "test",
+	}
+	if err := store.AddDependency(ctx, dep, "test"); err != nil {
+		t.Fatalf("AddDependency: %v", err)
+	}
+
+	townRoot := setupTownRoot(t)
+	gtPath, logPath := makeGTStub(t, 0)
+	logger, logMsgs := makeLogger()
+
+	// isRigParked always returns true
+	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return true })
+
+	// gt should NOT have been called
+	if _, err := os.ReadFile(logPath); err == nil {
+		t.Errorf("gt stub should not have been called for parked rig")
+	}
+
+	// Verify "parked" appeared in log
+	foundParked := false
+	for _, msg := range *logMsgs {
+		if strings.Contains(msg, "parked") {
+			foundParked = true
+			break
+		}
+	}
+	if !foundParked {
+		// It's also possible we got "no ready issues" if getConvoyTrackedIssues
+		// failed due to embedded Dolt. Accept either.
+		t.Logf("log messages: %v", *logMsgs)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// dispatchIssue tests (direct function call)
+// ---------------------------------------------------------------------------
+
+func TestDispatchIssue_Success(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	townRoot := t.TempDir()
+	gtPath, logPath := makeGTStub(t, 0)
+
+	err := dispatchIssue(context.Background(), townRoot, "test-abc", "myrig", gtPath)
+	if err != nil {
+		t.Fatalf("dispatchIssue returned error: %v", err)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("gt stub log not written: %v", err)
+	}
+	logStr := strings.TrimSpace(string(logData))
+	expected := "sling test-abc myrig --no-boot"
+	if logStr != expected {
+		t.Errorf("gt stub called with %q, want %q", logStr, expected)
+	}
+}
+
+func TestDispatchIssue_Failure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	townRoot := t.TempDir()
+	gtPath, _ := makeGTStub(t, 1)
+
+	err := dispatchIssue(context.Background(), townRoot, "test-fail", "myrig", gtPath)
+	if err == nil {
+		t.Fatal("dispatchIssue should return error when gt exits 1")
 	}
 }

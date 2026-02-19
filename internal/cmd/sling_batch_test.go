@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -1215,4 +1216,348 @@ func lookupRigForPrefixInTest(townRoot, prefix string) string {
 		}
 	}
 	return ""
+}
+
+// ---------------------------------------------------------------------------
+// findConvoyByDescription tests
+// ---------------------------------------------------------------------------
+
+// TestFindConvoyByDescription_MatchesDescriptionPattern verifies that a convoy
+// whose description contains "tracking <beadID>" is found by description scan.
+func TestFindConvoyByDescription_MatchesDescriptionPattern(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows — shell stubs")
+	}
+
+	townRoot, logPath := setupTownWithBdStub(t, "")
+
+	// Rewrite bd stub to return a convoy list with matching description.
+	bdScript := fmt.Sprintf(`#!/bin/sh
+echo "CMD:$*" >> "%s"
+cmd="$1"
+shift || true
+case "$cmd" in
+  list)
+    echo '[{"id":"hq-cv-match1","description":"Auto-created convoy tracking gt-abc"}]'
+    exit 0
+    ;;
+esac
+exit 0
+`, logPath)
+	if err := os.WriteFile(filepath.Join(townRoot, "bin", "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("rewrite bd stub: %v", err)
+	}
+
+	got := findConvoyByDescription(townRoot, "gt-abc")
+	if got != "hq-cv-match1" {
+		t.Errorf("findConvoyByDescription() = %q, want %q", got, "hq-cv-match1")
+	}
+}
+
+// TestFindConvoyByDescription_NoMatch verifies that empty string is returned
+// when no convoy description matches and no convoy tracks the bead.
+func TestFindConvoyByDescription_NoMatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows — shell stubs")
+	}
+
+	townRoot, logPath := setupTownWithBdStub(t, "")
+
+	// bd stub: list returns convoys with non-matching descriptions,
+	// dep list returns empty (no tracked deps) for the fallback path.
+	bdScript := fmt.Sprintf(`#!/bin/sh
+echo "CMD:$*" >> "%s"
+cmd="$1"
+shift || true
+case "$cmd" in
+  list)
+    echo '[{"id":"hq-cv-other","description":"Auto-created convoy tracking gt-other"}]'
+    exit 0
+    ;;
+  dep)
+    echo '[]'
+    exit 0
+    ;;
+esac
+exit 0
+`, logPath)
+	if err := os.WriteFile(filepath.Join(townRoot, "bin", "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("rewrite bd stub: %v", err)
+	}
+
+	got := findConvoyByDescription(townRoot, "gt-zzz")
+	if got != "" {
+		t.Errorf("findConvoyByDescription() = %q, want empty string", got)
+	}
+}
+
+// TestFindConvoyByDescription_FallsBackToTrackedDeps verifies that when no
+// description matches, the function falls back to checking tracked deps of
+// each convoy via convoyTracksBead.
+func TestFindConvoyByDescription_FallsBackToTrackedDeps(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows — shell stubs")
+	}
+
+	townRoot, logPath := setupTownWithBdStub(t, "")
+
+	// bd stub: list returns a convoy whose description does NOT match gt-abc,
+	// dep list --direction=down returns gt-abc as a tracked dep of that convoy.
+	bdScript := fmt.Sprintf(`#!/bin/sh
+echo "CMD:$*" >> "%s"
+cmd="$1"
+shift || true
+case "$cmd" in
+  list)
+    echo '[{"id":"hq-cv-manual","description":"Manually created convoy"}]'
+    exit 0
+    ;;
+  dep)
+    # dep list <convoyID> --direction=down --type=tracks --json
+    echo '[{"id":"gt-abc"}]'
+    exit 0
+    ;;
+esac
+exit 0
+`, logPath)
+	if err := os.WriteFile(filepath.Join(townRoot, "bin", "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("rewrite bd stub: %v", err)
+	}
+
+	got := findConvoyByDescription(townRoot, "gt-abc")
+	if got != "hq-cv-manual" {
+		t.Errorf("findConvoyByDescription() = %q, want %q", got, "hq-cv-manual")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// isTrackedByConvoy tests
+// ---------------------------------------------------------------------------
+
+// TestIsTrackedByConvoy_FoundViaDepList verifies that isTrackedByConvoy returns
+// a convoy ID when the bd dep list (direction=up) finds a tracking convoy.
+func TestIsTrackedByConvoy_FoundViaDepList(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows — shell stubs")
+	}
+
+	townRoot, logPath := setupTownWithBdStub(t, "")
+
+	// bd stub: dep list returns a tracking convoy for direction=up.
+	bdScript := fmt.Sprintf(`#!/bin/sh
+echo "CMD:$*" >> "%s"
+cmd="$1"
+shift || true
+case "$cmd" in
+  dep)
+    echo '[{"id":"hq-cv-found","issue_type":"convoy","status":"open"}]'
+    exit 0
+    ;;
+esac
+exit 0
+`, logPath)
+	if err := os.WriteFile(filepath.Join(townRoot, "bin", "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("rewrite bd stub: %v", err)
+	}
+
+	got := isTrackedByConvoy("gt-abc")
+	if got != "hq-cv-found" {
+		t.Errorf("isTrackedByConvoy() = %q, want %q", got, "hq-cv-found")
+	}
+}
+
+// TestIsTrackedByConvoy_NotFound verifies that isTrackedByConvoy returns empty
+// string when no convoy tracks the bead (neither via dep list nor description).
+func TestIsTrackedByConvoy_NotFound(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows — shell stubs")
+	}
+
+	townRoot, logPath := setupTownWithBdStub(t, "")
+
+	// bd stub: dep list returns empty, list returns empty.
+	bdScript := fmt.Sprintf(`#!/bin/sh
+echo "CMD:$*" >> "%s"
+cmd="$1"
+shift || true
+case "$cmd" in
+  dep)
+    echo '[]'
+    exit 0
+    ;;
+  list)
+    echo '[]'
+    exit 0
+    ;;
+esac
+exit 0
+`, logPath)
+	if err := os.WriteFile(filepath.Join(townRoot, "bin", "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("rewrite bd stub: %v", err)
+	}
+
+	got := isTrackedByConvoy("gt-zzz")
+	if got != "" {
+		t.Errorf("isTrackedByConvoy() = %q, want empty string", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// printConvoyConflict tests
+// ---------------------------------------------------------------------------
+
+// TestPrintConvoyConflict_PrintsConflictInfo verifies that printConvoyConflict
+// outputs convoy conflict details including the convoy title, tracked beads with
+// status icons, and the 4 recommended actions.
+func TestPrintConvoyConflict_PrintsConflictInfo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows — shell stubs")
+	}
+
+	townRoot, logPath := setupTownWithBdStub(t, "")
+
+	// bd stub: handles show (convoy title), dep list (tracked beads),
+	// and show for issue details batch.
+	// getTrackedIssues calls:
+	//   1. bd dep list <convoyID> --direction=down --type=tracks --json (from townRoot)
+	//   2. bd show <id1> <id2> ... --json (getIssueDetailsBatch, from unknown cwd)
+	// printConvoyConflict also calls:
+	//   3. bd show <convoyID> --json (from townBeads)
+	bdScript := fmt.Sprintf(`#!/bin/sh
+echo "CMD:$*" >> "%s"
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    # Check if this is a convoy show or a batch issue details show
+    first_id="$1"
+    case "$first_id" in
+      hq-cv-test)
+        echo '[{"title":"Test convoy title","labels":[]}]'
+        ;;
+      *)
+        # Batch show for issue details - return details for each ID
+        echo '[{"id":"gt-aaa","title":"First bead","status":"open","issue_type":"task"},{"id":"gt-bbb","title":"Second bead","status":"closed","issue_type":"task"}]'
+        ;;
+    esac
+    exit 0
+    ;;
+  dep)
+    echo '[{"id":"gt-aaa","title":"First bead","status":"open","dependency_type":"tracks","issue_type":"task"},{"id":"gt-bbb","title":"Second bead","status":"closed","dependency_type":"tracks","issue_type":"task"}]'
+    exit 0
+    ;;
+  list)
+    echo '[]'
+    exit 0
+    ;;
+esac
+exit 0
+`, logPath)
+	if err := os.WriteFile(filepath.Join(townRoot, "bin", "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("rewrite bd stub: %v", err)
+	}
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+
+	printConvoyConflict("gt-bbb", "hq-cv-test")
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+	output := buf.String()
+
+	// Verify convoy ID appears in output
+	if !strings.Contains(output, "hq-cv-test") {
+		t.Errorf("output should contain convoy ID 'hq-cv-test':\n%s", output)
+	}
+
+	// Verify conflict bead mentioned
+	if !strings.Contains(output, "gt-bbb") {
+		t.Errorf("output should contain conflict bead 'gt-bbb':\n%s", output)
+	}
+
+	// Verify convoy title
+	if !strings.Contains(output, "Test convoy title") {
+		t.Errorf("output should contain convoy title 'Test convoy title':\n%s", output)
+	}
+
+	// Verify status icons (● for open, ✓ for closed)
+	if !strings.Contains(output, "●") {
+		t.Errorf("output should contain open status icon ●:\n%s", output)
+	}
+	if !strings.Contains(output, "✓") {
+		t.Errorf("output should contain closed status icon ✓:\n%s", output)
+	}
+
+	// Verify conflict marker
+	if !strings.Contains(output, "← conflict") {
+		t.Errorf("output should contain '← conflict' marker:\n%s", output)
+	}
+
+	// Verify all 4 option headings
+	for _, option := range []string{
+		"1. Remove the bead from this batch",
+		"2. Move the bead to the new batch",
+		"3. Close the existing convoy",
+		"4. Add the other beads to the existing convoy",
+	} {
+		if !strings.Contains(output, option) {
+			t.Errorf("output should contain option %q:\n%s", option, output)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// getConvoyInfoFromIssue tests
+// ---------------------------------------------------------------------------
+
+// TestGetConvoyInfoFromIssue_EmptyIssueID verifies that passing an empty
+// issueID returns nil immediately (line 207).
+func TestGetConvoyInfoFromIssue_EmptyIssueID(t *testing.T) {
+	got := getConvoyInfoFromIssue("", "/tmp")
+	if got != nil {
+		t.Errorf("getConvoyInfoFromIssue(\"\", ...) = %+v, want nil", got)
+	}
+}
+
+// TestGetConvoyInfoFromIssue_NonexistentIssue verifies that when bd.Show fails
+// (e.g., nonexistent issue), nil is returned (line 213).
+func TestGetConvoyInfoFromIssue_NonexistentIssue(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows — shell stubs")
+	}
+
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	// Install a bd stub that returns exit 1 for show (nonexistent issue).
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	bdScript := `#!/bin/sh
+exit 1
+`
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	got := getConvoyInfoFromIssue("nonexistent-id", tmpDir)
+	if got != nil {
+		t.Errorf("getConvoyInfoFromIssue(\"nonexistent-id\", ...) = %+v, want nil", got)
+	}
 }
