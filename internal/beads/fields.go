@@ -545,7 +545,7 @@ func ParseRoleConfig(description string) *RoleConfig {
 			config.PingTimeout = value
 			hasFields = true
 		case "consecutive_failures", "consecutive-failures", "consecutivefailures":
-			if n, err := parseIntValue(value); err == nil {
+			if n, err := parseIntField(value); err == nil {
 				config.ConsecutiveFailures = n
 				hasFields = true
 			}
@@ -584,13 +584,6 @@ func ParseWispTTLKey(key string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// parseIntValue parses an integer from a string value.
-func parseIntValue(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
 }
 
 // FormatRoleConfig formats RoleConfig as a string suitable for a role bead description.
