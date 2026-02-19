@@ -1969,6 +1969,93 @@ func TestSessionPrefixPattern_AlwaysIncludesGTAndHQ(t *testing.T) {
 	}
 }
 
+func TestGetKeyBinding_NoExistingBinding(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	tm := NewTmux()
+	// Query a key that almost certainly has no binding
+	result := tm.getKeyBinding("prefix", "F12")
+	if result != "" {
+		t.Errorf("expected empty string for unbound key, got %q", result)
+	}
+}
+
+func TestGetKeyBinding_CapturesDefaultBinding(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	tm := NewTmux()
+
+	// Query the default tmux binding for prefix-n (next-window).
+	// This works without a running tmux server because list-keys
+	// returns builtin defaults.
+	result := tm.getKeyBinding("prefix", "n")
+	if result != "next-window" {
+		t.Errorf("expected 'next-window' for default prefix-n binding, got %q", result)
+	}
+}
+
+func TestGetKeyBinding_CapturesDefaultBindingWithArgs(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	tm := NewTmux()
+
+	// prefix-s is "choose-tree -Zs" by default — tests multi-word command parsing
+	result := tm.getKeyBinding("prefix", "s")
+	if !strings.Contains(result, "choose-tree") {
+		t.Errorf("expected binding to contain 'choose-tree', got %q", result)
+	}
+}
+
+func TestGetKeyBinding_SkipsGasTownBindings(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	if !IsInsideTmux() {
+		t.Skip("not inside tmux — need server for bind-key")
+	}
+	tm := NewTmux()
+
+	// Set a Gas Town binding (contains "gt ")
+	_, _ = tm.run("bind-key", "-T", "prefix", "F11",
+		"run-shell", "gt agents")
+
+	result := tm.getKeyBinding("prefix", "F11")
+	if result != "" {
+		t.Errorf("expected empty string for Gas Town binding, got %q", result)
+	}
+
+	// Clean up
+	_, _ = tm.run("unbind-key", "-T", "prefix", "F11")
+}
+
+func TestGetKeyBinding_CapturesUserBinding(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	if !IsInsideTmux() {
+		t.Skip("not inside tmux — need server for bind-key")
+	}
+	tm := NewTmux()
+
+	// Set a user binding that doesn't contain "gt "
+	_, _ = tm.run("bind-key", "-T", "prefix", "F11", "display-message", "hello")
+
+	result := tm.getKeyBinding("prefix", "F11")
+	// Should capture the user's binding command
+	if result == "" {
+		t.Error("expected non-empty string for user binding")
+	}
+	if !strings.Contains(result, "display-message") {
+		t.Errorf("expected binding to contain 'display-message', got %q", result)
+	}
+
+	// Clean up
+	_, _ = tm.run("unbind-key", "-T", "prefix", "F11")
+}
+
 func TestSessionPrefixPattern_WithTownRoot(t *testing.T) {
 	// Point at the real town root if available; otherwise skip.
 	townRoot := os.Getenv("GT_ROOT")
