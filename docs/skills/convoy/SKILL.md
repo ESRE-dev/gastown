@@ -1,1 +1,0 @@
-../../../.agents/skills/convoy/SKILL.md
