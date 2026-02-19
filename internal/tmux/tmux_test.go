@@ -1989,8 +1989,12 @@ func TestGetKeyBinding_CapturesDefaultBinding(t *testing.T) {
 
 	// Query the default tmux binding for prefix-n (next-window).
 	// This works without a running tmux server because list-keys
-	// returns builtin defaults.
+	// returns builtin defaults. Skip if already a GT binding (e.g.,
+	// when running inside an active gastown session).
 	result := tm.getKeyBinding("prefix", "n")
+	if result == "" && tm.isGTBinding("prefix", "n") {
+		t.Skip("prefix-n is already a GT binding in this environment")
+	}
 	if result != "next-window" {
 		t.Errorf("expected 'next-window' for default prefix-n binding, got %q", result)
 	}
@@ -2018,9 +2022,12 @@ func TestGetKeyBinding_SkipsGasTownBindings(t *testing.T) {
 	}
 	tm := NewTmux()
 
-	// Set a Gas Town binding (contains "gt ")
+	// Set a GT-style if-shell binding (contains both "if-shell" and "gt ")
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
 	_, _ = tm.run("bind-key", "-T", "prefix", "F11",
-		"run-shell", "gt agents")
+		"if-shell", ifShell,
+		"run-shell 'gt agents'",
+		":")
 
 	result := tm.getKeyBinding("prefix", "F11")
 	if result != "" {
@@ -2050,6 +2057,71 @@ func TestGetKeyBinding_CapturesUserBinding(t *testing.T) {
 	}
 	if !strings.Contains(result, "display-message") {
 		t.Errorf("expected binding to contain 'display-message', got %q", result)
+	}
+
+	// Clean up
+	_, _ = tm.run("unbind-key", "-T", "prefix", "F11")
+}
+
+func TestIsGTBinding_DetectsGasTownBindings(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	if !IsInsideTmux() {
+		t.Skip("not inside tmux — need server for bind-key")
+	}
+	tm := NewTmux()
+
+	// A plain user binding should NOT be detected as GT
+	_, _ = tm.run("bind-key", "-T", "prefix", "F11", "display-message", "hello")
+	if tm.isGTBinding("prefix", "F11") {
+		t.Error("plain user binding should not be detected as GT binding")
+	}
+
+	// A GT-style if-shell binding should be detected
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
+	_, _ = tm.run("bind-key", "-T", "prefix", "F11",
+		"if-shell", ifShell,
+		"run-shell 'gt feed --window'",
+		"display-message hello")
+	if !tm.isGTBinding("prefix", "F11") {
+		t.Error("GT if-shell binding should be detected as GT binding")
+	}
+
+	// Clean up
+	_, _ = tm.run("unbind-key", "-T", "prefix", "F11")
+}
+
+func TestSetBindings_PreserveFallbackOnRepeatedCalls(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	if !IsInsideTmux() {
+		t.Skip("not inside tmux — need server for bind-key")
+	}
+	tm := NewTmux()
+
+	// Set a custom user binding on F11
+	_, _ = tm.run("bind-key", "-T", "prefix", "F11", "display-message", "custom-user-cmd")
+
+	// Wrap it as a GT binding (simulating first Set*Binding call)
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
+	_, _ = tm.run("bind-key", "-T", "prefix", "F11",
+		"if-shell", ifShell,
+		"run-shell 'gt feed --window'",
+		"display-message custom-user-cmd")
+
+	// Record the binding after first configuration
+	firstRaw, _ := tm.run("list-keys", "-T", "prefix", "F11")
+
+	// isGTBinding should return true, causing Set*Binding to skip
+	if !tm.isGTBinding("prefix", "F11") {
+		t.Fatal("expected isGTBinding=true after first configuration")
+	}
+
+	// Verify the original user fallback is preserved in the binding
+	if !strings.Contains(firstRaw, "custom-user-cmd") {
+		t.Errorf("original user fallback not found in binding: %q", firstRaw)
 	}
 
 	// Clean up

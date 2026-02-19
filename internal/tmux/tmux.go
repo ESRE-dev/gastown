@@ -1894,6 +1894,10 @@ func IsInsideTmux() bool {
 // MouseDown1StatusRight binding (if any) is preserved.
 // See: https://github.com/steveyegge/gastown/issues/1548
 func (t *Tmux) SetMailClickBinding(session string) error {
+	// Skip if already configured — preserves user's original fallback from first call
+	if t.isGTBinding("root", "MouseDown1StatusRight") {
+		return nil
+	}
 	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
 	fallback := t.getKeyBinding("root", "MouseDown1StatusRight")
 	if fallback == "" {
@@ -1974,6 +1978,20 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 	return t.SetCycleBindings(session)
 }
 
+// isGTBinding checks if the given key already has a Gas Town if-shell binding.
+// Used to skip redundant re-binding on repeated ConfigureGasTownSession calls,
+// preserving the user's original fallback captured on the first call.
+func (t *Tmux) isGTBinding(table, key string) bool {
+	output, err := t.run("list-keys", "-T", table, key)
+	if err != nil || output == "" {
+		return false
+	}
+	// GT bindings use if-shell with a run-shell/display-popup invoking "gt ".
+	// Require both "if-shell" and "gt " to avoid false positives on user
+	// bindings that happen to contain "gt " without the if-shell guard.
+	return strings.Contains(output, "if-shell") && strings.Contains(output, "gt ")
+}
+
 // getKeyBinding returns the current tmux command bound to the given key in the
 // specified key table. Returns empty string if no binding exists or if querying
 // fails. This is used to capture user bindings before overwriting them, so the
@@ -1983,12 +2001,17 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // suitable for use as a command argument to bind-key or if-shell.
 //
 // If the existing binding is already a Gas Town if-shell binding (detected by
-// the presence of "gt " in the command), it is treated as no prior binding to
-// avoid recursive wrapping on repeated calls.
+// the presence of both "if-shell" and "gt " in the output), it is treated as
+// no prior binding to avoid recursive wrapping on repeated calls.
 func (t *Tmux) getKeyBinding(table, key string) string {
 	// tmux list-keys -T <table> <key> outputs a line like:
 	//   bind-key -T prefix g if-shell "..." "run-shell 'gt agents'" ":"
 	// We need to extract just the command portion.
+	//
+	// Assumed format (tested with tmux 3.3+):
+	//   bind-key [-r] -T <table> <key> <command...>
+	// If tmux changes this format, parsing fails safely (returns ""),
+	// which causes the caller to use its default fallback.
 	output, err := t.run("list-keys", "-T", table, key)
 	if err != nil || output == "" {
 		return ""
@@ -1996,7 +2019,9 @@ func (t *Tmux) getKeyBinding(table, key string) string {
 
 	// If this is already a Gas Town binding (from a previous ConfigureGasTownSession call),
 	// don't capture it — we'd end up wrapping our own if-shell in another if-shell.
-	if strings.Contains(output, "gt ") {
+	// We check for both "if-shell" and "gt " to avoid false-positiving on user
+	// bindings that happen to contain the substring "gt ".
+	if strings.Contains(output, "if-shell") && strings.Contains(output, "gt ") {
 		return ""
 	}
 
@@ -2081,6 +2106,10 @@ func sessionPrefixPattern() string {
 // reliably preserve the session context. tmux expands #{session_name} at binding
 // resolution time (when the key is pressed), giving us the correct session.
 func (t *Tmux) SetCycleBindings(session string) error {
+	// Skip if already configured — preserves user's original fallback from first call
+	if t.isGTBinding("prefix", "n") {
+		return nil
+	}
 	pattern := sessionPrefixPattern()
 	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", pattern)
 
@@ -2122,6 +2151,10 @@ func (t *Tmux) SetCycleBindings(session string) error {
 // See: https://github.com/steveyegge/gastown/issues/13
 // See: https://github.com/steveyegge/gastown/issues/1548
 func (t *Tmux) SetFeedBinding(session string) error {
+	// Skip if already configured — preserves user's original fallback from first call
+	if t.isGTBinding("prefix", "a") {
+		return nil
+	}
 	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
 	fallback := t.getKeyBinding("prefix", "a")
 	if fallback == "" {
@@ -2144,6 +2177,10 @@ func (t *Tmux) SetFeedBinding(session string) error {
 // press is silently ignored.
 // See: https://github.com/steveyegge/gastown/issues/1548
 func (t *Tmux) SetAgentsBinding(session string) error {
+	// Skip if already configured — preserves user's original fallback from first call
+	if t.isGTBinding("prefix", "g") {
+		return nil
+	}
 	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
 	fallback := t.getKeyBinding("prefix", "g")
 	if fallback == "" {
