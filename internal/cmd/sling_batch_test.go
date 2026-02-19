@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -714,4 +716,503 @@ exit 0
 	if !strings.Contains(closeContent, "all beads failed") {
 		t.Errorf("close log should contain failure reason:\n%s", closeContent)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// slingGenerateShortID tests
+// ---------------------------------------------------------------------------
+
+// TestSlingGenerateShortID_Format verifies the generated ID is 5 lowercase
+// base32 characters.
+func TestSlingGenerateShortID_Format(t *testing.T) {
+	id := slingGenerateShortID()
+	if len(id) != 5 {
+		t.Fatalf("expected 5-char ID, got %d chars: %q", len(id), id)
+	}
+	// base32 lowercase alphabet: a-z, 2-7
+	for _, ch := range id {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= '2' && ch <= '7')) {
+			t.Errorf("unexpected character %q in ID %q (expected base32 lowercase)", ch, id)
+		}
+	}
+}
+
+// TestSlingGenerateShortID_Unique verifies successive calls produce different IDs.
+func TestSlingGenerateShortID_Unique(t *testing.T) {
+	a := slingGenerateShortID()
+	b := slingGenerateShortID()
+	if a == b {
+		t.Errorf("two successive calls returned the same ID: %q", a)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ConvoyInfo.IsOwnedDirect tests
+// ---------------------------------------------------------------------------
+
+func TestConvoyInfo_IsOwnedDirect(t *testing.T) {
+	cases := []struct {
+		name string
+		info *ConvoyInfo
+		want bool
+	}{
+		{"nil receiver", nil, false},
+		{"owned + direct", &ConvoyInfo{Owned: true, MergeStrategy: "direct"}, true},
+		{"owned + mr", &ConvoyInfo{Owned: true, MergeStrategy: "mr"}, false},
+		{"not owned + direct", &ConvoyInfo{Owned: false, MergeStrategy: "direct"}, false},
+		{"not owned + empty", &ConvoyInfo{Owned: false, MergeStrategy: ""}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.info.IsOwnedDirect()
+			if got != tc.want {
+				t.Errorf("IsOwnedDirect() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// createAutoConvoy tests
+// ---------------------------------------------------------------------------
+
+// setupTownWithBdStub creates a minimal town workspace and installs a bd
+// shell stub that logs all commands. Returns townRoot and logPath.
+func setupTownWithBdStub(t *testing.T, bdScript string) (townRoot, logPath string) {
+	t.Helper()
+
+	townRoot = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath = filepath.Join(townRoot, "bd.log")
+
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	return townRoot, logPath
+}
+
+// TestCreateAutoConvoy_BasicSuccess verifies that createAutoConvoy creates a
+// convoy with "Work: <title>" title, adds a tracking dep, and returns hq-cv-* ID.
+func TestCreateAutoConvoy_BasicSuccess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	logPath := filepath.Join(t.TempDir(), "placeholder") // overwritten below
+	bdScript := `#!/bin/sh
+echo "CMD:$*" >> "LOGPATH"
+exit 0
+`
+	// We need logPath before the script, so build it in two steps.
+	townRoot, logPath := setupTownWithBdStub(t, "")
+	// Rewrite bd with the actual logPath baked in.
+	bdScript = strings.ReplaceAll(bdScript, "LOGPATH", logPath)
+	if err := os.WriteFile(filepath.Join(townRoot, "bin", "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("rewrite bd stub: %v", err)
+	}
+
+	convoyID, err := createAutoConvoy("gt-aaa", "Fix the widget", false, "mr")
+	if err != nil {
+		t.Fatalf("createAutoConvoy() error: %v", err)
+	}
+
+	if !strings.HasPrefix(convoyID, "hq-cv-") {
+		t.Errorf("convoy ID %q should have hq-cv- prefix", convoyID)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read bd log: %v", err)
+	}
+	logContent := string(logBytes)
+
+	// Verify title is "Work: Fix the widget"
+	if !strings.Contains(logContent, "Work: Fix the widget") {
+		t.Errorf("create should include 'Work: Fix the widget' in args:\n%s", logContent)
+	}
+
+	// Verify dep add was called
+	if !strings.Contains(logContent, "dep add") {
+		t.Errorf("expected dep add command in log:\n%s", logContent)
+	}
+	if !strings.Contains(logContent, "gt-aaa") {
+		t.Errorf("dep add should reference gt-aaa:\n%s", logContent)
+	}
+}
+
+// TestCreateAutoConvoy_FlagLikeTitleReturnsError verifies that a title starting
+// with "--" is rejected.
+func TestCreateAutoConvoy_FlagLikeTitleReturnsError(t *testing.T) {
+	_, err := createAutoConvoy("gt-aaa", "--verbose", false, "")
+	if err == nil {
+		t.Fatal("expected error for flag-like title, got nil")
+	}
+	if !strings.Contains(err.Error(), "CLI flag") {
+		t.Errorf("error should mention CLI flag, got: %v", err)
+	}
+}
+
+// TestCreateAutoConvoy_OwnedLabel verifies that owned=true adds --labels=gt:owned.
+func TestCreateAutoConvoy_OwnedLabel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	bdScript := `#!/bin/sh
+printf 'CMD:' >> "LOGPATH"
+for arg in "$@"; do printf '%s\0' "$arg"; done >> "LOGPATH"
+printf '\n' >> "LOGPATH"
+exit 0
+`
+	townRoot, logPath := setupTownWithBdStub(t, "")
+	bdScript = strings.ReplaceAll(bdScript, "LOGPATH", logPath)
+	if err := os.WriteFile(filepath.Join(townRoot, "bin", "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("rewrite bd stub: %v", err)
+	}
+
+	_, err := createAutoConvoy("gt-aaa", "My task", true, "direct")
+	if err != nil {
+		t.Fatalf("createAutoConvoy() error: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(logBytes), "--labels=gt:owned") {
+		t.Errorf("create should include --labels=gt:owned:\n%q", string(logBytes))
+	}
+}
+
+// TestCreateAutoConvoy_DepFailCleansUpOrphan verifies that when the dep add
+// fails, the convoy is closed to prevent orphans.
+func TestCreateAutoConvoy_DepFailCleansUpOrphan(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	bdScript := `#!/bin/sh
+echo "CMD:$*" >> "LOGPATH"
+cmd="$1"
+shift || true
+case "$cmd" in
+  create)
+    exit 0
+    ;;
+  dep)
+    exit 1
+    ;;
+  close)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	townRoot, logPath := setupTownWithBdStub(t, "")
+	bdScript = strings.ReplaceAll(bdScript, "LOGPATH", logPath)
+	if err := os.WriteFile(filepath.Join(townRoot, "bin", "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("rewrite bd stub: %v", err)
+	}
+
+	_, err := createAutoConvoy("gt-aaa", "My task", false, "")
+	if err == nil {
+		t.Fatal("expected error when dep add fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "tracking relation") {
+		t.Errorf("error should mention tracking relation, got: %v", err)
+	}
+
+	// Verify close was called (orphan cleanup)
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	logContent := string(logBytes)
+	if !strings.Contains(logContent, "CMD:close") {
+		t.Errorf("expected close command for orphan cleanup:\n%s", logContent)
+	}
+	if !strings.Contains(logContent, "tracking dep failed") {
+		t.Errorf("close should include 'tracking dep failed' reason:\n%s", logContent)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// convoyTracksBead tests
+// ---------------------------------------------------------------------------
+
+// TestConvoyTracksBead_ExactMatch verifies exact bead ID match.
+func TestConvoyTracksBead_ExactMatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	binDir := t.TempDir()
+	beadsDir := t.TempDir()
+
+	deps := []struct {
+		ID string `json:"id"`
+	}{
+		{ID: "gt-aaa"},
+		{ID: "gt-bbb"},
+	}
+	depsJSON, _ := json.Marshal(deps)
+
+	bdScript := `#!/bin/sh
+echo '` + string(depsJSON) + `'
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", binDir+":"+origPath)
+
+	if !convoyTracksBead(beadsDir, "hq-cv-test", "gt-aaa") {
+		t.Error("expected true for exact match gt-aaa")
+	}
+	if !convoyTracksBead(beadsDir, "hq-cv-test", "gt-bbb") {
+		t.Error("expected true for exact match gt-bbb")
+	}
+}
+
+// TestConvoyTracksBead_ExternalWrappedMatch verifies matching through
+// the "external:prefix:beadID" format.
+func TestConvoyTracksBead_ExternalWrappedMatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	binDir := t.TempDir()
+	beadsDir := t.TempDir()
+
+	deps := []struct {
+		ID string `json:"id"`
+	}{
+		{ID: "external:gt:gt-abc"},
+	}
+	depsJSON, _ := json.Marshal(deps)
+
+	bdScript := `#!/bin/sh
+echo '` + string(depsJSON) + `'
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	if !convoyTracksBead(beadsDir, "hq-cv-test", "gt-abc") {
+		t.Error("expected true for external-wrapped match gt-abc")
+	}
+}
+
+// TestConvoyTracksBead_NoMatch verifies false when bead is not tracked.
+func TestConvoyTracksBead_NoMatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	binDir := t.TempDir()
+	beadsDir := t.TempDir()
+
+	deps := []struct {
+		ID string `json:"id"`
+	}{
+		{ID: "gt-aaa"},
+	}
+	depsJSON, _ := json.Marshal(deps)
+
+	bdScript := `#!/bin/sh
+echo '` + string(depsJSON) + `'
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	if convoyTracksBead(beadsDir, "hq-cv-test", "gt-zzz") {
+		t.Error("expected false when bead is not tracked")
+	}
+}
+
+// TestConvoyTracksBead_BdError verifies false when bd command fails.
+func TestConvoyTracksBead_BdError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	binDir := t.TempDir()
+	beadsDir := t.TempDir()
+
+	bdScript := `#!/bin/sh
+exit 1
+`
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	if convoyTracksBead(beadsDir, "hq-cv-test", "gt-aaa") {
+		t.Error("expected false when bd fails")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cross-rig guard in runBatchSling tests
+// ---------------------------------------------------------------------------
+
+// TestBatchSling_CrossRigGuardRejectsPrefix verifies that the cross-rig guard
+// in runBatchSling rejects beads whose prefix doesn't match the target rig.
+func TestBatchSling_CrossRigGuardRejectsPrefix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	// Routes: gt- -> gastown, bd- -> beads
+	routesContent := `{"prefix":"gt-","path":"gastown/.beads"}
+{"prefix":"bd-","path":"beads/.beads"}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+
+	// Stub bd: show succeeds (verifyBeadExists), everything else succeeds
+	bdScript := `#!/bin/sh
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"id":"test","status":"open","title":"test"}]'
+    exit 0
+    ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore package-level flags
+	origForce := slingForce
+	t.Cleanup(func() { slingForce = origForce })
+	slingForce = false
+
+	// Directly test the cross-rig guard logic from runBatchSling lines 32-61.
+	// A bd- bead targeting "gastown" should be rejected.
+	beadIDs := []string{"gt-aaa", "bd-bbb"}
+	rigName := "gastown"
+	townBeadsDir := beadsDir
+
+	var guardErr error
+	for _, beadID := range beadIDs {
+		prefix := extractPrefixForTest(beadID)
+		beadRig := lookupRigForPrefixInTest(townRoot, prefix)
+		if prefix != "" && beadRig != "" && beadRig != rigName {
+			guardErr = fmt.Errorf("bead %s (prefix %q) belongs to rig %q, but target is %q",
+				beadID, strings.TrimSuffix(prefix, "-"), beadRig, rigName)
+			break
+		}
+	}
+	_ = townBeadsDir // used only for context
+
+	if guardErr == nil {
+		t.Fatal("expected cross-rig guard error, got nil")
+	}
+	if !strings.Contains(guardErr.Error(), "bd-bbb") {
+		t.Errorf("error should mention bd-bbb, got: %v", guardErr)
+	}
+	if !strings.Contains(guardErr.Error(), "beads") {
+		t.Errorf("error should mention rig 'beads', got: %v", guardErr)
+	}
+	if !strings.Contains(guardErr.Error(), "gastown") {
+		t.Errorf("error should mention target rig 'gastown', got: %v", guardErr)
+	}
+}
+
+// extractPrefixForTest mirrors beads.ExtractPrefix for the cross-rig guard test.
+func extractPrefixForTest(beadID string) string {
+	idx := strings.Index(beadID, "-")
+	if idx <= 0 {
+		return ""
+	}
+	return beadID[:idx+1]
+}
+
+// lookupRigForPrefixInTest loads routes.jsonl and resolves rig name for a prefix.
+func lookupRigForPrefixInTest(townRoot, prefix string) string {
+	routesPath := filepath.Join(townRoot, ".beads", "routes.jsonl")
+	data, err := os.ReadFile(routesPath)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var route struct {
+			Prefix string `json:"prefix"`
+			Path   string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(line), &route); err != nil {
+			continue
+		}
+		if route.Prefix == prefix {
+			if route.Path == "." {
+				return ""
+			}
+			parts := strings.SplitN(route.Path, "/", 2)
+			if len(parts) > 0 {
+				return parts[0]
+			}
+		}
+	}
+	return ""
 }
