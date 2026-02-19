@@ -166,6 +166,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewWispGCCheck())
 	d.Register(doctor.NewCheckMisclassifiedWisps())
 	d.Register(doctor.NewStaleBeadsRedirectCheck())
+	d.Register(doctor.NewBeadsRedirectTargetCheck())
 	d.Register(doctor.NewBranchCheck())
 	d.Register(doctor.NewCloneDivergenceCheck())
 	d.Register(doctor.NewDefaultBranchAllRigsCheck())
