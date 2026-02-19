@@ -113,6 +113,16 @@ Uses patterns from existing daemon tests:
 | `TestFeedFirstReady_UnknownRig_Skips` | Unit | Prefix resolves but rig lookup fails → sling never called |
 | `TestFeedFirstReady_EmptyReadyIssues_NoOp` | Unit | ReadyIssues=[] despite ReadyCount>0 |
 
+### Batch sling rig resolution (implemented in sling_batch_test.go)
+
+| Test | Type | Status |
+|------|------|--------|
+| `TestAllBeadIDs_TrueWhenAllBeadIDs` | Unit | Done |
+| `TestResolveRigFromBeadIDs_AllSamePrefix` | Unit | Done |
+| `TestResolveRigFromBeadIDs_MixedPrefixes_Errors` | Unit | Done |
+| `TestResolveRigFromBeadIDs_UnmappedPrefix_Errors` | Unit | Done |
+| `TestResolveRigFromBeadIDs_TownLevelPrefix_Errors` | Unit | Done |
+
 ### Priority 2 — Error-path coverage
 
 | Test | Type | Gap Addressed |

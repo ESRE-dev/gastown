@@ -103,17 +103,30 @@ gt convoy
 
 ## Batch sling behavior
 
-`gt sling <bead1> <bead2> <bead3> <rig>` creates **one convoy** tracking all beads. The convoy title is `"Batch: N beads to <rig>"`. Each bead gets its own polecat, but they share a single convoy for tracking.
+`gt sling <bead1> <bead2> <bead3>` creates **one convoy** tracking all beads. The rig is auto-resolved from the beads' prefixes (via `routes.jsonl`). The convoy title is `"Batch: N beads to <rig>"`. Each bead gets its own polecat, but they share a single convoy for tracking.
 
 The convoy ID and merge strategy are stored on each bead, so `gt done` can find the convoy via the fast path (`getConvoyInfoFromIssue`).
+
+### Rig resolution
+
+- **Auto-resolve (preferred):** `gt sling gt-task1 gt-task2 gt-task3` -- resolves rig from the `gt-` prefix. All beads must resolve to the same rig.
+- **Explicit rig (deprecated):** `gt sling gt-task1 gt-task2 gt-task3 myrig` -- still works, prints a deprecation warning. If any bead's prefix doesn't match the explicit rig, errors with suggested actions.
+- **Mixed prefixes:** If beads resolve to different rigs, errors listing each bead's resolved rig and suggested actions (sling separately, or `--force`).
+- **Unmapped prefix:** If a prefix has no route, errors with diagnostic info (`cat .beads/routes.jsonl | grep <prefix>`).
+
+### Conflict handling
 
 If any bead is already tracked by another convoy, batch sling **errors** with detailed conflict info (which convoy, all beads in it with statuses, and 4 recommended actions). This prevents accidental double-tracking.
 
 ```bash
-# Batch sling: one convoy, three polecats
-gt sling gt-task1 gt-task2 gt-task3 myrig
+# Auto-resolve: one convoy, three polecats (preferred)
+gt sling gt-task1 gt-task2 gt-task3
 # → Created convoy hq-cv-xxxxx tracking 3 beads
-# daemon feeds next ready task as each closes (respecting blocks deps)
+
+# Explicit rig still works but prints deprecation warning
+gt sling gt-task1 gt-task2 gt-task3 gastown
+# → Deprecation: gt sling now auto-resolves the rig from bead prefixes.
+# → Created convoy hq-cv-xxxxx tracking 3 beads
 ```
 
 ## Testing convoy changes
@@ -137,6 +150,10 @@ go test ./internal/cmd/... -v -count=1 -run TestConvoy
 # Batch sling convoy (createBatchConvoy, conflict detection, cleanup)
 go test ./internal/cmd/... -v -count=1 -run TestCreateBatchConvoy
 go test ./internal/cmd/... -v -count=1 -run TestBatchSling
+
+# Rig auto-resolution and deprecation
+go test ./internal/cmd/... -v -count=1 -run TestAllBeadIDs
+go test ./internal/cmd/... -v -count=1 -run TestResolveRig
 ```
 
 ### Test patterns
@@ -178,6 +195,11 @@ m.pollAllStores()
 | `TestBatchSling_ConvoyIDStoredInBeadFieldUpdates` | ConvoyID and MergeStrategy set in each bead's field updates |
 | `TestBatchSling_ErrorsOnAlreadyTrackedBead` | Pre-loop conflict check detects already-tracked bead |
 | `TestBatchSling_EmptyConvoyCleanupOnAllFailures` | All beads fail -> convoy closed with cleanup reason |
+| `TestAllBeadIDs_TrueWhenAllBeadIDs` | Syntactic check: bead IDs vs rig names vs paths |
+| `TestResolveRigFromBeadIDs_AllSamePrefix` | All beads with same prefix resolve to correct rig |
+| `TestResolveRigFromBeadIDs_MixedPrefixes_Errors` | Beads from different rigs error with suggested actions |
+| `TestResolveRigFromBeadIDs_UnmappedPrefix_Errors` | Unmapped prefix errors with diagnostic info |
+| `TestResolveRigFromBeadIDs_TownLevelPrefix_Errors` | Town-level prefix (path=".") errors |
 
 ### Key test invariants
 

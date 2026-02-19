@@ -512,6 +512,143 @@ exit 0
 	}
 }
 
+// --- Auto-rig-resolution and deprecation tests ---
+
+// TestAllBeadIDs_TrueWhenAllBeadIDs verifies that allBeadIDs returns true
+// when every argument looks like a bead ID.
+func TestAllBeadIDs_TrueWhenAllBeadIDs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"all beads", []string{"gt-abc", "gt-def", "gt-ghi"}, true},
+		{"mixed prefixes", []string{"gt-abc", "bd-def", "hq-ghi"}, true},
+		{"single bead", []string{"gt-abc"}, true},
+		{"last is rig name", []string{"gt-abc", "gt-def", "gastown"}, false},
+		{"empty list", []string{}, false},
+		{"contains path", []string{"gt-abc", "gastown/polecats/foo"}, false},
+		{"contains bare word no hyphen", []string{"gt-abc", "gastown"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := allBeadIDs(tc.args)
+			if got != tc.want {
+				t.Errorf("allBeadIDs(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveRigFromBeadIDs_AllSamePrefix verifies that resolveRigFromBeadIDs
+// resolves the rig when all beads share the same prefix.
+func TestResolveRigFromBeadIDs_AllSamePrefix(t *testing.T) {
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Write routes.jsonl mapping gt- to gastown
+	routesContent := `{"prefix":"gt-","path":"gastown/.beads"}` + "\n"
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	rigName, err := resolveRigFromBeadIDs([]string{"gt-aaa", "gt-bbb", "gt-ccc"}, townRoot)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rigName != "gastown" {
+		t.Errorf("rigName = %q, want %q", rigName, "gastown")
+	}
+}
+
+// TestResolveRigFromBeadIDs_MixedPrefixes_Errors verifies that beads from
+// different rigs produce an error with suggested actions.
+func TestResolveRigFromBeadIDs_MixedPrefixes_Errors(t *testing.T) {
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	routesContent := `{"prefix":"gt-","path":"gastown/.beads"}
+{"prefix":"bd-","path":"beads/.beads"}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	_, err := resolveRigFromBeadIDs([]string{"gt-aaa", "bd-bbb", "gt-ccc"}, townRoot)
+	if err == nil {
+		t.Fatal("expected error for mixed prefixes, got nil")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "different rigs") {
+		t.Errorf("error should mention 'different rigs', got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "gastown") || !strings.Contains(errMsg, "beads") {
+		t.Errorf("error should mention both rig names, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "Options") {
+		t.Errorf("error should include suggested actions, got: %s", errMsg)
+	}
+}
+
+// TestResolveRigFromBeadIDs_UnmappedPrefix_Errors verifies that a bead whose
+// prefix has no route mapping produces an error with suggested actions.
+func TestResolveRigFromBeadIDs_UnmappedPrefix_Errors(t *testing.T) {
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Only gt- is mapped; zz- is not
+	routesContent := `{"prefix":"gt-","path":"gastown/.beads"}` + "\n"
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	_, err := resolveRigFromBeadIDs([]string{"gt-aaa", "zz-bbb"}, townRoot)
+	if err == nil {
+		t.Fatal("expected error for unmapped prefix, got nil")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "zz-bbb") {
+		t.Errorf("error should mention the bead ID, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "not mapped") {
+		t.Errorf("error should mention prefix is not mapped, got: %s", errMsg)
+	}
+}
+
+// TestResolveRigFromBeadIDs_TownLevelPrefix_Errors verifies that a bead with
+// a town-level prefix (path=".") produces an error because it has no rig.
+func TestResolveRigFromBeadIDs_TownLevelPrefix_Errors(t *testing.T) {
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// hq- maps to town root (path=".")
+	routesContent := `{"prefix":"hq-","path":"."}` + "\n"
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	_, err := resolveRigFromBeadIDs([]string{"hq-aaa", "hq-bbb"}, townRoot)
+	if err == nil {
+		t.Fatal("expected error for town-level prefix, got nil")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "not mapped") || !strings.Contains(errMsg, "town-level") {
+		t.Errorf("error should mention town-level bead, got: %s", errMsg)
+	}
+}
+
 // TestBatchSling_EmptyConvoyCleanupOnAllFailures verifies that when all beads
 // fail to sling, the empty convoy is closed with a cleanup reason.
 func TestBatchSling_EmptyConvoyCleanupOnAllFailures(t *testing.T) {

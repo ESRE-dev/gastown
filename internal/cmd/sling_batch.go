@@ -32,7 +32,29 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 	if !slingForce {
 		townRoot := filepath.Dir(townBeadsDir)
 		for _, beadID := range beadIDs {
-			if err := checkCrossRigGuard(beadID, rigName+"/polecats/_", townRoot); err != nil {
+			prefix := beads.ExtractPrefix(beadID)
+			beadRig := beads.GetRigNameForPrefix(townRoot, prefix)
+			if prefix != "" && beadRig != "" && beadRig != rigName {
+				others := make([]string, 0, len(beadIDs)-1)
+				for _, id := range beadIDs {
+					if id != beadID {
+						others = append(others, id)
+					}
+				}
+				return fmt.Errorf("bead %s (prefix %q) belongs to rig %q, but target is %q\n\n"+
+					"  Options:\n"+
+					"    1. Remove the mismatched bead from this batch:\n"+
+					"         gt sling %s\n"+
+					"    2. Sling the mismatched bead to its own rig:\n"+
+					"         gt sling %s %s\n"+
+					"    3. Use --force to override the cross-rig guard:\n"+
+					"         gt sling %s --force\n",
+					beadID, strings.TrimSuffix(prefix, "-"), beadRig, rigName,
+					strings.Join(others, " "),
+					beadID, beadRig,
+					strings.Join(append(beadIDs, rigName), " "))
+			} else if err := checkCrossRigGuard(beadID, rigName+"/polecats/_", townRoot); err != nil {
+				// Fall back to generic guard for edge cases (empty prefix, town-level beads)
 				return err
 			}
 		}
@@ -343,4 +365,74 @@ func cleanupSpawnedPolecat(spawnInfo *SpawnedPolecatInfo, rigName string) {
 		fmt.Printf("  %s Cleaned up orphaned polecat %s\n",
 			style.Dim.Render("○"), spawnInfo.PolecatName)
 	}
+}
+
+// allBeadIDs returns true if every arg looks like a bead ID (syntactic check).
+func allBeadIDs(args []string) bool {
+	for _, arg := range args {
+		if !looksLikeBeadID(arg) {
+			return false
+		}
+	}
+	return len(args) > 0
+}
+
+// resolveRigFromBeadIDs resolves the target rig from bead prefixes.
+// All beads must resolve to the same rig. Returns an error with suggested
+// actions if any prefix cannot be resolved or if beads span multiple rigs.
+func resolveRigFromBeadIDs(beadIDs []string, townRoot string) (string, error) {
+	var resolvedRig string
+	mismatches := []string{} // "bead-id -> rig" for error reporting
+
+	for _, beadID := range beadIDs {
+		prefix := beads.ExtractPrefix(beadID)
+		if prefix == "" {
+			return "", fmt.Errorf("cannot resolve rig for %s: no valid prefix\n\n"+
+				"  Options:\n"+
+				"    1. Specify the rig explicitly:\n"+
+				"         gt sling %s <rig>\n"+
+				"    2. Check the bead ID is correct:\n"+
+				"         bd show %s\n",
+				beadID, strings.Join(beadIDs, " "), beadID)
+		}
+
+		rigName := beads.GetRigNameForPrefix(townRoot, prefix)
+		if rigName == "" {
+			return "", fmt.Errorf("cannot resolve rig for %s: prefix %q is not mapped to any rig\n\n"+
+				"  The prefix may belong to a town-level bead or the routes are not configured.\n\n"+
+				"  Options:\n"+
+				"    1. Specify the rig explicitly:\n"+
+				"         gt sling %s <rig>\n"+
+				"    2. Check the bead's route mapping:\n"+
+				"         cat .beads/routes.jsonl | grep %s\n"+
+				"    3. Create the bead from the target rig directory instead:\n"+
+				"         cd <rig> && bd create --title=...\n",
+				beadID, prefix, strings.Join(beadIDs, " "), prefix)
+		}
+
+		if resolvedRig == "" {
+			resolvedRig = rigName
+		}
+		mismatches = append(mismatches, fmt.Sprintf("    %s (prefix %s) -> %s", beadID, prefix, rigName))
+
+		if rigName != resolvedRig {
+			return "", fmt.Errorf("beads resolve to different rigs:\n\n%s\n\n"+
+				"  All beads in a batch sling must target the same rig.\n\n"+
+				"  Options:\n"+
+				"    1. Sling each rig's beads separately:\n"+
+				"         gt sling <bead1> <bead2> ...   (beads for %s)\n"+
+				"         gt sling <bead3> <bead4> ...   (beads for %s)\n"+
+				"    2. Use --force to override the cross-rig guard:\n"+
+				"         gt sling %s --force\n",
+				strings.Join(mismatches, "\n"),
+				resolvedRig, rigName,
+				strings.Join(beadIDs, " "))
+		}
+	}
+
+	if resolvedRig == "" {
+		return "", fmt.Errorf("could not resolve rig from bead prefixes")
+	}
+
+	return resolvedRig, nil
 }

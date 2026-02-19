@@ -86,10 +86,21 @@ gt sling sh-task-1 gastown
 
 Result: 1 bead, 1 convoy, 1 polecat.
 
-### Batch sling (3+ args, last arg is a rig)
+### Batch sling (3+ bead args, rig auto-resolved)
+
+```
+gt sling gt-task-1 gt-task-2 gt-task-3
+```
+
+The rig is auto-resolved from the beads' prefixes via `routes.jsonl`
+(`resolveRigFromBeadIDs` in `sling_batch.go`). All beads must resolve
+to the same rig. An explicit rig arg still works but prints a
+deprecation warning:
 
 ```
 gt sling gt-task-1 gt-task-2 gt-task-3 gastown
+# Deprecation: gt sling now auto-resolves the rig from bead prefixes.
+#              You no longer need to explicitly specify <gastown>.
 ```
 
 **Batch sling creates one convoy tracking all beads.** Before spawning
@@ -98,15 +109,26 @@ any polecats, `runBatchSling` (`sling_batch.go`) calls
 with title `"Batch: N beads to <rig>"` and adds `tracks` deps for all
 beads.
 
-Result: 3 beads, **1 convoy**, 3 polecats — all dispatched in parallel
+Result: 3 beads, **1 convoy**, 3 polecats -- all dispatched in parallel
 with 2-second delays between spawns.
 
 The convoy ID and merge strategy are stored on each bead via
 `beadFieldUpdates`, so `gt done` can find the convoy via the fast path.
 
-There is no upper limit on the number of beads. `gt sling <10 beads> <rig>`
+There is no upper limit on the number of beads. `gt sling <10 beads>`
 spawns 10 polecats sharing 1 convoy. The only throttle is
 `--max-concurrent` (default 0 = unlimited).
+
+### Rig resolution errors
+
+When the rig is explicit, the cross-rig guard checks each bead's prefix
+against the target rig. On mismatch, it errors with batch-specific
+suggested actions (remove the bead, sling it separately, or `--force`).
+
+When auto-resolving, `resolveRigFromBeadIDs` errors if:
+- A bead has no valid prefix
+- A prefix is not mapped in `routes.jsonl` (including town-level `path="."`)
+- Beads resolve to different rigs (lists each bead's rig, suggests slinging separately)
 
 ### Already-tracked bead conflict
 
