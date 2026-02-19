@@ -694,7 +694,7 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	age := hb.Age()
 
 	// If heartbeat is fresh, nothing to do
-	if !hb.ShouldPoke() {
+	if !hb.IsVeryStale() {
 		return
 	}
 

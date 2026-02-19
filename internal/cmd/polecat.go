@@ -114,25 +114,6 @@ Examples:
 	RunE: runPolecatRemove,
 }
 
-var polecatSyncCmd = &cobra.Command{
-	Use:   "sync <rig>/<polecat>",
-	Short: "Sync beads for a polecat (deprecated with Dolt backend)",
-	Long: `Sync beads for a polecat's worktree.
-
-Legacy command: with Dolt backend, beads changes are persisted automatically.
-This command is a no-op when using Dolt.
-
-Use --all to sync all polecats in a rig.
-Use --from-main to only pull (no push).
-
-Examples:
-  gt polecat sync greenplace/Toast
-  gt polecat sync greenplace --all
-  gt polecat sync greenplace/Toast --from-main`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runPolecatSync,
-}
-
 var polecatStatusCmd = &cobra.Command{
 	Use:   "status <rig>/<polecat>",
 	Short: "Show detailed status for a polecat",
@@ -153,8 +134,6 @@ Examples:
 }
 
 var (
-	polecatSyncAll           bool
-	polecatSyncFromMain      bool
 	polecatStatusJSON        bool
 	polecatGitStateJSON      bool
 	polecatGCDryRun          bool
@@ -319,10 +298,6 @@ func init() {
 	polecatRemoveCmd.Flags().BoolVarP(&polecatForce, "force", "f", false, "Force removal, bypassing checks")
 	polecatRemoveCmd.Flags().BoolVar(&polecatRemoveAll, "all", false, "Remove all polecats in the rig")
 
-	// Sync flags
-	polecatSyncCmd.Flags().BoolVar(&polecatSyncAll, "all", false, "Sync all polecats in the rig")
-	polecatSyncCmd.Flags().BoolVar(&polecatSyncFromMain, "from-main", false, "Pull only, no push")
-
 	// Status flags
 	polecatStatusCmd.Flags().BoolVar(&polecatStatusJSON, "json", false, "Output as JSON")
 
@@ -354,7 +329,6 @@ func init() {
 	polecatCmd.AddCommand(polecatListCmd)
 	polecatCmd.AddCommand(polecatAddCmd)
 	polecatCmd.AddCommand(polecatRemoveCmd)
-	polecatCmd.AddCommand(polecatSyncCmd)
 	polecatCmd.AddCommand(polecatStatusCmd)
 	polecatCmd.AddCommand(polecatGitStateCmd)
 	polecatCmd.AddCommand(polecatCheckRecoveryCmd)
@@ -608,13 +582,6 @@ func runPolecatRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%d removal(s) failed", len(removeErrors))
 	}
 
-	return nil
-}
-
-func runPolecatSync(cmd *cobra.Command, args []string) error {
-	// With Dolt backend, beads changes are persisted immediately - no sync needed
-	fmt.Println("Note: With Dolt backend, beads changes are persisted immediately.")
-	fmt.Println("No sync step is required.")
 	return nil
 }
 
