@@ -87,6 +87,13 @@ type sessionDeath struct {
 const (
 	massDeathWindow    = 30 * time.Second // Time window to detect mass death
 	massDeathThreshold = 3                // Number of deaths to trigger alert
+
+	// hungSessionThreshold is how long a refinery/witness session can be
+	// inactive (no tmux output) before the daemon considers it hung and
+	// kills it for restart. This catches sessions where Claude is alive
+	// (process exists) but not making progress (infinite loop, stuck API
+	// call, etc.). Conservative: 30 minutes. See: gt-tr3d
+	hungSessionThreshold = 30 * time.Minute
 )
 
 // New creates a new daemon instance.
@@ -770,6 +777,15 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	}
 	mgr := witness.NewManager(r)
 
+	// Check for hung session before Start (which only detects process-dead zombies).
+	// A hung session has a live process but no tmux activity for an extended period,
+	// indicating Claude is stuck. Kill it so Start() can recreate a fresh one.
+	if status := mgr.IsHealthy(hungSessionThreshold); status == tmux.AgentHung {
+		d.logger.Printf("Witness for %s is hung (no activity for %v), killing for restart", rigName, hungSessionThreshold)
+		t := tmux.NewTmux()
+		_ = t.KillSession(mgr.SessionName())
+	}
+
 	if err := mgr.Start(false, "", nil); err != nil {
 		if err == witness.ErrAlreadyRunning {
 			// Already running - this is the expected case
@@ -810,6 +826,15 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 		Path: filepath.Join(d.config.TownRoot, rigName),
 	}
 	mgr := refinery.NewManager(r)
+
+	// Check for hung session before Start (which only detects process-dead zombies).
+	// A hung refinery means MRs pile up with no processing. Kill it so Start()
+	// can recreate a fresh one. See: gt-tr3d
+	if status := mgr.IsHealthy(hungSessionThreshold); status == tmux.AgentHung {
+		d.logger.Printf("Refinery for %s is hung (no activity for %v), killing for restart", rigName, hungSessionThreshold)
+		t := tmux.NewTmux()
+		_ = t.KillSession(mgr.SessionName())
+	}
 
 	if err := mgr.Start(false, ""); err != nil {
 		if err == refinery.ErrAlreadyRunning {

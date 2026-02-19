@@ -20,6 +20,14 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// HungSessionThresholdMinutes is the number of minutes of tmux inactivity
+// after which a live agent session is considered hung. This catches agents
+// where the process is alive but has stopped producing output (infinite loop,
+// crashed mid-API-call, stuck waiting for something that will never arrive).
+// Conservative default: 30 minutes. Normal agent operations produce frequent
+// tmux output (tool calls, status updates). 30 minutes of silence is abnormal.
+const HungSessionThresholdMinutes = 30
+
 // initRegistryFromWorkDir initializes the session prefix registry from a work
 // directory. This ensures session.PrefixFor(rigName) returns the correct rig
 // prefix (e.g., "tr" for testrig) instead of the default "gt".
@@ -1005,7 +1013,71 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 			if zombie, found := detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, sessionName, t, doneIntent, router); found {
 				result.Zombies = append(result.Zombies, zombie)
 			}
-			continue
+
+			// Tmux session exists but agent process may have died inside it.
+			// This catches the "tmux-alive-but-agent-dead" zombie class that
+			// status.go detects but DetectZombiePolecats previously missed.
+			// See: gt-kj6r6
+			if !t.IsAgentAlive(sessionName) {
+				// Read hook bead before nuke (nuke may clean up agent bead)
+				_, deadAgentHookBead := getAgentBeadState(workDir, agentBeadID)
+				zombie := ZombieResult{
+					PolecatName: polecatName,
+					AgentState:  "agent-dead-in-session",
+					HookBead:    deadAgentHookBead,
+					Action:      "killed-agent-dead-session",
+				}
+				if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+					zombie.Error = err
+					zombie.Action = fmt.Sprintf("kill-agent-dead-session-failed: %v", err)
+				}
+				// Reset abandoned bead for re-dispatch (gt-c3lgp)
+				zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, deadAgentHookBead, polecatName, router)
+				result.Zombies = append(result.Zombies, zombie)
+			} else {
+				// Agent is alive. Check if the hooked bead has been closed.
+				// A polecat that closed its bead but didn't run gt done is
+				// occupying a slot without doing work. See: gt-h1l6i
+				_, hookBead := getAgentBeadState(workDir, agentBeadID)
+				if hookBead != "" && getBeadStatus(workDir, hookBead) == "closed" {
+					zombie := ZombieResult{
+						PolecatName: polecatName,
+						AgentState:  "bead-closed-still-running",
+						HookBead:    hookBead,
+						Action:      "nuke-bead-closed-polecat",
+					}
+					if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+						zombie.Error = err
+						zombie.Action = fmt.Sprintf("nuke-bead-closed-failed: %v", err)
+					}
+					result.Zombies = append(result.Zombies, zombie)
+				} else {
+					// Agent is alive and bead is not closed — check for hung session.
+					// A session where Claude is alive but has produced no tmux output
+					// for a long time is likely hung (infinite loop, crashed mid-call,
+					// or waiting for something that will never arrive). See: gt-tr3d
+					lastActivity, actErr := t.GetSessionActivity(sessionName)
+					if actErr == nil && !lastActivity.IsZero() {
+						inactiveMinutes := int(time.Since(lastActivity).Minutes())
+						if inactiveMinutes >= HungSessionThresholdMinutes {
+							_, hungHookBead := getAgentBeadState(workDir, agentBeadID)
+							zombie := ZombieResult{
+								PolecatName: polecatName,
+								AgentState:  "agent-hung",
+								HookBead:    hungHookBead,
+								Action:      fmt.Sprintf("killed-hung-session (inactive %dm)", inactiveMinutes),
+							}
+							if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+								zombie.Error = err
+								zombie.Action = fmt.Sprintf("kill-hung-session-failed: %v", err)
+							}
+							zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, hungHookBead, polecatName, router)
+							result.Zombies = append(result.Zombies, zombie)
+						}
+					}
+				}
+			}
+			continue // Either handled or not a zombie
 		}
 
 		if zombie, found := detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, sessionName, t, doneIntent, detectedAt, router); found {

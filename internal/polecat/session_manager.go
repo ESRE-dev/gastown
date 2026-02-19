@@ -452,10 +452,13 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 	return nil
 }
 
-// IsRunning checks if a polecat session is active.
+// IsRunning checks if a polecat session is active and healthy.
+// Checks both tmux session existence AND agent process liveness to avoid
+// reporting zombie sessions (tmux alive but Claude dead) as "running".
 func (m *SessionManager) IsRunning(polecat string) (bool, error) {
 	sessionID := m.SessionName(polecat)
-	return m.tmux.HasSession(sessionID)
+	status := m.tmux.CheckSessionHealth(sessionID, 0)
+	return status == tmux.SessionHealthy, nil
 }
 
 // Status returns detailed status for a polecat session.

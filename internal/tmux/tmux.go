@@ -1228,6 +1228,80 @@ func (t *Tmux) GetSessionActivity(session string) (time.Time, error) {
 	return time.Unix(timestamp, 0), nil
 }
 
+// ZombieStatus describes the liveness state of a tmux agent session.
+type ZombieStatus int
+
+const (
+	// SessionHealthy means the session exists and the agent process is alive.
+	SessionHealthy ZombieStatus = iota
+	// SessionDead means the tmux session does not exist.
+	SessionDead
+	// AgentDead means the tmux session exists but the agent process has died.
+	AgentDead
+	// AgentHung means the tmux session and agent process exist but there has
+	// been no tmux activity for longer than the specified threshold.
+	AgentHung
+)
+
+// String returns a human-readable label for the zombie status.
+func (z ZombieStatus) String() string {
+	switch z {
+	case SessionHealthy:
+		return "healthy"
+	case SessionDead:
+		return "session-dead"
+	case AgentDead:
+		return "agent-dead"
+	case AgentHung:
+		return "agent-hung"
+	default:
+		return "unknown"
+	}
+}
+
+// IsZombie returns true if the status represents a zombie (any non-healthy state
+// where the session exists but the agent is dead or hung).
+func (z ZombieStatus) IsZombie() bool {
+	return z == AgentDead || z == AgentHung
+}
+
+// CheckSessionHealth determines the health status of an agent session.
+// It performs three levels of checking:
+//  1. Session existence (tmux has-session)
+//  2. Agent process liveness (IsAgentAlive — checks process tree)
+//  3. Activity staleness (GetSessionActivity — checks tmux output timestamp)
+//
+// The maxInactivity parameter controls how long a session can be idle before
+// being considered hung. Pass 0 to skip activity checking (only check process
+// liveness). A reasonable default for production is 10-15 minutes.
+//
+// This is the preferred unified method for zombie detection across all agent types.
+func (t *Tmux) CheckSessionHealth(session string, maxInactivity time.Duration) ZombieStatus {
+	// Level 1: Does the tmux session exist?
+	alive, err := t.HasSession(session)
+	if err != nil || !alive {
+		return SessionDead
+	}
+
+	// Level 2: Is the agent process running inside the session?
+	if !t.IsAgentAlive(session) {
+		return AgentDead
+	}
+
+	// Level 3: Has there been recent activity? (optional)
+	if maxInactivity > 0 {
+		lastActivity, err := t.GetSessionActivity(session)
+		if err == nil && !lastActivity.IsZero() {
+			if time.Since(lastActivity) > maxInactivity {
+				return AgentHung
+			}
+		}
+		// On error or zero time, skip activity check — don't false-positive
+	}
+
+	return SessionHealthy
+}
+
 // processMatchesNames checks if a process's binary name matches any of the given names.
 // Uses ps to get the actual command name from the process's executable path.
 // This handles cases where argv[0] is modified (e.g., Claude showing version "2.1.30").

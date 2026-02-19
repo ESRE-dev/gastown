@@ -336,5 +336,9 @@ func (s *defaultHealthSource) ListAgentBeads() (map[string]*beads.Issue, error) 
 }
 
 func (s *defaultHealthSource) IsSessionAlive(sessionName string) (bool, error) {
-	return s.tmux.HasSession(sessionName)
+	// Check both session existence AND agent process liveness.
+	// HasSession alone misses zombie sessions where tmux is alive
+	// but Claude has crashed inside the pane.
+	status := s.tmux.CheckSessionHealth(sessionName, 0)
+	return status == tmux.SessionHealthy, nil
 }
