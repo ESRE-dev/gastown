@@ -702,6 +702,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try to inject the "start now" prompt with specific work details (graceful if no tmux).
+	// This fires for ALL target types with an active session: polecats, crew, and mayor (gt-in7b).
 	// Fresh polecats need this too — SessionManager.Start() only sends a generic
 	// StartupNudge ("check your hook"), not the specific work prompt with bead ID/title.
 	// Skip for self-sling - agent is currently processing the sling command and will see
