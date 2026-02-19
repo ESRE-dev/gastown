@@ -257,6 +257,8 @@ var (
 	polecatStaleThreshold int
 	polecatStaleCleanup   bool
 	polecatStaleDryRun    bool
+	polecatPruneDryRun    bool
+	polecatPruneRemote    bool
 )
 
 var polecatStaleCmd = &cobra.Command{
@@ -282,6 +284,30 @@ Examples:
   gt polecat stale greenplace --cleanup --dry-run`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPolecatStale,
+}
+
+var polecatPruneCmd = &cobra.Command{
+	Use:   "prune <rig>",
+	Short: "Prune stale polecat branches (local and remote)",
+	Long: `Prune stale polecat branches in a rig.
+
+Finds and deletes polecat branches that are no longer needed:
+  - Branches fully merged to main
+  - Branches whose remote tracking branch was deleted (post-merge cleanup)
+  - Branches for polecats that no longer exist (orphaned)
+
+Uses safe deletion (git branch -d) — only removes fully merged branches.
+Also cleans up remote polecat branches that are fully merged.
+
+Use --dry-run to preview what would be pruned.
+Use --remote to also prune remote polecat branches on origin.
+
+Examples:
+  gt polecat prune greenplace
+  gt polecat prune greenplace --dry-run
+  gt polecat prune greenplace --remote`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPolecatPrune,
 }
 
 func init() {
@@ -320,6 +346,10 @@ func init() {
 	polecatStaleCmd.Flags().BoolVar(&polecatStaleCleanup, "cleanup", false, "Automatically nuke stale polecats")
 	polecatStaleCmd.Flags().BoolVar(&polecatStaleDryRun, "dry-run", false, "Show what would be cleaned without doing it")
 
+	// Prune flags
+	polecatPruneCmd.Flags().BoolVar(&polecatPruneDryRun, "dry-run", false, "Show what would be pruned without doing it")
+	polecatPruneCmd.Flags().BoolVar(&polecatPruneRemote, "remote", false, "Also prune remote polecat branches on origin")
+
 	// Add subcommands
 	polecatCmd.AddCommand(polecatListCmd)
 	polecatCmd.AddCommand(polecatAddCmd)
@@ -331,6 +361,7 @@ func init() {
 	polecatCmd.AddCommand(polecatGCCmd)
 	polecatCmd.AddCommand(polecatNukeCmd)
 	polecatCmd.AddCommand(polecatStaleCmd)
+	polecatCmd.AddCommand(polecatPruneCmd)
 
 	rootCmd.AddCommand(polecatCmd)
 }
@@ -1229,7 +1260,7 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		}
 	}
 
-	// Step 4: Delete branch (if we know it)
+	// Step 4: Delete branch (if we know it) — local and remote
 	if branchToDelete != "" {
 		var repoGit *git.Git
 		bareRepoPath := filepath.Join(r.Path, ".repo.git")
@@ -1241,7 +1272,13 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		if err := repoGit.DeleteBranch(branchToDelete, true); err != nil {
 			fmt.Printf("  %s branch delete: %v\n", style.Dim.Render("○"), err)
 		} else {
-			fmt.Printf("  %s deleted branch %s\n", style.Success.Render("✓"), branchToDelete)
+			fmt.Printf("  %s deleted local branch %s\n", style.Success.Render("✓"), branchToDelete)
+		}
+		// Also delete remote branch if it exists
+		if err := repoGit.DeleteRemoteBranch("origin", branchToDelete); err != nil {
+			fmt.Printf("  %s remote branch delete: %v\n", style.Dim.Render("○"), err)
+		} else {
+			fmt.Printf("  %s deleted remote branch %s\n", style.Success.Render("✓"), branchToDelete)
 		}
 	}
 
@@ -1404,6 +1441,98 @@ func runPolecatStale(cmd *cobra.Command, args []string) error {
 
 			// Clean up any orphaned processes that survived session termination
 			cleanupOrphanedProcesses()
+		}
+	}
+
+	return nil
+}
+
+func runPolecatPrune(cmd *cobra.Command, args []string) error {
+	rigName := args[0]
+
+	_, r, err := getPolecatManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	// Use the mayor/rig clone (or bare repo) for branch operations
+	var repoGit *git.Git
+	bareRepoPath := filepath.Join(r.Path, ".repo.git")
+	if info, statErr := os.Stat(bareRepoPath); statErr == nil && info.IsDir() {
+		repoGit = git.NewGitWithDir(bareRepoPath, "")
+	} else {
+		repoGit = git.NewGit(filepath.Join(r.Path, "mayor", "rig"))
+	}
+
+	fmt.Printf("Pruning stale polecat branches in %s...\n", r.Name)
+
+	// First, prune stale remote-tracking refs so we detect deleted remote branches
+	if err := repoGit.FetchPrune("origin"); err != nil {
+		fmt.Printf("  %s fetch --prune: %v (continuing anyway)\n", style.Warning.Render("⚠"), err)
+	}
+
+	// Prune local branches that are merged or have no remote
+	pruned, err := repoGit.PruneStaleBranches("polecat/*", polecatPruneDryRun)
+	if err != nil {
+		return fmt.Errorf("pruning local branches: %w", err)
+	}
+
+	if len(pruned) == 0 {
+		fmt.Println("No stale local polecat branches found.")
+	} else {
+		verb := "Pruned"
+		if polecatPruneDryRun {
+			verb = "Would prune"
+		}
+		for _, b := range pruned {
+			fmt.Printf("  %s %s (%s)\n", style.Success.Render("✓"), b.Name, b.Reason)
+		}
+		fmt.Printf("\n%s %d local branch(es).\n", verb, len(pruned))
+	}
+
+	// Optionally prune remote polecat branches
+	if polecatPruneRemote {
+		fmt.Println()
+		fmt.Println("Pruning remote polecat branches...")
+
+		defaultBranch := repoGit.RemoteDefaultBranch()
+		remoteRefs, lsErr := repoGit.ListRemoteRefs("origin", "refs/heads/polecat/")
+		if lsErr != nil {
+			return fmt.Errorf("listing remote refs: %w", lsErr)
+		}
+
+		remotePruned := 0
+		for _, ref := range remoteRefs {
+			branch := strings.TrimPrefix(ref, "refs/heads/")
+			// Check if merged to main
+			merged, mergeErr := repoGit.IsAncestor(branch, "origin/"+defaultBranch)
+			if mergeErr != nil {
+				continue
+			}
+			if !merged {
+				continue
+			}
+
+			if polecatPruneDryRun {
+				fmt.Printf("  Would delete remote: %s\n", style.Dim.Render(branch))
+			} else {
+				if delErr := repoGit.DeleteRemoteBranch("origin", branch); delErr != nil {
+					fmt.Printf("  %s remote %s: %v\n", style.Warning.Render("⚠"), branch, delErr)
+				} else {
+					fmt.Printf("  %s deleted remote %s\n", style.Success.Render("✓"), branch)
+				}
+			}
+			remotePruned++
+		}
+
+		if remotePruned == 0 {
+			fmt.Println("No stale remote polecat branches found.")
+		} else {
+			verb := "Pruned"
+			if polecatPruneDryRun {
+				verb = "Would prune"
+			}
+			fmt.Printf("\n%s %d remote branch(es).\n", verb, remotePruned)
 		}
 	}
 
