@@ -18,7 +18,7 @@ import (
 // 3. These files often exist due to a bug where bd's auto-export wrote issue data to routes.jsonl
 //
 // Fix: Delete routes.jsonl unconditionally. The Dolt database is the source
-// of truth for beads data.
+// of truth, and bd will auto-export to issues.jsonl on next run.
 type RigRoutesJSONLCheck struct {
 	FixableCheck
 	// affectedRigs tracks which rigs have routes.jsonl
@@ -100,7 +100,8 @@ func (c *RigRoutesJSONLCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix deletes routes.jsonl files in rig .beads directories.
-// The Dolt database is the source of truth for beads data.
+// The Dolt database is the source of truth - bd will auto-export
+// to issues.jsonl on next run.
 func (c *RigRoutesJSONLCheck) Fix(ctx *CheckContext) error {
 	// Re-run check to populate affectedRigs if needed
 	if len(c.affectedRigs) == 0 {
