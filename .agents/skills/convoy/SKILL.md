@@ -1,5 +1,5 @@
 ---
-name: gastown-convoy
+name: convoy
 description: The definitive guide for working with gastown's convoy system — batch work tracking, event-driven feeding, and dispatch safety guards. Use when writing convoy code, debugging convoy behavior, adding convoy features, testing convoy changes, or answering questions about how convoys work. Triggers on convoy, convoy manager, convoy feeding, dispatch, stranded convoy, feedFirstReady, feedNextReadyIssue, IsSlingableType, isIssueBlocked, CheckConvoysForIssue, gt convoy, gt sling.
 ---
 
@@ -36,9 +36,10 @@ Two feed paths, same safety guards:
 | `internal/convoy/operations.go` | Core feeding logic: `CheckConvoysForIssue`, `feedNextReadyIssue`, `IsSlingableType`, `isIssueBlocked`, `getConvoyTrackedIssues` |
 | `internal/daemon/convoy_manager.go` | `ConvoyManager` goroutines: `runEventPoll`, `runStrandedScan`, `feedFirstReady`, `findStranded` |
 | `internal/cmd/convoy.go` | All `gt convoy` subcommands: create, add, check, status, list, stranded, close, land |
-| `internal/cmd/sling.go` | `gt sling` — auto-creates convoy per bead (batch sling = N convoys, not 1) |
-| `internal/cmd/sling_batch.go` | Batch sling loop — one auto-convoy per bead at lines 124-136 |
-| `internal/cmd/sling_convoy.go` | Auto-convoy creation logic |
+| `internal/cmd/sling.go` | `gt sling` — detects batch vs single sling at line ~242 |
+| `internal/cmd/sling_batch.go` | Batch sling loop — creates one convoy before the per-bead loop, stores ConvoyID on each bead |
+| `internal/cmd/sling_batch_test.go` | 9 tests for `createBatchConvoy`, conflict detection, ConvoyID storage, empty convoy cleanup |
+| `internal/cmd/sling_convoy.go` | `createAutoConvoy` (single), `createBatchConvoy` (batch), `printConvoyConflict` |
 | `internal/daemon/daemon.go` | Daemon startup — creates `ConvoyManager` at line ~237 |
 
 ## Safety guards (the three rules)
@@ -132,6 +133,10 @@ go test ./internal/daemon/... -v -count=1 -run TestPollAllStores
 
 # Convoy commands (stranded scan CLI path)
 go test ./internal/cmd/... -v -count=1 -run TestConvoy
+
+# Batch sling convoy (createBatchConvoy, conflict detection, cleanup)
+go test ./internal/cmd/... -v -count=1 -run TestCreateBatchConvoy
+go test ./internal/cmd/... -v -count=1 -run TestBatchSling
 ```
 
 ### Test patterns
@@ -160,6 +165,20 @@ m.seeded = true
 m.pollAllStores()
 ```
 
+### Batch sling tests (`sling_batch_test.go`)
+
+| Test | What it proves |
+|------|---------------|
+| `TestCreateBatchConvoy_CreatesOneConvoyTrackingAllBeads` | Core contract: exactly 1 `bd create` + N `bd dep add` for N beads |
+| `TestCreateBatchConvoy_OwnedLabel` | `--owned` flag propagates `gt:owned` label |
+| `TestCreateBatchConvoy_MergeStrategyInDescription` | Merge strategy appears in convoy description |
+| `TestCreateBatchConvoy_EmptyBeadIDs` | Returns error when called with no beads |
+| `TestCreateBatchConvoy_TitleIncludesBeadCount` | Title matches "Batch: N beads to \<rig\>" format |
+| `TestCreateBatchConvoy_PartialDepFailureContinues` | One dep add failure doesn't abort other beads |
+| `TestBatchSling_ConvoyIDStoredInBeadFieldUpdates` | ConvoyID and MergeStrategy set in each bead's field updates |
+| `TestBatchSling_ErrorsOnAlreadyTrackedBead` | Pre-loop conflict check detects already-tracked bead |
+| `TestBatchSling_EmptyConvoyCleanupOnAllFailures` | All beads fail -> convoy closed with cleanup reason |
+
 ### Key test invariants
 
 - `feedFirstReady` dispatches exactly 1 issue per call (first success wins)
@@ -185,6 +204,10 @@ These use real beads stores and test the full event→convoy→feed pipeline.
 ```bash
 go test ./internal/convoy/... ./internal/daemon/... ./internal/cmd/... -count=1
 ```
+
+### Deeper test engineering
+
+See `docs/design/convoy/testing.md` for the full test plan covering failure modes, coverage gaps, harness scorecard, and recommended test strategy for the daemon ConvoyManager.
 
 ## Common pitfalls
 
