@@ -17,8 +17,8 @@ import (
 // 2. If a rig has its own routes.jsonl, bd uses it and never finds town routes, breaking cross-rig routing
 // 3. These files often exist due to a bug where bd's auto-export wrote issue data to routes.jsonl
 //
-// Fix: Delete routes.jsonl unconditionally. The SQLite database (beads.db) is the source
-// of truth, and bd will auto-export to issues.jsonl on next run.
+// Fix: Delete routes.jsonl unconditionally. The Dolt database is the source
+// of truth for beads data.
 type RigRoutesJSONLCheck struct {
 	FixableCheck
 	// affectedRigs tracks which rigs have routes.jsonl
@@ -100,8 +100,7 @@ func (c *RigRoutesJSONLCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix deletes routes.jsonl files in rig .beads directories.
-// The SQLite database (beads.db) is the source of truth - bd will auto-export
-// to issues.jsonl on next run.
+// The Dolt database is the source of truth for beads data.
 func (c *RigRoutesJSONLCheck) Fix(ctx *CheckContext) error {
 	// Re-run check to populate affectedRigs if needed
 	if len(c.affectedRigs) == 0 {
