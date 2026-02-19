@@ -43,6 +43,8 @@ Examples:
   gt handoff -c                       # Collect state into handoff message
   gt handoff crew                     # Hand off crew session
   gt handoff mayor                    # Hand off mayor session
+  gt handoff --agent codex            # Hand off to codex runtime
+  gt handoff --agent gemini           # Hand off to gemini runtime
 
 The --collect (-c) flag gathers current state (hooked work, inbox, ready beads,
 in-progress items) and includes it in the handoff mail. This provides context
@@ -63,6 +65,7 @@ var (
 	handoffAuto       bool
 	handoffReason     string
 	handoffNoGitCheck bool
+	handoffAgent      string
 )
 
 func init() {
@@ -75,6 +78,7 @@ func init() {
 	handoffCmd.Flags().BoolVar(&handoffAuto, "auto", false, "Save state only, no session cycling (for PreCompact hooks)")
 	handoffCmd.Flags().StringVar(&handoffReason, "reason", "", "Reason for handoff (e.g., 'compaction', 'idle')")
 	handoffCmd.Flags().BoolVar(&handoffNoGitCheck, "no-git-check", false, "Skip git workspace cleanliness check")
+	handoffCmd.Flags().StringVar(&handoffAgent, "agent", "", "Override runtime agent for the new session (e.g., claude, codex, gemini, or custom alias)")
 	rootCmd.AddCommand(handoffCmd)
 }
 
@@ -197,7 +201,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build the restart command
-	restartCmd, err := buildRestartCommand(targetSession)
+	restartCmd, err := buildRestartCommandWithAgent(targetSession, handoffAgent)
 	if err != nil {
 		return err
 	}
@@ -494,9 +498,16 @@ var claudeEnvVars = []string{
 }
 
 // buildRestartCommand creates the command to run when respawning a session's pane.
-// This needs to be the actual command to execute (e.g., claude), not a session attach command.
-// The command includes a cd to the correct working directory for the role.
+// This is the signature-stable variant used by quota rotation and molecule steps.
+// For explicit agent selection, use buildRestartCommandWithAgent.
 func buildRestartCommand(sessionName string) (string, error) {
+	return buildRestartCommandWithAgent(sessionName, "")
+}
+
+// buildRestartCommandWithAgent creates the respawn command with an optional agent override.
+// When agentOverride is non-empty it takes precedence over the GT_AGENT env var.
+// Returns a non-zero error if agentOverride names an unknown agent.
+func buildRestartCommandWithAgent(sessionName, agentOverride string) (string, error) {
 	// Detect town root from current directory
 	townRoot := detectTownRootFromCwd()
 	if townRoot == "" {
@@ -538,15 +549,24 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// 4. run claude with the startup beacon (triggers immediate context loading)
 	// Use exec to ensure clean process replacement.
 	//
-	// Check if current session is using a non-default agent (GT_AGENT env var).
-	// If so, preserve it across handoff by using the override variant.
-	// Fall back to tmux session environment if process env doesn't have it,
-	// since exec env vars may not propagate through all agent runtimes.
-	currentAgent := os.Getenv("GT_AGENT")
-	if currentAgent == "" {
-		t := tmux.NewTmux()
-		if val, err := t.GetEnvironment(sessionName, "GT_AGENT"); err == nil && val != "" {
-			currentAgent = val
+	// Agent selection priority:
+	// 1. --agent flag (agentOverride) — explicit caller request
+	// 2. GT_AGENT env var / tmux session env — inherited from current session
+	// 3. rig/town default — resolved by config
+	var currentAgent string
+	if agentOverride != "" {
+		// Validate before use — fail fast with a clear error for unknown agents.
+		if _, _, err := config.ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride); err != nil {
+			return "", fmt.Errorf("invalid --agent %q: %w", agentOverride, err)
+		}
+		currentAgent = agentOverride
+	} else {
+		currentAgent = os.Getenv("GT_AGENT")
+		if currentAgent == "" {
+			t := tmux.NewTmux()
+			if val, err := t.GetEnvironment(sessionName, "GT_AGENT"); err == nil && val != "" {
+				currentAgent = val
+			}
 		}
 	}
 	var runtimeCmd string
