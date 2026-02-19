@@ -21,7 +21,7 @@
 | Context cancellation stops both goroutines cleanly | Liveness | High | Yes (lifecycle + stop-timeout tests) |
 | One issue fed per convoy per scan call (no batch overflow) | Safety | Medium | Implicit (single-issue tested, multi-issue not) |
 | feedFirstReady skips issues with unknown prefix/rig | Safety | Medium | No |
-| Scan interval defaults to 2min when 0 or negative | Data | Low | Yes (`TestConvoyManager_ScanInterval_Configurable`) |
+| Scan interval defaults to 30s when 0 or negative | Data | Low | Yes (`TestConvoyManager_ScanInterval_Configurable`) |
 | `Stop()` is idempotent (double-call safe) | Safety | Low | Yes (`TestConvoyManager_DoubleStop_Idempotent`) |
 
 ---
@@ -78,9 +78,9 @@ All tests in `convoy_manager_test.go`, `convoy/store_test.go`, and `daemon_test.
 | `TestManagerLifecycle_StartStop` | Smoke | Start+Stop completes without deadlock |
 | `TestScanStranded_FeedsReadyIssues` | Integration | scan() → findStranded → feedFirstReady → gt sling logged |
 | `TestScanStranded_ClosesEmptyConvoys` | Integration | scan() → findStranded → closeEmptyConvoy → gt convoy check logged |
-| `TestScanStranded_NoStrandedConvoys` | Smoke | Empty stranded list doesn't crash (no side-effect assertion) |
+| `TestScanStranded_NoStrandedConvoys` | Unit | Empty stranded list: asserts sling log absent, check log absent, no convoy activity in logs |
 | `TestScanStranded_DispatchFailure` | Integration | First sling fails → error logged, scan continues to second convoy |
-| `TestConvoyManager_ScanInterval_Configurable` | Unit | 0 → default (2min), custom value preserved |
+| `TestConvoyManager_ScanInterval_Configurable` | Unit | 0 → default (30s), custom value preserved |
 | `TestStrandedConvoyInfo_JSONParsing` | Unit | JSON struct round-trip for stranded convoy |
 | `TestDaemon_StartsManagerAndScanner` | Integration | Daemon-style start+stop with mock bd/gt |
 | `TestDaemon_StopsManagerAndScanner` | Integration | Stop completes within 5s (no hang) |
@@ -103,15 +103,15 @@ Uses patterns from existing daemon tests:
 - Mock scripts log invocations to files for assertion
 - Skip on Windows (`runtime.GOOS == "windows"`)
 
-### Priority 1 — Fill gaps on high-blast-radius invariants
+### Priority 1 — Fill gaps on high-blast-radius invariants (all implemented)
 
-| Test | Type | Gap Addressed |
-|------|------|---------------|
-| `TestProcessLine_NonCloseEvent_VerifyNoSideEffects` | Unit | Non-close events should invoke zero gt/bd subcommands (assert log file absent) |
-| `TestFeedFirstReady_MultipleReadyIssues_DispatchesOnlyFirst` | Unit | 3 ready issues → sling log contains only first issue ID |
-| `TestFeedFirstReady_UnknownPrefix_Skips` | Unit | Issue prefix not in routes.jsonl → sling never called, error logged |
-| `TestFeedFirstReady_UnknownRig_Skips` | Unit | Prefix resolves but rig lookup fails → sling never called |
-| `TestFeedFirstReady_EmptyReadyIssues_NoOp` | Unit | ReadyIssues=[] despite ReadyCount>0 |
+| Test | Type | Gap Addressed | Status |
+|------|------|---------------|--------|
+| `TestEventPoll_SkipsNonCloseEvents_NegativeAssertion` | Unit | Non-close events should invoke zero gt/bd subcommands (assert log file absent) | Done |
+| `TestFeedFirstReady_MultipleReadyIssues_DispatchesOnlyFirst` | Unit | 3 ready issues → sling log contains only first issue ID | Done |
+| `TestFeedFirstReady_UnknownPrefix_Skips` | Unit | Issue prefix not in routes.jsonl → sling never called, error logged | Done |
+| `TestFeedFirstReady_UnknownRig_Skips` | Unit | Prefix resolves but rig lookup fails → sling never called | Done |
+| `TestFeedFirstReady_EmptyReadyIssues_NoOp` | Unit | ReadyIssues=[] despite ReadyCount>0 | Done |
 
 ### Batch sling rig resolution (implemented in sling_batch_test.go)
 
@@ -123,21 +123,22 @@ Uses patterns from existing daemon tests:
 | `TestResolveRigFromBeadIDs_UnmappedPrefix_Errors` | Unit | Done |
 | `TestResolveRigFromBeadIDs_TownLevelPrefix_Errors` | Unit | Done |
 
-### Priority 2 — Error-path coverage
+### Priority 2 — Error-path coverage (all implemented)
 
-| Test | Type | Gap Addressed |
-|------|------|---------------|
-| `TestFindStranded_GtFailure_ReturnsError` | Unit | gt convoy stranded exits non-zero |
-| `TestFindStranded_InvalidJSON_ReturnsError` | Unit | gt returns non-JSON stdout |
-| `TestScan_FindStrandedError_LogsAndContinues` | Unit | scan() doesn't panic on findStranded error |
-| `TestProcessLine_EmptyIssueID` | Unit | Close event with empty issue_id |
+| Test | Type | Gap Addressed | Status |
+|------|------|---------------|--------|
+| `TestFindStranded_GtFailure_ReturnsError` | Unit | gt convoy stranded exits non-zero | Done |
+| `TestFindStranded_InvalidJSON_ReturnsError` | Unit | gt returns non-JSON stdout | Done |
+| `TestScan_FindStrandedError_LogsAndContinues` | Unit | scan() doesn't panic on findStranded error | Done |
+| `TestPollEvents_GetAllEventsSinceError` | Unit | GetAllEventsSince error logged, retried next interval | Done |
 
-### Priority 3 — Lifecycle edge cases
+### Priority 3 — Lifecycle edge cases (all implemented)
 
-| Test | Type | Gap Addressed |
-|------|------|---------------|
-| `TestScan_ContextCancelled_MidIteration` | Unit | Large stranded list + cancel mid-loop |
-| `TestScanStranded_MixedReadyAndEmpty` | Unit | Heterogeneous stranded list routed correctly |
+| Test | Type | Gap Addressed | Status |
+|------|------|---------------|--------|
+| `TestScan_ContextCancelled_MidIteration` | Unit | Large stranded list + cancel mid-loop | Done |
+| `TestScanStranded_MixedReadyAndEmpty` | Unit | Heterogeneous stranded list routed correctly | Done |
+| `TestStart_DoubleCall_Guarded` | Unit | Second Start() is no-op, warning logged | Done |
 
 ---
 
@@ -145,9 +146,9 @@ Uses patterns from existing daemon tests:
 
 | Dimension | Score (1-5) | Key Gap |
 |-----------|-------------|---------|
-| Fixtures & Setup | 3 | `mockBdGtForManagerTest` covers processLine path; scan tests duplicate setup inline |
+| Fixtures & Setup | 4 | `mockGtForScanTest` shared builder covers scan tests; processLine path has own setup |
 | Isolation | 4 | Temp dirs + `t.Setenv(PATH)` is solid; Windows correctly skipped; no shared state |
-| Observability | 3 | Shell-script log files work but are indirect; some tests lack assertions (prove no-panic only) |
+| Observability | 4 | All mock scripts emit call logs; negative tests assert log files absent/empty |
 | Speed | 4 | All convoy-manager tests run quickly; no long-running interval waits in current suite |
 | Determinism | 4 | No real timing dependencies; ticker tests use long intervals to avoid races |
 
@@ -163,9 +164,9 @@ Uses patterns from existing daemon tests:
 
 **Compound Value**: Converts every assertion-free test into a real negative test. Trivial to adopt.
 
-**Exists Today?**: Partially — `mockBdGtForManagerTest` writes `bd-calls.log` and `gt-check.log`, but the scan-path mocks don't.
+**Exists Today?**: Yes — `mockGtForScanTest` writes `sling-calls.log` and `check-calls.log` for all scan tests. Negative tests assert these files are absent.
 
-**Priority**: P1
+**Priority**: Done
 
 ### Shared Mock Builder for Scan Tests
 
@@ -175,13 +176,13 @@ Uses patterns from existing daemon tests:
 
 **Compound Value**: Every new scan test becomes 5 lines of setup instead of 30. Adding new gt subcommands is one change.
 
-**Exists Today?**: No. `mockBdGtForManagerTest` covers only the processLine/CheckConvoysForIssue path.
+**Exists Today?**: Yes — `mockGtForScanTest(t, scanTestOpts)` in `convoy_manager_test.go`. Used by 5+ scan tests. Takes config struct with `strandedJSON`, `slingExitCode`, and more.
 
-**Priority**: P2
+**Priority**: Done
 
 ### Test Clock Injection
 
-**Problem**: ConvoyManager uses `time.Ticker` with 2-minute default. Testing "runs at interval" requires waiting 2 minutes or injecting a clock.
+**Problem**: ConvoyManager uses `time.Ticker` with 30s default. Testing "runs at interval" requires waiting or injecting a clock.
 
 **Proposal**: Add `clock` field to ConvoyManager (interface with `NewTicker(d)`) defaulting to real time. Tests inject fake clock with immediate tick.
 
@@ -195,9 +196,9 @@ Uses patterns from existing daemon tests:
 
 ## Next Actions
 
-1. Convert assertion-free tests to negative tests (add call-log files, assert absent/empty)
-2. Add `TestFeedFirstReady_MultipleReadyIssues_DispatchesOnlyFirst`
-3. Add `TestFeedFirstReady_UnknownPrefix_Skips` and `_UnknownRig_Skips`
-4. Add `TestFindStranded_GtFailure_ReturnsError` and `_InvalidJSON`
-5. Extract `mockGtForScanTest` helper to deduplicate scan test setup
-6. Add `TestScanStranded_MixedReadyAndEmpty`
+All Priority 1-3 test gaps and harness improvements have been implemented
+(see spec.md stories S-11 through S-14). Remaining items:
+
+1. Add test clock injection to ConvoyManager (P3 -- useful but not blocking)
+2. Add `TestProcessLine_EmptyIssueID` (close event with empty issue_id)
+3. Expand integration test coverage for multi-rig event polling

@@ -41,13 +41,13 @@ bd dep add sh-task-2 sh-task-1 --type=blocks
 gt sling sh-task-1 sh-task-2 sh-task-3 gastown
 ```
 
-What happens today:
-- Batch sling creates 3 separate auto-convoys (one per task)
-- Each task gets its own `"Work: <title>"` convoy
-- No convoy groups the 3 tasks together
-- Tasks sling in parallel (all at once), not sequentially
-- `blocks` deps are ignored by the feeder — sh-task-2 gets slung even
-  though sh-task-1 hasn't finished
+What happens today (with PR [#1759](https://github.com/steveyegge/gastown/pull/1759)):
+- Batch sling creates **one convoy** tracking all 3 tasks
+- Rig is auto-resolved from bead prefixes (explicit rig is deprecated)
+- Tasks sling sequentially with 2s delays, sharing 1 convoy
+- `blocks` deps are respected by the daemon feeder — sh-task-2 won't
+  be fed by the daemon until sh-task-1 closes (but initial dispatch
+  sends all tasks regardless of deps)
 
 What people expect:
 - Tasks dispatch in dependency order
@@ -64,9 +64,10 @@ What people expect:
 gt sling <task1> <task2> <task3> gastown
 ```
 
-Same outcome as Workflow A: 3 separate auto-convoys, blocks deps ignored.
-The epic and sub-epic structure exists in beads but has no effect on
-dispatch or completion tracking.
+Same outcome as Workflow A: one shared convoy, blocks deps respected
+by the daemon feeder. The epic and sub-epic structure exists in beads
+and affects daemon-driven feeding (epics are filtered by `IsSlingableType`,
+blocked tasks wait for their blockers to close).
 
 ### Workflow C: Manual convoy creation
 
@@ -192,22 +193,24 @@ PR [#1759](https://github.com/steveyegge/gastown/pull/1759) (awaiting review).
 - Type filtering (prevents slinging epics)
 - Blocks dep checking (prevents slinging blocked tasks)
 - Iteration past dispatch failures (prevents stuck convoys)
+- Batch sling single-convoy fix (one convoy per batch, not N)
+- Rig auto-resolution from bead prefixes (deprecates explicit rig arg)
+- ConvoyID/MergeStrategy storage on beads for `gt done` fast path
+- Skills infrastructure (`.agents/skills/` convention with symlinks)
 
 **What it fixes for Workflow A:**
-- `gt sling <task1> <task2> <task3>` still creates 3 auto-convoys, but
-  each convoy now correctly checks blocks deps before dispatch. A blocked
-  task won't be slung until its blocker closes. BUT: each convoy only
-  tracks 1 task, so the blocks check only matters if the daemon's
-  stranded scan or event poll somehow reaches across convoys (it doesn't —
-  the blocks check runs on the tracked issue itself, which queries the
-  issue's deps in the beads store, so it works regardless of convoy
-  boundaries).
+- `gt sling <task1> <task2> <task3>` creates **one convoy** tracking all
+  tasks. Rig is auto-resolved from bead prefixes.
+- Blocks deps are respected by the daemon feeder: a blocked task won't
+  be fed until its blocker closes.
 - Type filtering prevents accidental epic slinging.
+- ConvoyID and merge strategy are stored on each bead, enabling `gt done`
+  fast-path convoy lookup.
 
 **What it does NOT fix for Workflow A:**
-- Batch sling still creates N separate auto-convoys. No group convoy.
-- No convoy-level dependency ordering (each convoy is independent).
-- Tasks still sling in parallel if there's rig capacity.
+- Initial dispatch still sends all tasks regardless of deps (only daemon
+  feeding respects blocks).
+- No convoy-level wave computation (see Milestone 2).
 
 **What it fixes for Workflow B:**
 - Same as Workflow A. design-to-beads creates blocks deps, which are now
@@ -219,7 +222,8 @@ PR [#1759](https://github.com/steveyegge/gastown/pull/1759) (awaiting review).
   now handles everything the witness did (and more).
 
 **Remaining action items:**
-1. Get PR [#1759](https://github.com/steveyegge/gastown/pull/1759) reviewed and merged
+1. Fix doc inaccuracies identified in audit (this pass)
+2. Get PR [#1759](https://github.com/steveyegge/gastown/pull/1759) reviewed and merged
 
 ### Milestone 1: Pipeline reliability (independent of convoys)
 

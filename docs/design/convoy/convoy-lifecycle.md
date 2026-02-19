@@ -86,7 +86,7 @@ gt sling sh-task-1 gastown
 
 Result: 1 bead, 1 convoy, 1 polecat.
 
-### Batch sling (3+ bead args, rig auto-resolved)
+### Batch sling (3+ args, rig auto-resolved)
 
 ```
 gt sling gt-task-1 gt-task-2 gt-task-3
@@ -142,11 +142,12 @@ sling **errors** before spawning any polecats. It prints:
 
 ### Initial dispatch vs daemon feeding
 
-- **Initial dispatch is parallel.** All beads get polecats simultaneously.
-  Even if `gt-task-2` has a `blocks` dep on `gt-task-1`, both get slung
-  at the same time. The `isIssueBlocked` check only applies to
-  daemon-driven convoy feeding (after a close event), not to the initial
-  batch sling dispatch.
+- **Initial dispatch is parallel.** All beads get polecats sequentially
+  with 2-second delays between spawns, but they all dispatch in the same
+  batch sling call regardless of deps. Even if `gt-task-2` has a `blocks`
+  dep on `gt-task-1`, both get slung. The `isIssueBlocked` check only
+  applies to daemon-driven convoy feeding (after a close event), not to
+  the initial batch sling dispatch.
 - **Subsequent feeding respects deps.** When a task closes, the daemon's
   event-driven feeder checks `IsSlingableType` and `isIssueBlocked`
   before dispatching the next ready issue from the shared convoy.

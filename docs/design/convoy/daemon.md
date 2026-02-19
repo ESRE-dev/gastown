@@ -21,7 +21,7 @@ flowchart TB
     eventDriven --> concurrent
 
     subgraph periodicScan [Periodic Scan]
-        scanTick["Ticker 2min"] --> stranded["gt convoy stranded --json"]
+        scanTick["Ticker 30s"] --> stranded["gt convoy stranded --json"]
         stranded --> each["For each convoy"]
         each --> ready{"ready_count > 0?"}
         ready -->|Yes| sling["gt sling issueID rig --no-boot"]
@@ -36,11 +36,11 @@ flowchart TB
 Runs as two goroutines inside `gt daemon`:
 
 - **Event-driven**: Polls beads SDK `GetAllEventsSince` every 5 seconds, detects
-  issue close events, and invokes `convoy.CheckConvoysForIssue` (shared with
-  Witness/Refinery) to check completion and feed the next ready issue. On poll
-  errors it logs and retries on the next tick.
+  issue close events, and invokes `convoy.CheckConvoysForIssue` to check
+  completion and feed the next ready issue. On poll errors it logs and retries
+  on the next tick.
 
-- **Periodic scan**: Every 2 min, runs `gt convoy stranded --json`. For convoys with
+- **Periodic scan**: Every 30s, runs `gt convoy stranded --json`. For convoys with
   ready work, dispatches first issue via `gt sling`. For empty convoys, runs
   `gt convoy check` to auto-close. Catches stranded convoys (e.g. after crash)
   that the event poll path missed.

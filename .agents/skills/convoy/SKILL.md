@@ -113,7 +113,8 @@ gt convoy land hq-cv-abc         # cleanup worktrees + close
 ### Interactive TUI
 
 ```bash
-gt convoy                        # opens interactive convoy browser
+gt convoy -i                     # opens interactive convoy browser
+gt convoy --interactive          # long form
 ```
 
 ## Batch sling behavior
