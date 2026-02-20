@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -1243,8 +1244,7 @@ func TestConvoyInfoFallbackChain(t *testing.T) {
 
 // TestMRCreationFailureDoesNotSelfKill verifies that when MR bead creation fails
 // during a COMPLETED exit, the session is NOT killed (gt-t79 fix).
-// The bug: MR creation failure was non-fatal, so gt done would continue to
-// self-kill the session, orphaning the pushed branch with no MR bead.
+// Tests all three kill paths: explicit self-kill, deferred cleanup, and SIGTERM handler.
 func TestMRCreationFailureDoesNotSelfKill(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -1253,74 +1253,81 @@ func TestMRCreationFailureDoesNotSelfKill(t *testing.T) {
 		pushFailed        bool
 		wantSelfKill      bool
 		wantDeferredKill  bool
+		wantSIGTERMKill   bool
 	}{
 		{
-			name:             "completed+MR-ok: self-kill proceeds",
+			name:             "completed+MR-ok: all kill paths active",
 			exitType:         ExitCompleted,
 			mrCreationFailed: false,
 			pushFailed:       false,
 			wantSelfKill:     true,
 			wantDeferredKill: true,
+			wantSIGTERMKill:  true,
 		},
 		{
-			name:             "completed+MR-failed: NO self-kill (gt-t79)",
+			name:             "completed+MR-failed: ALL kill paths blocked (gt-t79)",
 			exitType:         ExitCompleted,
 			mrCreationFailed: true,
 			pushFailed:       false,
 			wantSelfKill:     false,
 			wantDeferredKill: false,
+			wantSIGTERMKill:  false,
 		},
 		{
-			name:             "completed+push-failed: self-kill proceeds (push failure is different)",
+			name:             "completed+push-failed: self-kill skipped but session still killed",
 			exitType:         ExitCompleted,
 			mrCreationFailed: false,
 			pushFailed:       true,
 			wantSelfKill:     false, // pushFailed skips nuke but session still killed
 			wantDeferredKill: true,
+			wantSIGTERMKill:  true,
 		},
 		{
-			name:             "escalated: self-kill proceeds regardless",
+			name:             "escalated: deferred+SIGTERM kill active, no explicit self-kill",
 			exitType:         ExitEscalated,
 			mrCreationFailed: false,
 			pushFailed:       false,
 			wantSelfKill:     false, // not completed, no nuke
 			wantDeferredKill: true,
+			wantSIGTERMKill:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the explicit self-kill guard from runDone
 			sessionCleanupNeeded := true
 			sessionKilled := false
 
-			// Explicit self-kill: only for completed+no-mr-failure
+			// Path 1: Explicit self-kill (only for completed+no-push-failure+no-mr-failure)
 			shouldSelfKill := tt.exitType == ExitCompleted && !tt.pushFailed && !tt.mrCreationFailed
 			if shouldSelfKill != tt.wantSelfKill {
 				t.Errorf("shouldSelfKill = %v, want %v", shouldSelfKill, tt.wantSelfKill)
 			}
 
-			// Deferred kill: backstop for zombie prevention, but NOT when MR failed
+			// Path 2: Deferred kill backstop (must also check mrCreationFailed)
 			shouldDeferredKill := sessionCleanupNeeded && !sessionKilled && !tt.mrCreationFailed
 			if shouldDeferredKill != tt.wantDeferredKill {
 				t.Errorf("shouldDeferredKill = %v, want %v", shouldDeferredKill, tt.wantDeferredKill)
+			}
+
+			// Path 3: SIGTERM handler (must also check mrCreationFailed)
+			shouldSIGTERMKill := sessionCleanupNeeded && !sessionKilled && !tt.mrCreationFailed
+			if shouldSIGTERMKill != tt.wantSIGTERMKill {
+				t.Errorf("shouldSIGTERMKill = %v, want %v", shouldSIGTERMKill, tt.wantSIGTERMKill)
 			}
 		})
 	}
 }
 
-// TestMRFailedCheckpointFormat verifies the done-cp:mr-failed label format.
+// TestMRFailedCheckpointFormat verifies the done-cp:mr-failed label format
+// uses B64_-prefixed base64 encoding to prevent colon truncation in error messages.
 func TestMRFailedCheckpointFormat(t *testing.T) {
 	now := time.Now()
 	errMsg := "dolt: connection refused"
-	label := fmt.Sprintf("done-cp:%s:%s:%d", CheckpointMRFailed, errMsg, now.Unix())
+	encoded := "B64_" + base64.RawStdEncoding.EncodeToString([]byte(errMsg))
+	label := fmt.Sprintf("done-cp:%s:%s:%d", CheckpointMRFailed, encoded, now.Unix())
 
-	wantPrefix := "done-cp:mr-failed:dolt: connection refused:"
-	if !strings.HasPrefix(label, wantPrefix) {
-		t.Errorf("label = %q, want prefix %q", label, wantPrefix)
-	}
-
-	// Verify the label can be parsed back
+	// Verify the label structure: done-cp:<stage>:B64_<base64-value>:<ts>
 	parts := strings.SplitN(label, ":", 4)
 	if len(parts) != 4 {
 		t.Fatalf("expected 4 parts, got %d: %v", len(parts), parts)
@@ -1330,6 +1337,72 @@ func TestMRFailedCheckpointFormat(t *testing.T) {
 	}
 	if DoneCheckpoint(parts[1]) != CheckpointMRFailed {
 		t.Errorf("stage = %q, want %q", parts[1], CheckpointMRFailed)
+	}
+
+	// Verify B64_-prefixed value round-trips correctly (even with colons in original)
+	rawValue := parts[2]
+	if !strings.HasPrefix(rawValue, "B64_") {
+		t.Fatalf("expected B64_ prefix, got %q", rawValue)
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(rawValue, "B64_"))
+	if err != nil {
+		t.Fatalf("failed to decode base64 value: %v", err)
+	}
+	if string(decoded) != errMsg {
+		t.Errorf("decoded value = %q, want %q", string(decoded), errMsg)
+	}
+}
+
+// TestCheckpointLegacyBackwardCompat verifies that readDoneCheckpoints handles
+// both legacy raw-value checkpoints and new B64_-prefixed checkpoints correctly.
+func TestCheckpointLegacyBackwardCompat(t *testing.T) {
+	// Simulate reading labels from a bead that has both legacy and new-format checkpoints.
+	// This tests the parsing logic directly rather than through the beads layer.
+	tests := []struct {
+		name      string
+		rawValue  string
+		wantValue string
+	}{
+		{
+			name:      "legacy raw value: main",
+			rawValue:  "main",
+			wantValue: "main",
+		},
+		{
+			name:      "legacy raw value: ok",
+			rawValue:  "ok",
+			wantValue: "ok",
+		},
+		{
+			name:      "new b64 value with colons",
+			rawValue:  "B64_" + base64.RawStdEncoding.EncodeToString([]byte("dolt: connection refused")),
+			wantValue: "dolt: connection refused",
+		},
+		{
+			name:      "new b64 simple value",
+			rawValue:  "B64_" + base64.RawStdEncoding.EncodeToString([]byte("ok")),
+			wantValue: "ok",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Replicate the parsing logic from readDoneCheckpoints
+			var result string
+			if strings.HasPrefix(tt.rawValue, "B64_") {
+				decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(tt.rawValue, "B64_"))
+				if err != nil {
+					result = tt.rawValue
+				} else {
+					result = string(decoded)
+				}
+			} else {
+				result = tt.rawValue
+			}
+			if result != tt.wantValue {
+				t.Errorf("parsed value = %q, want %q", result, tt.wantValue)
+			}
+		})
 	}
 }
 

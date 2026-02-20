@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -374,6 +375,14 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	var pushFailed bool
 	var doneErrors []string
 	var convoyInfo *ConvoyInfo // Populated if issue is tracked by a convoy
+
+	// Pre-declare variables used between notifyWitness and afterAgentStateUpdate
+	// so that goto notifyWitness / goto afterAgentStateUpdate don't jump over declarations.
+	var mergeFailed bool
+	var townRouter *mail.Router
+	var bodyLines []string
+	var doneNotification *mail.Message
+	var witnessAddr string
 	if exitType == ExitCompleted {
 		if branch == defaultBranch || branch == "master" {
 			return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
@@ -861,10 +870,17 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 notifyWitness:
+	// gt-t79: When MR creation failed, skip Dolt merge and agent state update.
+	// The polecat's Dolt branch must stay alive so BD_BRANCH remains valid,
+	// checkpoints are readable, and MR bead creation can succeed on retry
+	// via gt done --resume.
+	if mrCreationFailed {
+		goto afterAgentStateUpdate
+	}
+
 	// Branch-per-polecat: merge polecat's Dolt branch to main.
 	// This makes all beads changes (MR bead, issue updates) visible on main
 	// before the refinery or witness try to read them.
-	var mergeFailed bool
 
 	// Resume: skip Dolt merge if already completed (gt-aufru checkpoint)
 	if checkpoints[CheckpointDoltMerged] != "" {
@@ -902,12 +918,12 @@ afterDoltMerge:
 
 	// Notify Witness about completion
 	// Use town-level beads for cross-agent mail
-	townRouter := mail.NewRouter(townRoot)
+	townRouter = mail.NewRouter(townRoot)
 	defer townRouter.WaitPendingNotifications()
-	witnessAddr := fmt.Sprintf("%s/witness", rigName)
+	witnessAddr = fmt.Sprintf("%s/witness", rigName)
 
 	// Build notification body
-	var bodyLines []string
+	bodyLines = nil
 	bodyLines = append(bodyLines, fmt.Sprintf("Exit: %s", exitType))
 	if issueID != "" {
 		bodyLines = append(bodyLines, fmt.Sprintf("Issue: %s", issueID))
@@ -930,7 +946,7 @@ afterDoltMerge:
 		bodyLines = append(bodyLines, fmt.Sprintf("Errors: %s", strings.Join(doneErrors, "; ")))
 	}
 
-	doneNotification := &mail.Message{
+	doneNotification = &mail.Message{
 		To:      witnessAddr,
 		From:    sender,
 		Subject: fmt.Sprintf("POLECAT_DONE %s", polecatName),
@@ -978,6 +994,7 @@ afterDoltMerge:
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
 
+afterAgentStateUpdate:
 	// Self-cleaning: Nuke our own sandbox and session (if we're a polecat)
 	// This is the self-cleaning model - polecats clean up after themselves
 	// "done means gone" - both worktree and session are terminated
@@ -986,6 +1003,13 @@ afterDoltMerge:
 		// gt-t79: Do NOT self-kill if MR creation failed. The session must stay
 		// alive so the agent (or witness) can retry with gt done --resume.
 		if mrCreationFailed {
+			// gt-t79: Clear done-intent so Witness patrol doesn't classify this
+			// session as "stuck in done" and nuke it. The session must survive
+			// for retry via gt done --resume.
+			if agentBeadID != "" {
+				cpBd := beads.New(beads.ResolveBeadsDir(cwd))
+				clearDoneIntentLabel(cpBd, agentBeadID)
+			}
 			fmt.Printf("\n%s MR creation failed — session preserved for retry (gt-t79)\n", style.Bold.Render("⚠"))
 			fmt.Printf("  Branch is pushed to origin. Retry with: gt done --resume\n")
 			fmt.Printf("  Or escalate: gt escalate \"MR creation failed\" -s HIGH\n")
@@ -1099,13 +1123,17 @@ const (
 )
 
 // writeDoneCheckpoint writes a checkpoint label on the agent bead.
-// Format: done-cp:<stage>:<value>:<unix-ts>
+// Format: done-cp:<stage>:B64_<base64-value>:<unix-ts>
+// The value is B64_-prefixed base64-encoded to avoid truncation when it
+// contains colons (common in error messages like "dolt: connection refused").
+// Legacy checkpoints (without B64_ prefix) are still readable.
 // Non-fatal: if this fails, gt done continues without the checkpoint.
 func writeDoneCheckpoint(bd *beads.Beads, agentBeadID string, cp DoneCheckpoint, value string) {
 	if agentBeadID == "" {
 		return
 	}
-	label := fmt.Sprintf("done-cp:%s:%s:%d", cp, value, time.Now().Unix())
+	encoded := "B64_" + base64.RawStdEncoding.EncodeToString([]byte(value))
+	label := fmt.Sprintf("done-cp:%s:%s:%d", cp, encoded, time.Now().Unix())
 	if err := bd.Update(agentBeadID, beads.UpdateOptions{
 		AddLabels: []string{label},
 	}); err != nil {
@@ -1114,7 +1142,7 @@ func writeDoneCheckpoint(bd *beads.Beads, agentBeadID string, cp DoneCheckpoint,
 }
 
 // readDoneCheckpoints reads all done-cp:* labels from the agent bead.
-// Returns a map of checkpoint stage -> value. Empty map if none found.
+// Returns a map of checkpoint stage -> decoded value. Empty map if none found.
 func readDoneCheckpoints(bd *beads.Beads, agentBeadID string) map[DoneCheckpoint]string {
 	checkpoints := make(map[DoneCheckpoint]string)
 	if agentBeadID == "" {
@@ -1126,12 +1154,23 @@ func readDoneCheckpoints(bd *beads.Beads, agentBeadID string) map[DoneCheckpoint
 	}
 	for _, label := range issue.Labels {
 		if strings.HasPrefix(label, "done-cp:") {
-			// Format: done-cp:<stage>:<value>:<ts>
+			// Format: done-cp:<stage>:<base64-value>:<ts>
 			parts := strings.SplitN(label, ":", 4)
 			if len(parts) >= 3 {
 				stage := DoneCheckpoint(parts[1])
-				value := parts[2]
-				checkpoints[stage] = value
+				rawValue := parts[2]
+				// Values with "B64_" prefix are base64-encoded (new format).
+				// Values without the prefix are legacy raw strings.
+				if strings.HasPrefix(rawValue, "B64_") {
+					decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(rawValue, "B64_"))
+					if err != nil {
+						checkpoints[stage] = rawValue // keep raw on decode error
+					} else {
+						checkpoints[stage] = string(decoded)
+					}
+				} else {
+					checkpoints[stage] = rawValue // legacy raw value
+				}
 			}
 		}
 	}
