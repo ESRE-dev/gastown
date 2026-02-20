@@ -132,7 +132,7 @@ func (m *Manager) Start(agentOverride string) error {
 	// FIX: GT_PROCESS_NAMES must be set for correct IsAgentAlive detection
 	// when using non-Claude agents (opencode, codex, etc.)
 	// See: https://github.com/steveyegge/gastown/issues/1808
-	processNames := config.GetProcessNames(runtimeConfig.ResolvedAgent)
+	processNames := config.ResolveProcessNames(runtimeConfig.ResolvedAgent, runtimeConfig.Command)
 	envVars["GT_PROCESS_NAMES"] = strings.Join(processNames, ",")
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
