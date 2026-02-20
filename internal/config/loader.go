@@ -1771,6 +1771,11 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if rc.ResolvedAgent != "" {
 		resolvedEnv["GT_AGENT"] = rc.ResolvedAgent
 	}
+	// Set GT_PROCESS_NAMES for accurate liveness detection. Custom agents may
+	// shadow built-in preset names (e.g., custom "codex" running "opencode"),
+	// so we resolve process names from both agent name and actual command.
+	processNames := ResolveProcessNames(rc.ResolvedAgent, rc.Command)
+	resolvedEnv["GT_PROCESS_NAMES"] = strings.Join(processNames, ",")
 	// Merge agent-specific env vars (e.g., OPENCODE_PERMISSION for yolo mode)
 	for k, v := range rc.Env {
 		resolvedEnv[k] = v
@@ -1937,11 +1942,16 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	}
 	// Record agent name so IsAgentAlive can detect the running process.
 	// Explicit override takes priority; fall back to resolved agent name.
+	agentForProcess := rc.ResolvedAgent
 	if agentOverride != "" {
 		resolvedEnv["GT_AGENT"] = agentOverride
+		agentForProcess = agentOverride
 	} else if rc.ResolvedAgent != "" {
 		resolvedEnv["GT_AGENT"] = rc.ResolvedAgent
 	}
+	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.
+	processNamesOverride := ResolveProcessNames(agentForProcess, rc.Command)
+	resolvedEnv["GT_PROCESS_NAMES"] = strings.Join(processNamesOverride, ",")
 	// Merge agent-specific env vars (e.g., OPENCODE_PERMISSION for yolo mode)
 	for k, v := range rc.Env {
 		resolvedEnv[k] = v
