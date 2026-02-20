@@ -3,6 +3,7 @@ package beads
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
 // Common errors
@@ -233,7 +235,8 @@ func (b *Beads) Init(prefix string) error {
 }
 
 // run executes a bd command and returns stdout.
-func (b *Beads) run(args ...string) ([]byte, error) {
+func (b *Beads) run(args ...string) (_ []byte, retErr error) {
+	defer func() { telemetry.RecordBDCall(context.Background(), args, retErr) }()
 	// Use --allow-stale to prevent failures when db is out of sync with JSONL
 	// (e.g., after daemon is killed during shutdown before syncing).
 	fullArgs := append([]string{"--allow-stale"}, args...)
@@ -292,7 +295,8 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 // This is needed for slot operations that reference beads with different prefixes
 // (e.g., setting an hq-* hook bead on a gt-* agent bead).
 // See: sling_helpers.go verifyBeadExists/hookBeadWithRetry for the same pattern.
-func (b *Beads) runWithRouting(args ...string) ([]byte, error) { //nolint:unparam // mirrors run() signature for consistency
+func (b *Beads) runWithRouting(args ...string) (_ []byte, retErr error) { //nolint:unparam // mirrors run() signature for consistency
+	defer func() { telemetry.RecordBDCall(context.Background(), args, retErr) }()
 	fullArgs := append([]string{"--allow-stale"}, args...)
 
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool

@@ -2,16 +2,19 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/ui"
 	"github.com/steveyegge/gastown/internal/version"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -226,6 +229,19 @@ func checkStaleBinaryWarning() {
 // Execute runs the root command and returns an exit code.
 // The caller (main) should call os.Exit with this code.
 func Execute() int {
+	ctx := context.Background()
+	provider, err := telemetry.Init(ctx, "gastown", Version)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: telemetry init: %v\n", err)
+	}
+	if provider != nil {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = provider.Shutdown(shutdownCtx)
+		}()
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		// Check for silent exit (scripting commands that signal status via exit code)
 		if code, ok := IsSilentExit(err); ok {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -89,7 +91,8 @@ func init() {
 // New code should use RoleInfo directly.
 type RoleContext = RoleInfo
 
-func runPrime(cmd *cobra.Command, args []string) error {
+func runPrime(cmd *cobra.Command, args []string) (retErr error) {
+	defer func() { telemetry.RecordPrime(context.Background(), os.Getenv("GT_ROLE"), primeHookMode, retErr) }()
 	if err := validatePrimeFlags(); err != nil {
 		return err
 	}

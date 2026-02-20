@@ -10,12 +10,15 @@
 //
 // Telemetry is best-effort: initialization errors are returned but do not
 // affect normal gt operation — callers should log and continue.
+//
+// Init is idempotent: multiple calls return the same provider.
 package telemetry
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -45,14 +48,31 @@ const (
 	ExportInterval = 30 * time.Second
 )
 
+// package-level state for idempotent Init.
+var (
+	initMu         sync.Mutex
+	initDone       bool
+	globalProvider *Provider
+)
+
 // Provider wraps OTel SDK providers and their shutdown functions.
 type Provider struct {
-	shutdowns []func(context.Context) error
+	shutdowns    []func(context.Context) error
+	shutdownMu   sync.Mutex
+	shutdownDone bool
 }
 
 // Shutdown flushes all pending data and stops the OTel providers.
-// Should be called with a deadline context (e.g. 5s timeout) on daemon exit.
+// Idempotent: safe to call more than once.
+// Should be called with a deadline context (e.g. 5s timeout) on process exit.
 func (p *Provider) Shutdown(ctx context.Context) error {
+	p.shutdownMu.Lock()
+	defer p.shutdownMu.Unlock()
+	if p.shutdownDone {
+		return nil
+	}
+	p.shutdownDone = true
+
 	var errs []error
 	for _, fn := range p.shutdowns {
 		if err := fn(ctx); err != nil {
@@ -67,6 +87,9 @@ func (p *Provider) Shutdown(ctx context.Context) error {
 
 // Init initializes OTel metric and log providers.
 //
+// Idempotent: subsequent calls with the same or different arguments return the
+// provider created on the first call.
+//
 // Returns (nil, nil) if neither GT_OTEL_METRICS_URL nor GT_OTEL_LOGS_URL is set,
 // so that telemetry is strictly opt-in. Set either variable to activate.
 //
@@ -75,11 +98,19 @@ func (p *Provider) Shutdown(ctx context.Context) error {
 //	metrics → http://localhost:8428/opentelemetry/api/v1/push
 //	logs    → http://localhost:9428/insert/opentelemetry/v1/logs
 func Init(ctx context.Context, serviceName, serviceVersion string) (*Provider, error) {
+	initMu.Lock()
+	defer initMu.Unlock()
+	if initDone {
+		return globalProvider, nil
+	}
+
 	metricsURL := os.Getenv(EnvMetricsURL)
 	logsURL := os.Getenv(EnvLogsURL)
 
 	// Both unset → telemetry disabled, not an error.
 	if metricsURL == "" && logsURL == "" {
+		initDone = true
+		globalProvider = nil
 		return nil, nil
 	}
 	if metricsURL == "" {
@@ -120,6 +151,7 @@ func Init(ctx context.Context, serviceName, serviceVersion string) (*Provider, e
 	)
 	otel.SetMeterProvider(mp)
 	p.shutdowns = append(p.shutdowns, mp.Shutdown)
+	initInstruments()
 
 	// Logs → VictoriaLogs
 	logExp, err := otlploghttp.New(ctx,
@@ -135,5 +167,7 @@ func Init(ctx context.Context, serviceName, serviceVersion string) (*Provider, e
 	global.SetLoggerProvider(lp)
 	p.shutdowns = append(p.shutdowns, lp.Shutdown)
 
+	initDone = true
+	globalProvider = p
 	return p, nil
 }
