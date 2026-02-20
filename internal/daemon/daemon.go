@@ -31,6 +31,7 @@ import (
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/wisp"
@@ -75,6 +76,11 @@ type Daemon struct {
 
 	// Restart tracking with exponential backoff to prevent crash loops
 	restartTracker *RestartTracker
+
+	// telemetry exports metrics and logs to VictoriaMetrics / VictoriaLogs.
+	// Nil when telemetry is disabled (GT_OTEL_METRICS_URL / GT_OTEL_LOGS_URL not set).
+	otelProvider *telemetry.Provider
+	metrics      *daemonMetrics
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -149,6 +155,24 @@ func New(config *Config) (*Daemon, error) {
 		logger.Printf("Warning: failed to load restart state: %v", err)
 	}
 
+	// Initialize OpenTelemetry (best-effort — telemetry failure never blocks startup).
+	// Activate by setting GT_OTEL_METRICS_URL and/or GT_OTEL_LOGS_URL.
+	otelProvider, otelErr := telemetry.Init(ctx, "gastown-daemon", "")
+	if otelErr != nil {
+		logger.Printf("Warning: telemetry init failed: %v", otelErr)
+	}
+	var dm *daemonMetrics
+	if otelProvider != nil {
+		dm, err = newDaemonMetrics()
+		if err != nil {
+			logger.Printf("Warning: failed to register daemon metrics: %v", err)
+			dm = nil
+		} else {
+			logger.Printf("Telemetry active (metrics → %s, logs → %s)",
+				telemetry.DefaultMetricsURL, telemetry.DefaultLogsURL)
+		}
+	}
+
 	return &Daemon{
 		config:         config,
 		patrolConfig:   patrolConfig,
@@ -160,6 +184,8 @@ func New(config *Config) (*Daemon, error) {
 		gtPath:         gtPath,
 		bdPath:         bdPath,
 		restartTracker: restartTracker,
+		otelProvider:   otelProvider,
+		metrics:        dm,
 	}, nil
 }
 
@@ -359,6 +385,7 @@ func (d *Daemon) heartbeat(state *State) {
 		return
 	}
 
+	d.metrics.recordHeartbeat(d.ctx)
 	d.logger.Println("Heartbeat starting (recovery-focused)")
 
 	// 0. Ensure Dolt server is running (if configured)
@@ -464,6 +491,18 @@ func (d *Daemon) ensureDoltServerRunning() {
 
 	if err := d.doltServer.EnsureRunning(); err != nil {
 		d.logger.Printf("Error ensuring Dolt server is running: %v", err)
+	}
+
+	// Update OTel gauges with the latest Dolt health snapshot.
+	if d.metrics != nil {
+		h := doltserver.GetHealthMetrics(d.config.TownRoot)
+		d.metrics.updateDoltHealth(
+			int64(h.Connections),
+			int64(h.MaxConnections),
+			float64(h.QueryLatency.Milliseconds()),
+			h.DiskUsageBytes,
+			h.Healthy,
+		)
 	}
 }
 
@@ -1125,6 +1164,15 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 			d.logger.Printf("Warning: failed to stop Dolt server: %v", err)
 		} else {
 			d.logger.Println("Dolt server stopped")
+		}
+	}
+
+	// Flush and stop OTel providers (5s deadline to avoid blocking shutdown).
+	if d.otelProvider != nil {
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := d.otelProvider.Shutdown(shutCtx); err != nil {
+			d.logger.Printf("Warning: telemetry shutdown: %v", err)
 		}
 	}
 
