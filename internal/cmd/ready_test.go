@@ -148,3 +148,106 @@ func TestFilterFormulaScaffolds_DotInNonScaffold(t *testing.T) {
 		t.Errorf("got %d issues, want 2 (non-formula dots should not filter)", len(filtered))
 	}
 }
+
+func TestFilterMoleculeBeads(t *testing.T) {
+	issues := []*beads.Issue{
+		{ID: "hq-cv-rg22g", Title: "Real dispatchable work", Type: "task"},
+		{ID: "hq-cv-ulme2", Title: "Another real task", Type: "bug"},
+		{ID: "asm-mol-4lj", Title: "mol-witness-patrol", Type: "epic"},
+		{ID: "asm-mol-fje", Title: "Check if active swarm is complete", Type: "task"},
+		// Note: wisp filtering is handled by filterWisps, not filterMoleculeBeads.
+		// hq-wisp-93j should pass through filterMoleculeBeads unchanged.
+		{ID: "hq-wisp-93j", Title: "Load context and verify assignment", Type: "task"},
+		{ID: "hq-f29k", Title: "Compaction Report 2026-02-20", Type: "event"},
+	}
+
+	filtered := filterMoleculeBeads(issues)
+
+	// filterMoleculeBeads removes: mol instances (-mol-), mol steps (-mol-), and events.
+	// It does NOT remove wisps - that's filterWisps's responsibility.
+	// So hq-cv-rg22g, hq-cv-ulme2, and hq-wisp-93j should remain.
+	if len(filtered) != 3 {
+		t.Errorf("got %d filtered issues, want 3", len(filtered))
+		for _, issue := range filtered {
+			t.Logf("  remaining: %s (%s)", issue.ID, issue.Title)
+		}
+	}
+
+	expectedIDs := map[string]bool{
+		"hq-cv-rg22g": true,
+		"hq-cv-ulme2": true,
+		"hq-wisp-93j": true,
+	}
+	for _, issue := range filtered {
+		if !expectedIDs[issue.ID] {
+			t.Errorf("unexpected issue in filtered result: %s (%s)", issue.ID, issue.Title)
+		}
+	}
+}
+
+func TestFilterMoleculeBeads_EmptyInput(t *testing.T) {
+	filtered := filterMoleculeBeads([]*beads.Issue{})
+	if len(filtered) != 0 {
+		t.Errorf("got %d issues, want 0", len(filtered))
+	}
+}
+
+func TestFilterMoleculeBeads_AllLegitimate(t *testing.T) {
+	issues := []*beads.Issue{
+		{ID: "hq-abc", Title: "Feature request", Type: "task"},
+		{ID: "gt-xyz", Title: "Bug fix", Type: "bug"},
+	}
+
+	filtered := filterMoleculeBeads(issues)
+	if len(filtered) != 2 {
+		t.Errorf("got %d issues, want 2 (all legitimate, none filtered)", len(filtered))
+	}
+}
+
+func TestFilterWisps_IDPatternFallback(t *testing.T) {
+	// When wispIDs is nil (issues.jsonl not found for Dolt-backed stores),
+	// filterWisps should still filter by ID pattern.
+	issues := []*beads.Issue{
+		{ID: "hq-cv-rg22g", Title: "Real work"},
+		{ID: "hq-wisp-93j", Title: "Wisp step item"},
+		{ID: "asm-wisp-cx5", Title: "Another wisp"},
+	}
+
+	// Passing nil wispIDs to simulate missing issues.jsonl (Dolt backend)
+	filtered := filterWisps(issues, nil)
+
+	if len(filtered) != 1 {
+		t.Errorf("got %d filtered issues, want 1", len(filtered))
+		for _, issue := range filtered {
+			t.Logf("  remaining: %s", issue.ID)
+		}
+	}
+
+	if len(filtered) > 0 && filtered[0].ID != "hq-cv-rg22g" {
+		t.Errorf("expected hq-cv-rg22g to remain, got %s", filtered[0].ID)
+	}
+}
+
+func TestFilterWisps_DBLookupFallback(t *testing.T) {
+	// When wispIDs is populated (issues.jsonl found), both ID pattern
+	// and DB lookup should work together.
+	wispIDs := map[string]bool{
+		"hq-special": true, // wisp without "-wisp-" in the ID (edge case)
+	}
+
+	issues := []*beads.Issue{
+		{ID: "hq-cv-rg22g", Title: "Real work"},
+		{ID: "hq-wisp-93j", Title: "Wisp by ID pattern"},
+		{ID: "hq-special", Title: "Wisp by DB lookup"},
+	}
+
+	filtered := filterWisps(issues, wispIDs)
+
+	if len(filtered) != 1 {
+		t.Errorf("got %d filtered issues, want 1", len(filtered))
+	}
+
+	if len(filtered) > 0 && filtered[0].ID != "hq-cv-rg22g" {
+		t.Errorf("expected hq-cv-rg22g to remain, got %s", filtered[0].ID)
+	}
+}
