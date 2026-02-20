@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -78,6 +80,7 @@ func init() {
 }
 
 func runDone(cmd *cobra.Command, args []string) (retErr error) {
+	defer func() { telemetry.RecordDone(context.Background(), doneStatus, retErr) }()
 	// Guard: Only polecats should call gt done
 	// Crew, deacons, witnesses etc. don't use gt done - they persist across tasks.
 	// Polecat sessions end with gt done — the session is cleaned up, but the

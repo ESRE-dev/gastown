@@ -20,17 +20,28 @@ const (
 	loggerName        = "gastown"
 )
 
-// recorderInstruments holds all lazy-initialized OTel metric counters.
+// recorderInstruments holds all lazy-initialized OTel metric instruments.
 type recorderInstruments struct {
-	bdTotal         metric.Int64Counter
-	sessionTotal    metric.Int64Counter
-	promptTotal     metric.Int64Counter
-	paneReadTotal   metric.Int64Counter
-	primeTotal      metric.Int64Counter
-	agentStateTotal metric.Int64Counter
-	polecatTotal    metric.Int64Counter
-	slingTotal      metric.Int64Counter
-	mailTotal       metric.Int64Counter
+	// Counters
+	bdTotal            metric.Int64Counter
+	sessionTotal       metric.Int64Counter
+	sessionStopTotal   metric.Int64Counter
+	promptTotal        metric.Int64Counter
+	paneReadTotal      metric.Int64Counter
+	primeTotal         metric.Int64Counter
+	agentStateTotal    metric.Int64Counter
+	polecatTotal       metric.Int64Counter
+	polecatRemoveTotal metric.Int64Counter
+	slingTotal         metric.Int64Counter
+	mailTotal          metric.Int64Counter
+	nudgeTotal         metric.Int64Counter
+	doneTotal          metric.Int64Counter
+	daemonRestartTotal metric.Int64Counter
+	formulaTotal       metric.Int64Counter
+	convoyTotal        metric.Int64Counter
+
+	// Histograms
+	bdDurationHist metric.Float64Histogram
 }
 
 var (
@@ -38,17 +49,22 @@ var (
 	inst     recorderInstruments
 )
 
-// initInstruments registers all recorder metric counters against the current
+// initInstruments registers all recorder metric instruments against the current
 // global MeterProvider. Must be called after telemetry.Init so the real
 // provider is set. Also called lazily on first use as a safety net.
 func initInstruments() {
 	instOnce.Do(func() {
 		m := otel.GetMeterProvider().Meter(meterRecorderName)
+
+		// Counters
 		inst.bdTotal, _ = m.Int64Counter("gastown.bd.calls.total",
 			metric.WithDescription("Total bd CLI command invocations"),
 		)
 		inst.sessionTotal, _ = m.Int64Counter("gastown.session.starts.total",
 			metric.WithDescription("Total agent session starts"),
+		)
+		inst.sessionStopTotal, _ = m.Int64Counter("gastown.session.stops.total",
+			metric.WithDescription("Total agent session terminations"),
 		)
 		inst.promptTotal, _ = m.Int64Counter("gastown.prompt.sends.total",
 			metric.WithDescription("Total tmux SendKeys prompt dispatches"),
@@ -65,11 +81,35 @@ func initInstruments() {
 		inst.polecatTotal, _ = m.Int64Counter("gastown.polecat.spawns.total",
 			metric.WithDescription("Total polecat spawns"),
 		)
+		inst.polecatRemoveTotal, _ = m.Int64Counter("gastown.polecat.removes.total",
+			metric.WithDescription("Total polecat removals"),
+		)
 		inst.slingTotal, _ = m.Int64Counter("gastown.sling.dispatches.total",
 			metric.WithDescription("Total sling work dispatches"),
 		)
 		inst.mailTotal, _ = m.Int64Counter("gastown.mail.operations.total",
 			metric.WithDescription("Total mail/bd SDK operations"),
+		)
+		inst.nudgeTotal, _ = m.Int64Counter("gastown.nudge.total",
+			metric.WithDescription("Total gt nudge invocations"),
+		)
+		inst.doneTotal, _ = m.Int64Counter("gastown.done.total",
+			metric.WithDescription("Total gt done invocations (polecat work completions)"),
+		)
+		inst.daemonRestartTotal, _ = m.Int64Counter("gastown.daemon.agent_restarts.total",
+			metric.WithDescription("Total daemon-initiated agent session restarts"),
+		)
+		inst.formulaTotal, _ = m.Int64Counter("gastown.formula.instantiations.total",
+			metric.WithDescription("Total formula→wisp instantiations"),
+		)
+		inst.convoyTotal, _ = m.Int64Counter("gastown.convoy.creates.total",
+			metric.WithDescription("Total auto-convoy creations"),
+		)
+
+		// Histograms
+		inst.bdDurationHist, _ = m.Float64Histogram("gastown.bd.duration_ms",
+			metric.WithDescription("bd CLI call round-trip latency in milliseconds"),
+			metric.WithUnit("ms"),
 		)
 	})
 }
@@ -83,11 +123,11 @@ func statusStr(err error) string {
 }
 
 // emit sends an OTel log event with the given body and key-value attributes.
-func emit(ctx context.Context, body string, severity otellog.Severity, attrs ...otellog.KeyValue) {
+func emit(ctx context.Context, body string, sev otellog.Severity, attrs ...otellog.KeyValue) {
 	logger := global.GetLoggerProvider().Logger(loggerName)
 	var r otellog.Record
 	r.SetBody(otellog.StringValue(body))
-	r.SetSeverity(severity)
+	r.SetSeverity(sev)
 	r.AddAttributes(attrs...)
 	logger.Emit(ctx, r)
 }
@@ -108,24 +148,26 @@ func severity(err error) otellog.Severity {
 	return otellog.SeverityInfo
 }
 
-// RecordBDCall records a bd CLI invocation (metrics + log event).
+// RecordBDCall records a bd CLI invocation with duration (metrics + log event).
 // args is the full argument list; args[0] is used as the subcommand label.
-func RecordBDCall(ctx context.Context, args []string, err error) {
+// durationMs is the wall-clock time of the subprocess in milliseconds.
+func RecordBDCall(ctx context.Context, args []string, durationMs float64, err error) {
 	initInstruments()
 	subcommand := ""
 	if len(args) > 0 {
 		subcommand = args[0]
 	}
 	status := statusStr(err)
-	inst.bdTotal.Add(ctx, 1,
-		metric.WithAttributes(
-			attribute.String("status", status),
-			attribute.String("subcommand", subcommand),
-		),
+	attrs := metric.WithAttributes(
+		attribute.String("status", status),
+		attribute.String("subcommand", subcommand),
 	)
+	inst.bdTotal.Add(ctx, 1, attrs)
+	inst.bdDurationHist.Record(ctx, durationMs, attrs)
 	emit(ctx, "bd.call", severity(err),
 		otellog.String("subcommand", subcommand),
 		otellog.Int64("args_count", int64(len(args))),
+		otellog.Float64("duration_ms", durationMs),
 		otellog.String("status", status),
 		errKV(err),
 	)
@@ -144,6 +186,20 @@ func RecordSessionStart(ctx context.Context, sessionID, role string, err error) 
 	emit(ctx, "session.start", severity(err),
 		otellog.String("session_id", sessionID),
 		otellog.String("role", role),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
+// RecordSessionStop records an agent session termination (metrics + log event).
+func RecordSessionStop(ctx context.Context, sessionID string, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.sessionStopTotal.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("status", status)),
+	)
+	emit(ctx, "session.stop", severity(err),
+		otellog.String("session_id", sessionID),
 		otellog.String("status", status),
 		errKV(err),
 	)
@@ -234,6 +290,20 @@ func RecordPolecatSpawn(ctx context.Context, name string, err error) {
 	)
 }
 
+// RecordPolecatRemove records a polecat removal (metrics + log event).
+func RecordPolecatRemove(ctx context.Context, name string, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.polecatRemoveTotal.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("status", status)),
+	)
+	emit(ctx, "polecat.remove", severity(err),
+		otellog.String("name", name),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
 // RecordSling records a sling work dispatch (metrics + log event).
 func RecordSling(ctx context.Context, bead, target string, err error) {
 	initInstruments()
@@ -261,6 +331,82 @@ func RecordMail(ctx context.Context, operation string, err error) {
 	)
 	emit(ctx, "mail", severity(err),
 		otellog.String("operation", operation),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
+// RecordNudge records a gt nudge invocation (metrics + log event).
+func RecordNudge(ctx context.Context, target string, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.nudgeTotal.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("status", status)),
+	)
+	emit(ctx, "nudge", severity(err),
+		otellog.String("target", target),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
+// RecordDone records a gt done invocation — polecat work completion (metrics + log event).
+// exitType is one of COMPLETED, ESCALATED, DEFERRED.
+func RecordDone(ctx context.Context, exitType string, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.doneTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("exit_type", exitType),
+		),
+	)
+	emit(ctx, "done", severity(err),
+		otellog.String("exit_type", exitType),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
+// RecordDaemonRestart records a daemon-initiated agent session restart (metrics + log event).
+// agentType is e.g. "deacon", "witness-myrig", "refinery-myrig".
+func RecordDaemonRestart(ctx context.Context, agentType string) {
+	initInstruments()
+	inst.daemonRestartTotal.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("agent_type", agentType)),
+	)
+	emit(ctx, "daemon.restart", otellog.SeverityInfo,
+		otellog.String("agent_type", agentType),
+	)
+}
+
+// RecordFormulaInstantiate records a formula→wisp instantiation (metrics + log event).
+func RecordFormulaInstantiate(ctx context.Context, formulaName, beadID string, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.formulaTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("formula", formulaName),
+		),
+	)
+	emit(ctx, "formula.instantiate", severity(err),
+		otellog.String("formula_name", formulaName),
+		otellog.String("bead_id", beadID),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
+// RecordConvoyCreate records an auto-convoy creation (metrics + log event).
+func RecordConvoyCreate(ctx context.Context, beadID string, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.convoyTotal.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("status", status)),
+	)
+	emit(ctx, "convoy.create", severity(err),
+		otellog.String("bead_id", beadID),
 		otellog.String("status", status),
 		errKV(err),
 	)

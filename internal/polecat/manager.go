@@ -811,7 +811,8 @@ func (m *Manager) Remove(name string, force bool) error {
 //
 // ZFC #10: Uses cleanup_status from agent bead if available (polecat self-report),
 // falls back to git check for backward compatibility.
-func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) error {
+func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) (retErr error) {
+	defer func() { telemetry.RecordPolecatRemove(context.Background(), name, retErr) }()
 	// Acquire per-polecat file lock to prevent concurrent Remove races
 	fl, err := m.lockPolecat(name)
 	if err != nil {

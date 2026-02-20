@@ -221,9 +221,10 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 }
 
 // KillSession terminates a tmux session.
-func (t *Tmux) KillSession(name string) error {
-	_, err := t.run("kill-session", "-t", name)
-	return err
+func (t *Tmux) KillSession(name string) (retErr error) {
+	defer func() { telemetry.RecordSessionStop(context.Background(), name, retErr) }()
+	_, retErr = t.run("kill-session", "-t", name)
+	return retErr
 }
 
 // processKillGracePeriod is how long to wait after SIGTERM before sending SIGKILL.

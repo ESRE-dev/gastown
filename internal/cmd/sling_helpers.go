@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -18,6 +19,7 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -651,7 +653,8 @@ type FormulaOnBeadResult struct {
 //   - extraVars: additional --var values supplied by the user
 //
 // Returns the wisp root ID which should be hooked.
-func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot string, skipCook bool, extraVars []string) (*FormulaOnBeadResult, error) {
+func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot string, skipCook bool, extraVars []string) (_ *FormulaOnBeadResult, retErr error) {
+	defer func() { telemetry.RecordFormulaInstantiate(context.Background(), formulaName, beadID, retErr) }()
 	// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
 	formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 

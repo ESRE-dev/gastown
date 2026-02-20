@@ -671,6 +671,8 @@ func (d *Daemon) ensureDeaconRunning() {
 	// Track when we started the Deacon to prevent race condition in checkDeaconHeartbeat.
 	// The heartbeat file will still be stale until the Deacon runs a full patrol cycle.
 	d.deaconLastStarted = time.Now()
+	d.metrics.recordRestart(d.ctx, "deacon")
+	telemetry.RecordDaemonRestart(d.ctx, "deacon")
 	d.logger.Println("Deacon started successfully")
 }
 
@@ -835,6 +837,8 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 		return
 	}
 
+	d.metrics.recordRestart(d.ctx, "witness")
+	telemetry.RecordDaemonRestart(d.ctx, "witness-"+rigName)
 	d.logger.Printf("Witness session for %s started successfully", rigName)
 }
 
@@ -885,6 +889,8 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 		return
 	}
 
+	d.metrics.recordRestart(d.ctx, "refinery")
+	telemetry.RecordDaemonRestart(d.ctx, "refinery-"+rigName)
 	d.logger.Printf("Refinery session for %s started successfully", rigName)
 }
 
