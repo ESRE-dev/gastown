@@ -71,6 +71,9 @@ const (
 	TypeMerged       = "merged"
 	TypeMergeFailed  = "merge_failed"
 	TypeMergeSkipped = "merge_skipped"
+
+	// Stale branch detection (gt-frf61)
+	TypeStaleBranch = "stale_branch"
 )
 
 // EventsFile is the name of the raw events log.
@@ -167,6 +170,15 @@ func HandoffPayload(subject string, toSession bool) map[string]interface{} {
 		p["subject"] = subject
 	}
 	return p
+}
+
+// StaleBranchPayload creates a payload for stale branch detection events (gt-frf61).
+func StaleBranchPayload(branchIssue, hookIssue, agentBead string) map[string]interface{} {
+	return map[string]interface{}{
+		"branch_issue": branchIssue,
+		"hook_issue":   hookIssue,
+		"agent_bead":   agentBead,
+	}
 }
 
 // DonePayload creates a payload for done events.

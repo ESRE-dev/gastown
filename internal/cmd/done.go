@@ -375,6 +375,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	var pushFailed bool
 	var doneErrors []string
 	var convoyInfo *ConvoyInfo // Populated if issue is tracked by a convoy
+	var staleBranchDetected bool
 
 	// Pre-declare variables used between notifyWitness and afterAgentStateUpdate
 	// so that goto notifyWitness / goto afterAgentStateUpdate don't jump over declarations.
@@ -386,6 +387,32 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	if exitType == ExitCompleted {
 		if branch == defaultBranch || branch == "master" {
 			return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
+		}
+
+		// Early stale-branch detection (gt-frf61): if the branch-derived issue
+		// differs from the agent's hook_bead, this polecat was respawned for new
+		// work but still has the old worktree branch. Skip all done operations
+		// to prevent the stale polecat from pushing, creating MRs, or
+		// force-closing another polecat's bead.
+		//
+		// Uses info.Issue (branch-parsed) rather than issueID (which may come
+		// from --issue flag) to prevent bypass.
+		//
+		// Limitation: modern polecat branches (polecat/<worker>-<timestamp>)
+		// don't encode issue ID, so info.Issue is empty and this guard doesn't
+		// fire. Those branches fall through to the hook_bead lookup for issueID.
+		// Tracked as a follow-up to gt-frf61.
+		if info.Issue != "" && agentBeadID != "" {
+			bd := beads.New(beads.ResolveBeadsDir(cwd))
+			hookIssue := getIssueFromAgentHook(bd, agentBeadID)
+			if hookIssue != "" && hookIssue != info.Issue {
+				staleBranchDetected = true
+				style.PrintWarning("stale branch detected: branch references %s but agent hook is %s — skipping done", info.Issue, hookIssue)
+				if err := events.LogFeed(events.TypeStaleBranch, sender, events.StaleBranchPayload(info.Issue, hookIssue, agentBeadID)); err != nil {
+					style.PrintWarning("could not log stale branch event: %v", err)
+				}
+				goto notifyWitness
+			}
 		}
 
 		// CRITICAL: Verify work exists before completing (hq-xthqf)
@@ -911,8 +938,10 @@ notifyWitness:
 		os.Unsetenv("BD_BRANCH")
 	}
 
-	// Write Dolt merge checkpoint for resume (gt-aufru)
-	if agentBeadID != "" {
+	// Write Dolt merge checkpoint for resume (gt-aufru).
+	// Skip on stale path: checkpoints must not persist across assignments,
+	// or a later legitimate gt done could skip required stages.
+	if agentBeadID != "" && !staleBranchDetected {
 		cpBd := beads.New(beads.ResolveBeadsDir(cwd))
 		writeDoneCheckpoint(cpBd, agentBeadID, CheckpointDoltMerged, "ok")
 	}
@@ -952,6 +981,9 @@ afterDoltMerge:
 			bodyLines = append(bodyLines, fmt.Sprintf("MergeStrategy: %s", convoyInfo.MergeStrategy))
 		}
 	}
+	if staleBranchDetected {
+		bodyLines = append(bodyLines, "StaleBranch: true")
+	}
 	if len(doneErrors) > 0 {
 		bodyLines = append(bodyLines, fmt.Sprintf("Errors: %s", strings.Join(doneErrors, "; ")))
 	}
@@ -973,7 +1005,11 @@ afterDoltMerge:
 	// Notify witness of work completion (witness is the polecat's direct supervisor).
 	// Previously this went to the dispatcher (often mayor), flooding mayor's inbox
 	// with routine operational mail. The witness handles polecat lifecycle.
-	if issueID != "" {
+	//
+	// Skip WORK_DONE, LogDone, and TypeDone on the stale path (gt-frf61):
+	// these record a successful completion that didn't happen and would
+	// confuse downstream consumers.
+	if issueID != "" && !staleBranchDetected {
 		workDoneNotification := &mail.Message{
 			To:      witnessAddr,
 			From:    sender,
@@ -987,22 +1023,39 @@ afterDoltMerge:
 		}
 	}
 
-	// Write witness notification checkpoint for resume (gt-aufru)
-	if agentBeadID != "" {
+	// Write witness notification checkpoint for resume (gt-aufru).
+	// Skip on stale path (same rationale as Dolt merge checkpoint).
+	if agentBeadID != "" && !staleBranchDetected {
 		cpBd := beads.New(beads.ResolveBeadsDir(cwd))
 		writeDoneCheckpoint(cpBd, agentBeadID, CheckpointWitnessNotified, "ok")
 	}
 
-	// Log done event (townlog and activity feed)
-	if err := LogDone(townRoot, sender, issueID); err != nil {
-		style.PrintWarning("could not log done event: %v", err)
-	}
-	if err := events.LogFeed(events.TypeDone, sender, events.DonePayload(issueID, branch)); err != nil {
-		style.PrintWarning("could not log feed event: %v", err)
+	// On stale path: clear done-intent and any pre-existing checkpoints
+	// to prevent witness patrol from misclassifying this polecat as
+	// done-intent-dead and resetting the new assignment's hooked bead.
+	if staleBranchDetected && agentBeadID != "" {
+		cpBd := beads.New(beads.ResolveBeadsDir(cwd))
+		clearDoneIntentLabel(cpBd, agentBeadID)
+		clearDoneCheckpoints(cpBd, agentBeadID)
 	}
 
-	// Update agent bead state (ZFC: self-report completion)
-	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
+	// Log done event (townlog and activity feed).
+	// Skip on stale path — no real work completed.
+	if !staleBranchDetected {
+		if err := LogDone(townRoot, sender, issueID); err != nil {
+			style.PrintWarning("could not log done event: %v", err)
+		}
+		if err := events.LogFeed(events.TypeDone, sender, events.DonePayload(issueID, branch)); err != nil {
+			style.PrintWarning("could not log feed event: %v", err)
+		}
+	}
+
+	// Update agent bead state (ZFC: self-report completion).
+	// Skip on stale-branch path (gt-frf61): the agent's hook_bead now points
+	// to the new assignment. Clearing/closing it would damage the new work.
+	if !staleBranchDetected {
+		updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
+	}
 
 afterAgentStateUpdate:
 	// Self-cleaning: Nuke our own sandbox and session (if we're a polecat)
@@ -1396,6 +1449,12 @@ func getIssueFromAgentHook(bd *beads.Beads, agentBeadID string) string {
 	}
 	agentBead, err := bd.Show(agentBeadID)
 	if err != nil {
+		// Fail-open: return "" so callers proceed without hook info.
+		// This is intentional — gt done must be resilient to bead-system outages.
+		// The stale-branch guard (gt-frf61) will not activate, which is acceptable
+		// because a bead-system outage also prevents the damaging close/unhook
+		// operations downstream.
+		style.PrintWarning("could not look up agent hook for %s: %v (stale-branch guard inactive)", agentBeadID, err)
 		return ""
 	}
 	return agentBead.HookBead

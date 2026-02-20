@@ -86,6 +86,42 @@ func TestParsePolecatDone_MinimalBody(t *testing.T) {
 	}
 }
 
+func TestParsePolecatDone_WithStaleBranch(t *testing.T) {
+	subject := "POLECAT_DONE nux"
+	body := `Exit: COMPLETED
+Issue: gt-abc123
+Branch: polecat/nux/gt-old-issue
+StaleBranch: true`
+
+	payload, err := ParsePolecatDone(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePolecatDone() error = %v", err)
+	}
+
+	if !payload.StaleBranch {
+		t.Error("StaleBranch = false, want true")
+	}
+	if payload.Exit != "COMPLETED" {
+		t.Errorf("Exit = %q, want %q", payload.Exit, "COMPLETED")
+	}
+}
+
+func TestParsePolecatDone_WithoutStaleBranch(t *testing.T) {
+	subject := "POLECAT_DONE nux"
+	body := `Exit: COMPLETED
+Issue: gt-abc123
+Branch: polecat/nux/gt-abc123`
+
+	payload, err := ParsePolecatDone(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePolecatDone() error = %v", err)
+	}
+
+	if payload.StaleBranch {
+		t.Error("StaleBranch = true, want false")
+	}
+}
+
 func TestParsePolecatDone_InvalidSubject(t *testing.T) {
 	_, err := ParsePolecatDone("Invalid subject", "body")
 	if err == nil {
