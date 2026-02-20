@@ -118,7 +118,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		}
 		// Zombie - tmux alive but agent dead. Kill and recreate.
 		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, agent dead). Recreating...")
-		if err := t.KillSession(sessionID); err != nil {
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -225,8 +225,8 @@ func (m *Manager) Stop() error {
 		return ErrNotRunning
 	}
 
-	// Kill the tmux session
-	return t.KillSession(sessionID)
+	// Kill the tmux session and all descendant processes
+	return t.KillSessionWithProcesses(sessionID)
 }
 
 // Queue returns the current merge queue.
