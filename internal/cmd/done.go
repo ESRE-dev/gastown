@@ -388,6 +388,20 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
 		}
 
+		// Early stale-branch detection (gt-frf61): if the branch references a
+		// different issue than the agent's hook_bead, this polecat was respawned
+		// for new work but still has the old worktree branch. Skip all done
+		// operations to prevent the stale polecat from pushing, creating MRs,
+		// or force-closing another polecat's bead.
+		if issueID != "" && agentBeadID != "" {
+			bd := beads.New(beads.ResolveBeadsDir(cwd))
+			hookIssue := getIssueFromAgentHook(bd, agentBeadID)
+			if hookIssue != "" && hookIssue != issueID {
+				style.PrintWarning("stale branch detected: branch references %s but agent hook is %s — skipping done", issueID, hookIssue)
+				goto notifyWitness
+			}
+		}
+
 		// CRITICAL: Verify work exists before completing (hq-xthqf)
 		// Polecats calling gt done without commits results in lost work.
 		// We MUST check for:

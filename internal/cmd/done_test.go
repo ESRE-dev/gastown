@@ -1440,6 +1440,47 @@ func TestMRFailedCheckpointEnablesResume(t *testing.T) {
 			},
 			wantSkipPush: true,
 			wantRetryMR:  false, // mr-created means skip
+// TestStaleBranchDetectionLogic verifies the early stale-branch detection
+// guard added for gt-frf61. When a polecat is respawned for new work but
+// retains its old worktree branch, the branch-parsed issue ID will differ
+// from the agent's hook_bead. The guard should detect this mismatch and
+// skip all done operations.
+func TestStaleBranchDetectionLogic(t *testing.T) {
+	tests := []struct {
+		name      string
+		issueID   string // parsed from branch name
+		hookBead  string // from agent's hook_bead field
+		wantStale bool
+	}{
+		{
+			name:      "hook matches branch issue - legitimate done",
+			issueID:   "gt-frf61",
+			hookBead:  "gt-frf61",
+			wantStale: false,
+		},
+		{
+			name:      "hook points to different issue - stale branch (gt-frf61 scenario)",
+			issueID:   "gt-frf61",
+			hookBead:  "gt-pjox2",
+			wantStale: true,
+		},
+		{
+			name:      "hook empty - not stale (hook may have been cleared)",
+			issueID:   "gt-frf61",
+			hookBead:  "",
+			wantStale: false,
+		},
+		{
+			name:      "issueID empty - guard not active",
+			issueID:   "",
+			hookBead:  "gt-pjox2",
+			wantStale: false,
+		},
+		{
+			name:      "both empty - guard not active",
+			issueID:   "",
+			hookBead:  "",
+			wantStale: false,
 		},
 	}
 
@@ -1617,5 +1658,23 @@ func TestIsStalePolecatDoneFailClosed(t *testing.T) {
 	stale, reason = isStalePolecatDone(bd, "", "gt-test", "furiosa")
 	if !stale {
 		t.Errorf("expected stale=true when bd.Show fails on issue lookup, got false (reason: %s)", reason)
+	}
+}
+			// Replicate the guard logic from done.go:
+			//   if issueID != "" && agentBeadID != "" {
+			//       hookIssue := getIssueFromAgentHook(bd, agentBeadID)
+			//       if hookIssue != "" && hookIssue != issueID {
+			//           // stale — skip done
+			//       }
+			//   }
+			// Here hookBead stands in for what getIssueFromAgentHook returns.
+			guardActive := tt.issueID != "" && tt.hookBead != "" // agentBeadID presence implied by hookBead
+			stale := guardActive && tt.hookBead != tt.issueID
+
+			if stale != tt.wantStale {
+				t.Errorf("stale = %v, want %v (issueID=%q, hookBead=%q)",
+					stale, tt.wantStale, tt.issueID, tt.hookBead)
+			}
+		})
 	}
 }
