@@ -137,7 +137,7 @@ func checkConvoyCompletion(beadIDs []string) {
 	if err != nil {
 		return
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	gtPath, err := os.Executable()
 	if err != nil {
