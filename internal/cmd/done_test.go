@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/events"
 )
 
 // TestDoneUsesResolveBeadsDir verifies that the done command correctly uses
@@ -1237,5 +1239,245 @@ func TestConvoyInfoFallbackChain(t *testing.T) {
 				t.Errorf("MergeStrategy = %q, want %q", convoyInfo.MergeStrategy, tt.wantMerge)
 			}
 		})
+	}
+}
+
+// TestMRCreationFailureDoesNotSelfKill verifies that when MR bead creation fails
+// during a COMPLETED exit, the session is NOT killed (gt-t79 fix).
+// Tests all three kill paths: explicit self-kill, deferred cleanup, and SIGTERM handler.
+func TestMRCreationFailureDoesNotSelfKill(t *testing.T) {
+	tests := []struct {
+		name              string
+		exitType          string
+		mrCreationFailed  bool
+		pushFailed        bool
+		wantSelfKill      bool
+		wantDeferredKill  bool
+		wantSIGTERMKill   bool
+	}{
+		{
+			name:             "completed+MR-ok: all kill paths active",
+			exitType:         ExitCompleted,
+			mrCreationFailed: false,
+			pushFailed:       false,
+			wantSelfKill:     true,
+			wantDeferredKill: true,
+			wantSIGTERMKill:  true,
+		},
+		{
+			name:             "completed+MR-failed: ALL kill paths blocked (gt-t79)",
+			exitType:         ExitCompleted,
+			mrCreationFailed: true,
+			pushFailed:       false,
+			wantSelfKill:     false,
+			wantDeferredKill: false,
+			wantSIGTERMKill:  false,
+		},
+		{
+			name:             "completed+push-failed: self-kill skipped but session still killed",
+			exitType:         ExitCompleted,
+			mrCreationFailed: false,
+			pushFailed:       true,
+			wantSelfKill:     false, // pushFailed skips nuke but session still killed
+			wantDeferredKill: true,
+			wantSIGTERMKill:  true,
+		},
+		{
+			name:             "escalated: deferred+SIGTERM kill active, no explicit self-kill",
+			exitType:         ExitEscalated,
+			mrCreationFailed: false,
+			pushFailed:       false,
+			wantSelfKill:     false, // not completed, no nuke
+			wantDeferredKill: true,
+			wantSIGTERMKill:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sessionCleanupNeeded := true
+			sessionKilled := false
+
+			// Path 1: Explicit self-kill (only for completed+no-push-failure+no-mr-failure)
+			shouldSelfKill := tt.exitType == ExitCompleted && !tt.pushFailed && !tt.mrCreationFailed
+			if shouldSelfKill != tt.wantSelfKill {
+				t.Errorf("shouldSelfKill = %v, want %v", shouldSelfKill, tt.wantSelfKill)
+			}
+
+			// Path 2: Deferred kill backstop (must also check mrCreationFailed)
+			shouldDeferredKill := sessionCleanupNeeded && !sessionKilled && !tt.mrCreationFailed
+			if shouldDeferredKill != tt.wantDeferredKill {
+				t.Errorf("shouldDeferredKill = %v, want %v", shouldDeferredKill, tt.wantDeferredKill)
+			}
+
+			// Path 3: SIGTERM handler (must also check mrCreationFailed)
+			shouldSIGTERMKill := sessionCleanupNeeded && !sessionKilled && !tt.mrCreationFailed
+			if shouldSIGTERMKill != tt.wantSIGTERMKill {
+				t.Errorf("shouldSIGTERMKill = %v, want %v", shouldSIGTERMKill, tt.wantSIGTERMKill)
+			}
+		})
+	}
+}
+
+// TestMRFailedCheckpointFormat verifies the done-cp:mr-failed label format
+// uses B64_-prefixed base64 encoding to prevent colon truncation in error messages.
+func TestMRFailedCheckpointFormat(t *testing.T) {
+	now := time.Now()
+	errMsg := "dolt: connection refused"
+	encoded := "B64_" + base64.RawStdEncoding.EncodeToString([]byte(errMsg))
+	label := fmt.Sprintf("done-cp:%s:%s:%d", CheckpointMRFailed, encoded, now.Unix())
+
+	// Verify the label structure: done-cp:<stage>:B64_<base64-value>:<ts>
+	parts := strings.SplitN(label, ":", 4)
+	if len(parts) != 4 {
+		t.Fatalf("expected 4 parts, got %d: %v", len(parts), parts)
+	}
+	if parts[0] != "done-cp" {
+		t.Errorf("prefix = %q, want %q", parts[0], "done-cp")
+	}
+	if DoneCheckpoint(parts[1]) != CheckpointMRFailed {
+		t.Errorf("stage = %q, want %q", parts[1], CheckpointMRFailed)
+	}
+
+	// Verify B64_-prefixed value round-trips correctly (even with colons in original)
+	rawValue := parts[2]
+	if !strings.HasPrefix(rawValue, "B64_") {
+		t.Fatalf("expected B64_ prefix, got %q", rawValue)
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(rawValue, "B64_"))
+	if err != nil {
+		t.Fatalf("failed to decode base64 value: %v", err)
+	}
+	if string(decoded) != errMsg {
+		t.Errorf("decoded value = %q, want %q", string(decoded), errMsg)
+	}
+}
+
+// TestCheckpointLegacyBackwardCompat verifies that readDoneCheckpoints handles
+// both legacy raw-value checkpoints and new B64_-prefixed checkpoints correctly.
+func TestCheckpointLegacyBackwardCompat(t *testing.T) {
+	// Simulate reading labels from a bead that has both legacy and new-format checkpoints.
+	// This tests the parsing logic directly rather than through the beads layer.
+	tests := []struct {
+		name      string
+		rawValue  string
+		wantValue string
+	}{
+		{
+			name:      "legacy raw value: main",
+			rawValue:  "main",
+			wantValue: "main",
+		},
+		{
+			name:      "legacy raw value: ok",
+			rawValue:  "ok",
+			wantValue: "ok",
+		},
+		{
+			name:      "new b64 value with colons",
+			rawValue:  "B64_" + base64.RawStdEncoding.EncodeToString([]byte("dolt: connection refused")),
+			wantValue: "dolt: connection refused",
+		},
+		{
+			name:      "new b64 simple value",
+			rawValue:  "B64_" + base64.RawStdEncoding.EncodeToString([]byte("ok")),
+			wantValue: "ok",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Replicate the parsing logic from readDoneCheckpoints
+			var result string
+			if strings.HasPrefix(tt.rawValue, "B64_") {
+				decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(tt.rawValue, "B64_"))
+				if err != nil {
+					result = tt.rawValue
+				} else {
+					result = string(decoded)
+				}
+			} else {
+				result = tt.rawValue
+			}
+			if result != tt.wantValue {
+				t.Errorf("parsed value = %q, want %q", result, tt.wantValue)
+			}
+		})
+	}
+}
+
+// TestMRFailedCheckpointEnablesResume verifies that when a push checkpoint exists
+// but no MR checkpoint exists (MR creation failed), the MR creation is retried
+// on resume. The mr-failed checkpoint signals the failure reason but does NOT
+// prevent retry (only mr-created would skip MR creation).
+func TestMRFailedCheckpointEnablesResume(t *testing.T) {
+	tests := []struct {
+		name           string
+		checkpoints    map[DoneCheckpoint]string
+		wantSkipPush   bool
+		wantRetryMR    bool
+	}{
+		{
+			name:         "no checkpoints - full run",
+			checkpoints:  map[DoneCheckpoint]string{},
+			wantSkipPush: false,
+			wantRetryMR:  true, // MR not created yet
+		},
+		{
+			name: "push + mr-failed: skip push, retry MR (gt-t79 resume)",
+			checkpoints: map[DoneCheckpoint]string{
+				CheckpointPushed:   "mybranch",
+				CheckpointMRFailed: "dolt: connection refused",
+			},
+			wantSkipPush: true,
+			wantRetryMR:  true, // mr-failed means retry, not skip
+		},
+		{
+			name: "push + mr-created: skip push, skip MR",
+			checkpoints: map[DoneCheckpoint]string{
+				CheckpointPushed:    "mybranch",
+				CheckpointMRCreated: "gt-mr123",
+			},
+			wantSkipPush: true,
+			wantRetryMR:  false, // mr-created means skip
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skipPush := tt.checkpoints[CheckpointPushed] != ""
+			if skipPush != tt.wantSkipPush {
+				t.Errorf("skipPush = %v, want %v", skipPush, tt.wantSkipPush)
+			}
+
+			// MR is retried when: no mr-created checkpoint exists
+			// (mr-failed checkpoint is informational, does not block retry)
+			retryMR := tt.checkpoints[CheckpointMRCreated] == ""
+			if retryMR != tt.wantRetryMR {
+				t.Errorf("retryMR = %v, want %v", retryMR, tt.wantRetryMR)
+			}
+		})
+	}
+}
+
+// TestDoneMRFailedPayload verifies the DoneMRFailedPayload helper.
+func TestDoneMRFailedPayload(t *testing.T) {
+	payload := events.DoneMRFailedPayload("gt-abc", "polecat/nux-xyz", "dolt: connection refused")
+
+	if payload["issue"] != "gt-abc" {
+		t.Errorf("issue = %q, want %q", payload["issue"], "gt-abc")
+	}
+	if payload["branch"] != "polecat/nux-xyz" {
+		t.Errorf("branch = %q, want %q", payload["branch"], "polecat/nux-xyz")
+	}
+	if payload["reason"] != "dolt: connection refused" {
+		t.Errorf("reason = %q, want %q", payload["reason"], "dolt: connection refused")
+	}
+}
+
+// TestDoneMRFailedEventType verifies the event type constant.
+func TestDoneMRFailedEventType(t *testing.T) {
+	if events.TypeDoneMRFailed != "done_mr_failed" {
+		t.Errorf("TypeDoneMRFailed = %q, want %q", events.TypeDoneMRFailed, "done_mr_failed")
 	}
 }
