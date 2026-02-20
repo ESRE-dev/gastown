@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tui/convoy"
@@ -1307,7 +1308,7 @@ func isReadyIssue(t trackedIssueInfo) bool {
 	// polecat). If a dispatched bead is later reopened/unassigned, it should
 	// surface as stranded so it can be re-queued or manually handled.
 	for _, l := range t.Labels {
-		if l == LabelQueued {
+		if l == capacity.LabelScheduled {
 			return false
 		}
 		if l == "gt:queue-dispatched" && t.Assignee != "" {
