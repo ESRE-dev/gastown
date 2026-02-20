@@ -509,4 +509,73 @@ func TestHandoffAgentFlag(t *testing.T) {
 			t.Errorf("expected 'claude' in restart command, got: %q", cmd)
 		}
 	})
+
+	t.Run("agent override beats GT_AGENT env", func(t *testing.T) {
+		setupHandoffTestRegistry(t)
+
+		tmpTown := t.TempDir()
+		mayorDir := filepath.Join(tmpTown, "mayor")
+		os.MkdirAll(mayorDir, 0755)
+		os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`), 0644)
+
+		t.Setenv("GT_ROOT", tmpTown)
+		t.Setenv("GT_AGENT", "codex")
+		origCwd, _ := os.Getwd()
+		os.Chdir(os.TempDir())
+		t.Cleanup(func() { os.Chdir(origCwd) })
+
+		cmd, err := buildRestartCommandWithAgent("gt-crew-propane", "claude")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(cmd, "GT_AGENT=claude") {
+			t.Errorf("expected GT_AGENT=claude (override should beat env), got: %q", cmd)
+		}
+	})
+
+	t.Run("GT_AGENT env used when no override", func(t *testing.T) {
+		setupHandoffTestRegistry(t)
+
+		tmpTown := t.TempDir()
+		mayorDir := filepath.Join(tmpTown, "mayor")
+		os.MkdirAll(mayorDir, 0755)
+		os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`), 0644)
+
+		t.Setenv("GT_ROOT", tmpTown)
+		t.Setenv("GT_AGENT", "claude")
+		origCwd, _ := os.Getwd()
+		os.Chdir(os.TempDir())
+		t.Cleanup(func() { os.Chdir(origCwd) })
+
+		cmd, err := buildRestartCommandWithAgent("gt-crew-propane", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(cmd, "GT_AGENT=claude") {
+			t.Errorf("expected GT_AGENT=claude from env, got: %q", cmd)
+		}
+	})
+
+	t.Run("default when neither override nor GT_AGENT set", func(t *testing.T) {
+		setupHandoffTestRegistry(t)
+
+		tmpTown := t.TempDir()
+		mayorDir := filepath.Join(tmpTown, "mayor")
+		os.MkdirAll(mayorDir, 0755)
+		os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`), 0644)
+
+		t.Setenv("GT_ROOT", tmpTown)
+		t.Setenv("GT_AGENT", "")
+		origCwd, _ := os.Getwd()
+		os.Chdir(os.TempDir())
+		t.Cleanup(func() { os.Chdir(origCwd) })
+
+		cmd, err := buildRestartCommandWithAgent("gt-crew-propane", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(cmd, "GT_AGENT=") {
+			t.Errorf("expected no GT_AGENT export when using defaults, got: %q", cmd)
+		}
+	})
 }

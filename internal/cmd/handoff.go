@@ -555,10 +555,6 @@ func buildRestartCommandWithAgent(sessionName, agentOverride string) (string, er
 	// 3. rig/town default — resolved by config
 	var currentAgent string
 	if agentOverride != "" {
-		// Validate before use — fail fast with a clear error for unknown agents.
-		if _, _, err := config.ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride); err != nil {
-			return "", fmt.Errorf("invalid --agent %q: %w", agentOverride, err)
-		}
 		currentAgent = agentOverride
 	} else {
 		currentAgent = os.Getenv("GT_AGENT")
@@ -569,13 +565,24 @@ func buildRestartCommandWithAgent(sessionName, agentOverride string) (string, er
 			}
 		}
 	}
+	// Build runtime command. When an agent is specified (via --agent flag or
+	// GT_AGENT env), resolve config directly with the already-known townRoot
+	// and rigPath. This avoids redundant cwd-based town root re-detection in
+	// GetRuntimeCommandWithPromptAndAgentOverride, which could silently fall
+	// back to default config if cwd detection fails (e.g., town-level sessions
+	// where rigPath is empty).
 	var runtimeCmd string
+	var agentRC *config.RuntimeConfig // reused for env var resolution below
 	if currentAgent != "" {
-		var err error
-		runtimeCmd, err = config.GetRuntimeCommandWithPromptAndAgentOverride(rigPath, beacon, currentAgent)
+		rc, _, err := config.ResolveAgentConfigWithOverride(townRoot, rigPath, currentAgent)
 		if err != nil {
+			if agentOverride != "" {
+				return "", fmt.Errorf("unknown agent %q: %w", agentOverride, err)
+			}
 			return "", fmt.Errorf("resolving agent config: %w", err)
 		}
+		agentRC = rc
+		runtimeCmd = rc.BuildCommandWithPrompt(beacon)
 	} else {
 		runtimeCmd = config.GetRuntimeCommandWithPrompt(rigPath, beacon)
 	}
@@ -589,13 +596,8 @@ func buildRestartCommandWithAgent(sessionName, agentOverride string) (string, er
 		// the active agent's env (e.g., NODE_OPTIONS from [agents.X.env]).
 		// Otherwise, fall back to role-based resolution.
 		var runtimeConfig *config.RuntimeConfig
-		if currentAgent != "" {
-			rc, _, err := config.ResolveAgentConfigWithOverride(townRoot, rigPath, currentAgent)
-			if err == nil {
-				runtimeConfig = rc
-			} else {
-				runtimeConfig = config.ResolveRoleAgentConfig(simpleRole, townRoot, rigPath)
-			}
+		if currentAgent != "" && agentRC != nil {
+			runtimeConfig = agentRC
 		} else {
 			runtimeConfig = config.ResolveRoleAgentConfig(simpleRole, townRoot, rigPath)
 		}
