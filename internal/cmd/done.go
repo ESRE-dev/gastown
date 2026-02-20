@@ -449,6 +449,16 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// would ever close the issue.
 			if issueID != "" {
 				bd := beads.New(beads.ResolveBeadsDir(cwd))
+
+				// Guard: verify this polecat still owns this bead before force-closing (gt-frf61).
+				// A respawned polecat may retain stale branch state from a prior assignment,
+				// causing gt done to close a bead that's been reassigned to another polecat.
+				// Check both the agent's hook (authoritative) and the bead's assignee (backup).
+				if stale, reason := isStalePolecatDone(bd, agentBeadID, issueID, polecatName); stale {
+					style.PrintWarning("skipping force-close of %s: %s", issueID, reason)
+					goto notifyWitness
+				}
+
 				closeReason := "Completed with no code changes (already fixed or pushed directly to main)"
 				// G15 fix: Force-close bypasses molecule dependency checks.
 				// The polecat is about to be nuked — open wisps should not block closure.
@@ -1406,6 +1416,63 @@ func parseCleanupStatus(s string) polecat.CleanupStatus {
 	default:
 		return polecat.CleanupUnknown
 	}
+}
+
+// isStalePolecatDone checks whether the current gt done invocation is from a
+// stale polecat that no longer owns the target bead. This prevents a respawned
+// polecat (with stale branch state from a prior assignment) from force-closing
+// a bead that has been reassigned to another polecat.
+//
+// Fail-closed: if bead reads fail, we assume stale and skip force-close. A false
+// "stale" leaves the bead HOOKED (recoverable by witness), while a false "not stale"
+// causes the original gt-frf61 bug. Fail-closed is safer.
+//
+// Returns (true, reason) if stale or unverifiable, (false, "") if ownership confirmed.
+func isStalePolecatDone(bd *beads.Beads, agentBeadID, issueID, polecatName string) (bool, string) {
+	// Check 1: Agent hook mismatch (most reliable).
+	// The agent's hook_bead is the authoritative source of current work.
+	// If it points to a different issue, this gt done is from stale branch state.
+	var agentHookBead string
+	if agentBeadID != "" {
+		agentBead, err := bd.Show(agentBeadID)
+		if err != nil {
+			style.PrintWarning("ownership check: failed to read agent bead %s: %v (assuming stale)", agentBeadID, err)
+			return true, fmt.Sprintf("cannot verify ownership: agent bead %s read failed: %v", agentBeadID, err)
+		}
+		agentHookBead = agentBead.HookBead
+	}
+
+	// Check 2: Assignee mismatch (backup for when hook is cleared).
+	// If the bead is assigned to a different polecat, we shouldn't close it.
+	var assignee string
+	if polecatName != "" && issueID != "" {
+		issue, err := bd.Show(issueID)
+		if err != nil {
+			style.PrintWarning("ownership check: failed to read bead %s: %v (assuming stale)", issueID, err)
+			return true, fmt.Sprintf("cannot verify ownership: bead %s read failed: %v", issueID, err)
+		}
+		assignee = issue.Assignee
+	}
+
+	return isStalePolecatDoneCheck(agentHookBead, issueID, assignee, polecatName)
+}
+
+// isStalePolecatDoneCheck is the pure guard logic, separated from bd I/O for testability.
+// Two independent checks, either of which catches the stale state:
+//  1. Hook mismatch: agent's hook_bead points to a different issue than the branch
+//  2. Assignee mismatch: bead is assigned to a different polecat
+func isStalePolecatDoneCheck(agentHookBead, issueID, assignee, polecatName string) (bool, string) {
+	if agentHookBead != "" && agentHookBead != issueID {
+		return true, fmt.Sprintf("agent hook is %s but branch references %s (stale branch state)", agentHookBead, issueID)
+	}
+
+	if polecatName != "" && issueID != "" {
+		if assignee != "" && !strings.HasSuffix(assignee, "/"+polecatName) {
+			return true, fmt.Sprintf("%s is assigned to %s, not %s", issueID, assignee, polecatName)
+		}
+	}
+
+	return false, ""
 }
 
 // selfNukePolecat deletes this polecat's worktree (self-cleaning model).
