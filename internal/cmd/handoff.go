@@ -295,15 +295,14 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		style.PrintWarning("could not set remain-on-exit: %v", err)
 	}
 
-	// NOTE: For self-handoff, we do NOT call KillPaneProcesses here.
-	// That would kill the gt handoff process itself before it can call RespawnPane,
-	// leaving the pane dead with no respawn. RespawnPane's -k flag handles killing
-	// atomically - tmux kills the old process and spawns the new one together.
-	// See: https://github.com/steveyegge/gastown/issues/859 (pane is dead bug)
-	//
-	// For orphan prevention, we rely on respawn-pane -k which sends SIGHUP/SIGTERM.
-	// If orphans still occur, the solution is to adjust the restart command to
-	// kill orphans at startup, not to kill ourselves before respawning.
+	// Kill all pane processes EXCEPT ourselves before respawning.
+	// respawn-pane -k only sends SIGHUP which opencode/Node.js ignores,
+	// causing duplicate processes. KillPaneProcessesExcluding sends SIGTERM/SIGKILL
+	// to ensure old processes are terminated before new ones spawn.
+	selfPID := fmt.Sprintf("%d", os.Getpid())
+	if err := t.KillPaneProcessesExcluding(pane, []string{selfPID}); err != nil {
+		style.PrintWarning("could not kill pane processes: %v", err)
+	}
 
 	// Check if pane's working directory exists (may have been deleted)
 	paneWorkDir, _ := t.GetPaneWorkDir(currentSession)
@@ -491,6 +490,13 @@ func runHandoffCycle() error {
 		style.PrintWarning("could not set remain-on-exit: %v", err)
 	}
 
+	// Kill all pane processes EXCEPT ourselves before respawning.
+	// respawn-pane -k only sends SIGHUP which opencode/Node.js ignores.
+	selfPID := fmt.Sprintf("%d", os.Getpid())
+	if err := t.KillPaneProcessesExcluding(pane, []string{selfPID}); err != nil {
+		style.PrintWarning("could not kill pane processes: %v", err)
+	}
+
 	// Clear scrollback history before respawn
 	if err := t.ClearHistory(pane); err != nil {
 		style.PrintWarning("could not clear history: %v", err)
@@ -506,7 +512,6 @@ func runHandoffCycle() error {
 		}
 	}
 
-	// Respawn pane — this atomically kills current process and starts fresh
 	return t.RespawnPane(pane, restartCmd)
 }
 

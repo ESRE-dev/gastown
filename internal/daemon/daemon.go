@@ -783,7 +783,7 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	if status := mgr.IsHealthy(hungSessionThreshold); status == tmux.AgentHung {
 		d.logger.Printf("Witness for %s is hung (no activity for %v), killing for restart", rigName, hungSessionThreshold)
 		t := tmux.NewTmux()
-		_ = t.KillSession(mgr.SessionName())
+		_ = t.KillSessionWithProcesses(mgr.SessionName())
 	}
 
 	if err := mgr.Start(false, "", nil); err != nil {
@@ -833,7 +833,7 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	if status := mgr.IsHealthy(hungSessionThreshold); status == tmux.AgentHung {
 		d.logger.Printf("Refinery for %s is hung (no activity for %v), killing for restart", rigName, hungSessionThreshold)
 		t := tmux.NewTmux()
-		_ = t.KillSession(mgr.SessionName())
+		_ = t.KillSessionWithProcesses(mgr.SessionName())
 	}
 
 	if err := mgr.Start(false, ""); err != nil {
