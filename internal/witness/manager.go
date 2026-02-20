@@ -122,7 +122,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but Claude dead. Kill and recreate.
-		if err := t.KillSessionWithProcesses(sessionID); err != nil {
+		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -172,11 +172,10 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:          "witness",
-		Rig:           m.rig.Name,
-		TownRoot:      townRoot,
-		Agent:         agentOverride,
-		ResolvedAgent: runtimeConfig.ResolvedAgent,
+		Role:     "witness",
+		Rig:      m.rig.Name,
+		TownRoot: townRoot,
+		Agent:    agentOverride,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
@@ -279,6 +278,6 @@ func (m *Manager) Stop() error {
 		return ErrNotRunning
 	}
 
-	// Kill the tmux session and all descendant processes
-	return t.KillSessionWithProcesses(sessionID)
+	// Kill the tmux session
+	return t.KillSession(sessionID)
 }

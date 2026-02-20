@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"encoding/base64"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,7 +10,6 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/events"
 )
 
 // TestDoneUsesResolveBeadsDir verifies that the done command correctly uses
@@ -469,98 +466,26 @@ func TestClearDoneIntentLabel(t *testing.T) {
 // own branch-on-remote check).
 func TestPushFailureDoesNotNukeWorktree(t *testing.T) {
 	// This tests the boolean guard logic inline in runDone:
-	// if exitType == ExitCompleted && !pushFailed && !(mergeFailed && mrID != "") { ... nuke ... }
-	tests := []struct {
-		name        string
-		exitType    string
-		pushFailed  bool
-		mergeFailed bool
-		mrID        string
-		wantNuke    bool
-	}{
-		{"completed+push-ok+merge-ok", ExitCompleted, false, false, "gt-mr1", true},
-		{"completed+push-failed", ExitCompleted, true, false, "", false},
-		{"completed+merge-failed+has-mr", ExitCompleted, false, true, "gt-mr1", false},
-		{"completed+merge-failed+no-mr", ExitCompleted, false, true, "", true},
-		{"escalated+push-ok", ExitEscalated, false, false, "", false},
-		{"deferred+push-ok", ExitDeferred, false, false, "", false},
-		{"escalated+push-failed", ExitEscalated, true, false, "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Replicate the guard condition from runDone (gt-cof fix)
-			shouldNuke := tt.exitType == ExitCompleted && !tt.pushFailed && !(tt.mergeFailed && tt.mrID != "")
-			if shouldNuke != tt.wantNuke {
-				t.Errorf("shouldNuke = %v, want %v", shouldNuke, tt.wantNuke)
-			}
-		})
-	}
-}
-
-// TestMRCreationFailureSetsPushFailed verifies that when MR bead creation
-// fails after all retries, pushFailed is set to prevent worktree nuking.
-// This is the gt-cof fix: without this, the branch is pushed but MR is missing,
-// and the worktree gets nuked, losing the only reference to what work was done.
-func TestMRCreationFailureSetsPushFailed(t *testing.T) {
-	// Simulate the MR creation retry logic from done.go
-	pushFailed := false
-	mrID := ""
-
-	// Simulate 3 failed MR creation attempts
-	var mrCreateErr error
-	for mrAttempt := 1; mrAttempt <= 3; mrAttempt++ {
-		mrCreateErr = fmt.Errorf("connection refused")
-	}
-
-	// After all retries fail, pushFailed should be set
-	if mrCreateErr != nil {
-		pushFailed = true // Prevent worktree nuke
-	}
-
-	if !pushFailed {
-		t.Error("pushFailed should be true after MR creation failure")
-	}
-	if mrID != "" {
-		t.Error("mrID should be empty after MR creation failure")
-	}
-
-	// Verify worktree nuke guard works (full guard including mergeFailed check)
-	mergeFailed := false
-	shouldNuke := ExitCompleted == ExitCompleted && !pushFailed && !(mergeFailed && mrID != "")
-	if shouldNuke {
-		t.Error("worktree should NOT be nuked when MR creation failed")
-	}
-}
-
-// TestDeferredCleanupLogsErrors verifies that the deferred session cleanup
-// correctly handles real errors: logs them (before session kill) and preserves
-// them (does NOT overwrite with SilentExit(0)). This complements
-// TestDeferredCleanupPreservesValidationError which checks the retErr contract.
-func TestDeferredCleanupLogsErrors(t *testing.T) {
-	// Verify that IsSilentExit correctly distinguishes real errors from SilentExit
+	// if exitType == ExitCompleted && !pushFailed { ... nuke ... }
 	tests := []struct {
 		name       string
-		err        error
-		wantSilent bool
-		wantLog    bool // should the error be logged before session kill?
+		exitType   string
+		pushFailed bool
+		wantNuke   bool
 	}{
-		{"nil error", nil, false, false},
-		{"real error", fmt.Errorf("cannot determine source issue"), false, true},
-		{"SilentExit(0)", NewSilentExit(0), true, false},
-		{"SilentExit(1)", NewSilentExit(1), true, false},
+		{"completed+push-ok", ExitCompleted, false, true},
+		{"completed+push-failed", ExitCompleted, true, false},
+		{"escalated+push-ok", ExitEscalated, false, false},
+		{"deferred+push-ok", ExitDeferred, false, false},
+		{"escalated+push-failed", ExitEscalated, true, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, isSilent := IsSilentExit(tt.err)
-			if isSilent != tt.wantSilent {
-				t.Errorf("IsSilentExit(%v) = %v, want %v", tt.err, isSilent, tt.wantSilent)
-			}
-			// The logging condition from the deferred cleanup
-			shouldLog := tt.err != nil && !isSilent
-			if shouldLog != tt.wantLog {
-				t.Errorf("shouldLog = %v, want %v", shouldLog, tt.wantLog)
+			// Replicate the guard condition from runDone
+			shouldNuke := tt.exitType == ExitCompleted && !tt.pushFailed
+			if shouldNuke != tt.wantNuke {
+				t.Errorf("shouldNuke = %v, want %v", shouldNuke, tt.wantNuke)
 			}
 		})
 	}
@@ -598,57 +523,6 @@ func TestDeferredKillNotOnValidationError(t *testing.T) {
 	// defer checks: sessionKilled is true → no-op (don't double-kill)
 	if sessionCleanupNeeded && !sessionKilled {
 		t.Error("deferred kill should NOT trigger when sessionKilled is true")
-	}
-}
-
-// TestDeferredCleanupPreservesValidationError verifies that the deferred cleanup
-// does NOT overwrite retErr when a validation error has already been set.
-// This is a regression test for the fix in done.go that changed:
-//
-//	retErr = NewSilentExit(0)
-//
-// to:
-//
-//	if retErr == nil { retErr = NewSilentExit(0) }
-func TestDeferredCleanupPreservesValidationError(t *testing.T) {
-	originalErr := fmt.Errorf("validation failed: bad input")
-
-	var retErr error = originalErr
-
-	sessionCleanupNeeded := true
-	sessionKilled := false
-
-	if sessionCleanupNeeded && !sessionKilled {
-		if retErr == nil {
-			retErr = NewSilentExit(0)
-		}
-	}
-
-	if retErr != originalErr {
-		t.Errorf("retErr was overwritten: got %v, want %v", retErr, originalErr)
-	}
-}
-
-// TestDeferredCleanupSetsSilentExitOnSuccess verifies that the deferred cleanup
-// sets retErr to SilentExit(0) when there was no prior error.
-func TestDeferredCleanupSetsSilentExitOnSuccess(t *testing.T) {
-	var retErr error = nil
-
-	sessionCleanupNeeded := true
-	sessionKilled := false
-
-	if sessionCleanupNeeded && !sessionKilled {
-		if retErr == nil {
-			retErr = NewSilentExit(0)
-		}
-	}
-
-	if retErr == nil {
-		t.Error("retErr should be set to SilentExit(0)")
-	}
-	var silentExit *SilentExitError
-	if !errors.As(retErr, &silentExit) {
-		t.Errorf("retErr should be SilentExitError, got %T", retErr)
 	}
 }
 
@@ -983,7 +857,7 @@ func TestReadDoneCheckpoints(t *testing.T) {
 			},
 		},
 		{
-			name: "all checkpoints",
+			name:   "all checkpoints",
 			labels: []string{
 				"done-cp:pushed:branch-name:1738972800",
 				"done-cp:mr-created:gt-mr1:1738972801",
@@ -998,7 +872,7 @@ func TestReadDoneCheckpoints(t *testing.T) {
 			},
 		},
 		{
-			name: "mixed with done-intent and other labels",
+			name:   "mixed with done-intent and other labels",
 			labels: []string{
 				"gt:agent",
 				"done-intent:COMPLETED:1738972800",
@@ -1178,12 +1052,12 @@ func TestCheckpointNilMapSafe(t *testing.T) {
 // convoy merge=direct was not propagated because cross-rig dep resolution failed.
 func TestConvoyInfoFallbackChain(t *testing.T) {
 	tests := []struct {
-		name           string
-		attachmentInfo *ConvoyInfo // Result from getConvoyInfoFromIssue
-		depInfo        *ConvoyInfo // Result from getConvoyInfoForIssue
-		wantConvoyID   string
-		wantMerge      string
-		wantNil        bool
+		name            string
+		attachmentInfo  *ConvoyInfo // Result from getConvoyInfoFromIssue
+		depInfo         *ConvoyInfo // Result from getConvoyInfoForIssue
+		wantConvoyID    string
+		wantMerge       string
+		wantNil         bool
 	}{
 		{
 			name:           "attachment fields provide convoy info",
@@ -1239,383 +1113,5 @@ func TestConvoyInfoFallbackChain(t *testing.T) {
 				t.Errorf("MergeStrategy = %q, want %q", convoyInfo.MergeStrategy, tt.wantMerge)
 			}
 		})
-	}
-}
-
-// TestMRCreationFailureDoesNotSelfKill verifies that when MR bead creation fails
-// during a COMPLETED exit, the session is NOT killed (gt-t79 fix).
-// Tests all three kill paths: explicit self-kill, deferred cleanup, and SIGTERM handler.
-func TestMRCreationFailureDoesNotSelfKill(t *testing.T) {
-	tests := []struct {
-		name              string
-		exitType          string
-		mrCreationFailed  bool
-		pushFailed        bool
-		wantSelfKill      bool
-		wantDeferredKill  bool
-		wantSIGTERMKill   bool
-	}{
-		{
-			name:             "completed+MR-ok: all kill paths active",
-			exitType:         ExitCompleted,
-			mrCreationFailed: false,
-			pushFailed:       false,
-			wantSelfKill:     true,
-			wantDeferredKill: true,
-			wantSIGTERMKill:  true,
-		},
-		{
-			name:             "completed+MR-failed: ALL kill paths blocked (gt-t79)",
-			exitType:         ExitCompleted,
-			mrCreationFailed: true,
-			pushFailed:       false,
-			wantSelfKill:     false,
-			wantDeferredKill: false,
-			wantSIGTERMKill:  false,
-		},
-		{
-			name:             "completed+push-failed: self-kill skipped but session still killed",
-			exitType:         ExitCompleted,
-			mrCreationFailed: false,
-			pushFailed:       true,
-			wantSelfKill:     false, // pushFailed skips nuke but session still killed
-			wantDeferredKill: true,
-			wantSIGTERMKill:  true,
-		},
-		{
-			name:             "escalated: deferred+SIGTERM kill active, no explicit self-kill",
-			exitType:         ExitEscalated,
-			mrCreationFailed: false,
-			pushFailed:       false,
-			wantSelfKill:     false, // not completed, no nuke
-			wantDeferredKill: true,
-			wantSIGTERMKill:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sessionCleanupNeeded := true
-			sessionKilled := false
-
-			// Path 1: Explicit self-kill (only for completed+no-push-failure+no-mr-failure)
-			shouldSelfKill := tt.exitType == ExitCompleted && !tt.pushFailed && !tt.mrCreationFailed
-			if shouldSelfKill != tt.wantSelfKill {
-				t.Errorf("shouldSelfKill = %v, want %v", shouldSelfKill, tt.wantSelfKill)
-			}
-
-			// Path 2: Deferred kill backstop (must also check mrCreationFailed)
-			shouldDeferredKill := sessionCleanupNeeded && !sessionKilled && !tt.mrCreationFailed
-			if shouldDeferredKill != tt.wantDeferredKill {
-				t.Errorf("shouldDeferredKill = %v, want %v", shouldDeferredKill, tt.wantDeferredKill)
-			}
-
-			// Path 3: SIGTERM handler (must also check mrCreationFailed)
-			shouldSIGTERMKill := sessionCleanupNeeded && !sessionKilled && !tt.mrCreationFailed
-			if shouldSIGTERMKill != tt.wantSIGTERMKill {
-				t.Errorf("shouldSIGTERMKill = %v, want %v", shouldSIGTERMKill, tt.wantSIGTERMKill)
-			}
-		})
-	}
-}
-
-// TestMRFailedCheckpointFormat verifies the done-cp:mr-failed label format
-// uses B64_-prefixed base64 encoding to prevent colon truncation in error messages.
-func TestMRFailedCheckpointFormat(t *testing.T) {
-	now := time.Now()
-	errMsg := "dolt: connection refused"
-	encoded := "B64_" + base64.RawStdEncoding.EncodeToString([]byte(errMsg))
-	label := fmt.Sprintf("done-cp:%s:%s:%d", CheckpointMRFailed, encoded, now.Unix())
-
-	// Verify the label structure: done-cp:<stage>:B64_<base64-value>:<ts>
-	parts := strings.SplitN(label, ":", 4)
-	if len(parts) != 4 {
-		t.Fatalf("expected 4 parts, got %d: %v", len(parts), parts)
-	}
-	if parts[0] != "done-cp" {
-		t.Errorf("prefix = %q, want %q", parts[0], "done-cp")
-	}
-	if DoneCheckpoint(parts[1]) != CheckpointMRFailed {
-		t.Errorf("stage = %q, want %q", parts[1], CheckpointMRFailed)
-	}
-
-	// Verify B64_-prefixed value round-trips correctly (even with colons in original)
-	rawValue := parts[2]
-	if !strings.HasPrefix(rawValue, "B64_") {
-		t.Fatalf("expected B64_ prefix, got %q", rawValue)
-	}
-	decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(rawValue, "B64_"))
-	if err != nil {
-		t.Fatalf("failed to decode base64 value: %v", err)
-	}
-	if string(decoded) != errMsg {
-		t.Errorf("decoded value = %q, want %q", string(decoded), errMsg)
-	}
-}
-
-// TestCheckpointLegacyBackwardCompat verifies that readDoneCheckpoints handles
-// both legacy raw-value checkpoints and new B64_-prefixed checkpoints correctly.
-func TestCheckpointLegacyBackwardCompat(t *testing.T) {
-	// Simulate reading labels from a bead that has both legacy and new-format checkpoints.
-	// This tests the parsing logic directly rather than through the beads layer.
-	tests := []struct {
-		name      string
-		rawValue  string
-		wantValue string
-	}{
-		{
-			name:      "legacy raw value: main",
-			rawValue:  "main",
-			wantValue: "main",
-		},
-		{
-			name:      "legacy raw value: ok",
-			rawValue:  "ok",
-			wantValue: "ok",
-		},
-		{
-			name:      "new b64 value with colons",
-			rawValue:  "B64_" + base64.RawStdEncoding.EncodeToString([]byte("dolt: connection refused")),
-			wantValue: "dolt: connection refused",
-		},
-		{
-			name:      "new b64 simple value",
-			rawValue:  "B64_" + base64.RawStdEncoding.EncodeToString([]byte("ok")),
-			wantValue: "ok",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Replicate the parsing logic from readDoneCheckpoints
-			var result string
-			if strings.HasPrefix(tt.rawValue, "B64_") {
-				decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(tt.rawValue, "B64_"))
-				if err != nil {
-					result = tt.rawValue
-				} else {
-					result = string(decoded)
-				}
-			} else {
-				result = tt.rawValue
-			}
-			if result != tt.wantValue {
-				t.Errorf("parsed value = %q, want %q", result, tt.wantValue)
-			}
-		})
-	}
-}
-
-// TestMRFailedCheckpointEnablesResume verifies that when a push checkpoint exists
-// but no MR checkpoint exists (MR creation failed), the MR creation is retried
-// on resume. The mr-failed checkpoint signals the failure reason but does NOT
-// prevent retry (only mr-created would skip MR creation).
-func TestMRFailedCheckpointEnablesResume(t *testing.T) {
-	tests := []struct {
-		name           string
-		checkpoints    map[DoneCheckpoint]string
-		wantSkipPush   bool
-		wantRetryMR    bool
-	}{
-		{
-			name:         "no checkpoints - full run",
-			checkpoints:  map[DoneCheckpoint]string{},
-			wantSkipPush: false,
-			wantRetryMR:  true, // MR not created yet
-		},
-		{
-			name: "push + mr-failed: skip push, retry MR (gt-t79 resume)",
-			checkpoints: map[DoneCheckpoint]string{
-				CheckpointPushed:   "mybranch",
-				CheckpointMRFailed: "dolt: connection refused",
-			},
-			wantSkipPush: true,
-			wantRetryMR:  true, // mr-failed means retry, not skip
-		},
-		{
-			name: "push + mr-created: skip push, skip MR",
-			checkpoints: map[DoneCheckpoint]string{
-				CheckpointPushed:    "mybranch",
-				CheckpointMRCreated: "gt-mr123",
-			},
-			wantSkipPush: true,
-			wantRetryMR:  false, // mr-created means skip
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			skipPush := tt.checkpoints[CheckpointPushed] != ""
-			if skipPush != tt.wantSkipPush {
-				t.Errorf("skipPush = %v, want %v", skipPush, tt.wantSkipPush)
-			}
-
-			// MR is retried when: no mr-created checkpoint exists
-			// (mr-failed checkpoint is informational, does not block retry)
-			retryMR := tt.checkpoints[CheckpointMRCreated] == ""
-			if retryMR != tt.wantRetryMR {
-				t.Errorf("retryMR = %v, want %v", retryMR, tt.wantRetryMR)
-			}
-		})
-	}
-}
-
-// TestDoneMRFailedPayload verifies the DoneMRFailedPayload helper.
-func TestDoneMRFailedPayload(t *testing.T) {
-	payload := events.DoneMRFailedPayload("gt-abc", "polecat/nux-xyz", "dolt: connection refused")
-
-	if payload["issue"] != "gt-abc" {
-		t.Errorf("issue = %q, want %q", payload["issue"], "gt-abc")
-	}
-	if payload["branch"] != "polecat/nux-xyz" {
-		t.Errorf("branch = %q, want %q", payload["branch"], "polecat/nux-xyz")
-	}
-	if payload["reason"] != "dolt: connection refused" {
-		t.Errorf("reason = %q, want %q", payload["reason"], "dolt: connection refused")
-	}
-}
-
-// TestDoneMRFailedEventType verifies the event type constant.
-func TestDoneMRFailedEventType(t *testing.T) {
-	if events.TypeDoneMRFailed != "done_mr_failed" {
-		t.Errorf("TypeDoneMRFailed = %q, want %q", events.TypeDoneMRFailed, "done_mr_failed")
-	}
-}
-
-
-// TestIsStalePolecatDoneCheck verifies the guard logic that prevents respawned
-// polecats from force-closing beads assigned to other polecats (gt-frf61).
-//
-// Root cause: polecat furiosa was respawned for a different bead but retained
-// stale branch state from a prior assignment. Its gt done found 0 commits ahead
-// and the G15 force-close path closed gt-frf61, which was assigned to polecat
-// cheedo. The isStalePolecatDoneCheck guard checks hook_bead and assignee to prevent this.
-//
-// This tests the actual isStalePolecatDoneCheck function (pure logic, no bd dependency).
-// The bd.Show error paths (fail-closed behavior) are handled by isStalePolecatDone,
-// which returns stale=true on any read error — see TestIsStalePolecatDoneFailClosed.
-func TestIsStalePolecatDoneCheck(t *testing.T) {
-	tests := []struct {
-		name          string
-		agentHookBead string // agent's current hook_bead
-		issueID       string // issue ID parsed from branch name
-		beadAssignee  string // bead's current assignee
-		polecatName   string // this polecat's name
-		wantStale     bool
-	}{
-		{
-			name:          "hook matches issue - legitimate done",
-			agentHookBead: "gt-frf61",
-			issueID:       "gt-frf61",
-			beadAssignee:  "gastown/polecats/furiosa",
-			polecatName:   "furiosa",
-			wantStale:     false,
-		},
-		{
-			name:          "hook points to different issue - stale (gt-frf61 scenario)",
-			agentHookBead: "gt-pjox2",
-			issueID:       "gt-frf61",
-			beadAssignee:  "gastown/polecats/cheedo",
-			polecatName:   "furiosa",
-			wantStale:     true,
-		},
-		{
-			name:          "hook empty but assignee is different polecat - stale",
-			agentHookBead: "",
-			issueID:       "gt-frf61",
-			beadAssignee:  "gastown/polecats/cheedo",
-			polecatName:   "furiosa",
-			wantStale:     true,
-		},
-		{
-			name:          "hook empty and assignee matches - legitimate",
-			agentHookBead: "",
-			issueID:       "gt-frf61",
-			beadAssignee:  "gastown/polecats/furiosa",
-			polecatName:   "furiosa",
-			wantStale:     false,
-		},
-		{
-			name:          "hook empty and no assignee - legitimate (unassigned bead)",
-			agentHookBead: "",
-			issueID:       "gt-frf61",
-			beadAssignee:  "",
-			polecatName:   "furiosa",
-			wantStale:     false,
-		},
-		{
-			name:          "assignee with polecats path format - matches",
-			agentHookBead: "",
-			issueID:       "gt-abc",
-			beadAssignee:  "gastown/polecats/toast",
-			polecatName:   "toast",
-			wantStale:     false,
-		},
-		{
-			name:          "assignee with short format - matches",
-			agentHookBead: "",
-			issueID:       "gt-abc",
-			beadAssignee:  "gastown/toast",
-			polecatName:   "toast",
-			wantStale:     false,
-		},
-		{
-			name:          "no agent bead and no polecat name - not stale (non-polecat caller)",
-			agentHookBead: "",
-			issueID:       "gt-abc",
-			beadAssignee:  "",
-			polecatName:   "",
-			wantStale:     false,
-		},
-		{
-			name:          "substring polecat name does not false-match (gastown in path)",
-			agentHookBead: "",
-			issueID:       "gt-abc",
-			beadAssignee:  "gastown/polecats/cheedo",
-			polecatName:   "gastown",
-			wantStale:     true,
-		},
-		{
-			name:          "prefix polecat name does not false-match",
-			agentHookBead: "",
-			issueID:       "gt-abc",
-			beadAssignee:  "gastown/polecats/maximum",
-			polecatName:   "max",
-			wantStale:     true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			stale, reason := isStalePolecatDoneCheck(tt.agentHookBead, tt.issueID, tt.beadAssignee, tt.polecatName)
-			if stale != tt.wantStale {
-				t.Errorf("stale = %v (reason: %s), want %v (hook=%q, issue=%q, assignee=%q, polecat=%q)",
-					stale, reason, tt.wantStale, tt.agentHookBead, tt.issueID, tt.beadAssignee, tt.polecatName)
-			}
-		})
-	}
-}
-
-// TestIsStalePolecatDoneFailClosed verifies that isStalePolecatDone returns stale=true
-// when bd.Show fails, rather than proceeding to force-close (fail-closed behavior).
-// This is tested indirectly: isStalePolecatDone with a nil/invalid beads instance
-// will fail on bd.Show and should return stale=true.
-func TestIsStalePolecatDoneFailClosed(t *testing.T) {
-	// A beads instance pointing at a nonexistent directory will fail on Show.
-	bd := beads.New("/nonexistent/beads/dir")
-
-	// With a non-empty agentBeadID, the first bd.Show should fail → stale.
-	stale, reason := isStalePolecatDone(bd, "agent-bead-123", "gt-test", "furiosa")
-	if !stale {
-		t.Errorf("expected stale=true when bd.Show fails, got false (reason: %s)", reason)
-	}
-	if reason == "" {
-		t.Error("expected non-empty reason when bd.Show fails")
-	}
-
-	// With empty agentBeadID but valid polecatName/issueID, second bd.Show should fail → stale.
-	stale, reason = isStalePolecatDone(bd, "", "gt-test", "furiosa")
-	if !stale {
-		t.Errorf("expected stale=true when bd.Show fails on issue lookup, got false (reason: %s)", reason)
 	}
 }

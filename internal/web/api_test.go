@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/session"
 )
 
 func TestValidateCommand(t *testing.T) {
@@ -1001,5 +1003,69 @@ func TestRunGtCommandSemaphoreTimeoutBudget(t *testing.T) {
 	// The call should have returned within the timeout budget (200ms + margin).
 	if elapsed > 500*time.Millisecond {
 		t.Errorf("elapsed = %v, want < 500ms (timeout should bound semaphore wait)", elapsed)
+	}
+}
+
+// TestHandleSessionPreviewPrefixValidation verifies that handleSessionPreview
+// accepts session names with known rig prefixes and rejects invalid prefixes.
+func TestHandleSessionPreviewPrefixValidation(t *testing.T) {
+	originalRegistry := session.DefaultRegistry()
+	t.Cleanup(func() { session.SetDefaultRegistry(originalRegistry) })
+
+	testRegistry := session.NewPrefixRegistry()
+	testRegistry.Register("nx", "nexus")
+	testRegistry.Register("myrig", "myrig-project")
+	session.SetDefaultRegistry(testRegistry)
+
+	h := &APIHandler{
+		gtPath:            "true",
+		workDir:           t.TempDir(),
+		defaultRunTimeout: 1 * time.Second,
+		maxRunTimeout:     2 * time.Second,
+		cmdSem:            make(chan struct{}, 5),
+	}
+
+	tests := []struct {
+		name          string
+		sessionName   string
+		wantRejected  bool
+		wantErrSubstr string
+	}{
+		{"registered prefix nx", "nx-polecat-alpha", false, ""},
+		{"registered prefix myrig", "myrig-crew-bob", false, ""},
+		{"legacy gt- prefix", "gt-polecat-test", false, ""},
+		{"legacy bd- prefix", "bd-some-bead", false, ""},
+		{"hq- prefix", "hq-nonexistent-session", false, ""},
+		{"gthq- prefix", "gthq-deacon", false, ""},
+		{"unknown prefix rejected", "unknown-session-name", true, "must start with a known rig prefix"},
+		{"no prefix rejected", "justsomename", true, "must start with a known rig prefix"},
+		{"invalid characters rejected", "gt-bad_chars!", true, "invalid characters"},
+		{"missing session parameter", "", true, "Missing session parameter"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			url := "/api/session-preview"
+			if tc.sessionName != "" {
+				url += "?session=" + tc.sessionName
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			rec := httptest.NewRecorder()
+
+			h.handleSessionPreview(rec, req)
+
+			if tc.wantRejected {
+				if rec.Code != http.StatusBadRequest {
+					t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+				}
+				if !strings.Contains(rec.Body.String(), tc.wantErrSubstr) {
+					t.Errorf("body = %q, want substring %q", rec.Body.String(), tc.wantErrSubstr)
+				}
+			} else {
+				if rec.Code == http.StatusBadRequest && strings.Contains(rec.Body.String(), "prefix") {
+					t.Errorf("valid prefix %q was rejected: %s", tc.sessionName, rec.Body.String())
+				}
+			}
+		})
 	}
 }

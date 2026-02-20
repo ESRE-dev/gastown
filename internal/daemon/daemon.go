@@ -783,7 +783,7 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	if status := mgr.IsHealthy(hungSessionThreshold); status == tmux.AgentHung {
 		d.logger.Printf("Witness for %s is hung (no activity for %v), killing for restart", rigName, hungSessionThreshold)
 		t := tmux.NewTmux()
-		_ = t.KillSessionWithProcesses(mgr.SessionName())
+		_ = t.KillSession(mgr.SessionName())
 	}
 
 	if err := mgr.Start(false, "", nil); err != nil {
@@ -833,7 +833,7 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	if status := mgr.IsHealthy(hungSessionThreshold); status == tmux.AgentHung {
 		d.logger.Printf("Refinery for %s is hung (no activity for %v), killing for restart", rigName, hungSessionThreshold)
 		t := tmux.NewTmux()
-		_ = t.KillSessionWithProcesses(mgr.SessionName())
+		_ = t.KillSession(mgr.SessionName())
 	}
 
 	if err := mgr.Start(false, ""); err != nil {
@@ -1596,23 +1596,26 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		return fmt.Errorf("creating session: %w", err)
 	}
 
-	// Resolve agent config for GT_AGENT fallback and process name detection.
-	rc := config.ResolveRoleAgentConfig("polecat", d.config.TownRoot, rigPath)
-
-	// Set environment variables using centralized AgentEnv.
-	// ResolvedAgent ensures GT_AGENT is in the tmux session table even without
-	// an explicit --agent override, so IsAgentAlive detects non-Claude agents.
+	// Set environment variables using centralized AgentEnv
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:          "polecat",
-		Rig:           rigName,
-		AgentName:     polecatName,
-		TownRoot:      d.config.TownRoot,
-		ResolvedAgent: rc.ResolvedAgent,
+		Role:      "polecat",
+		Rig:       rigName,
+		AgentName: polecatName,
+		TownRoot:  d.config.TownRoot,
 	})
 
 	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
 	for k, v := range envVars {
 		_ = d.tmux.SetEnvironment(sessionName, k, v)
+	}
+
+	// Set GT_AGENT in tmux session env so tools querying tmux environment
+	// (e.g., witness patrol) can detect non-Claude agents.
+	// BuildStartupCommand sets GT_AGENT in process env via exec env, but that
+	// isn't visible to tmux show-environment.
+	rc := config.ResolveRoleAgentConfig("polecat", d.config.TownRoot, rigPath)
+	if rc.ResolvedAgent != "" {
+		_ = d.tmux.SetEnvironment(sessionName, "GT_AGENT", rc.ResolvedAgent)
 	}
 
 	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.

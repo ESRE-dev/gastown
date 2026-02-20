@@ -86,7 +86,7 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 		return result
 	}
 
-	hasPendingMR := (payload.MRID != "" || payload.Exit == "COMPLETED") && !payload.StaleBranch
+	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
 	if hasPendingMR {
 		return handlePolecatDonePendingMR(workDir, rigName, payload, router, result)
 	}
@@ -775,8 +775,8 @@ func NukePolecat(workDir, rigName, polecatName string) error {
 		_ = t.SendKeysRaw(sessionName, "C-c")
 		// Brief delay for graceful handling
 		time.Sleep(100 * time.Millisecond)
-		// Force kill the session and all descendant processes
-		if err := t.KillSessionWithProcesses(sessionName); err != nil {
+		// Force kill the session
+		if err := t.KillSession(sessionName); err != nil {
 			// Log but continue - session might already be dead
 			// The important thing is we tried
 		}

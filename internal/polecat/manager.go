@@ -22,8 +22,8 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
-	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -969,15 +969,11 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 // verifyRemovalComplete checks that polecat directories were actually removed.
 // If they still exist, it attempts more aggressive cleanup and returns an error
 // describing what couldn't be removed.
-//
-// Uses os.Lstat (not os.Stat) to check paths without following symlinks.
-// This correctly handles symlinks that point outside the worktree: we care
-// whether the path itself (symlink or dir) is gone, not whether the target exists.
 func verifyRemovalComplete(polecatDir, clonePath string) error {
 	var remaining []string
 
-	// Check if clone path still exists (use Lstat to detect symlinks without following them)
-	if _, err := os.Lstat(clonePath); err == nil {
+	// Check if clone path still exists
+	if _, err := os.Stat(clonePath); err == nil {
 		// Try one more aggressive removal
 		if removeErr := forceRemoveDir(clonePath); removeErr != nil {
 			remaining = append(remaining, clonePath)
@@ -986,7 +982,7 @@ func verifyRemovalComplete(polecatDir, clonePath string) error {
 
 	// Check if polecat dir still exists (and is different from clone path)
 	if polecatDir != clonePath {
-		if _, err := os.Lstat(polecatDir); err == nil {
+		if _, err := os.Stat(polecatDir); err == nil {
 			if removeErr := forceRemoveDir(polecatDir); removeErr != nil {
 				remaining = append(remaining, polecatDir)
 			}
@@ -1537,8 +1533,11 @@ func (m *Manager) SetState(name string, state State) error {
 
 	switch state {
 	case StateWorking:
-		// Set issue to in_progress if there is one
-		if issue != nil {
+		// Set issue to in_progress if there is one.
+		// Skip if status is "hooked" — sling sets this, and changing it here causes
+		// merge conflicts when gt done runs. The polecat should claim work via gt prime,
+		// not have sling change status during spawn (gt-zecmc).
+		if issue != nil && issue.Status != "hooked" {
 			status := "in_progress"
 			if err := m.beads.Update(issue.ID, beads.UpdateOptions{Status: &status}); err != nil {
 				return fmt.Errorf("setting issue status: %w", err)

@@ -138,9 +138,7 @@ func runReady(cmd *cobra.Command, args []string) error {
 				wispIDs := getWispIDs(townBeadsPath)
 				filtered = filterWisps(filtered, wispIDs)
 				// Filter identity beads (agents, roles, rigs) - not actionable work
-				filtered = filterIdentityBeads(filtered)
-				// Filter molecule infrastructure (mol instances, mol steps, events)
-				src.Issues = filterMoleculeBeads(filtered)
+				src.Issues = filterIdentityBeads(filtered)
 			}
 			sources = append(sources, src)
 		}()
@@ -169,9 +167,7 @@ func runReady(cmd *cobra.Command, args []string) error {
 				wispIDs := getWispIDs(r.BeadsPath())
 				filtered = filterWisps(filtered, wispIDs)
 				// Filter identity beads (agents, roles, rigs) - not actionable work
-				filtered = filterIdentityBeads(filtered)
-				// Filter molecule infrastructure (mol instances, mol steps, events)
-				src.Issues = filterMoleculeBeads(filtered)
+				src.Issues = filterIdentityBeads(filtered)
 			}
 			sources = append(sources, src)
 		}(r)
@@ -468,54 +464,18 @@ func filterIdentityBeads(issues []*beads.Issue) []*beads.Issue {
 	return filtered
 }
 
-// filterMoleculeBeads removes molecule infrastructure beads from the list.
-// Molecule instances and their step sub-issues are operational infrastructure
-// managed by agents — not dispatchable user work. The dashboard Work panel
-// should only show issues that a human or agent can actually sling to a polecat.
-//
-// Molecule beads follow the naming convention: <prefix>-mol-<id>
-// Both mol instance epics and their step sub-issues share this pattern.
-//
-// Also filters event-type issues (compaction reports, convoy events, etc.)
-// that are informational records, not actionable work items.
-func filterMoleculeBeads(issues []*beads.Issue) []*beads.Issue {
-	filtered := make([]*beads.Issue, 0, len(issues))
-	for _, issue := range issues {
-		// Filter event-type issues (compaction reports, convoy events, etc.)
-		if issue.Type == "event" {
-			continue
-		}
-
-		// Filter molecule infrastructure beads.
-		// ID convention: <rig-prefix>mol-<random-id> for both mol instances and steps.
-		// We detect this by checking whether "-mol-" appears in the ID.
-		if strings.Contains(issue.ID, "-mol-") {
-			continue
-		}
-
-		filtered = append(filtered, issue)
-	}
-	return filtered
-}
-
 // filterWisps removes wisp issues from the list.
 // Wisps are ephemeral operational work that shouldn't appear in ready work.
-// Primary filtering is done by bd ready (which excludes ephemeral issues by default).
-// This function provides defense-in-depth using two strategies:
-//  1. ID-based: any issue whose ID contains "-wisp-" is a wisp by naming convention
-//  2. DB-based: fallback lookup of explicit wisp flags from issues.jsonl (flat-file stores only)
 func filterWisps(issues []*beads.Issue, wispIDs map[string]bool) []*beads.Issue {
+	if wispIDs == nil || len(wispIDs) == 0 {
+		return issues
+	}
+
 	filtered := make([]*beads.Issue, 0, len(issues))
 	for _, issue := range issues {
-		// Filter by ID pattern: wisp IDs follow the convention <prefix>-wisp-<id>
-		if strings.Contains(issue.ID, "-wisp-") {
-			continue
+		if !wispIDs[issue.ID] {
+			filtered = append(filtered, issue)
 		}
-		// Filter by explicit wisp flag from DB lookup (when available)
-		if wispIDs != nil && wispIDs[issue.ID] {
-			continue
-		}
-		filtered = append(filtered, issue)
 	}
 	return filtered
 }

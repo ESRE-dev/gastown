@@ -18,7 +18,6 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 )
 
-
 // CommandRequest is the JSON request body for /api/run.
 type CommandRequest struct {
 	// Command is the gt command to run (without the "gt" prefix).
@@ -1574,10 +1573,10 @@ func parsePRShowOutput(jsonStr string) PRShowResponse {
 	}
 
 	var data struct {
-		Number       int    `json:"number"`
-		Title        string `json:"title"`
-		State        string `json:"state"`
-		Author       struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		State  string `json:"state"`
+		Author struct {
 			Login string `json:"login"`
 		} `json:"author"`
 		URL          string `json:"url"`
@@ -1643,18 +1642,18 @@ func parsePRShowOutput(jsonStr string) PRShowResponse {
 type CrewMember struct {
 	Name       string `json:"name"`
 	Rig        string `json:"rig"`
-	State      string `json:"state"`       // spinning, finished, ready, questions
+	State      string `json:"state"` // spinning, finished, ready, questions
 	Hook       string `json:"hook,omitempty"`
 	HookTitle  string `json:"hook_title,omitempty"`
-	Session    string `json:"session"`     // attached, detached, none
+	Session    string `json:"session"` // attached, detached, none
 	LastActive string `json:"last_active"`
 }
 
 // CrewResponse is the response for /api/crew.
 type CrewResponse struct {
-	Crew    []CrewMember `json:"crew"`
-	ByRig   map[string][]CrewMember `json:"by_rig"`
-	Total   int          `json:"total"`
+	Crew  []CrewMember            `json:"crew"`
+	ByRig map[string][]CrewMember `json:"by_rig"`
+	Total int                     `json:"total"`
 }
 
 // ReadyItem represents a ready work item.
@@ -1668,9 +1667,9 @@ type ReadyItem struct {
 
 // ReadyResponse is the response for /api/ready.
 type ReadyResponse struct {
-	Items   []ReadyItem         `json:"items"`
+	Items    []ReadyItem            `json:"items"`
 	BySource map[string][]ReadyItem `json:"by_source"`
-	Summary struct {
+	Summary  struct {
 		Total   int `json:"total"`
 		P1Count int `json:"p1_count"`
 		P2Count int `json:"p2_count"`
@@ -1685,7 +1684,7 @@ func (h *APIHandler) handleCrew(w http.ResponseWriter, r *http.Request) {
 
 	// Run gt crew list --all --json to get crew across all rigs
 	output, err := h.runGtCommand(ctx, 10*time.Second, []string{"crew", "list", "--all", "--json"})
-	
+
 	resp := CrewResponse{
 		Crew:  make([]CrewMember, 0),
 		ByRig: make(map[string][]CrewMember),
@@ -1705,7 +1704,7 @@ func (h *APIHandler) handleCrew(w http.ResponseWriter, r *http.Request) {
 		Session string `json:"session,omitempty"`
 		Hook    string `json:"hook,omitempty"`
 	}
-	
+
 	if err := json.Unmarshal([]byte(output), &crewData); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
@@ -1807,9 +1806,9 @@ func (h *APIHandler) isClaudeRunningInSession(ctx context.Context, sessionName s
 	}
 	// Check for common agent commands
 	return strings.Contains(output, "claude") ||
-	       strings.Contains(output, "node") ||
-	       strings.Contains(output, "codex") ||
-	       strings.Contains(output, "opencode")
+		strings.Contains(output, "node") ||
+		strings.Contains(output, "codex") ||
+		strings.Contains(output, "opencode")
 }
 
 // hasQuestionInPane checks the last output for question indicators.
@@ -1880,7 +1879,7 @@ func (h *APIHandler) handleReady(w http.ResponseWriter, r *http.Request) {
 
 	// Run gt ready --json to get ready work
 	output, err := h.runGtCommand(ctx, 12*time.Second, []string{"ready", "--json"})
-	
+
 	resp := ReadyResponse{
 		Items:    make([]ReadyItem, 0),
 		BySource: make(map[string][]ReadyItem),
@@ -1962,9 +1961,10 @@ func (h *APIHandler) handleSessionPreview(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Validate session name: must start with "gt-" and contain only safe characters
-	if !strings.HasPrefix(sessionName, "gt-") {
-		h.sendError(w, "Invalid session name: must start with gt-", http.StatusBadRequest)
+	// Validate session name: must start with a known prefix and contain only safe characters
+	hasValidPrefix := session.HasKnownPrefix(sessionName)
+	if !hasValidPrefix {
+		h.sendError(w, "Invalid session name: must start with a known rig prefix", http.StatusBadRequest)
 		return
 	}
 	for _, c := range sessionName {
@@ -2061,11 +2061,11 @@ func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	var lastHash string
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	// Send keepalive comment every 30 seconds to prevent connection timeouts
-	keepalive := time.NewTicker(30 * time.Second)
+	// Send keepalive comment every 15 seconds to prevent connection timeouts
+	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
 
 	for {

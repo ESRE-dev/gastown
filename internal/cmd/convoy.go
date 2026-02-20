@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tui/convoy"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -33,29 +34,23 @@ func generateShortID() string {
 // looksLikeIssueID checks if a string looks like a beads issue ID.
 // Issue IDs have the format: prefix-id (e.g., gt-abc, bd-xyz, hq-123).
 func looksLikeIssueID(s string) bool {
-	// Common beads prefixes
-	prefixes := []string{"gt-", "bd-", "hq-"}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(s, prefix) {
-			return true
-		}
+	// Check registry prefixes and legacy fallbacks via centralized helper
+	if session.HasKnownPrefix(s) {
+		return true
 	}
-	// Also check for pattern: 2-3 lowercase letters followed by hyphen
-	// This catches custom prefixes defined in routes.jsonl
-	if len(s) >= 4 && s[2] == '-' || (len(s) >= 5 && s[3] == '-') {
-		hyphenIdx := strings.Index(s, "-")
-		if hyphenIdx >= 2 && hyphenIdx <= 3 {
-			prefix := s[:hyphenIdx]
-			// Check if prefix is all lowercase letters
-			allLower := true
-			for _, c := range prefix {
-				if c < 'a' || c > 'z' {
-					allLower = false
-					break
-				}
+	// Pattern check: 2-3 lowercase letters followed by hyphen.
+	// Covers unregistered short rig prefixes (e.g., nx, rpk).
+	// Longer prefixes (4+ chars like nrpk) are caught by HasKnownPrefix
+	// via the registry — no need to heuristic-match them here.
+	hyphenIdx := strings.Index(s, "-")
+	if hyphenIdx >= 2 && hyphenIdx <= 3 && len(s) > hyphenIdx+1 {
+		prefix := s[:hyphenIdx]
+		for _, c := range prefix {
+			if c < 'a' || c > 'z' {
+				return false
 			}
-			return allLower
 		}
+		return true
 	}
 	return false
 }
@@ -1939,7 +1934,6 @@ type trackedDependency struct {
 	Labels         []string `json:"labels"`
 	Blocked        bool     `json:"-"`
 }
-
 
 func applyFreshIssueDetails(dep *trackedDependency, details *issueDetails) {
 	dep.Status = details.Status
