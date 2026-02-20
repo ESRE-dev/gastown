@@ -86,7 +86,7 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 		return result
 	}
 
-	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
+	hasPendingMR := (payload.MRID != "" || payload.Exit == "COMPLETED") && !payload.StaleBranch
 	if hasPendingMR {
 		return handlePolecatDonePendingMR(workDir, rigName, payload, router, result)
 	}
