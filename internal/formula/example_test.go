@@ -210,13 +210,11 @@ needs = ["b"]
 `
 	_, err := formula.Parse([]byte(toml))
 	if err != nil {
-		// The error identifies a node in the cycle; the specific node
-		// depends on traversal order, so we print only the stable prefix.
-		fmt.Println("Validation error: cycle detected")
+		fmt.Printf("Validation error: %v\n", err)
 	}
 
 	// Output:
-	// Validation error: cycle detected
+	// Validation error: cycle detected involving: a
 }
 
 func ExampleFormula_GetStep() {

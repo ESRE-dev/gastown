@@ -118,7 +118,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		}
 		// Zombie - tmux alive but agent dead. Kill and recreate.
 		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, agent dead). Recreating...")
-		if err := t.KillSessionWithProcesses(sessionID); err != nil {
+		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -176,11 +176,10 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:          "refinery",
-		Rig:           m.rig.Name,
-		TownRoot:      townRoot,
-		Agent:         agentOverride,
-		ResolvedAgent: runtimeConfig.ResolvedAgent,
+		Role:     "refinery",
+		Rig:      m.rig.Name,
+		TownRoot: townRoot,
+		Agent:    agentOverride,
 	})
 
 	// Add refinery-specific flag
@@ -226,8 +225,8 @@ func (m *Manager) Stop() error {
 		return ErrNotRunning
 	}
 
-	// Kill the tmux session and all descendant processes
-	return t.KillSessionWithProcesses(sessionID)
+	// Kill the tmux session
+	return t.KillSession(sessionID)
 }
 
 // Queue returns the current merge queue.

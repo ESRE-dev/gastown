@@ -155,11 +155,6 @@ func runMoleculeProgress(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
 
-	// Unset BD_BRANCH to read from main rig branch for hooked work visibility
-	if bdBranch := os.Getenv("BD_BRANCH"); bdBranch != "" {
-		os.Unsetenv("BD_BRANCH")
-	}
-
 	b := beads.New(workDir)
 
 	// Get the root issue
@@ -363,14 +358,6 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
 
-	// Unset BD_BRANCH so we read from the main rig branch where work is assigned,
-	// not the polecat's isolated branch. Polecats have BD_BRANCH set for write isolation,
-	// but they need to read hooked work from the main branch.
-	// See: https://github.com/steveyegge/gastown/issues/gt-nnnnnn
-	if bdBranch := os.Getenv("BD_BRANCH"); bdBranch != "" {
-		os.Unsetenv("BD_BRANCH")
-	}
-
 	b := beads.New(workDir)
 
 	// Build status info
@@ -413,19 +400,8 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 				}
 				hookBead, err = hookB.Show(agentBead.HookBead)
 				if err != nil {
-					// Hook bead not found in resolved dir - fall back to town beads.
-					// The hook_bead may be an hq- prefixed issue stored in town beads
-					// (not rig beads). This mirrors the fallback in runHookShow.
-					townBeadsDir := filepath.Join(townRoot, ".beads")
-					if _, statErr := os.Stat(townBeadsDir); statErr == nil {
-						townBeads := beads.New(townBeadsDir)
-						hookBead, err = townBeads.Show(agentBead.HookBead)
-						if err != nil {
-							hookBead = nil
-						}
-					} else {
-						hookBead = nil
-					}
+					// Hook bead referenced but not found - report error but continue
+					hookBead = nil
 				}
 			}
 		}
@@ -479,24 +455,6 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			if err == nil && len(inProgressBeads) > 0 {
 				// Use the first in_progress bead (should typically be only one)
 				hookedBeads = inProgressBeads
-			}
-		}
-
-		// If still nothing found locally, check town beads for cross-rig hook beads
-		// (e.g., hq-* prefix beads stored in town beads but assigned to this agent).
-		// This mirrors the fallback in runHookShow.
-		if len(hookedBeads) == 0 {
-			townBeadsDir := filepath.Join(townRoot, ".beads")
-			if _, statErr := os.Stat(townBeadsDir); statErr == nil {
-				townBeads := beads.New(townBeadsDir)
-				townHooked, tErr := townBeads.List(beads.ListOptions{
-					Status:   beads.StatusHooked,
-					Assignee: target,
-					Priority: -1,
-				})
-				if tErr == nil && len(townHooked) > 0 {
-					hookedBeads = townHooked
-				}
 			}
 		}
 

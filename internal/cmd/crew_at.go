@@ -192,7 +192,6 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			TownRoot:         townRoot,
 			RuntimeConfigDir: claudeConfigDir,
 			Agent:            crewAgentOverride,
-			ResolvedAgent:    runtimeConfig.ResolvedAgent,
 		})
 		for k, v := range envVars {
 			_ = t.SetEnvironment(sessionID, k, v)

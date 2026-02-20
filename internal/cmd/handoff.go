@@ -295,28 +295,18 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		style.PrintWarning("could not set remain-on-exit: %v", err)
 	}
 
-	// Check if pane's working directory exists (may have been deleted).
-	// Must happen BEFORE killing pane processes — GetPaneWorkDir reads
-	// /proc/PID/cwd which becomes unavailable once the process is dead.
-	paneWorkDir, _ := t.GetPaneWorkDir(currentSession)
+	// NOTE: For self-handoff, we do NOT call KillPaneProcesses here.
+	// That would kill the gt handoff process itself before it can call RespawnPane,
+	// leaving the pane dead with no respawn. RespawnPane's -k flag handles killing
+	// atomically - tmux kills the old process and spawns the new one together.
+	// See: https://github.com/steveyegge/gastown/issues/859 (pane is dead bug)
+	//
+	// For orphan prevention, we rely on respawn-pane -k which sends SIGHUP/SIGTERM.
+	// If orphans still occur, the solution is to adjust the restart command to
+	// kill orphans at startup, not to kill ourselves before respawning.
 
-	// Kill all pane processes EXCEPT ourselves and the pane shell before respawning.
-	// respawn-pane -k only sends SIGHUP which opencode/Node.js ignores,
-	// causing duplicate processes. KillPaneProcessesExcluding sends SIGTERM/SIGKILL
-	// to ensure old processes are terminated before new ones spawn.
-	// We exclude:
-	//   - selfPID: gt handoff must survive to call RespawnPane
-	//   - panePID: the shell is the session leader; killing it sends SIGHUP to
-	//     the foreground process group (which includes us), causing premature
-	//     termination. RespawnPane -k handles shell cleanup atomically.
-	selfPID := fmt.Sprintf("%d", os.Getpid())
-	excludePIDs := []string{selfPID}
-	if panePID, err := t.GetPanePID(pane); err == nil && panePID != "" {
-		excludePIDs = append(excludePIDs, panePID)
-	}
-	if err := t.KillPaneProcessesExcluding(pane, excludePIDs); err != nil {
-		style.PrintWarning("could not kill pane processes: %v", err)
-	}
+	// Check if pane's working directory exists (may have been deleted)
+	paneWorkDir, _ := t.GetPaneWorkDir(currentSession)
 	if paneWorkDir != "" {
 		if _, err := os.Stat(paneWorkDir); err != nil {
 			if townRoot := detectTownRootFromCwd(); townRoot != "" {
@@ -501,27 +491,13 @@ func runHandoffCycle() error {
 		style.PrintWarning("could not set remain-on-exit: %v", err)
 	}
 
-	// Check if pane's working directory exists (may have been deleted).
-	// Must happen BEFORE killing pane processes — GetPaneWorkDir reads
-	// /proc/PID/cwd which becomes unavailable once the process is dead.
-	paneWorkDir, _ := t.GetPaneWorkDir(currentSession)
-
-	// Kill all pane processes EXCEPT ourselves and the pane shell before respawning.
-	// respawn-pane -k only sends SIGHUP which opencode/Node.js ignores.
-	// Exclude panePID to prevent SIGHUP from session leader death killing us.
-	selfPID := fmt.Sprintf("%d", os.Getpid())
-	excludePIDs := []string{selfPID}
-	if panePID, err := t.GetPanePID(pane); err == nil && panePID != "" {
-		excludePIDs = append(excludePIDs, panePID)
-	}
-	if err := t.KillPaneProcessesExcluding(pane, excludePIDs); err != nil {
-		style.PrintWarning("could not kill pane processes: %v", err)
-	}
-
 	// Clear scrollback history before respawn
 	if err := t.ClearHistory(pane); err != nil {
 		style.PrintWarning("could not clear history: %v", err)
 	}
+
+	// Check if pane's working directory exists (may have been deleted)
+	paneWorkDir, _ := t.GetPaneWorkDir(currentSession)
 	if paneWorkDir != "" {
 		if _, err := os.Stat(paneWorkDir); err != nil {
 			if townRoot := detectTownRootFromCwd(); townRoot != "" {
@@ -530,6 +506,7 @@ func runHandoffCycle() error {
 		}
 	}
 
+	// Respawn pane — this atomically kills current process and starts fresh
 	return t.RespawnPane(pane, restartCmd)
 }
 

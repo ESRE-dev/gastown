@@ -495,12 +495,11 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
 		}
 		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:          "polecat",
-			Rig:           parsed.RigName,
-			AgentName:     parsed.AgentName,
-			TownRoot:      d.config.TownRoot,
-			SessionIDEnv:  sessionIDEnv,
-			ResolvedAgent: runtimeConfig.ResolvedAgent,
+			Role:         "polecat",
+			Rig:          parsed.RigName,
+			AgentName:    parsed.AgentName,
+			TownRoot:     d.config.TownRoot,
+			SessionIDEnv: sessionIDEnv,
 		})
 		config.SanitizeAgentEnv(envVars, map[string]string{})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
@@ -512,12 +511,11 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
 		}
 		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:          "crew",
-			Rig:           parsed.RigName,
-			AgentName:     parsed.AgentName,
-			TownRoot:      d.config.TownRoot,
-			SessionIDEnv:  sessionIDEnv,
-			ResolvedAgent: runtimeConfig.ResolvedAgent,
+			Role:         "crew",
+			Rig:          parsed.RigName,
+			AgentName:    parsed.AgentName,
+			TownRoot:     d.config.TownRoot,
+			SessionIDEnv: sessionIDEnv,
 		})
 		config.SanitizeAgentEnv(envVars, map[string]string{})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
@@ -529,20 +527,12 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 // setSessionEnvironment sets environment variables for the tmux session.
 // Uses centralized AgentEnv for consistency, plus custom env vars from role config if available.
 func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
-	// Resolve agent config for ResolvedAgent fallback (ensures GT_AGENT in tmux session table).
-	rigPath := ""
-	if parsed.RigName != "" {
-		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
-	}
-	rc := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
-
 	// Use centralized AgentEnv for base environment variables
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:          parsed.RoleType,
-		Rig:           parsed.RigName,
-		AgentName:     parsed.AgentName,
-		TownRoot:      d.config.TownRoot,
-		ResolvedAgent: rc.ResolvedAgent,
+		Role:      parsed.RoleType,
+		Rig:       parsed.RigName,
+		AgentName: parsed.AgentName,
+		TownRoot:  d.config.TownRoot,
 	})
 	for k, v := range envVars {
 		_ = d.tmux.SetEnvironment(sessionName, k, v)
