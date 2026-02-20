@@ -115,17 +115,20 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	defer func() {
 		if sessionCleanupNeeded && !sessionKilled {
 			fmt.Printf("%s Deferred session cleanup (backstop)\n", style.Bold.Render("→"))
+			// Log real errors before session kill — selfKillSession terminates the
+			// tmux session (and this process's PTY), so any logging after it is
+			// unreachable. This makes errors visible in the agent's output (gt-cof fix).
+			if _, silent := IsSilentExit(retErr); retErr != nil && !silent {
+				fmt.Fprintf(os.Stderr, "Error during gt done (session will be cleaned up): %v\n", retErr)
+			}
 			if err := selfKillSession(deferredTownRoot, deferredRoleInfo); err != nil {
 				style.PrintWarning("deferred session kill failed: %v", err)
 			}
-			// Only suppress errors with SilentExit(0) if the function completed
-			// normally (retErr is nil or already a SilentExit). If retErr is a real
-			// error (e.g., MR creation failed, missing issue ID), log it before
-			// exiting so it's visible in the agent's output (gt-cof fix).
-			if _, silent := IsSilentExit(retErr); retErr != nil && !silent {
-				fmt.Fprintf(os.Stderr, "Error during gt done (session cleaned up): %v\n", retErr)
+			// Only suppress with SilentExit(0) when retErr is nil (normal completion).
+			// Preserve real errors so the cobra error handler can report non-zero exit.
+			if retErr == nil {
+				retErr = NewSilentExit(0)
 			}
-			retErr = NewSilentExit(0)
 		}
 	}()
 
@@ -793,7 +796,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				// pushFailed is set so worktree is preserved for recovery (gt-cof).
 				errMsg := fmt.Sprintf("MR bead creation failed after 3 attempts: %v", mrCreateErr)
 				doneErrors = append(doneErrors, errMsg)
-				pushFailed = true // Prevent worktree nuke — branch is pushed but MR is missing
+				// NOTE: pushFailed is reused here to mean "preserve worktree" — push
+				// actually succeeded, but the MR bead is missing so recovery needs
+				// the worktree intact. The nuke guard at self-clean checks pushFailed.
+				pushFailed = true
 				style.PrintWarning("%s\nBranch is pushed but MR bead not created. Witness will be notified.", errMsg)
 				goto notifyWitness
 			}

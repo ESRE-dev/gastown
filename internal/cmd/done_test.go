@@ -523,28 +523,30 @@ func TestMRCreationFailureSetsPushFailed(t *testing.T) {
 		t.Error("mrID should be empty after MR creation failure")
 	}
 
-	// Verify worktree nuke guard works
-	shouldNuke := ExitCompleted == ExitCompleted && !pushFailed
+	// Verify worktree nuke guard works (full guard including mergeFailed check)
+	mergeFailed := false
+	shouldNuke := ExitCompleted == ExitCompleted && !pushFailed && !(mergeFailed && mrID != "")
 	if shouldNuke {
 		t.Error("worktree should NOT be nuked when MR creation failed")
 	}
 }
 
 // TestDeferredCleanupLogsErrors verifies that the deferred session cleanup
-// logs real errors before overwriting them with SilentExit(0).
-// This is the gt-cof fix: previously, errors like "cannot determine source issue"
-// were silently swallowed by the deferred cleanup.
+// correctly handles real errors: logs them (before session kill) and preserves
+// them (does NOT overwrite with SilentExit(0)). This complements
+// TestDeferredCleanupPreservesValidationError which checks the retErr contract.
 func TestDeferredCleanupLogsErrors(t *testing.T) {
 	// Verify that IsSilentExit correctly distinguishes real errors from SilentExit
 	tests := []struct {
 		name       string
 		err        error
 		wantSilent bool
+		wantLog    bool // should the error be logged before session kill?
 	}{
-		{"nil error", nil, false},
-		{"real error", fmt.Errorf("cannot determine source issue"), false},
-		{"SilentExit(0)", NewSilentExit(0), true},
-		{"SilentExit(1)", NewSilentExit(1), true},
+		{"nil error", nil, false, false},
+		{"real error", fmt.Errorf("cannot determine source issue"), false, true},
+		{"SilentExit(0)", NewSilentExit(0), true, false},
+		{"SilentExit(1)", NewSilentExit(1), true, false},
 	}
 
 	for _, tt := range tests {
@@ -552,6 +554,11 @@ func TestDeferredCleanupLogsErrors(t *testing.T) {
 			_, isSilent := IsSilentExit(tt.err)
 			if isSilent != tt.wantSilent {
 				t.Errorf("IsSilentExit(%v) = %v, want %v", tt.err, isSilent, tt.wantSilent)
+			}
+			// The logging condition from the deferred cleanup
+			shouldLog := tt.err != nil && !isSilent
+			if shouldLog != tt.wantLog {
+				t.Errorf("shouldLog = %v, want %v", shouldLog, tt.wantLog)
 			}
 		})
 	}
