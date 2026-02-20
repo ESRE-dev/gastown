@@ -2,13 +2,16 @@
 package beads
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
@@ -82,7 +85,7 @@ func ResolveRoutingTarget(townRoot, beadID, fallbackDir string) string {
 // This function is thread-safe and idempotent.
 //
 // If the beads database does not exist (e.g., after a fresh rig add), this function
-// will attempt to initialize it automatically and import any existing JSONL data.
+// will attempt to initialize it automatically using bd init --server.
 func EnsureCustomTypes(beadsDir string) error {
 	if beadsDir == "" {
 		return fmt.Errorf("empty beads directory")
@@ -132,108 +135,157 @@ func EnsureCustomTypes(beadsDir string) error {
 	return nil
 }
 
+// prefixRe validates beads prefix format. Must start with a letter, contain only
+// alphanumerics and hyphens, max 20 chars.
+// NOTE: This MUST stay in sync with beadsPrefixRegexp in internal/rig/manager.go.
+// Both exist because rig/manager.go cannot import internal/beads (circular dep).
+var prefixRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]{0,19}$`)
+
 // ensureDatabaseInitialized checks if a beads database exists and initializes it if needed.
 // This handles the case where a rig was added but the database was never created,
 // which causes Dolt panics when trying to create agent beads.
+//
+// Uses --server mode to match all production bd init callers (gastown uses a
+// centralized Dolt sql-server). JSONL auto-import is handled by bd init itself.
 func ensureDatabaseInitialized(beadsDir string) error {
-	// Check for Dolt database directory
+	// Check for Dolt database directory (embedded mode)
 	doltDir := filepath.Join(beadsDir, "dolt")
 	if _, err := os.Stat(doltDir); err == nil {
-		// Database exists
 		return nil
+	}
+
+	// Check for metadata.json (server mode — gastown's exclusive mode).
+	// In server mode, .beads/ may contain only metadata.json with no local dolt/ dir.
+	// This mirrors the deep check in bdDatabaseExists (internal/rig/manager.go):
+	// parse metadata.json and verify the referenced database exists in .dolt-data/.
+	// metadata.json can be git-tracked from another workspace where the Dolt server
+	// had this database, but this may be a fresh server without it.
+	metadataFile := filepath.Join(beadsDir, "metadata.json")
+	if data, err := os.ReadFile(metadataFile); err == nil {
+		var meta struct {
+			DoltMode     string `json:"dolt_mode"`
+			DoltDatabase string `json:"dolt_database"`
+		}
+		if err := json.Unmarshal(data, &meta); err != nil {
+			return nil // Can't parse — assume initialized (backward compat)
+		}
+		if meta.DoltMode == "server" && meta.DoltDatabase != "" {
+			townRoot := FindTownRoot(filepath.Dir(beadsDir))
+			if townRoot == "" {
+				return nil // Can't find town root — assume initialized
+			}
+			dbDir := filepath.Join(townRoot, ".dolt-data", meta.DoltDatabase)
+			if _, err := os.Stat(dbDir); !os.IsNotExist(err) {
+				return nil // Database exists (or stat error — assume initialized)
+			}
+			// metadata.json exists but database doesn't — fall through to init
+		} else {
+			return nil // Non-server mode or no database ref — assume initialized
+		}
 	}
 
 	// Check for SQLite database file (legacy)
 	sqliteDB := filepath.Join(beadsDir, "beads.db")
 	if _, err := os.Stat(sqliteDB); err == nil {
-		// Database exists
 		return nil
 	}
 
-	// No database found - need to initialize
-	// Try to determine the prefix from config.yaml
+	// No database found — need to initialize.
 	prefix := detectPrefix(beadsDir)
 
-	// Initialize the database from the parent directory (bd init cannot run inside .beads/)
+	// bd init must run from the parent directory (not inside .beads/).
+	// Use --server to match all production callers (rig/manager.go, doctor/rig_check.go, cmd/install.go).
 	parentDir := filepath.Dir(beadsDir)
-	cmd := exec.Command("bd", "init", "--prefix", prefix, "--quiet")
+	cmd := exec.Command("bd", "init", "--prefix", prefix, "--server")
 	cmd.Dir = parentDir
 	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		// Check if this is a "command not found" or "unexpected command" error
-		// which indicates we're running in a test environment with a mock bd
-		outputStr := strings.TrimSpace(string(output))
-		if strings.Contains(outputStr, "unexpected command") || strings.Contains(err.Error(), "executable file not found") {
-			// In test environments with mock bd, database initialization isn't needed
-			// The mock bd doesn't need a real database
+		// Handle "already initialized" gracefully, matching install.go behavior.
+		// This can happen due to race conditions or if detection heuristics miss
+		// a valid database state.
+		outputStr := string(output)
+		if strings.Contains(outputStr, "already initialized") {
 			return nil
 		}
-		return fmt.Errorf("bd init: %s: %w", outputStr, err)
+		return fmt.Errorf("bd init: %s: %w", strings.TrimSpace(outputStr), err)
 	}
 
-	// Import existing JSONL data if present
-	jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
-	if _, err := os.Stat(jsonlPath); err == nil {
-		// Check if JSONL has content (not just empty)
-		if info, err := os.Stat(jsonlPath); err == nil && info.Size() > 0 {
-			cmd := exec.Command("bd", "import", "-i", jsonlPath)
-			cmd.Dir = parentDir
-			cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
-			if output, err := cmd.CombinedOutput(); err != nil {
-				// Import failure is non-fatal - log warning but continue
-				fmt.Fprintf(os.Stderr, "Warning: could not import JSONL data: %s\n", strings.TrimSpace(string(output)))
-			}
-		}
-	}
+	// Explicitly set issue_prefix — bd init --prefix may not persist it
+	// in newer versions (see rig/manager.go InitBeads).
+	pfxCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
+	pfxCmd.Dir = parentDir
+	pfxCmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	_, _ = pfxCmd.CombinedOutput() // Best effort — crash prevention guard
 
 	return nil
 }
 
-// detectPrefix attempts to determine the beads prefix for a directory.
-// It checks config.yaml first, then falls back to extracting from routes.jsonl,
-// and finally defaults to a generic prefix.
+// detectPrefix determines the beads prefix for a directory.
+// Resolution order:
+//  1. Town-level config: FindTownRoot → config.GetRigPrefix (authoritative source from rigs.json)
+//  2. Local config.yaml: issue-prefix or prefix field
+//  3. Default: "gt"
+//
+// All candidates are validated against prefixRe before use.
+//
+// Known limitation: when beadsDir is a routed path (e.g., mayor/rig/.beads
+// via beads routing), filepath.Base(filepath.Dir(beadsDir)) yields "rig" not
+// the actual rig name. GetRigPrefix will not find "rig" in rigs.json and
+// returns the default "gt". This is a safe fallback — "gt" is the universal
+// default prefix — but rigs with custom prefixes accessed via routed paths
+// will silently use "gt" instead. Fixing this would require walking up the
+// directory tree to resolve the actual rig name, which is out of scope for
+// this crash-prevention guard.
 func detectPrefix(beadsDir string) string {
-	// Try to read from config.yaml
+	// 1. Try authoritative source: rigs.json via town root
+	rigDir := filepath.Dir(beadsDir)
+	if townRoot := FindTownRoot(rigDir); townRoot != "" {
+		rigName := filepath.Base(rigDir)
+		if prefix := config.GetRigPrefix(townRoot, rigName); prefix != "" && prefixRe.MatchString(prefix) {
+			return prefix
+		}
+	}
+
+	// 2. Fallback: read from config.yaml.
+	// NOTE: Inside towns, this is typically unreachable because GetRigPrefix
+	// always returns at least "gt" (the default) when a rig isn't found in
+	// rigs.json. This fallback is primarily for standalone rigs outside towns.
 	configPath := filepath.Join(beadsDir, "config.yaml")
 	if data, err := os.ReadFile(configPath); err == nil {
-		content := string(data)
-		// Look for "prefix: xxx" or "issue-prefix: xxx" lines
-		for _, line := range strings.Split(content, "\n") {
+		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "prefix:") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					return strings.TrimSpace(strings.TrimSuffix(parts[1], "-"))
-				}
-			}
-			if strings.HasPrefix(line, "issue-prefix:") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					return strings.TrimSpace(strings.TrimSuffix(parts[1], "-"))
+			for _, key := range []string{"issue-prefix:", "prefix:"} {
+				if strings.HasPrefix(line, key) {
+					parts := strings.SplitN(line, ":", 2)
+					if len(parts) == 2 {
+						candidate := strings.TrimSpace(parts[1])
+						// Strip quotes first, then trailing dash — matches
+						// detectBeadsPrefixFromConfig in rig/manager.go.
+						candidate = stripYAMLQuotes(candidate)
+						candidate = strings.TrimSuffix(candidate, "-")
+						if candidate != "" && prefixRe.MatchString(candidate) {
+							return candidate
+						}
+					}
 				}
 			}
 		}
 	}
 
-	// Try to extract from the parent directory name as fallback
-	// e.g., "hello_world_gastown" -> "hwg"
-	parent := filepath.Base(filepath.Dir(beadsDir))
-	if parent != "" && parent != "." {
-		// Generate prefix from first letters of words
-		words := strings.Split(parent, "_")
-		var prefix strings.Builder
-		for _, word := range words {
-			if len(word) > 0 {
-				prefix.WriteByte(word[0])
-			}
-		}
-		if prefix.Len() > 0 {
-			return prefix.String()
-		}
-	}
-
-	// Default fallback
+	// 3. Default
 	return "gt"
+}
+
+// stripYAMLQuotes removes surrounding single or double quotes from a string.
+// Note: unlike strings.Trim in detectBeadsPrefixFromConfig (rig/manager.go),
+// this only strips matching pairs — arguably more correct for well-formed YAML.
+func stripYAMLQuotes(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
 }
 
 // ResetEnsuredDirs clears the in-memory cache of ensured directories.
