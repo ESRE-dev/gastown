@@ -706,6 +706,10 @@ func addressToAgentBeadID(address string) string {
 			crewName := strings.TrimPrefix(role, "crew/")
 			return session.CrewSessionName(session.PrefixFor(rig), crewName)
 		}
+		if strings.HasPrefix(role, "polecats/") {
+			pcName := strings.TrimPrefix(role, "polecats/")
+			return session.PolecatSessionName(session.PrefixFor(rig), pcName)
+		}
 		return session.PolecatSessionName(session.PrefixFor(rig), role)
 	}
 }
