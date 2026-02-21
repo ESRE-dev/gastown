@@ -257,7 +257,20 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	command := opts.Command
 	if command == "" {
-		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, beacon)
+		var err error
+		command, err = config.BuildStartupCommandFromConfig(config.AgentEnvConfig{
+			Role:        "polecat",
+			Rig:         m.rig.Name,
+			AgentName:   polecat,
+			TownRoot:    townRoot,
+			Prompt:      beacon,
+			Issue:       opts.Issue,
+			Topic:       "assigned",
+			SessionName: sessionID,
+		}, m.rig.Path, beacon, "")
+		if err != nil {
+			return fmt.Errorf("building startup command: %w", err)
+		}
 	}
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {

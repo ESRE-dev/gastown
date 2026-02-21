@@ -2,6 +2,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -129,7 +131,8 @@ type StartResult struct {
 // Role-specific concerns (issue validation, fallback nudges, pane-died hooks,
 // crew cycle bindings, etc.) should be handled by the caller before/after
 // calling StartSession.
-func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
+func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error) {
+	defer func() { telemetry.RecordSessionStart(context.Background(), cfg.SessionID, cfg.Role, retErr) }()
 	if cfg.SessionID == "" {
 		return nil, fmt.Errorf("SessionID is required")
 	}

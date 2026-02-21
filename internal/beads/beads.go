@@ -3,6 +3,7 @@ package beads
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
 // Common errors
@@ -267,7 +270,13 @@ func (b *Beads) Init(prefix string) error {
 }
 
 // run executes a bd command and returns stdout.
-func (b *Beads) run(args ...string) ([]byte, error) {
+func (b *Beads) run(args ...string) (_ []byte, retErr error) {
+	start := time.Now()
+	// Declare buffers before defer so the closure captures them after cmd.Run.
+	var stdout, stderr bytes.Buffer
+	defer func() {
+		telemetry.RecordBDCall(context.Background(), args, float64(time.Since(start).Milliseconds()), retErr, stdout.Bytes(), stderr.String())
+	}()
 	// Use --allow-stale to prevent failures when db is out of sync with JSONL
 	// (e.g., after daemon is killed during shutdown before syncing).
 	fullArgs := append([]string{"--allow-stale"}, args...)
@@ -293,8 +302,8 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	cmd.Dir = b.workDir
 
 	cmd.Env = append(b.buildRunEnv(), "BEADS_DIR="+beadsDir)
+	cmd.Env = append(cmd.Env, telemetry.OTELEnvForSubprocess()...)
 
-	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -318,15 +327,20 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 // This is needed for slot operations that reference beads with different prefixes
 // (e.g., setting an hq-* hook bead on a gt-* agent bead).
 // See: sling_helpers.go verifyBeadExists/hookBeadWithRetry for the same pattern.
-func (b *Beads) runWithRouting(args ...string) ([]byte, error) { //nolint:unparam // mirrors run() signature for consistency
+func (b *Beads) runWithRouting(args ...string) (_ []byte, retErr error) { //nolint:unparam // mirrors run() signature for consistency
+	start := time.Now()
+	var stdout, stderr bytes.Buffer
+	defer func() {
+		telemetry.RecordBDCall(context.Background(), args, float64(time.Since(start).Milliseconds()), retErr, stdout.Bytes(), stderr.String())
+	}()
 	fullArgs := append([]string{"--allow-stale"}, args...)
 
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 
 	cmd.Env = b.buildRoutingEnv()
+	cmd.Env = append(cmd.Env, telemetry.OTELEnvForSubprocess()...)
 
-	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
