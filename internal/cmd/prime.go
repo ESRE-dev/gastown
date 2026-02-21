@@ -149,9 +149,14 @@ func runPrime(cmd *cobra.Command, args []string) (retErr error) {
 		return nil
 	}
 
-	if err := outputRoleContext(ctx); err != nil {
+	formula, err := outputRoleContext(ctx)
+	if err != nil {
 		return err
 	}
+	// Log the rendered formula to OTEL so it's visible in VictoriaLogs alongside
+	// Claude's API calls, letting operators see exactly what context each agent
+	// started with. Only emitted when GT telemetry is active (GT_OTEL_LOGS_URL set).
+	telemetry.RecordPrimeContext(context.Background(), formula, os.Getenv("GT_ROLE"), primeHookMode)
 
 	hasSlungWork := checkSlungWork(ctx)
 	explain(hasSlungWork, "Autonomous mode: hooked/in-progress work detected")
@@ -302,19 +307,21 @@ func setupPrimeSession(ctx RoleContext, roleInfo RoleInfo) error {
 }
 
 // outputRoleContext emits session metadata and all role/context output sections.
-func outputRoleContext(ctx RoleContext) error {
+// Returns the rendered formula content for OTEL telemetry (empty if using fallback path).
+func outputRoleContext(ctx RoleContext) (string, error) {
 	explain(true, "Session metadata: always included for seance discovery")
 	outputSessionMetadata(ctx)
 
 	explain(true, fmt.Sprintf("Role context: detected role is %s", ctx.Role))
-	if err := outputPrimeContext(ctx); err != nil {
-		return err
+	formula, err := outputPrimeContext(ctx)
+	if err != nil {
+		return "", err
 	}
 
 	outputContextFile(ctx)
 	outputHandoffContent(ctx)
 	outputAttachmentStatus(ctx)
-	return nil
+	return formula, nil
 }
 
 // runPrimeExternalTools runs bd prime and gt mail check --inject.

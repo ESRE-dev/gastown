@@ -31,7 +31,7 @@ services:
       - "9429:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin  # dev-only stack — change before any shared/remote deployment
       - GF_PLUGINS_PREINSTALL=victoriametrics-logs-datasource
     volumes:
       - grafana-data:/var/lib/grafana

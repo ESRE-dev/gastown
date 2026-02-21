@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -38,6 +39,25 @@ type AgentEnvConfig struct {
 	// Without this, GetEnvironment returns empty (tmux show-environment reads the
 	// session table, not the process env set via exec env in the startup command).
 	Agent string
+
+	// Prompt is the initial startup prompt/beacon given to the agent.
+	// When set, the first line (truncated) is added as gt.prompt to OTEL_RESOURCE_ATTRIBUTES
+	// so logs can be correlated to the specific task the agent was working on.
+	Prompt string
+
+	// Issue is the molecule/bead ID being worked (e.g., "gt-abc12").
+	// Added as gt.issue to OTEL_RESOURCE_ATTRIBUTES for filtering by ticket.
+	Issue string
+
+	// Topic is the beacon topic describing why the session was started.
+	// Examples: "assigned", "patrol", "start", "restart", "handoff".
+	// Added as gt.topic to OTEL_RESOURCE_ATTRIBUTES for filtering by work type.
+	Topic string
+
+	// SessionName is the tmux session name for this agent (e.g., "hq-mayor", "gt-witness").
+	// Added as gt.session to OTEL_RESOURCE_ATTRIBUTES so all Claude logs from a
+	// single GT session can be correlated, and as GT_SESSION env var.
+	SessionName string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -121,6 +141,12 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
 	}
 
+	// Set GT_SESSION when a session name is provided, so gt commands and
+	// cost reports can correlate activity to a specific tmux session.
+	if cfg.SessionName != "" {
+		env["GT_SESSION"] = cfg.SessionName
+	}
+
 	// Set GT_AGENT when an agent override is in use.
 	// This makes the override visible via tmux show-environment so that
 	// IsAgentAlive and waitForPolecatReady use the correct process names.
@@ -169,9 +195,11 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 			env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = logsURL
 			env["OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"] = "http/protobuf"
 			// Log tool usage details (which tools ran, their status).
-			// Does not include tool output content (set OTEL_LOG_TOOL_CONTENT=true
-			// to enable that, or OTEL_LOG_USER_PROMPTS=true for prompt logging).
 			env["OTEL_LOG_TOOL_DETAILS"] = "true"
+			// Log tool output content (e.g. gt prime stdout as it reaches Claude).
+			env["OTEL_LOG_TOOL_CONTENT"] = "true"
+			// Log user-turn messages (initial beacon + any human prompts to Claude).
+			env["OTEL_LOG_USER_PROMPTS"] = "true"
 		}
 
 		// Attach GT context as OTEL resource attributes so Claude's metrics
@@ -190,12 +218,44 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		if cfg.AgentName != "" {
 			attrs = append(attrs, "gt.agent="+cfg.AgentName)
 		}
+		if cfg.TownRoot != "" {
+			attrs = append(attrs, "gt.town="+filepath.Base(cfg.TownRoot))
+		}
+		if cfg.Prompt != "" {
+			attrs = append(attrs, "gt.prompt="+sanitizeOTELAttrValue(cfg.Prompt, 120))
+		}
+		if cfg.Issue != "" {
+			attrs = append(attrs, "gt.issue="+sanitizeOTELAttrValue(cfg.Issue, 40))
+		}
+		if cfg.Topic != "" {
+			attrs = append(attrs, "gt.topic="+sanitizeOTELAttrValue(cfg.Topic, 40))
+		}
+		if cfg.SessionName != "" {
+			attrs = append(attrs, "gt.session="+sanitizeOTELAttrValue(cfg.SessionName, 80))
+		}
 		if len(attrs) > 0 {
 			env["OTEL_RESOURCE_ATTRIBUTES"] = strings.Join(attrs, ",")
 		}
 	}
 
 	return env
+}
+
+// sanitizeOTELAttrValue prepares a string for use as a value in OTEL_RESOURCE_ATTRIBUTES.
+// It takes the first line only, replaces commas (which break key=value,key=value parsing),
+// and truncates to maxLen bytes.
+func sanitizeOTELAttrValue(s string, maxLen int) string {
+	// First line only — beacons are multi-line; the first line is the structured header.
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		s = s[:idx]
+	}
+	// Commas separate key=value pairs in OTEL_RESOURCE_ATTRIBUTES — replace with |.
+	s = strings.ReplaceAll(s, ",", "|")
+	s = strings.TrimSpace(s)
+	if len(s) > maxLen {
+		s = s[:maxLen]
+	}
+	return s
 }
 
 // AgentEnvSimple is a convenience function for simple role-based env var lookup.

@@ -156,15 +156,16 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Topic:     "patrol",
 	}, "Run `gt prime --hook` and begin patrol.")
 
-	var command string
-	if agentOverride != "" {
-		var err error
-		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt, agentOverride)
-		if err != nil {
-			return fmt.Errorf("building startup command with agent override: %w", err)
-		}
-	} else {
-		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt)
+	command, err := config.BuildStartupCommandFromConfig(config.AgentEnvConfig{
+		Role:        "refinery",
+		Rig:         m.rig.Name,
+		TownRoot:    townRoot,
+		Prompt:      initialPrompt,
+		Topic:       "patrol",
+		SessionName: sessionID,
+	}, m.rig.Path, initialPrompt, agentOverride)
+	if err != nil {
+		return fmt.Errorf("building startup command: %w", err)
 	}
 
 	// Create session with command directly to avoid send-keys race condition.

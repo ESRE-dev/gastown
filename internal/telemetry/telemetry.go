@@ -87,8 +87,12 @@ func (p *Provider) Shutdown(ctx context.Context) error {
 
 // Init initializes OTel metric and log providers.
 //
-// Idempotent: subsequent calls with the same or different arguments return the
-// provider created on the first call.
+// Idempotent: subsequent calls (same or different arguments) return the
+// provider created on the first call. The serviceName and serviceVersion
+// passed to later calls are silently ignored — the first caller wins.
+// In practice each GT process calls Init exactly once, so this is not an
+// issue. If multiple packages call Init, ensure the entry-point (main or
+// cobra root) calls it first with the correct service name.
 //
 // Returns (nil, nil) if neither GT_OTEL_METRICS_URL nor GT_OTEL_LOGS_URL is set,
 // so that telemetry is strictly opt-in. Set either variable to activate.

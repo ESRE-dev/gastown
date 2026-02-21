@@ -6,6 +6,7 @@ package telemetry
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync"
 
@@ -168,6 +169,10 @@ func truncateOutput(s string, max int) string {
 // args is the full argument list; args[0] is used as the subcommand label.
 // durationMs is the wall-clock time of the subprocess in milliseconds.
 // stdout and stderr are the raw process outputs; both are truncated before logging.
+//
+// stdout and stderr are only included in the log event when GT_LOG_BD_OUTPUT=true.
+// They are opt-in because bd output may contain sensitive data (API tokens, PII).
+// See docs/OTEL-ENV-VARS.md for details.
 func RecordBDCall(ctx context.Context, args []string, durationMs float64, err error, stdout []byte, stderr string) {
 	initInstruments()
 	subcommand := ""
@@ -181,15 +186,21 @@ func RecordBDCall(ctx context.Context, args []string, durationMs float64, err er
 	)
 	inst.bdTotal.Add(ctx, 1, attrs)
 	inst.bdDurationHist.Record(ctx, durationMs, attrs)
-	emit(ctx, "bd.call", severity(err),
+	kvs := []otellog.KeyValue{
 		otellog.String("subcommand", subcommand),
 		otellog.String("args", strings.Join(args, " ")),
 		otellog.Float64("duration_ms", durationMs),
 		otellog.String("status", status),
-		otellog.String("stdout", truncateOutput(string(stdout), maxStdoutLog)),
-		otellog.String("stderr", truncateOutput(stderr, maxStderrLog)),
 		errKV(err),
-	)
+	}
+	// stdout/stderr are opt-in: they may contain tokens or PII returned by bd.
+	if os.Getenv("GT_LOG_BD_OUTPUT") == "true" {
+		kvs = append(kvs,
+			otellog.String("stdout", truncateOutput(string(stdout), maxStdoutLog)),
+			otellog.String("stderr", truncateOutput(stderr, maxStderrLog)),
+		)
+	}
+	emit(ctx, "bd.call", severity(err), kvs...)
 }
 
 // RecordSessionStart records an agent session start (metrics + log event).
@@ -272,6 +283,23 @@ func RecordPrime(ctx context.Context, role string, hookMode bool, err error) {
 		otellog.Bool("hook_mode", hookMode),
 		otellog.String("status", status),
 		errKV(err),
+	)
+}
+
+// RecordPrimeContext logs the formula/context rendered by gt prime.
+// This lets operators see exactly what context each agent started with,
+// correlated to the Claude API calls that follow. Only emits when telemetry
+// is active (no-op otherwise). The formula may be empty for compact/resume primes
+// or when the fallback (non-template) path is used.
+func RecordPrimeContext(ctx context.Context, formula, role string, hookMode bool) {
+	if formula == "" {
+		return
+	}
+	initInstruments()
+	emit(ctx, "prime.context", otellog.SeverityInfo,
+		otellog.String("role", role),
+		otellog.Bool("hook_mode", hookMode),
+		otellog.String("formula", formula),
 	)
 }
 

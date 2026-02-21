@@ -543,7 +543,13 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		Sender:    "daemon",
 		Topic:     "patrol",
 	}, "I am Deacon. First run `gt deacon heartbeat`. Then check gt hook, if empty create mol-deacon-patrol wisp and execute it.")
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", initialPrompt, agentOverride)
+	startupCmd, err := config.BuildStartupCommandFromConfig(config.AgentEnvConfig{
+		Role:        "deacon",
+		TownRoot:    townRoot,
+		Prompt:      initialPrompt,
+		Topic:       "patrol",
+		SessionName: sessionName,
+	}, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}
