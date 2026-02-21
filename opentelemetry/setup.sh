@@ -31,10 +31,12 @@ export OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=http/protobuf
 export OTEL_LOGS_EXPORTER=otlp
 export OTEL_EXPORTER_OTLP_LOGS_ENDPOINT="$GT_OTEL_LOGS_URL"
 export OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/protobuf
-# Log tool usage (which tools ran and their status, not content).
-# To also log tool output set: OTEL_LOG_TOOL_CONTENT=true
-# To also log user prompts set: OTEL_LOG_USER_PROMPTS=true (sensitive)
+# Log tool usage (which tools ran and their status).
 export OTEL_LOG_TOOL_DETAILS=true
+# Log tool output content (e.g. gt prime stdout as received by Claude).
+export OTEL_LOG_TOOL_CONTENT=true
+# Log user-turn messages (initial beacon + any human prompts to Claude).
+export OTEL_LOG_USER_PROMPTS=true
 
 echo "✓ Gas Town telemetry enabled"
 echo ""

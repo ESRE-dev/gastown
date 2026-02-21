@@ -657,6 +657,8 @@ var claudeEnvVars = []string{
 	"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
 	"OTEL_EXPORTER_OTLP_LOGS_PROTOCOL",
 	"OTEL_LOG_TOOL_DETAILS",
+	"OTEL_LOG_TOOL_CONTENT",
+	"OTEL_LOG_USER_PROMPTS",
 	"OTEL_RESOURCE_ATTRIBUTES",
 	// bd telemetry — so `bd` calls inside Claude emit to VictoriaMetrics/Logs
 	"BD_OTEL_METRICS_URL",
