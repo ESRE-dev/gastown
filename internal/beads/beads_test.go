@@ -1091,6 +1091,56 @@ func TestResolveBeadsDir(t *testing.T) {
 		}
 	})
 
+	t.Run("absolute path redirect", func(t *testing.T) {
+		// Redirect file contains an absolute path (e.g., /Users/emech/.../gastown/.beads)
+		// This was the path-doubling bug: filepath.Join(workDir, absPath) produces
+		// workDir/Users/emech/... instead of using absPath directly.
+		workDir := filepath.Join(tmpDir, "polecat", "chrome")
+		localBeadsDir := filepath.Join(workDir, ".beads")
+		targetBeadsDir := filepath.Join(tmpDir, "canonical", ".beads")
+
+		if err := os.MkdirAll(localBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(targetBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Write absolute path redirect
+		redirectPath := filepath.Join(localBeadsDir, "redirect")
+		if err := os.WriteFile(redirectPath, []byte(targetBeadsDir+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := ResolveBeadsDir(workDir)
+		if got != targetBeadsDir {
+			t.Errorf("ResolveBeadsDir() = %q, want %q (absolute redirect should be used as-is)", got, targetBeadsDir)
+		}
+	})
+
+	t.Run("absolute path in redirect chain", func(t *testing.T) {
+		// Test absolute path handling in resolveBeadsDirWithDepth (chained redirects)
+		firstBeadsDir := filepath.Join(tmpDir, "chain-test", "first", ".beads")
+		finalBeadsDir := filepath.Join(tmpDir, "chain-test", "final", ".beads")
+
+		if err := os.MkdirAll(firstBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(finalBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// First beads redirects via absolute path to final
+		if err := os.WriteFile(filepath.Join(firstBeadsDir, "redirect"), []byte(finalBeadsDir+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := resolveBeadsDirWithDepth(firstBeadsDir, 3)
+		if got != finalBeadsDir {
+			t.Errorf("resolveBeadsDirWithDepth() = %q, want %q", got, finalBeadsDir)
+		}
+	})
+
 	t.Run("circular redirect", func(t *testing.T) {
 		// Redirect that points to itself (e.g., mayor/rig/.beads/redirect -> ../../mayor/rig/.beads)
 		// This is the bug scenario from gt-csbjj
@@ -1869,6 +1919,54 @@ func TestSetupRedirect(t *testing.T) {
 		// crew/max -> ../../mayor/rig/.beads (direct, no chain)
 		if resolved != mayorRigBeads {
 			t.Errorf("resolved = %q, want %q", resolved, mayorRigBeads)
+		}
+	})
+
+	t.Run("crew worktree with absolute rig redirect", func(t *testing.T) {
+		// Setup: rig/.beads/redirect contains an absolute path
+		townRoot := t.TempDir()
+		rigRoot := filepath.Join(townRoot, "testrig")
+		rigBeads := filepath.Join(rigRoot, ".beads")
+		crewPath := filepath.Join(rigRoot, "crew", "max")
+
+		// Create an absolute target beads directory (simulates a canonical .beads outside the town)
+		absTarget := filepath.Join(t.TempDir(), "canonical", ".beads")
+		if err := os.MkdirAll(absTarget, 0755); err != nil {
+			t.Fatalf("mkdir abs target: %v", err)
+		}
+
+		// Create rig structure with absolute redirect
+		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+			t.Fatalf("mkdir rig beads: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(rigBeads, "redirect"), []byte(absTarget+"\n"), 0644); err != nil {
+			t.Fatalf("write rig redirect: %v", err)
+		}
+		if err := os.MkdirAll(crewPath, 0755); err != nil {
+			t.Fatalf("mkdir crew: %v", err)
+		}
+
+		// Run SetupRedirect
+		if err := SetupRedirect(townRoot, crewPath); err != nil {
+			t.Fatalf("SetupRedirect failed: %v", err)
+		}
+
+		// Verify redirect is the absolute path (not upPath + absolutePath)
+		redirectPath := filepath.Join(crewPath, ".beads", "redirect")
+		content, err := os.ReadFile(redirectPath)
+		if err != nil {
+			t.Fatalf("read redirect: %v", err)
+		}
+
+		want := absTarget + "\n"
+		if string(content) != want {
+			t.Errorf("redirect content = %q, want %q (absolute path should be passed through)", string(content), want)
+		}
+
+		// Verify redirect resolves correctly
+		resolved := ResolveBeadsDir(crewPath)
+		if resolved != absTarget {
+			t.Errorf("resolved = %q, want %q", resolved, absTarget)
 		}
 	})
 
