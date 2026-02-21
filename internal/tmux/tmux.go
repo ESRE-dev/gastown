@@ -2083,7 +2083,7 @@ func (t *Tmux) isGTBinding(table, key string) bool {
 // no prior binding to avoid recursive wrapping on repeated calls.
 func (t *Tmux) getKeyBinding(table, key string) string {
 	// tmux list-keys -T <table> <key> outputs a line like:
-	//   bind-key -T prefix g if-shell "..." "run-shell 'gt agents'" ":"
+	//   bind-key -T prefix g if-shell "..." "run-shell 'gt agents menu'" ":"
 	// We need to extract just the command portion.
 	//
 	// Assumed format (tested with tmux 3.3+):
@@ -2247,7 +2247,7 @@ func (t *Tmux) SetFeedBinding(session string) error {
 }
 
 // SetAgentsBinding configures C-b g to open the agent switcher popup menu.
-// This runs `gt agents` which displays a tmux popup with all Gas Town agents.
+// This runs `gt agents menu` which displays a tmux popup with all Gas Town agents.
 //
 // IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
 // (those matching a registered rig prefix or "hq-"). For non-GT sessions, the
@@ -2267,7 +2267,7 @@ func (t *Tmux) SetAgentsBinding(session string) error {
 	}
 	_, err := t.run("bind-key", "-T", "prefix", "g",
 		"if-shell", ifShell,
-		"run-shell 'gt agents'",
+		"run-shell 'gt agents menu'",
 		fallback)
 	return err
 }
