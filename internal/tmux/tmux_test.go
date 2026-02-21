@@ -2044,7 +2044,7 @@ func TestGetKeyBinding_SkipsGasTownBindings(t *testing.T) {
 	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
 	_, _ = tm.run("bind-key", "-T", "prefix", "F11",
 		"if-shell", ifShell,
-		"run-shell 'gt agents'",
+		"run-shell 'gt agents menu'",
 		":")
 
 	result := tm.getKeyBinding("prefix", "F11")

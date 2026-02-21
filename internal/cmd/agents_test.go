@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,16 +11,15 @@ import (
 
 func TestAgentsCmd_DefaultRunE(t *testing.T) {
 	// After the fix, `gt agents` (no subcommand) should run the list function,
-	// not the interactive popup menu.
+	// not the interactive popup menu. Verify the actual function pointer.
 	if agentsCmd.RunE == nil {
 		t.Fatal("agentsCmd.RunE is nil")
 	}
 
-	// Verify it points to runAgentsList by checking the Short description
-	// which we update to match the list behavior.
-	want := "List Gas Town agent sessions"
-	if agentsCmd.Short != want {
-		t.Errorf("agentsCmd.Short = %q, want %q", agentsCmd.Short, want)
+	gotPtr := reflect.ValueOf(agentsCmd.RunE).Pointer()
+	wantPtr := reflect.ValueOf(runAgentsList).Pointer()
+	if gotPtr != wantPtr {
+		t.Errorf("agentsCmd.RunE points to wrong function (got %v, want runAgentsList %v)", gotPtr, wantPtr)
 	}
 }
 
@@ -397,7 +397,9 @@ func TestGuessSessionFromWorkerDir(t *testing.T) {
 		{"crew worker", "/town/gastown/crew/max", "gt-crew-max"},
 		{"polecat worker", "/town/gastown/polecats/furiosa", "gt-furiosa"},
 		{"witness worker", "/town/gastown/witness/main", "gt-witness"},
+		{"witness worker rig", "/town/gastown/witness/rig", "gt-witness"},
 		{"refinery worker", "/town/gastown/refinery/main", "gt-refinery"},
+		{"refinery worker rig", "/town/gastown/refinery/rig", "gt-refinery"},
 		{"unknown type", "/town/gastown/unknown/thing", ""},
 		{"too few path parts", "/town/gastown", ""},
 		{"different rig", "/town/myrig/crew/alpha", "mr-crew-alpha"},
