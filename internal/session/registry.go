@@ -3,6 +3,8 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -99,21 +101,27 @@ func SetDefaultRegistry(r *PrefixRegistry) {
 
 // InitRegistry populates the default registry from the town's rigs.json and
 // loads the agent registry from settings/agents.json.
+// Both registries are loaded independently — a failure in one does not
+// prevent the other from loading.
 // Should be called early in the process lifecycle.
 // Safe to call multiple times; later calls replace earlier data.
 func InitRegistry(townRoot string) error {
+	var errs []error
+
 	r, err := BuildPrefixRegistryFromTown(townRoot)
 	if err != nil {
-		return err
+		errs = append(errs, fmt.Errorf("prefix registry: %w", err))
+	} else {
+		SetDefaultRegistry(r)
 	}
-	SetDefaultRegistry(r)
 
 	// Load agent registry so all entry points (CLI, daemon, witness) respect
 	// user-configured overrides like custom process_names.
 	if err := config.LoadAgentRegistry(config.DefaultAgentRegistryPath(townRoot)); err != nil {
-		return err
+		errs = append(errs, fmt.Errorf("agent registry: %w", err))
 	}
-	return nil
+
+	return errors.Join(errs...)
 }
 
 // PrefixFor returns the beads prefix for a rig, using the default registry.
