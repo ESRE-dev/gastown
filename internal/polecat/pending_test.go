@@ -1,6 +1,7 @@
 package polecat
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -252,7 +253,7 @@ func TestClearPendingSpawnFromList_NilMailboxError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nil mailbox, got nil")
 	}
-	if !containsSubstr(err.Error(), "nil mailbox") {
+	if !strings.Contains(err.Error(), "nil mailbox") {
 		t.Errorf("error = %q, want containing 'nil mailbox'", err.Error())
 	}
 }
@@ -394,7 +395,7 @@ func TestPruneStalePendingFromList_NothingToPrune(t *testing.T) {
 	}
 }
 
-func TestPruneStalePendingFromList_NilMailboxError(t *testing.T) {
+func TestPruneStalePendingFromList_NilMailboxSkipped(t *testing.T) {
 	pending := []*PendingSpawn{
 		{
 			Session:   "gt-gastown-polecat-Toast",
@@ -404,12 +405,12 @@ func TestPruneStalePendingFromList_NilMailboxError(t *testing.T) {
 		},
 	}
 
-	_, err := pruneStalePendingFromList(pending, 5*time.Minute)
-	if err == nil {
-		t.Fatal("expected error for nil mailbox, got nil")
+	pruned, err := pruneStalePendingFromList(pending, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("expected nil error for best-effort prune, got: %v", err)
 	}
-	if !containsSubstr(err.Error(), "nil mailbox") {
-		t.Errorf("error = %q, want containing 'nil mailbox'", err.Error())
+	if pruned != 0 {
+		t.Errorf("expected 0 pruned (nil mailbox skipped), got %d", pruned)
 	}
 }
 
@@ -459,12 +460,3 @@ func TestPruneStalePendingFromList_ArchiveSideEffect(t *testing.T) {
 	}
 }
 
-// containsSubstr checks if s contains substr.
-func containsSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

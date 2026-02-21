@@ -2,6 +2,7 @@
 package polecat
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -183,6 +184,7 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 
 // clearPendingSpawnFromList archives all POLECAT_STARTED messages for a specific
 // session from the given pending list. Extracted for testability.
+// Race-safe: treats ErrMessageNotFound as success (concurrent archive by daemon).
 func clearPendingSpawnFromList(pending []*PendingSpawn, sessionName string) error {
 	for _, ps := range pending {
 		if ps.Session == sessionName {
@@ -190,6 +192,9 @@ func clearPendingSpawnFromList(pending []*PendingSpawn, sessionName string) erro
 				return fmt.Errorf("nil mailbox for pending spawn session %s (mail_id: %s)", sessionName, ps.MailID)
 			}
 			if err := ps.mailbox.Archive(ps.MailID); err != nil {
+				if errors.Is(err, mail.ErrMessageNotFound) {
+					continue // Already archived by concurrent path
+				}
 				return fmt.Errorf("archiving mail %s for session %s: %w", ps.MailID, sessionName, err)
 			}
 		}
@@ -211,6 +216,7 @@ func ClearPendingSpawn(townRoot, sessionName string) error {
 
 // pruneStalePendingFromList archives POLECAT_STARTED messages older than the
 // given age from the provided pending list. Extracted for testability.
+// Best-effort: continues on per-item archive failures to maximize pruning throughput.
 func pruneStalePendingFromList(pending []*PendingSpawn, maxAge time.Duration) (int, error) {
 	cutoff := time.Now().Add(-maxAge)
 	pruned := 0
@@ -218,10 +224,10 @@ func pruneStalePendingFromList(pending []*PendingSpawn, maxAge time.Duration) (i
 	for _, ps := range pending {
 		if ps.SpawnedAt.Before(cutoff) {
 			if ps.mailbox == nil {
-				return pruned, fmt.Errorf("nil mailbox for stale pending spawn (mail_id: %s)", ps.MailID)
+				continue // Skip items with nil mailbox
 			}
 			if err := ps.mailbox.Archive(ps.MailID); err != nil {
-				return pruned, fmt.Errorf("archiving stale mail %s: %w", ps.MailID, err)
+				continue // Best-effort: skip failures, retry next patrol
 			}
 			pruned++
 		}
