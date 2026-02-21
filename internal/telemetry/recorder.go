@@ -6,6 +6,7 @@ package telemetry
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"go.opentelemetry.io/otel"
@@ -148,10 +149,26 @@ func severity(err error) otellog.Severity {
 	return otellog.SeverityInfo
 }
 
+const (
+	// maxStdoutLog is the maximum number of bytes of stdout captured in logs.
+	maxStdoutLog = 2048
+	// maxStderrLog is the maximum number of bytes of stderr captured in logs.
+	maxStderrLog = 1024
+)
+
+// truncateOutput trims s to max bytes and appends "…" when truncated.
+func truncateOutput(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
+}
+
 // RecordBDCall records a bd CLI invocation with duration (metrics + log event).
 // args is the full argument list; args[0] is used as the subcommand label.
 // durationMs is the wall-clock time of the subprocess in milliseconds.
-func RecordBDCall(ctx context.Context, args []string, durationMs float64, err error) {
+// stdout and stderr are the raw process outputs; both are truncated before logging.
+func RecordBDCall(ctx context.Context, args []string, durationMs float64, err error, stdout []byte, stderr string) {
 	initInstruments()
 	subcommand := ""
 	if len(args) > 0 {
@@ -166,9 +183,11 @@ func RecordBDCall(ctx context.Context, args []string, durationMs float64, err er
 	inst.bdDurationHist.Record(ctx, durationMs, attrs)
 	emit(ctx, "bd.call", severity(err),
 		otellog.String("subcommand", subcommand),
-		otellog.Int64("args_count", int64(len(args))),
+		otellog.String("args", strings.Join(args, " ")),
 		otellog.Float64("duration_ms", durationMs),
 		otellog.String("status", status),
+		otellog.String("stdout", truncateOutput(string(stdout), maxStdoutLog)),
+		otellog.String("stderr", truncateOutput(stderr, maxStderrLog)),
 		errKV(err),
 	)
 }

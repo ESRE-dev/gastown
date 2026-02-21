@@ -145,6 +145,47 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// See: https://github.com/steveyegge/gastown/issues/1666
 	env["CLAUDECODE"] = ""
 
+	// Propagate Claude Code's own OTEL telemetry when GT telemetry is enabled.
+	// Reuses the same VictoriaMetrics endpoint as gastown's telemetry so all
+	// metrics (gt + claude) land in the same store.
+	// Opt-in: only active when GT_OTEL_METRICS_URL is explicitly set.
+	if metricsURL := os.Getenv("GT_OTEL_METRICS_URL"); metricsURL != "" {
+		env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
+		env["OTEL_METRICS_EXPORTER"] = "otlp"
+		env["OTEL_METRIC_EXPORT_INTERVAL"] = "1000"
+		env["OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"] = metricsURL
+		// VictoriaMetrics rejects JSON encoding ("json encoding isn't supported
+		// for opentelemetry format"). The Node.js OTEL SDK defaults to JSON;
+		// force protobuf so the push succeeds.
+		env["OTEL_EXPORTER_OTLP_METRICS_PROTOCOL"] = "http/protobuf"
+		// Mirror into bd's own var names so any `bd` call inside the Claude
+		// session emits metrics/logs to the same VictoriaMetrics instance.
+		env["BD_OTEL_METRICS_URL"] = metricsURL
+		if logsURL := os.Getenv("GT_OTEL_LOGS_URL"); logsURL != "" {
+			env["BD_OTEL_LOGS_URL"] = logsURL
+		}
+
+		// Attach GT context as OTEL resource attributes so Claude's metrics
+		// can be correlated with gastown's own telemetry in VictoriaMetrics.
+		// Claude Code's Node.js SDK picks up OTEL_RESOURCE_ATTRIBUTES automatically.
+		var attrs []string
+		if v := env["GT_ROLE"]; v != "" {
+			attrs = append(attrs, "gt.role="+v)
+		}
+		if cfg.Rig != "" {
+			attrs = append(attrs, "gt.rig="+cfg.Rig)
+		}
+		if v := env["BD_ACTOR"]; v != "" {
+			attrs = append(attrs, "gt.actor="+v)
+		}
+		if cfg.AgentName != "" {
+			attrs = append(attrs, "gt.agent="+cfg.AgentName)
+		}
+		if len(attrs) > 0 {
+			env["OTEL_RESOURCE_ATTRIBUTES"] = strings.Join(attrs, ",")
+		}
+	}
+
 	return env
 }
 

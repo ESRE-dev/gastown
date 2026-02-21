@@ -240,6 +240,9 @@ func Execute() int {
 			defer cancel()
 			_ = provider.Shutdown(shutdownCtx)
 		}()
+		// Set OTEL_RESOURCE_ATTRIBUTES in the process env so all bd subprocesses
+		// spawned via exec.Command inherit GT context automatically.
+		telemetry.SetProcessOTELAttrs()
 	}
 
 	if err := rootCmd.Execute(); err != nil {

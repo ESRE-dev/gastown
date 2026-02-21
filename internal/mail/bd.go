@@ -58,6 +58,7 @@ func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, 
 
 	env := append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 	env = append(env, extraEnv...)
+	env = append(env, telemetry.OTELEnvForSubprocess()...)
 	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
