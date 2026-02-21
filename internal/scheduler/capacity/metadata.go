@@ -40,6 +40,15 @@ const LegacyMetadataDelimiter = "---gt:queue:v1---"
 // LabelScheduled marks a bead as scheduled for dispatch.
 const LabelScheduled = "gt:queued"
 
+// sanitizeMetadataValue escapes the delimiter string and newlines in field values
+// to prevent metadata block corruption from user-supplied content.
+func sanitizeMetadataValue(s string) string {
+	s = strings.ReplaceAll(s, MetadataDelimiter, "---gt_scheduler_v1---")
+	s = strings.ReplaceAll(s, LegacyMetadataDelimiter, "---gt_queue_v1---")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
+}
+
 // FormatMetadata formats metadata as key-value lines for bead description.
 func FormatMetadata(m *SchedulerMetadata) string {
 	var lines []string
@@ -49,39 +58,39 @@ func FormatMetadata(m *SchedulerMetadata) string {
 		lines = append(lines, fmt.Sprintf("target_rig: %s", m.TargetRig))
 	}
 	if m.Formula != "" {
-		lines = append(lines, fmt.Sprintf("formula: %s", m.Formula))
+		lines = append(lines, fmt.Sprintf("formula: %s", sanitizeMetadataValue(m.Formula)))
 	}
 	if m.Args != "" {
-		lines = append(lines, fmt.Sprintf("args: %s", m.Args))
+		lines = append(lines, fmt.Sprintf("args: %s", sanitizeMetadataValue(m.Args)))
 	}
 	// Vars are stored as repeated "var:" lines to avoid lossy delimiters.
 	// Values may contain commas, so one line per var is the safe format.
 	for _, v := range strings.Split(m.Vars, "\n") {
 		v = strings.TrimSpace(v)
 		if v != "" {
-			lines = append(lines, fmt.Sprintf("var: %s", v))
+			lines = append(lines, fmt.Sprintf("var: %s", sanitizeMetadataValue(v)))
 		}
 	}
 	if m.EnqueuedAt != "" {
 		lines = append(lines, fmt.Sprintf("enqueued_at: %s", m.EnqueuedAt))
 	}
 	if m.Merge != "" {
-		lines = append(lines, fmt.Sprintf("merge: %s", m.Merge))
+		lines = append(lines, fmt.Sprintf("merge: %s", sanitizeMetadataValue(m.Merge)))
 	}
 	if m.Convoy != "" {
-		lines = append(lines, fmt.Sprintf("convoy: %s", m.Convoy))
+		lines = append(lines, fmt.Sprintf("convoy: %s", sanitizeMetadataValue(m.Convoy)))
 	}
 	if m.BaseBranch != "" {
-		lines = append(lines, fmt.Sprintf("base_branch: %s", m.BaseBranch))
+		lines = append(lines, fmt.Sprintf("base_branch: %s", sanitizeMetadataValue(m.BaseBranch)))
 	}
 	if m.NoMerge {
 		lines = append(lines, "no_merge: true")
 	}
 	if m.Account != "" {
-		lines = append(lines, fmt.Sprintf("account: %s", m.Account))
+		lines = append(lines, fmt.Sprintf("account: %s", sanitizeMetadataValue(m.Account)))
 	}
 	if m.Agent != "" {
-		lines = append(lines, fmt.Sprintf("agent: %s", m.Agent))
+		lines = append(lines, fmt.Sprintf("agent: %s", sanitizeMetadataValue(m.Agent)))
 	}
 	if m.HookRawBead {
 		lines = append(lines, "hook_raw_bead: true")
@@ -90,13 +99,13 @@ func FormatMetadata(m *SchedulerMetadata) string {
 		lines = append(lines, "owned: true")
 	}
 	if m.Mode != "" {
-		lines = append(lines, fmt.Sprintf("mode: %s", m.Mode))
+		lines = append(lines, fmt.Sprintf("mode: %s", sanitizeMetadataValue(m.Mode)))
 	}
 	if m.DispatchFailures > 0 {
 		lines = append(lines, fmt.Sprintf("dispatch_failures: %d", m.DispatchFailures))
 	}
 	if m.LastFailure != "" {
-		lines = append(lines, fmt.Sprintf("last_failure: %s", m.LastFailure))
+		lines = append(lines, fmt.Sprintf("last_failure: %s", sanitizeMetadataValue(m.LastFailure)))
 	}
 
 	return strings.Join(lines, "\n")

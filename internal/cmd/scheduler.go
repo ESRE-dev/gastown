@@ -21,56 +21,53 @@ var (
 	schedulerClearBead  string
 	schedulerRunBatch   int
 	schedulerRunDryRun  bool
-	schedulerRunMaxPol  int
 )
 
 var schedulerCmd = &cobra.Command{
 	Use:     "scheduler",
 	GroupID: GroupWork,
-	Short:   "Manage dispatch schedulers",
-	RunE:    requireSubcommand,
-}
-
-var schedulerCapacityCmd = &cobra.Command{
-	Use:   "capacity",
-	Short: "Capacity-controlled dispatch scheduler",
+	Short:   "Manage dispatch scheduler",
 	Long: `Manage the capacity-controlled dispatch scheduler.
 
 Subcommands:
-  gt scheduler capacity status    # Show scheduler state
-  gt scheduler capacity list      # List all scheduled beads
-  gt scheduler capacity run       # Manual dispatch trigger
-  gt scheduler capacity pause     # Pause dispatch
-  gt scheduler capacity resume    # Resume dispatch
-  gt scheduler capacity clear     # Remove beads from scheduler`,
+  gt scheduler status    # Show scheduler state
+  gt scheduler list      # List all scheduled beads
+  gt scheduler run       # Manual dispatch trigger
+  gt scheduler pause     # Pause dispatch
+  gt scheduler resume    # Resume dispatch
+  gt scheduler clear     # Remove beads from scheduler
+
+Config:
+  gt config set scheduler.max_polecats 5    # Enable deferred dispatch
+  gt config set scheduler.max_polecats -1   # Direct dispatch (default)`,
 	RunE: requireSubcommand,
 }
 
-var schedulerCapacityStatusCmd = &cobra.Command{
+var schedulerStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show scheduler state: pending, capacity, active polecats",
 	RunE:  runSchedulerStatus,
 }
 
-var schedulerCapacityListCmd = &cobra.Command{
+var schedulerListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all scheduled beads with titles, rig, blocked status",
 	RunE:  runSchedulerList,
 }
 
-var schedulerCapacityPauseCmd = &cobra.Command{
+var schedulerPauseCmd = &cobra.Command{
 	Use:   "pause",
 	Short: "Pause all scheduler dispatch (town-wide)",
 	RunE:  runSchedulerPause,
 }
 
-var schedulerCapacityResumeCmd = &cobra.Command{
+var schedulerResumeCmd = &cobra.Command{
 	Use:   "resume",
 	Short: "Resume scheduler dispatch",
 	RunE:  runSchedulerResume,
 }
 
-var schedulerCapacityClearCmd = &cobra.Command{
+var schedulerClearCmd = &cobra.Command{
 	Use:   "clear",
 	Short: "Remove beads from the scheduler",
 	Long: `Remove beads from the scheduler by clearing gt:queued labels.
@@ -80,7 +77,7 @@ With --bead, removes only the specified bead.`,
 	RunE: runSchedulerClear,
 }
 
-var schedulerCapacityRunCmd = &cobra.Command{
+var schedulerRunCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Manually trigger scheduler dispatch",
 	Long: `Manually trigger dispatch of scheduled work.
@@ -88,35 +85,33 @@ var schedulerCapacityRunCmd = &cobra.Command{
 This dispatches scheduled beads using the same logic as the daemon heartbeat,
 but can be run ad-hoc. Useful for testing or when the daemon is not running.
 
-  gt scheduler capacity run                  # Dispatch using config defaults
-  gt scheduler capacity run --batch 5        # Dispatch up to 5
-  gt scheduler capacity run --dry-run        # Preview what would dispatch`,
+  gt scheduler run                  # Dispatch using config defaults
+  gt scheduler run --batch 5        # Dispatch up to 5
+  gt scheduler run --dry-run        # Preview what would dispatch`,
 	RunE: runSchedulerRun,
 }
 
 func init() {
 	// Status flags
-	schedulerCapacityStatusCmd.Flags().BoolVar(&schedulerStatusJSON, "json", false, "Output as JSON")
+	schedulerStatusCmd.Flags().BoolVar(&schedulerStatusJSON, "json", false, "Output as JSON")
 
 	// List flags
-	schedulerCapacityListCmd.Flags().BoolVar(&schedulerListJSON, "json", false, "Output as JSON")
+	schedulerListCmd.Flags().BoolVar(&schedulerListJSON, "json", false, "Output as JSON")
 
 	// Clear flags
-	schedulerCapacityClearCmd.Flags().StringVar(&schedulerClearBead, "bead", "", "Remove specific bead from scheduler")
+	schedulerClearCmd.Flags().StringVar(&schedulerClearBead, "bead", "", "Remove specific bead from scheduler")
 
 	// Run flags
-	schedulerCapacityRunCmd.Flags().IntVar(&schedulerRunBatch, "batch", 0, "Override batch size (0 = use config)")
-	schedulerCapacityRunCmd.Flags().BoolVar(&schedulerRunDryRun, "dry-run", false, "Preview what would dispatch")
-	schedulerCapacityRunCmd.Flags().IntVar(&schedulerRunMaxPol, "max-polecats", 0, "Override max polecats (0 = use config)")
+	schedulerRunCmd.Flags().IntVar(&schedulerRunBatch, "batch", 0, "Override batch size (0 = use config)")
+	schedulerRunCmd.Flags().BoolVar(&schedulerRunDryRun, "dry-run", false, "Preview what would dispatch")
 
-	// Build command tree
-	schedulerCapacityCmd.AddCommand(schedulerCapacityStatusCmd)
-	schedulerCapacityCmd.AddCommand(schedulerCapacityListCmd)
-	schedulerCapacityCmd.AddCommand(schedulerCapacityPauseCmd)
-	schedulerCapacityCmd.AddCommand(schedulerCapacityResumeCmd)
-	schedulerCapacityCmd.AddCommand(schedulerCapacityClearCmd)
-	schedulerCapacityCmd.AddCommand(schedulerCapacityRunCmd)
-	schedulerCmd.AddCommand(schedulerCapacityCmd)
+	// Build command tree (flat — no intermediary "capacity" level)
+	schedulerCmd.AddCommand(schedulerStatusCmd)
+	schedulerCmd.AddCommand(schedulerListCmd)
+	schedulerCmd.AddCommand(schedulerPauseCmd)
+	schedulerCmd.AddCommand(schedulerResumeCmd)
+	schedulerCmd.AddCommand(schedulerClearCmd)
+	schedulerCmd.AddCommand(schedulerRunCmd)
 
 	rootCmd.AddCommand(schedulerCmd)
 }
@@ -216,7 +211,7 @@ func runSchedulerList(cmd *cobra.Command, args []string) error {
 
 	if len(scheduled) == 0 {
 		fmt.Println("No beads scheduled.")
-		fmt.Println("Schedule work with: gt sling <bead> <rig> --scheduler capacity")
+		fmt.Println("Enable deferred dispatch with: gt config set scheduler.max_polecats <N>")
 		return nil
 	}
 
@@ -335,7 +330,7 @@ func runSchedulerRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	_, err = dispatchScheduledWork(townRoot, detectActor(), schedulerRunBatch, schedulerRunMaxPol, schedulerRunDryRun)
+	_, err = dispatchScheduledWork(townRoot, detectActor(), schedulerRunBatch, schedulerRunDryRun)
 	return err
 }
 

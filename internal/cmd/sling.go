@@ -125,7 +125,6 @@ var (
 	slingMaxConcurrent int    // --max-concurrent: limit concurrent spawns in batch mode
 	slingBaseBranch    string // --base-branch: override base branch for polecat worktree
 	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
-	slingScheduler     string // --scheduler: dispatch scheduler (e.g., "capacity")
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
 )
 
@@ -152,7 +151,6 @@ func init() {
 	slingCmd.Flags().IntVar(&slingMaxConcurrent, "max-concurrent", 0, "Limit concurrent polecat spawns in batch mode (0 = no limit)")
 	slingCmd.Flags().StringVar(&slingBaseBranch, "base-branch", "", "Override base branch for polecat worktree (e.g., 'develop', 'release/v2')")
 	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
-	slingCmd.Flags().StringVar(&slingScheduler, "scheduler", "", "Dispatch scheduler: capacity")
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
 
 	rootCmd.AddCommand(slingCmd)
@@ -240,39 +238,83 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Batch mode detection: multiple beads with rig target
-	// Pattern: gt sling gt-abc gt-def gt-ghi gastown
-	// Validate --scheduler flag
-	useScheduler := slingScheduler != ""
-	if useScheduler && slingScheduler != "capacity" {
-		return fmt.Errorf("unknown scheduler %q: only 'capacity' is supported", slingScheduler)
+	// Config-driven dispatch mode: check scheduler.max_polecats
+	deferred, deferErr := shouldDeferDispatch()
+	if deferErr != nil {
+		return deferErr
 	}
 
+	// Batch mode detection: multiple beads with rig target
+	// Pattern: gt sling gt-abc gt-def gt-ghi gastown
 	// When len(args) > 2 and last arg is a rig, sling each bead to its own polecat
 	if len(args) > 2 {
 		lastArg := args[len(args)-1]
 		if rigName, isRig := IsRigName(lastArg); isRig {
-			if useScheduler {
-				runBatchSchedule(args[:len(args)-1], rigName)
-				return nil
+			beadIDs := args[:len(args)-1]
+			if deferred {
+				// Reject epic/convoy IDs in batch — they must be dispatched individually
+				for _, id := range beadIDs {
+					idType, typeErr := detectSchedulerIDType(id)
+					if typeErr == nil && idType != "task" {
+						return fmt.Errorf("%s '%s' cannot be batch-scheduled with an explicit rig\nUse: gt sling %s (children auto-resolve rigs)", idType, id, id)
+					}
+				}
+				return runBatchSchedule(beadIDs, rigName)
 			}
-			return runBatchSling(args[:len(args)-1], rigName, townBeadsDir)
+			return runBatchSling(beadIDs, rigName, townBeadsDir)
 		}
 	}
 
-	// Scheduler routing: formula-on-bead + scheduler
-	// gt sling mol-review --on gt-abc gastown --scheduler capacity
-	if useScheduler && slingOnTarget != "" && len(args) >= 2 {
+	// Deferred routing: formula-on-bead with rig target
+	// gt sling mol-review --on gt-abc gastown  (when max_polecats > 0)
+	if deferred && slingOnTarget != "" && len(args) >= 2 {
 		rigName, isRig := IsRigName(args[len(args)-1])
-		if !isRig {
-			return fmt.Errorf("--scheduler requires a rig target (got %q)", args[len(args)-1])
+		if isRig {
+			formulaName := args[0]
+			if slingHookRawBead {
+				formulaName = ""
+			}
+			beadID := slingOnTarget
+			return scheduleBead(beadID, rigName, ScheduleOptions{
+				Formula:     formulaName,
+				Args:        slingArgs,
+				Vars:        slingVars,
+				Merge:       slingMerge,
+				BaseBranch:  slingBaseBranch,
+				NoConvoy:    slingNoConvoy,
+				Owned:       slingOwned,
+				DryRun:      slingDryRun,
+				Force:       slingForce,
+				NoMerge:     slingNoMerge,
+				Account:     slingAccount,
+				Agent:       slingAgent,
+				HookRawBead: slingHookRawBead,
+				Ralph:       slingRalph,
+			})
+		}
+	}
+
+	// Deferred routing: formula-on-bead without explicit rig (auto-resolve from bead prefix)
+	// gt sling mol-review --on gt-abc  (when max_polecats > 0, no explicit rig arg)
+	if deferred && slingOnTarget != "" {
+		if len(args) >= 2 {
+			// Non-rig last arg with --on in deferred mode — give clear error
+			return fmt.Errorf("'%s' is not a known rig\nUse: gt sling %s --on %s <rig>", args[len(args)-1], args[0], slingOnTarget)
+		}
+		// Auto-resolve rig from bead prefix
+		townRoot, twErr := workspace.FindFromCwdOrError()
+		if twErr != nil {
+			return twErr
+		}
+		rigName := resolveRigForBead(townRoot, slingOnTarget)
+		if rigName == "" {
+			return fmt.Errorf("cannot resolve rig for bead %s\nSpecify explicitly: gt sling %s --on %s <rig>", slingOnTarget, args[0], slingOnTarget)
 		}
 		formulaName := args[0]
 		if slingHookRawBead {
 			formulaName = ""
 		}
-		beadID := slingOnTarget
-		return scheduleBead(beadID, rigName, ScheduleOptions{
+		return scheduleBead(slingOnTarget, rigName, ScheduleOptions{
 			Formula:     formulaName,
 			Args:        slingArgs,
 			Vars:        slingVars,
@@ -290,16 +332,15 @@ func runSling(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	// Scheduler routing for single bead + rig: gt sling gt-abc gastown --scheduler capacity
-	// Also handles 2-arg case where second is NOT a rig (mixed type detection, error).
-	if useScheduler && len(args) == 2 {
+	// Single bead + rig (2 args): deferred check before resolveTarget side-effects
+	if deferred && len(args) == 2 {
 		rigName, isRig := IsRigName(args[1])
 		if isRig {
-			// Reject epic/convoy IDs — they must be scheduled without a rig
+			// Reject epic/convoy IDs — they must be dispatched without a rig
 			// (children auto-resolve their rigs)
 			idType, err := detectSchedulerIDType(args[0])
 			if err == nil && idType != "task" {
-				return fmt.Errorf("%s cannot be scheduled with an explicit rig\nUse: gt sling %s --scheduler capacity (children auto-resolve rigs)",
+				return fmt.Errorf("%s cannot be scheduled with an explicit rig\nUse: gt sling %s (children auto-resolve rigs)",
 					idType, args[0])
 			}
 			if verifyBeadExists(args[0]) != nil {
@@ -326,56 +367,61 @@ func runSling(cmd *cobra.Command, args []string) error {
 				Ralph:       slingRalph,
 			})
 		}
-		// Second arg is not a rig — check for mixed ID types
-		idType2, err := detectSchedulerIDType(args[1])
-		if err == nil && idType2 != "task" {
-			return fmt.Errorf("mixed ID types in batch: '%s' is a %s, not a task bead\nConvoys and epics must be scheduled individually: gt sling %s --scheduler capacity",
-				args[1], idType2, args[1])
-		}
-		return fmt.Errorf("--scheduler requires a rig target (e.g., gt sling %s <rig> --scheduler capacity)", args[0])
+		// Non-rig target in deferred mode — reject to prevent bypassing capacity control
+		return fmt.Errorf("deferred dispatch requires a rig target: gt sling %s <rig>\n'%s' is not a known rig", args[0], args[1])
 	}
 
-	// Scheduler: epic/convoy auto-detection when single arg given (no rig target)
-	// gt sling <epic-id> --scheduler capacity
-	// gt sling <convoy-id> --scheduler capacity
-	if useScheduler && len(args) == 1 {
+	// Epic/convoy auto-detection (1 arg, no rig): works for both deferred and direct
+	if len(args) == 1 {
 		idType, err := detectSchedulerIDType(args[0])
-		if err != nil {
-			return err
-		}
+		if err == nil && idType != "task" {
+			formula := resolveFormula(slingFormula, slingHookRawBead)
 
-		formula := resolveFormula(slingFormula, slingHookRawBead)
-
-		switch idType {
-		case "convoy":
-			if err := validateNoTaskOnlySchedulerFlags(cmd, "convoy"); err != nil {
-				return err
+			switch idType {
+			case "convoy":
+				if err := validateNoTaskOnlySchedulerFlags(cmd, "convoy"); err != nil {
+					return err
+				}
+				if deferred {
+					return runConvoyScheduleByID(args[0], convoyScheduleOpts{
+						Formula:     formula,
+						HookRawBead: slingHookRawBead,
+						Force:       slingForce,
+						DryRun:      slingDryRun,
+					})
+				}
+				return runConvoySlingByID(args[0], convoyScheduleOpts{
+					Formula:     formula,
+					HookRawBead: slingHookRawBead,
+					Force:       slingForce,
+					DryRun:      slingDryRun,
+					NoBoot:      slingNoBoot,
+				})
+			case "epic":
+				if err := validateNoTaskOnlySchedulerFlags(cmd, "epic"); err != nil {
+					return err
+				}
+				if deferred {
+					return runEpicScheduleByID(args[0], epicScheduleOpts{
+						Formula:     formula,
+						HookRawBead: slingHookRawBead,
+						Force:       slingForce,
+						DryRun:      slingDryRun,
+					})
+				}
+				return runEpicSlingByID(args[0], epicScheduleOpts{
+					Formula:     formula,
+					HookRawBead: slingHookRawBead,
+					Force:       slingForce,
+					DryRun:      slingDryRun,
+					NoBoot:      slingNoBoot,
+				})
 			}
-			return runConvoyScheduleByID(args[0], convoyScheduleOpts{
-				Formula:     formula,
-				HookRawBead: slingHookRawBead,
-				Force:       slingForce,
-				DryRun:      slingDryRun,
-			})
-		case "epic":
-			if err := validateNoTaskOnlySchedulerFlags(cmd, "epic"); err != nil {
-				return err
-			}
-			return runEpicScheduleByID(args[0], epicScheduleOpts{
-				Formula:     formula,
-				HookRawBead: slingHookRawBead,
-				Force:       slingForce,
-				DryRun:      slingDryRun,
-			})
-		default:
-			// Task bead without rig — can't schedule without knowing the target rig
-			return fmt.Errorf("--scheduler requires a rig target for task beads (e.g., gt sling %s <rig> --scheduler capacity)", args[0])
 		}
-	}
-
-	// Catch-all: --scheduler with 3+ args but no rig
-	if useScheduler {
-		return fmt.Errorf("--scheduler requires a rig target (e.g., gt sling %s <rig> --scheduler capacity)", args[0])
+		// task bead with deferred + no rig: error — must specify a rig
+		if deferred {
+			return fmt.Errorf("deferred dispatch requires a rig target: gt sling %s <rig>", args[0])
+		}
 	}
 
 	// Determine mode based on flags and argument types
@@ -406,7 +452,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 			// Not a verified bead - try as standalone formula
 			if err := verifyFormulaExists(firstArg); err == nil {
 				// Standalone formula mode: gt sling <formula> [target]
-				// Note: --scheduler is already caught by the catch-all guard above,
+				// Standalone formula: deferred dispatch is handled above (formula-on-bead),
 				// so no scheduler check needed here.
 				return runSlingFormula(args)
 			}
@@ -500,11 +546,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// TODO: Migrate single-sling rig dispatch to use executeSling().
+	// TODO(scheduler-unify): Migrate single-sling rig dispatch to use executeSling().
 	// The inline logic below duplicates executeSling's 12-step flow. Batch sling
-	// and queue dispatch already use the unified path. Single-sling is deferred
+	// and scheduler dispatch already use the unified path. Single-sling is deferred
 	// because it handles non-rig targets (dogs, mayor, crew, self-sling, nudge)
-	// that executeSling does not cover.
+	// that executeSling does not cover. The rig-target case could be factored out
+	// to use executeSling, limiting this to non-rig targets only.
 	//
 	// Resolve target agent using shared dispatch logic.
 	// Note: args[1] == args[len(args)-1] here because batch mode (len(args) > 2

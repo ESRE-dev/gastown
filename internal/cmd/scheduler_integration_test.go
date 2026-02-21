@@ -158,7 +158,7 @@ func setupSchedulerIntegrationTown(t *testing.T) (hqPath, rigPath, gtBinary stri
 	env = cleanSchedulerTestEnv(tmpDir)
 
 	// Configure scheduler with defaults
-	configureScheduler(t, hqPath, true, 10, 3)
+	configureScheduler(t, hqPath, 10, 3)
 
 	return hqPath, rigPath, gtBinary, env
 }
@@ -201,7 +201,7 @@ func TestSchedulerCircuitBreakerExclusion(t *testing.T) {
 	}
 
 	// Verify: dry-run dispatch should not pick this bead
-	out := runGTCmdOutput(t, gtBinary, hqPath, env, "scheduler", "capacity", "run", "--dry-run")
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "scheduler", "run", "--dry-run")
 	if strings.Contains(out, beadID) {
 		t.Errorf("dry-run dispatch should not mention circuit-broken bead %s", beadID)
 	}
@@ -213,13 +213,13 @@ func TestSchedulerMissingMetadataQuarantine(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
 	// Create a bead with gt:queued but NO scheduler metadata (simulating a
-	// manually-labeled bead that bypassed gt sling --scheduler capacity).
+	// manually-labeled bead that bypassed gt sling deferred dispatch (max_polecats > 0)).
 	beadID := createTestBead(t, rigPath, "Missing metadata test")
 	addBeadLabel(t, beadID, capacity.LabelScheduled, rigPath)
 
 	// Run dispatch (non-dry-run). The bead has no metadata so dispatch
 	// should quarantine it with gt:dispatch-failed.
-	runGTCmdMayFail(t, gtBinary, hqPath, env, "scheduler", "capacity", "run", "--batch", "1")
+	runGTCmdMayFail(t, gtBinary, hqPath, env, "scheduler", "run", "--batch", "1")
 
 	// Verify: bead should now have gt:dispatch-failed label
 	if !beadHasLabel(t, beadID, "gt:dispatch-failed", rigPath) {
@@ -227,7 +227,7 @@ func TestSchedulerMissingMetadataQuarantine(t *testing.T) {
 	}
 }
 
-// TestSchedulerAutoConvoyCreation verifies that gt sling --scheduler capacity
+// TestSchedulerAutoConvoyCreation verifies that gt sling deferred dispatch (max_polecats > 0)
 // creates an auto-convoy, stores the convoy ID in scheduler metadata, and the
 // convoy is resolvable via bd show.
 func TestSchedulerAutoConvoyCreation(t *testing.T) {
@@ -235,19 +235,19 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 
 	beadID := createTestBead(t, rigPath, "Auto convoy test")
 
-	// Schedule via gt sling --scheduler capacity
+	// Schedule via gt sling deferred dispatch (max_polecats > 0)
 	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
 
 	// Verify: bead should have gt:queued label
 	if !beadHasLabel(t, beadID, capacity.LabelScheduled, rigPath) {
-		t.Errorf("bead %s should have gt:queued label after sling --scheduler capacity", beadID)
+		t.Errorf("bead %s should have gt:queued label after sling deferred dispatch (max_polecats > 0)", beadID)
 	}
 
 	// Verify: description should contain scheduler metadata with convoy ID
 	desc := getBeadDescription(t, beadID, rigPath)
 	meta := capacity.ParseMetadata(desc)
 	if meta == nil {
-		t.Fatalf("bead %s has no scheduler metadata after sling --scheduler capacity", beadID)
+		t.Fatalf("bead %s has no scheduler metadata after sling deferred dispatch (max_polecats > 0)", beadID)
 	}
 	if meta.TargetRig != "testrig" {
 		t.Errorf("target_rig = %q, want %q", meta.TargetRig, "testrig")
@@ -313,7 +313,7 @@ func TestSchedulerBlockedStatusReporting(t *testing.T) {
 	blockedID := createTestBead(t, rigPath, "Blocked bead")
 	blockerID := createTestBead(t, rigPath, "Blocker bead")
 
-	// Schedule ready and blocked beads via gt sling --scheduler capacity
+	// Schedule ready and blocked beads via gt sling deferred dispatch (max_polecats > 0)
 	slingToScheduler(t, gtBinary, hqPath, env, readyID, "testrig")
 	slingToScheduler(t, gtBinary, hqPath, env, blockedID, "testrig")
 
@@ -363,7 +363,7 @@ func TestSchedulerBlockedStatusReporting(t *testing.T) {
 	}
 }
 
-// TestSchedulerSlingDryRun verifies that gt sling --scheduler capacity --dry-run
+// TestSchedulerSlingDryRun verifies that gt sling deferred dispatch (max_polecats > 0) --dry-run
 // has no side effects: no label added, no metadata written, no convoy created.
 func TestSchedulerSlingDryRun(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
@@ -373,7 +373,7 @@ func TestSchedulerSlingDryRun(t *testing.T) {
 	// Capture description before dry-run
 	descBefore := getBeadDescription(t, beadID, rigPath)
 
-	// Run sling --scheduler capacity --dry-run
+	// Run sling deferred dispatch (max_polecats > 0) --dry-run
 	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig", "--dry-run")
 
 	// Verify: no gt:queued label
@@ -529,7 +529,7 @@ func setupMultiRigSchedulerTown(t *testing.T) (hqPath, rig1Path, rig2Path, gtBin
 	env = cleanSchedulerTestEnv(tmpDir)
 
 	// Configure scheduler with defaults
-	configureScheduler(t, hqPath, true, 10, 3)
+	configureScheduler(t, hqPath, 10, 3)
 
 	return hqPath, rig1Path, rig2Path, gtBinary, env
 }
@@ -575,7 +575,7 @@ func TestSchedulerMultiRigDispatch(t *testing.T) {
 	}
 
 	// Verify: dry-run dispatch should mention both beads.
-	out := runGTCmdOutput(t, gtBinary, hqPath, env, "scheduler", "capacity", "run", "--dry-run")
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "scheduler", "run", "--dry-run")
 	if !strings.Contains(out, bead1) {
 		t.Errorf("dry-run should mention rig1 bead %s", bead1)
 	}
@@ -587,12 +587,12 @@ func TestSchedulerMultiRigDispatch(t *testing.T) {
 // --------------------------------------------------------------------------
 // Cross-rig container tests
 //
-// These tests verify that gt sling --scheduler capacity correctly auto-resolves
+// These tests verify that gt sling deferred dispatch (max_polecats > 0) correctly auto-resolves
 // each child's target rig from its bead ID prefix, enabling multi-rig epics
 // and convoys.
 // --------------------------------------------------------------------------
 
-// TestSchedulerMultiRigEpicAutoResolve verifies that gt sling <epic> --scheduler capacity
+// TestSchedulerMultiRigEpicAutoResolve verifies that gt sling <epic> deferred dispatch (max_polecats > 0)
 // auto-resolves each child's target rig from its prefix. An epic in rig1 with
 // children in rig1 and rig2 should schedule each child to its respective rig.
 func TestSchedulerMultiRigEpicAutoResolve(t *testing.T) {
@@ -613,7 +613,7 @@ func TestSchedulerMultiRigEpicAutoResolve(t *testing.T) {
 
 	// Dry-run: verify auto-rig-resolution routes each child correctly.
 	// Uses --dry-run to avoid needing formula infrastructure (mol-polecat-work).
-	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", epicID, "--scheduler", "capacity", "--dry-run")
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", epicID, "--dry-run")
 
 	// Verify: child1 should be routed to rig1
 	expected1 := fmt.Sprintf("%s -> rig1", child1)
@@ -662,7 +662,7 @@ func TestSchedulerMultiRigEpicAutoResolve(t *testing.T) {
 }
 
 // TestSchedulerConvoyFlagRejection verifies that task-only flags are rejected
-// when gt sling --scheduler capacity auto-detects a convoy ID.
+// when gt sling deferred dispatch (max_polecats > 0) auto-detects a convoy ID.
 func TestSchedulerConvoyFlagRejection(t *testing.T) {
 	hqPath, _, _, gtBinary, env := setupMultiRigSchedulerTown(t)
 
@@ -670,9 +670,9 @@ func TestSchedulerConvoyFlagRejection(t *testing.T) {
 	convoyID := createTestBeadOfType(t, hqPath, "Flag rejection convoy", "convoy")
 
 	// Attempt to schedule convoy with task-only flag --ralph.
-	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", convoyID, "--scheduler", "capacity", "--ralph")
+	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", convoyID, "--ralph")
 	if err == nil {
-		t.Fatalf("gt sling %s --scheduler capacity --ralph should fail, but succeeded:\n%s", convoyID, out)
+		t.Fatalf("gt sling %s deferred dispatch (max_polecats > 0) --ralph should fail, but succeeded:\n%s", convoyID, out)
 	}
 	if !strings.Contains(out, "convoy mode does not support") {
 		t.Errorf("expected 'convoy mode does not support' error, got:\n%s", out)
@@ -683,7 +683,7 @@ func TestSchedulerConvoyFlagRejection(t *testing.T) {
 }
 
 // TestSchedulerEpicFlagRejection verifies that task-only flags are rejected
-// when gt sling --scheduler capacity auto-detects an epic ID.
+// when gt sling deferred dispatch (max_polecats > 0) auto-detects an epic ID.
 func TestSchedulerEpicFlagRejection(t *testing.T) {
 	hqPath, rig1Path, _, gtBinary, env := setupMultiRigSchedulerTown(t)
 
@@ -694,9 +694,9 @@ func TestSchedulerEpicFlagRejection(t *testing.T) {
 	addBeadDependencyOfType(t, epicID, child, "depends_on", rig1Path)
 
 	// Attempt to schedule epic with task-only flag --account.
-	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", epicID, "--scheduler", "capacity", "--account", "foo")
+	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", epicID, "--account", "foo")
 	if err == nil {
-		t.Fatalf("gt sling %s --scheduler capacity --account foo should fail, but succeeded:\n%s", epicID, out)
+		t.Fatalf("gt sling %s deferred dispatch (max_polecats > 0) --account foo should fail, but succeeded:\n%s", epicID, out)
 	}
 	if !strings.Contains(out, "epic mode does not support") {
 		t.Errorf("expected 'epic mode does not support' error, got:\n%s", out)
@@ -706,7 +706,7 @@ func TestSchedulerEpicFlagRejection(t *testing.T) {
 	}
 }
 
-// TestSchedulerEpicDetection verifies that gt sling <epic-id> --scheduler capacity
+// TestSchedulerEpicDetection verifies that gt sling <epic-id> deferred dispatch (max_polecats > 0)
 // auto-detects the epic and routes to the epic handler (dry-run).
 func TestSchedulerEpicDetection(t *testing.T) {
 	hqPath, rig1Path, rig2Path, gtBinary, env := setupMultiRigSchedulerTown(t)
@@ -718,8 +718,8 @@ func TestSchedulerEpicDetection(t *testing.T) {
 	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path)
 	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path)
 
-	// gt sling <epic-id> --scheduler capacity --dry-run should auto-detect epic and list children.
-	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", epicID, "--scheduler", "capacity", "--dry-run")
+	// gt sling <epic-id> deferred dispatch (max_polecats > 0) --dry-run should auto-detect epic and list children.
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", epicID, "--dry-run")
 
 	// Should show both children with rig resolution.
 	if !strings.Contains(out, child1) {
@@ -733,9 +733,10 @@ func TestSchedulerEpicDetection(t *testing.T) {
 	}
 }
 
-// TestSchedulerMixedBatchRejection verifies that gt sling --scheduler capacity
-// rejects batches containing mixed ID types (e.g., a task bead + an epic in the
-// same batch).
+// TestSchedulerMixedBatchRejection verifies that gt sling with a task + epic
+// (without a rig target) fails. The epic ID is not a valid target, so the
+// command rejects it. With deferred dispatch, the 2-arg case expects a rig
+// as the second argument.
 func TestSchedulerMixedBatchRejection(t *testing.T) {
 	hqPath, rig1Path, _, gtBinary, env := setupMultiRigSchedulerTown(t)
 
@@ -743,20 +744,15 @@ func TestSchedulerMixedBatchRejection(t *testing.T) {
 	taskID := createTestBead(t, rig1Path, "Task bead")
 	epicID := createTestBeadOfType(t, rig1Path, "Epic bead", "epic")
 
-	// Attempt to batch-schedule a task + epic together.
-	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", taskID, epicID, "--scheduler", "capacity", "--dry-run")
+	// Attempt to sling a task + epic together (no rig target).
+	// Should fail because the epic ID is not a valid rig target.
+	_, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", taskID, epicID, "--dry-run")
 	if err == nil {
-		t.Fatalf("gt sling %s %s --scheduler capacity should fail (mixed types), but succeeded:\n%s", taskID, epicID, out)
-	}
-	if !strings.Contains(out, "mixed ID types") {
-		t.Errorf("expected 'mixed ID types' error, got:\n%s", out)
-	}
-	if !strings.Contains(out, epicID) {
-		t.Errorf("error should mention the epic ID %s, got:\n%s", epicID, out)
+		t.Fatalf("gt sling %s %s should fail (epic is not a rig target), but succeeded", taskID, epicID)
 	}
 }
 
-// TestSchedulerMultiRigConvoyAutoResolve verifies that gt sling <convoy> --scheduler capacity
+// TestSchedulerMultiRigConvoyAutoResolve verifies that gt sling <convoy> deferred dispatch (max_polecats > 0)
 // auto-resolves each tracked issue's target rig from its prefix. A convoy in HQ
 // tracking beads in rig1 and rig2 should schedule each bead to its respective rig.
 func TestSchedulerMultiRigConvoyAutoResolve(t *testing.T) {
@@ -775,7 +771,7 @@ func TestSchedulerMultiRigConvoyAutoResolve(t *testing.T) {
 	addBeadDependencyOfType(t, convoyID, bead2, "tracks", hqPath)
 
 	// Dry-run: verify auto-rig-resolution routes each bead correctly.
-	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", convoyID, "--scheduler", "capacity", "--dry-run")
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", convoyID, "--dry-run")
 
 	// Verify: bead1 should be routed to rig1
 	expected1 := fmt.Sprintf("%s -> rig1", bead1)
@@ -818,5 +814,199 @@ func TestSchedulerMultiRigConvoyAutoResolve(t *testing.T) {
 	total := int(status["queued_total"].(float64))
 	if total != 2 {
 		t.Errorf("queued_total = %d, want 2", total)
+	}
+}
+
+// --------------------------------------------------------------------------
+// Dispatch mode tests (direct, disabled)
+// --------------------------------------------------------------------------
+
+// TestSchedulerDisabledMode verifies that max_polecats=0 behaves as direct dispatch
+// (same as -1). Beads should NOT be queued — they fall through to normal dispatch.
+func TestSchedulerDisabledMode(t *testing.T) {
+	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	// Reconfigure scheduler to disabled mode (max_polecats=0)
+	configureScheduler(t, hqPath, 0, 1)
+
+	beadID := createTestBead(t, rigPath, "Disabled mode test")
+
+	// gt sling --dry-run should succeed (direct dispatch, not deferred)
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", beadID, "testrig", "--hook-raw-bead", "--dry-run")
+	if strings.Contains(out, "scheduler is disabled") {
+		t.Errorf("max_polecats=0 should act as direct dispatch, not error:\n%s", out)
+	}
+	if strings.Contains(out, "Would schedule") {
+		t.Errorf("max_polecats=0 should NOT schedule (deferred), got:\n%s", out)
+	}
+
+	// Bead should NOT have gt:queued label
+	if beadHasLabel(t, beadID, capacity.LabelScheduled, rigPath) {
+		t.Errorf("disabled mode should NOT add gt:queued label")
+	}
+}
+
+// TestSchedulerDirectModeNoQueue verifies that max_polecats=-1 (direct dispatch mode)
+// does not queue beads. Scheduler run and status should show zero queued.
+func TestSchedulerDirectModeNoQueue(t *testing.T) {
+	hqPath, _, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	// Reconfigure scheduler to direct dispatch mode
+	configureScheduler(t, hqPath, -1, 1)
+
+	// Scheduler status should report zero queued and not be paused
+	status := getSchedulerStatus(t, gtBinary, hqPath, env)
+	total := int(status["queued_total"].(float64))
+	if total != 0 {
+		t.Errorf("queued_total = %d, want 0 in direct mode", total)
+	}
+
+	// Scheduler run --dry-run should be a no-op (nothing to dispatch)
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "scheduler", "run", "--dry-run")
+	if strings.Contains(out, "Would dispatch") {
+		t.Errorf("direct mode should have nothing to dispatch, got:\n%s", out)
+	}
+}
+
+// TestSchedulerDeferredTaskWithoutRig verifies that in deferred mode (max_polecats > 0),
+// gt sling <task-bead> (without a rig) returns an error requiring a rig target.
+func TestSchedulerDeferredTaskWithoutRig(t *testing.T) {
+	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	beadID := createTestBead(t, rigPath, "No rig test")
+
+	// gt sling <bead> (no rig) in deferred mode should error
+	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", beadID, "--hook-raw-bead")
+	if err == nil {
+		t.Fatalf("gt sling %s without rig in deferred mode should fail, but succeeded:\n%s", beadID, out)
+	}
+	if !strings.Contains(out, "deferred dispatch requires a rig target") {
+		t.Errorf("expected 'deferred dispatch requires a rig target' error, got:\n%s", out)
+	}
+}
+
+// TestSchedulerConfigSetZero verifies that gt config set scheduler.max_polecats 0
+// is accepted (disabled mode is a valid config).
+func TestSchedulerConfigSetZero(t *testing.T) {
+	hqPath, _, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	// Set max_polecats=0 should succeed
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "config", "set", "scheduler.max_polecats", "0")
+	if strings.Contains(out, "invalid") {
+		t.Errorf("max_polecats=0 should be accepted, got:\n%s", out)
+	}
+
+	// Read it back — should return 0
+	out = runGTCmdOutput(t, gtBinary, hqPath, env, "config", "get", "scheduler.max_polecats")
+	if strings.TrimSpace(out) != "0" {
+		t.Errorf("max_polecats = %q, want %q", strings.TrimSpace(out), "0")
+	}
+}
+
+// TestSchedulerDeferredNonRigRejection verifies that in deferred mode (max_polecats > 0),
+// gt sling <bead> <non-rig> is rejected rather than falling through to direct dispatch.
+func TestSchedulerDeferredNonRigRejection(t *testing.T) {
+	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	beadID := createTestBead(t, rigPath, "Non-rig rejection test")
+	otherBead := createTestBead(t, rigPath, "Not a rig target")
+
+	// gt sling <bead> <non-rig-bead> in deferred mode should error
+	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", beadID, otherBead, "--hook-raw-bead")
+	if err == nil {
+		t.Fatalf("gt sling %s %s (non-rig) in deferred mode should fail, but succeeded:\n%s", beadID, otherBead, out)
+	}
+	if !strings.Contains(out, "deferred dispatch requires a rig target") {
+		t.Errorf("expected 'deferred dispatch requires a rig target' error, got:\n%s", out)
+	}
+
+	// gt sling <bead> . in deferred mode should also be rejected
+	out, err = runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", beadID, ".", "--hook-raw-bead")
+	if err == nil {
+		t.Fatalf("gt sling %s . in deferred mode should fail, but succeeded:\n%s", beadID, out)
+	}
+	if !strings.Contains(out, "deferred dispatch requires a rig target") {
+		t.Errorf("expected 'deferred dispatch requires a rig target' error for '.', got:\n%s", out)
+	}
+}
+
+// TestSchedulerDirectEpicDispatch verifies that gt sling <epic-id> --dry-run
+// with max_polecats=-1 (direct mode) routes to the direct dispatch path.
+func TestSchedulerDirectEpicDispatch(t *testing.T) {
+	hqPath, rig1Path, rig2Path, gtBinary, env := setupMultiRigSchedulerTown(t)
+
+	// Reconfigure to direct dispatch mode
+	configureScheduler(t, hqPath, -1, 1)
+
+	// Create an epic with cross-rig children.
+	epicID := createTestBeadOfType(t, rig1Path, "Direct dispatch epic", "epic")
+	child1 := createTestBead(t, rig1Path, "Rig1 direct child")
+	child2 := createTestBead(t, rig2Path, "Rig2 direct child")
+	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path)
+	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path)
+
+	// gt sling <epic-id> --dry-run in direct mode should show direct dispatch, not scheduling
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", epicID, "--dry-run")
+
+	// Should mention children
+	if !strings.Contains(out, child1) {
+		t.Errorf("direct epic dry-run should mention child1 %s\noutput: %s", child1, out)
+	}
+	if !strings.Contains(out, child2) {
+		t.Errorf("direct epic dry-run should mention child2 %s\noutput: %s", child2, out)
+	}
+	// Direct dispatch uses "Would sling" not "Would schedule"
+	if strings.Contains(out, "Would schedule") {
+		t.Errorf("direct mode should NOT show 'Would schedule'\noutput: %s", out)
+	}
+}
+
+// TestSchedulerBatchEpicRejection verifies that in deferred mode (max_polecats > 0),
+// gt sling <epic-id> <task-id> <rig> rejects the epic ID rather than scheduling it as a task.
+func TestSchedulerBatchEpicRejection(t *testing.T) {
+	hqPath, rig1Path, _, gtBinary, env := setupMultiRigSchedulerTown(t)
+
+	// Create an epic and a task bead in rig1.
+	epicID := createTestBeadOfType(t, rig1Path, "Batch epic", "epic")
+	taskID := createTestBead(t, rig1Path, "Batch task")
+
+	// gt sling <epic> <task> <rig> in deferred mode should reject the epic
+	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", epicID, taskID, "rig1", "--hook-raw-bead")
+	if err == nil {
+		t.Fatalf("gt sling %s %s rig1 should reject epic in batch, but succeeded:\n%s", epicID, taskID, out)
+	}
+	if !strings.Contains(out, "cannot be batch-scheduled") {
+		t.Errorf("expected 'cannot be batch-scheduled' error, got:\n%s", out)
+	}
+}
+
+// TestSchedulerDirectConvoyDispatch verifies that gt sling <convoy-id> --dry-run
+// with max_polecats=-1 (direct mode) routes to the direct dispatch path.
+func TestSchedulerDirectConvoyDispatch(t *testing.T) {
+	hqPath, rig1Path, rig2Path, gtBinary, env := setupMultiRigSchedulerTown(t)
+
+	// Reconfigure to direct dispatch mode
+	configureScheduler(t, hqPath, -1, 1)
+
+	// Create a convoy in HQ tracking beads in different rigs.
+	convoyID := createTestBeadOfType(t, hqPath, "Direct dispatch convoy", "convoy")
+	bead1 := createTestBead(t, rig1Path, "Rig1 direct tracked")
+	bead2 := createTestBead(t, rig2Path, "Rig2 direct tracked")
+	addBeadDependencyOfType(t, convoyID, bead1, "tracks", hqPath)
+	addBeadDependencyOfType(t, convoyID, bead2, "tracks", hqPath)
+
+	// gt sling <convoy-id> --dry-run in direct mode
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", convoyID, "--dry-run")
+
+	// Should mention tracked beads
+	if !strings.Contains(out, bead1) {
+		t.Errorf("direct convoy dry-run should mention bead1 %s\noutput: %s", bead1, out)
+	}
+	if !strings.Contains(out, bead2) {
+		t.Errorf("direct convoy dry-run should mention bead2 %s\noutput: %s", bead2, out)
+	}
+	// Direct dispatch uses "Would sling" not "Would schedule"
+	if strings.Contains(out, "Would schedule") {
+		t.Errorf("direct mode should NOT show 'Would schedule'\noutput: %s", out)
 	}
 }

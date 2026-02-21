@@ -20,8 +20,8 @@ import (
 const maxDispatchFailures = 3
 
 // dispatchScheduledWork is the main dispatch loop for the capacity scheduler.
-// Called by both `gt scheduler capacity run` and the daemon heartbeat.
-func dispatchScheduledWork(townRoot, actor string, batchOverride, maxPolOverride int, dryRun bool) (int, error) {
+// Called by both `gt scheduler run` and the daemon heartbeat.
+func dispatchScheduledWork(townRoot, actor string, batchOverride int, dryRun bool) (int, error) {
 	// Acquire exclusive lock to prevent concurrent dispatch
 	runtimeDir := filepath.Join(townRoot, ".runtime")
 	_ = os.MkdirAll(runtimeDir, 0755)
@@ -61,19 +61,25 @@ func dispatchScheduledWork(townRoot, actor string, batchOverride, maxPolOverride
 		schedulerCfg = capacity.DefaultSchedulerConfig()
 	}
 
-	if !schedulerCfg.Enabled && !dryRun {
-		if isDaemonDispatch() {
-			return 0, nil
+	// Nothing to dispatch when scheduler is in direct dispatch or disabled mode.
+	// Early return before any bd commands to keep direct-mode overhead near zero.
+	maxPolecats := schedulerCfg.GetMaxPolecats()
+	if maxPolecats <= 0 {
+		// Only check for stranded beads on manual invocations (not daemon heartbeats)
+		// to avoid spawning bd processes every 3 minutes in direct mode.
+		if !dryRun && !isDaemonDispatch() {
+			staleBeads, _ := getReadyScheduledBeads(townRoot)
+			if len(staleBeads) > 0 {
+				fmt.Printf("%s %d bead(s) still carry gt:queued from a previous deferred mode\n",
+					style.Warning.Render("⚠"), len(staleBeads))
+				fmt.Printf("  Use: gt scheduler clear  (remove all scheduled labels)\n")
+				fmt.Printf("  Or:  gt config set scheduler.max_polecats N  (re-enable deferred dispatch)\n")
+			}
 		}
-		fmt.Printf("%s Scheduler auto-dispatch is not enabled (manual dispatch proceeding)\n", style.Dim.Render("○"))
-		fmt.Println("  Enable daemon dispatch with: gt config set scheduler.enabled true")
+		return 0, nil
 	}
 
 	// Determine limits
-	maxPolecats := schedulerCfg.GetMaxPolecats()
-	if maxPolOverride > 0 {
-		maxPolecats = maxPolOverride
-	}
 	batchSize := schedulerCfg.GetBatchSize()
 	if batchOverride > 0 {
 		batchSize = batchOverride
@@ -259,7 +265,9 @@ func dispatchSingleBead(b capacity.PendingBead, townRoot, actor string) error {
 		beadDir := resolveBeadDir(b.ID)
 		failCmd := exec.Command("bd", "update", b.ID, "--add-label=gt:dispatch-failed", "--remove-label="+capacity.LabelScheduled)
 		failCmd.Dir = beadDir
-		_ = failCmd.Run()
+		if qErr := failCmd.Run(); qErr != nil {
+			fmt.Printf("  %s Could not quarantine %s: %v\n", style.Warning.Render("⚠"), b.ID, qErr)
+		}
 		return quarantineErr
 	}
 
@@ -307,13 +315,40 @@ func dispatchSingleBead(b capacity.PendingBead, townRoot, actor string) error {
 		if cleanDesc != freshInfo.Description {
 			descCmd := exec.Command("bd", "update", b.ID, "--description="+cleanDesc)
 			descCmd.Dir = beadDir
-			_ = descCmd.Run()
+			if descErr := descCmd.Run(); descErr != nil {
+				fmt.Printf("  %s Failed to strip metadata from %s: %v\n", style.Warning.Render("⚠"), b.ID, descErr)
+			}
 		}
 	}
+	// Label swap with retry to prevent double-dispatch. If executeSling succeeded
+	// but the label swap fails, the bead stays gt:queued and the next dispatch cycle
+	// would spawn a second polecat for the same work. Retry once, then force-remove
+	// gt:queued as a last resort to prevent re-dispatch.
 	swapCmd := exec.Command("bd", "update", b.ID,
 		"--remove-label="+capacity.LabelScheduled, "--add-label=gt:queue-dispatched")
 	swapCmd.Dir = beadDir
-	_ = swapCmd.Run()
+	if swapErr := swapCmd.Run(); swapErr != nil {
+		// Retry once after brief delay
+		time.Sleep(500 * time.Millisecond)
+		retryCmd := exec.Command("bd", "update", b.ID,
+			"--remove-label="+capacity.LabelScheduled, "--add-label=gt:queue-dispatched")
+		retryCmd.Dir = beadDir
+		if retryErr := retryCmd.Run(); retryErr != nil {
+			// Last resort: force-remove gt:queued to prevent double-dispatch.
+			// The bead won't get the gt:queue-dispatched label, but it also won't
+			// be re-dispatched on the next cycle.
+			stripCmd := exec.Command("bd", "update", b.ID,
+				"--remove-label="+capacity.LabelScheduled)
+			stripCmd.Dir = beadDir
+			if stripErr := stripCmd.Run(); stripErr != nil {
+				fmt.Printf("  %s CRITICAL: could not remove %s from %s after successful dispatch — risk of double-dispatch: %v\n",
+					style.Warning.Render("⚠"), capacity.LabelScheduled, b.ID, stripErr)
+			} else {
+				fmt.Printf("  %s Removed %s from %s (label swap failed, gt:queue-dispatched not set): %v\n",
+					style.Warning.Render("⚠"), capacity.LabelScheduled, b.ID, retryErr)
+			}
+		}
+	}
 
 	polecatName := ""
 	if result != nil && result.SpawnInfo != nil {
@@ -331,7 +366,11 @@ func isDaemonDispatch() bool {
 }
 
 // recordDispatchFailure increments the dispatch failure counter in the bead's
-// scheduler metadata.
+// scheduler metadata. This function does a read-modify-write on the description
+// which is NOT independently serialized. It is safe because:
+//   - The only caller is dispatchSingleBead, which runs inside the dispatch flock
+//   - The flock prevents concurrent dispatch of the same bead
+//   - Manual operations (gt scheduler clear) are user-initiated and acceptable race
 func recordDispatchFailure(b capacity.PendingBead, dispatchErr error) {
 	currentDesc := b.Description
 	if freshInfo, err := getBeadInfo(b.ID); err == nil {
@@ -356,13 +395,17 @@ func recordDispatchFailure(b capacity.PendingBead, dispatchErr error) {
 	beadDir := resolveBeadDir(b.ID)
 	descCmd := exec.Command("bd", "update", b.ID, "--description="+newDesc)
 	descCmd.Dir = beadDir
-	_ = descCmd.Run()
+	if descErr := descCmd.Run(); descErr != nil {
+		fmt.Printf("  %s Failed to record dispatch failure metadata for %s: %v\n", style.Warning.Render("⚠"), b.ID, descErr)
+	}
 
 	if meta.DispatchFailures >= maxDispatchFailures {
 		failCmd := exec.Command("bd", "update", b.ID,
 			"--add-label=gt:dispatch-failed", "--remove-label="+capacity.LabelScheduled)
 		failCmd.Dir = beadDir
-		_ = failCmd.Run()
+		if labelErr := failCmd.Run(); labelErr != nil {
+			fmt.Printf("  %s Failed to apply gt:dispatch-failed label to %s: %v\n", style.Warning.Render("⚠"), b.ID, labelErr)
+		}
 		fmt.Printf("  %s Bead %s failed %d times, marked gt:dispatch-failed\n",
 			style.Warning.Render("⚠"), b.ID, meta.DispatchFailures)
 	}

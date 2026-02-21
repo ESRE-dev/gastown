@@ -8,11 +8,39 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// shouldDeferDispatch checks the town config to decide dispatch mode.
+// Returns (true, nil) when max_polecats > 0 (deferred dispatch).
+// Returns (false, nil) when max_polecats <= 0 (direct dispatch).
+func shouldDeferDispatch() (bool, error) {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return false, nil // No town — direct dispatch
+	}
+
+	settingsPath := config.TownSettingsPath(townRoot)
+	settings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return false, fmt.Errorf("loading town settings: %w (dispatch blocked — fix config or use gt config set scheduler.max_polecats -1)", err)
+	}
+
+	schedulerCfg := settings.Scheduler
+	if schedulerCfg == nil {
+		return false, nil // No scheduler config — direct dispatch (default)
+	}
+
+	maxPol := schedulerCfg.GetMaxPolecats()
+	if maxPol > 0 {
+		return true, nil
+	}
+	return false, nil // -1 or 0 = direct dispatch
+}
 
 // ScheduleOptions holds options for scheduling a bead.
 type ScheduleOptions struct {
@@ -174,8 +202,15 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 			} else {
 				fmt.Printf("%s Created convoy %s\n", style.Bold.Render("→"), convoyID)
 				meta.Convoy = convoyID
+				// Re-read the current description to avoid clobbering concurrent updates
+				// that may have occurred between label activation and now.
+				freshInfo, freshErr := getBeadInfo(beadID)
+				currentBase := baseDesc
+				if freshErr == nil {
+					currentBase = capacity.StripMetadata(freshInfo.Description)
+				}
 				updatedBlock := capacity.FormatMetadata(meta)
-				updatedDesc := baseDesc
+				updatedDesc := currentBase
 				if updatedDesc != "" {
 					updatedDesc += "\n"
 				}
@@ -199,13 +234,14 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 }
 
 // runBatchSchedule schedules multiple beads for deferred dispatch.
-func runBatchSchedule(beadIDs []string, rigName string) {
+// Returns error when all schedule attempts fail.
+func runBatchSchedule(beadIDs []string, rigName string) error {
 	if slingDryRun {
 		fmt.Printf("%s Would schedule %d beads to rig '%s':\n", style.Bold.Render("📋"), len(beadIDs), rigName)
 		for _, beadID := range beadIDs {
 			fmt.Printf("  Would schedule: %s → %s\n", beadID, rigName)
 		}
-		return
+		return nil
 	}
 
 	fmt.Printf("%s Scheduling %d beads to rig '%s'...\n", style.Bold.Render("📋"), len(beadIDs), rigName)
@@ -237,6 +273,10 @@ func runBatchSchedule(beadIDs []string, rigName string) {
 	}
 
 	fmt.Printf("\n%s Scheduled %d/%d beads\n", style.Bold.Render("📊"), successCount, len(beadIDs))
+	if successCount == 0 {
+		return fmt.Errorf("all %d schedule attempts failed", len(beadIDs))
+	}
+	return nil
 }
 
 // unscheduleBeadLabels removes the gt:queued label and strips scheduler metadata.

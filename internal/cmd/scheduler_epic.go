@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
@@ -18,6 +20,7 @@ type epicScheduleOpts struct {
 	HookRawBead bool
 	Force       bool
 	DryRun      bool
+	NoBoot      bool
 }
 
 // runEpicScheduleByID schedules all open children of an epic.
@@ -119,6 +122,7 @@ func runEpicScheduleByID(epicID string, opts epicScheduleOpts) error {
 			Formula:     formula,
 			Force:       opts.Force,
 			HookRawBead: opts.HookRawBead,
+			NoConvoy:    true, // Epic is the organizing structure
 		})
 		if err != nil {
 			fmt.Printf("  %s %s: %v\n", style.Dim.Render("✗"), c.ID, err)
@@ -136,6 +140,141 @@ func runEpicScheduleByID(epicID string, opts epicScheduleOpts) error {
 
 	if successCount == 0 {
 		return fmt.Errorf("all %d schedule attempts failed for epic %s", len(candidates), epicID)
+	}
+	return nil
+}
+
+// runEpicSlingByID immediately dispatches all open children of an epic.
+// Used when max_polecats=-1 (direct dispatch mode). Each child gets its own
+// polecat via executeSling(). Respects --max-concurrent throttling.
+func runEpicSlingByID(epicID string, opts epicScheduleOpts) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return err
+	}
+
+	if err := verifyBeadExists(epicID); err != nil {
+		return fmt.Errorf("epic '%s' not found", epicID)
+	}
+
+	children, err := getEpicChildren(epicID)
+	if err != nil {
+		return fmt.Errorf("listing children of %s: %w", epicID, err)
+	}
+
+	if len(children) == 0 {
+		fmt.Printf("Epic %s has no child issues.\n", epicID)
+		return nil
+	}
+
+	type slingCandidate struct {
+		ID      string
+		Title   string
+		RigName string
+	}
+	var candidates []slingCandidate
+	skippedClosed := 0
+	skippedAssigned := 0
+	skippedNoRig := 0
+
+	for _, c := range children {
+		if c.Status == "closed" || c.Status == "tombstone" {
+			skippedClosed++
+			continue
+		}
+		if c.Assignee != "" && !opts.Force {
+			skippedAssigned++
+			continue
+		}
+		rigName := resolveRigForBead(townRoot, c.ID)
+		if rigName == "" {
+			skippedNoRig++
+			prefix := beads.ExtractPrefix(c.ID)
+			fmt.Printf("  %s %s: cannot resolve rig from prefix %q (town-root or unknown)\n",
+				style.Dim.Render("○"), c.ID, prefix)
+			continue
+		}
+		candidates = append(candidates, slingCandidate{ID: c.ID, Title: c.Title, RigName: rigName})
+	}
+
+	if len(candidates) == 0 {
+		fmt.Printf("No children to dispatch from epic %s", epicID)
+		if skippedClosed > 0 || skippedAssigned > 0 || skippedNoRig > 0 {
+			fmt.Printf(" (%d closed, %d assigned, %d no rig)",
+				skippedClosed, skippedAssigned, skippedNoRig)
+		}
+		fmt.Println()
+		return nil
+	}
+
+	formula := opts.Formula
+
+	if opts.DryRun {
+		fmt.Printf("%s Would dispatch %d child(ren) from epic %s:\n",
+			style.Bold.Render("DRY-RUN"), len(candidates), epicID)
+		for _, c := range candidates {
+			fmt.Printf("  Would dispatch: %s -> %s (%s)\n", c.ID, c.RigName, c.Title)
+		}
+		if skippedClosed > 0 || skippedAssigned > 0 || skippedNoRig > 0 {
+			fmt.Printf("\nSkipped: %d closed, %d assigned, %d no rig\n",
+				skippedClosed, skippedAssigned, skippedNoRig)
+		}
+		return nil
+	}
+
+	fmt.Printf("%s Dispatching %d child(ren) from epic %s...\n",
+		style.Bold.Render("▶"), len(candidates), epicID)
+
+	successCount := 0
+	successfulRigs := make(map[string]bool)
+	for i, c := range candidates {
+		if slingMaxConcurrent > 0 && i >= slingMaxConcurrent {
+			fmt.Printf("  %s Reached --max-concurrent limit (%d)\n", style.Dim.Render("○"), slingMaxConcurrent)
+			break
+		}
+
+		fmt.Printf("\n[%d/%d] Dispatching %s → %s...\n", i+1, len(candidates), c.ID, c.RigName)
+		_, err := executeSling(SlingParams{
+			BeadID:        c.ID,
+			RigName:       c.RigName,
+			FormulaName:   formula,
+			Force:         opts.Force,
+			HookRawBead:   opts.HookRawBead,
+			NoConvoy:      true, // Epic is the organizing structure
+			NoBoot:        opts.NoBoot,
+			CallerContext: "epic-sling",
+			TownRoot:      townRoot,
+			BeadsDir:      filepath.Join(townRoot, ".beads"),
+		})
+		if err != nil {
+			fmt.Printf("  %s %s: %v\n", style.Dim.Render("✗"), c.ID, err)
+			continue
+		}
+		successCount++
+		successfulRigs[c.RigName] = true
+
+		// Brief delay between spawns to avoid Dolt contention
+		if i < len(candidates)-1 {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	// Wake rig agents for each unique rig that had successful dispatches
+	if !opts.NoBoot {
+		for rig := range successfulRigs {
+			wakeRigAgents(rig)
+		}
+	}
+
+	fmt.Printf("\n%s Dispatched %d/%d child(ren) from epic %s\n",
+		style.Bold.Render("📊"), successCount, len(candidates), epicID)
+	if skippedClosed > 0 || skippedAssigned > 0 || skippedNoRig > 0 {
+		fmt.Printf("  Skipped: %d closed, %d assigned, %d no rig\n",
+			skippedClosed, skippedAssigned, skippedNoRig)
+	}
+
+	if successCount == 0 {
+		return fmt.Errorf("all %d dispatch attempts failed for epic %s", len(candidates), epicID)
 	}
 	return nil
 }

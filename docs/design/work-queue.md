@@ -1,129 +1,134 @@
-# Work Queue Architecture
+# Scheduler Architecture
 
-> **NOTE:** This document describes the original `gt queue` / `--queue` CLI surface.
-> The implementation has been renamed to `gt scheduler capacity` / `--scheduler capacity`.
-> Code now lives in `internal/scheduler/capacity/` (types/pure functions) and
-> `internal/cmd/scheduler*.go` / `sling_schedule.go` (orchestration).
-> Config keys use `scheduler.*` instead of `queue.*`.
-
-> Capacity-controlled polecat dispatch for batched work.
+> Config-driven capacity-controlled polecat dispatch.
 
 ## Quick Start
 
-Enable the queue and dispatch some work:
+Enable deferred dispatch and schedule some work:
 
 ```bash
-# 1. Enable daemon auto-dispatch
-gt config set queue.enabled true
+# 1. Enable deferred dispatch (config-driven, no per-command flag)
+gt config set scheduler.max_polecats 5
 
-# 2. Queue work (rig auto-resolved from bead prefix)
-gt queue gt-abc                    # Single task bead
-gt queue gt-abc gt-def gt-ghi      # Batch task beads
-gt queue hq-cv-abc                 # Convoy (queues all tracked issues)
-gt queue gt-epic-123               # Epic (queues all children)
+# 2. Schedule work via gt sling (auto-defers when max_polecats > 0)
+gt sling gt-abc gastown              # Single task bead
+gt sling gt-abc gt-def gt-ghi gastown  # Batch task beads
+gt sling hq-cv-abc                   # Convoy (schedules all tracked issues)
+gt sling gt-epic-123                 # Epic (schedules all children)
 
-# 3. Check what's queued
-gt queue status
-gt queue list
+# 3. Check what's scheduled
+gt scheduler status
+gt scheduler list
 
 # 4. Dispatch manually (or let the daemon do it)
-gt queue run
-gt queue run --dry-run    # Preview first
+gt scheduler run
+gt scheduler run --dry-run    # Preview first
 ```
 
-### Common CLI Flags
+### Dispatch Modes
 
-| Command | Flags | Description |
-|---------|-------|-------------|
-| `gt queue <bead>` | `--force`, `--merge`, `--args`, `--no-convoy`, `--formula`, `--hook-raw-bead`, `--account`, `--agent`, `--ralph` | Queue task bead (rig auto-resolved) |
-| `gt queue <bead>... [rig]` | (same as above) | Queue batch (explicit rig optional) |
-| `gt queue <convoy-id>` | `--dry-run`, `--force`, `--formula`, `--hook-raw-bead` | Queue all open issues in convoy (auto-resolve rigs) |
-| `gt queue <epic-id>` | `--dry-run`, `--force`, `--formula`, `--hook-raw-bead` | Queue all children of epic (auto-resolve rigs) |
-| `gt queue <formula> --on <bead>` | | Queue formula-on-bead |
-| `gt sling <bead> <rig> --queue` | `--force`, `--merge`, `--args`, `--no-convoy`, `--formula`, `--hook-raw-bead` | Queue single bead (legacy, still supported) |
-| `gt queue run` | `--batch N`, `--max-polecats N`, `--dry-run` | Trigger dispatch manually |
-| `gt queue status` | `--json` | Show queue state and capacity |
-| `gt queue list` | `--json` | List all queued beads by rig |
-| `gt queue pause` | | Pause all dispatch town-wide |
-| `gt queue resume` | | Resume dispatch |
-| `gt queue clear` | `--bead <id>` | Remove beads from queue |
+The `scheduler.max_polecats` config value controls dispatch behavior:
+
+| Value | Mode | Behavior |
+|-------|------|----------|
+| `-1` (default) | Direct dispatch | `gt sling` dispatches immediately, near-zero overhead |
+| `0` | Direct dispatch | Same as `-1` — `gt sling` dispatches immediately |
+| `N > 0` | Deferred dispatch | `gt sling` labels/metadata only, daemon dispatches |
+
+No per-invocation flag needed. The same `gt sling` command adapts automatically.
+
+### Common CLI
+
+| Command | Description |
+|---------|-------------|
+| `gt sling <bead> <rig>` | Sling bead (direct or deferred, per config) |
+| `gt sling <bead>... <rig>` | Batch sling/schedule multiple beads |
+| `gt sling <convoy-id>` | Sling/schedule all tracked issues in convoy |
+| `gt sling <epic-id>` | Sling/schedule all children of epic |
+| `gt scheduler status` | Show scheduler state and capacity |
+| `gt scheduler list` | List all scheduled beads by rig |
+| `gt scheduler run` | Trigger dispatch manually |
+| `gt scheduler pause` | Pause all dispatch town-wide |
+| `gt scheduler resume` | Resume dispatch |
+| `gt scheduler clear` | Remove beads from scheduler |
 
 ### Minimal Example
 
 ```bash
-gt queue gt-abc                   # Enqueue (adds gt:queued label + metadata)
-gt queue status                   # "Queued: 1 total, 1 ready"
-gt queue run                      # Dispatches -> spawns polecat -> strips metadata
+gt config set scheduler.max_polecats 5
+gt sling gt-abc gastown              # Defers: adds gt:queued label + metadata
+gt scheduler status                  # "Queued: 1 total, 1 ready"
+gt scheduler run                     # Dispatches -> spawns polecat -> strips metadata
 ```
 
 ---
 
 ## Overview
 
-The work queue solves **back-pressure** and **capacity control** for batched polecat dispatch.
+The scheduler solves **back-pressure** and **capacity control** for batched polecat dispatch.
 
-Without the queue, slinging N beads spawns N polecats simultaneously, exhausting API rate limits, memory, and CPU. The queue introduces a governor: beads enter a waiting state and the daemon dispatches them incrementally, respecting a configurable concurrency cap.
+Without the scheduler, slinging N beads spawns N polecats simultaneously, exhausting API rate limits, memory, and CPU. The scheduler introduces a governor: beads enter a waiting state and the daemon dispatches them incrementally, respecting a configurable concurrency cap.
 
-The queue integrates into the daemon heartbeat as **step 14** — after all agent health checks, lifecycle processing, and branch pruning. This ensures the system is healthy before spawning new work.
+The scheduler integrates into the daemon heartbeat as **step 14** — after all agent health checks, lifecycle processing, and branch pruning. This ensures the system is healthy before spawning new work.
 
 ```
 Daemon heartbeat (every 3 min)
-    │
-    ├─ Steps 0-13: Health checks, agent recovery, cleanup
-    │
-    └─ Step 14: gt queue run (capacity-controlled dispatch)
-         │
-         ├─ flock (exclusive)
-         ├─ Check paused state
-         ├─ Load config (max_polecats, batch_size)
-         ├─ Count active polecats (tmux)
-         ├─ Query ready queued beads (bd ready --label gt:queued)
-         ├─ Dispatch loop (up to min(capacity, batch, ready))
-         │    └─ dispatchSingleBead → executeSling
-         ├─ Wake rig agents (witness, refinery)
-         └─ Save dispatch state
+    |
+    +- Steps 0-13: Health checks, agent recovery, cleanup
+    |
+    +- Step 14: gt scheduler run (capacity-controlled dispatch)
+         |
+         +- flock (exclusive)
+         +- Check paused state
+         +- Load config (max_polecats, batch_size)
+         +- Count active polecats (tmux)
+         +- Query ready scheduled beads (bd ready --label gt:queued)
+         +- Dispatch loop (up to min(capacity, batch, ready))
+         |    +- dispatchSingleBead -> executeSling
+         +- Wake rig agents (witness, refinery)
+         +- Save dispatch state
 ```
 
 ---
 
 ## Bead State Machine
 
-A queued bead transitions through these states, tracked by labels and metadata:
+A scheduled bead transitions through these states, tracked by labels and metadata:
 
 ```
-                ┌──────────────────────────────────────────────┐
-                │                                              │
-                ▼                                              │
-          ┌──────────┐    dispatch ok     ┌──────────────┐    │
- enqueue  │          │ ────────────────►  │              │    │
-────────► │  QUEUED   │                    │  DISPATCHED  │    │
-          │          │                    │              │    │
-          └──────────┘                    └──────────────┘    │
-                │                                              │
-                ├── 3 failures ──► ┌────────────────┐          │
-                │                  │ CIRCUIT-BROKEN │          │
-                │                  └────────────────┘          │
-                │                                              │
-                ├── no metadata ─► ┌──────────────┐            │
-                │                  │  QUARANTINED  │           │
-                │                  └──────────────┘            │
-                │                                              │
-                └── gt queue clear ► ┌───────────┐             │
-                                     │ UNQUEUED  │ ───────────┘
-                                     └───────────┘  (re-queueable)
+                +----------------------------------------------+
+                |                                              |
+                v                                              |
+          +----------+    dispatch ok     +--------------+    |
+ schedule |          | -----------------> |              |    |
+--------> |  QUEUED  |                    |  DISPATCHED  |    |
+          |          |                    |              |    |
+          +----------+                    +--------------+    |
+                |                                              |
+                +-- 3 failures --> +----------------+          |
+                |                  | CIRCUIT-BROKEN |          |
+                |                  +----------------+          |
+                |                                              |
+                +-- no metadata -> +--------------+            |
+                |                  |  QUARANTINED |            |
+                |                  +--------------+            |
+                |                                              |
+                +-- gt scheduler clear -> +-----------+        |
+                                          | UNQUEUED  | ------+
+                                          +-----------+  (re-schedulable)
 ```
 
 ### Label Transitions
 
 | State | Label(s) | Metadata | Trigger |
 |-------|----------|----------|---------|
-| **QUEUED** | `gt:queued` | Present (delimiter block) | `enqueueBead()` |
+| **QUEUED** | `gt:queued` | Present (delimiter block) | `scheduleBead()` |
 | **DISPATCHED** | `gt:queue-dispatched` | Stripped | `dispatchSingleBead()` success |
 | **CIRCUIT-BROKEN** | `gt:dispatch-failed` | Retained (failure count) | `dispatch_failures >= 3` |
 | **QUARANTINED** | `gt:dispatch-failed` | Missing | Missing metadata at dispatch |
-| **UNQUEUED** | (label removed) | Stripped | `gt queue clear` |
+| **UNQUEUED** | (label removed) | Stripped | `gt scheduler clear` |
 
-Key invariant: `gt:queued` is always removed on terminal transitions. Dispatched beads get `gt:queue-dispatched` as an audit trail so reopened beads aren't mistaken for actively queued ones.
+Key invariant: `gt:queued` is always removed on terminal transitions. Dispatched beads get `gt:queue-dispatched` as an audit trail so reopened beads aren't mistaken for actively scheduled ones.
 
 ---
 
@@ -131,37 +136,35 @@ Key invariant: `gt:queued` is always removed on terminal transitions. Dispatched
 
 ### CLI Entry Points
 
-The unified `gt queue <id>` entry point auto-detects ID type and routes accordingly:
+`gt sling` auto-detects the dispatch mode from config and the ID type:
 
-| Command | Use Case | Formula |
-|---------|----------|---------|
-| `gt queue <bead> [rig]` | Queue task bead (rig auto-resolved from prefix) | `mol-polecat-work` (auto, override with `--formula`) |
-| `gt queue <bead>... [rig]` | Queue batch (rig auto-resolved per bead, or explicit trailing rig) | `mol-polecat-work` (auto, override with `--formula`) |
-| `gt queue <formula> --on <bead> [rig]` | Queue formula-on-bead | User-specified |
-| `gt queue <convoy-id>` | Queue all open convoy issues (auto-detected from hq-cv- prefix or issue_type) | `mol-polecat-work` (override with `--formula`) |
-| `gt queue <epic-id>` | Queue all children of epic (auto-detected from issue_type) | `mol-polecat-work` (override with `--formula`) |
-| `gt queue run` | Manual dispatch trigger | N/A (dispatches) |
-| `gt sling <bead> <rig> --queue` | Queue single bead (legacy path, still supported) | `mol-polecat-work` (auto, override with `--formula`) |
+| Command | Direct Mode (max_polecats=-1) | Deferred Mode (max_polecats>0) |
+|---------|-------------------------------|-------------------------------|
+| `gt sling <bead> <rig>` | Immediate dispatch | Schedule for later dispatch |
+| `gt sling <bead>... <rig>` | Batch immediate dispatch | Batch schedule |
+| `gt sling <epic-id>` | `runEpicSlingByID()` — dispatch all children | `runEpicScheduleByID()` — schedule all children |
+| `gt sling <convoy-id>` | `runConvoySlingByID()` — dispatch all tracked | `runConvoyScheduleByID()` — schedule all tracked |
 
-**Detection chain** in `runQueueEnqueue`:
-1. `--on` flag set -> formula-on-bead mode
-2. First arg starts with `hq-cv-` -> convoy mode (fast path)
-3. `getBeadInfo()` returns `issue_type == "epic"` -> epic mode
-4. `getBeadInfo()` returns `issue_type == "convoy"` -> convoy mode
-5. Default -> task bead mode
+**Detection chain** in `runSling`:
+1. `shouldDeferDispatch()` — check `scheduler.max_polecats` config
+2. Batch (3+ args, last is rig) — `runBatchSchedule()` or `runBatchSling()`
+3. `--on` flag set — formula-on-bead mode
+4. 2 args + last is rig — `scheduleBead()` or inline dispatch
+5. 1 arg, auto-detect type: epic/convoy/task
 
-All enqueue paths go through `enqueueBead()` in `internal/cmd/sling_queue.go`. All dispatch goes through `dispatchQueuedWork()` in `internal/cmd/queue_dispatch.go`.
+All schedule paths go through `scheduleBead()` in `internal/cmd/sling_schedule.go`.
+All dispatch goes through `dispatchScheduledWork()` in `internal/cmd/capacity_dispatch.go`.
 
 ### Daemon Entry Point
 
-The daemon calls `gt queue run` as a subprocess on each heartbeat (step 14):
+The daemon calls `gt scheduler run` as a subprocess on each heartbeat (step 14):
 
 ```go
-// internal/daemon/daemon.go:1617-1631
-func (d *Daemon) dispatchQueuedWork() {
+// internal/daemon/daemon.go
+func (d *Daemon) dispatchScheduledWork() {
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
     defer cancel()
-    cmd := exec.CommandContext(ctx, "gt", "queue", "run")
+    cmd := exec.CommandContext(ctx, "gt", "scheduler", "run")
     cmd.Env = append(os.Environ(), "GT_DAEMON=1", "BD_DOLT_AUTO_COMMIT=off")
     // ...
 }
@@ -171,14 +174,13 @@ func (d *Daemon) dispatchQueuedWork() {
 |----------|-------|
 | Timeout | 5 minutes |
 | Environment | `GT_DAEMON=1` (identifies daemon dispatch) |
-| Gating | `queue.enabled` must be `true` for daemon dispatch |
-| Manual override | `gt queue run` always works, even with `queue.enabled=false` |
+| Gating | `scheduler.max_polecats > 0` (deferred mode) |
 
 ---
 
-## Enqueue Path
+## Schedule Path
 
-`enqueueBead()` performs these steps in order:
+`scheduleBead()` performs these steps in order:
 
 1. **Validate** bead exists, rig exists
 2. **Cross-rig guard** — reject if bead prefix doesn't match target rig (unless `--force`)
@@ -186,8 +188,8 @@ func (d *Daemon) dispatchQueuedWork() {
 4. **Status guard** — reject if bead is hooked/in_progress (unless `--force`)
 5. **Validate formula** — verify formula exists (lightweight, no side effects)
 6. **Cook formula** — `bd cook` to catch bad protos before daemon dispatch
-7. **Build metadata** — `NewQueueMetadata(rigName)` with all sling params
-8. **Strip existing metadata** — ensure idempotent re-enqueue (no duplicates)
+7. **Build metadata** — `NewMetadata(rigName)` with all sling params
+8. **Strip existing metadata** — ensure idempotent re-schedule (no duplicates)
 9. **Write metadata** — `bd update --description=...` (inert without label)
 10. **Add label** — `bd update --add-label=gt:queued` (atomic activation)
 11. **Auto-convoy** — create convoy if not already tracked (unless `--no-convoy`)
@@ -201,42 +203,41 @@ func (d *Daemon) dispatchQueuedWork() {
 
 ## Dispatch Engine
 
-`dispatchQueuedWork()` is the main dispatch loop:
+`dispatchScheduledWork()` is the main dispatch loop:
 
 ```
-flock(queue-dispatch.lock)
-    │
-    ├─ Load QueueState → check paused?
-    │
-    ├─ Load WorkQueueConfig (or defaults)
-    │
-    ├─ Check queue.enabled (daemon only; manual always proceeds)
-    │
-    ├─ Determine limits:
-    │    maxPolecats = config (or override)
-    │    batchSize   = config (or override)
-    │    spawnDelay  = config
-    │
-    ├─ Count active polecats (tmux session scan)
-    │
-    ├─ Compute capacity = maxPolecats - activePolecats
-    │    (0 = unlimited if maxPolecats = 0)
-    │
-    ├─ Query ready beads:
-    │    bd ready --label gt:queued --json --limit=0
-    │    (scans all rig DBs, deduplicates, skips circuit-broken)
-    │
-    ├─ toDispatch = min(capacity, batchSize, readyCount)
-    │
-    ├─ Dispatch loop:
-    │    for i := 0; i < toDispatch; i++ {
-    │        dispatchSingleBead(bead, townRoot, actor)
-    │        sleep(spawnDelay)   // between spawns
-    │    }
-    │
-    ├─ Wake rig agents (witness, refinery) for each rig with dispatches
-    │
-    └─ Save dispatch state (fresh read to avoid clobbering concurrent pause)
+flock(scheduler-dispatch.lock)
+    |
+    +- Load SchedulerState -> check paused?
+    |
+    +- Load SchedulerConfig (or defaults)
+    |
+    +- Check max_polecats > 0 (deferred mode only)
+    |
+    +- Determine limits:
+    |    maxPolecats = config (or override)
+    |    batchSize   = config (or override)
+    |    spawnDelay  = config
+    |
+    +- Count active polecats (tmux session scan)
+    |
+    +- Compute capacity = maxPolecats - activePolecats
+    |
+    +- Query ready beads:
+    |    bd ready --label gt:queued --json --limit=0
+    |    (scans all rig DBs, deduplicates, skips circuit-broken)
+    |
+    +- PlanDispatch(maxPolecats, batchSize, activePolecats, readyBeads)
+    |
+    +- Dispatch loop:
+    |    for each planned bead {
+    |        dispatchSingleBead(bead, townRoot, actor)
+    |        sleep(spawnDelay)   // between spawns
+    |    }
+    |
+    +- Wake rig agents (witness, refinery) for each rig with dispatches
+    |
+    +- Save dispatch state (fresh read to avoid clobbering concurrent pause)
 ```
 
 ### dispatchSingleBead
@@ -248,24 +249,24 @@ Each bead dispatch:
 3. **Reconstruct SlingParams** from metadata fields:
    - `FormulaName`, `Args`, `Vars`, `Merge`, `BaseBranch`, `Account`, `Agent`, etc.
    - `FormulaFailFatal=true` (rollback + requeue on failure)
-   - `NoConvoy=true` (convoy already created at enqueue)
+   - `NoConvoy=true` (convoy already created at schedule time)
    - `NoBoot=true` (avoid lock contention in daemon dispatch loop)
-   - `CallerContext="queue-dispatch"`
+   - `CallerContext="scheduler-dispatch"`
 4. **Call `executeSling(params)`** — unified sling path (same as batch sling)
 5. **On failure**: record failure in metadata, increment `dispatch_failures` counter
-6. **On success**: strip queue metadata, swap `gt:queued` → `gt:queue-dispatched`
+6. **On success**: strip scheduler metadata, swap `gt:queued` -> `gt:queue-dispatched`
 7. **Log event** — feed event with polecat name
 
 ---
 
-## Queue Metadata Format
+## Scheduler Metadata Format
 
-Queue parameters are stored in the bead's description, delimited by a namespaced marker to avoid collision with user content.
+Scheduler parameters are stored in the bead's description, delimited by a namespaced marker to avoid collision with user content.
 
 ### Delimiter
 
 ```
----gt:queue:v1---
+---gt:scheduler:v1---
 ```
 
 Everything after the delimiter until the next delimiter (or end of description) is parsed as `key: value` lines.
@@ -278,7 +279,7 @@ Everything after the delimiter until the next delimiter (or end of description) 
 | `formula` | string | Formula to apply at dispatch (e.g., `mol-polecat-work`) |
 | `args` | string | Natural language instructions for executor |
 | `var` | repeated | Formula variables, one `var: key=value` per line |
-| `enqueued_at` | RFC3339 | Timestamp of enqueue |
+| `enqueued_at` | RFC3339 | Timestamp of schedule |
 | `merge` | string | Merge strategy: `direct`, `mr`, `local` |
 | `convoy` | string | Convoy bead ID (set after auto-convoy creation) |
 | `base_branch` | string | Override base branch for polecat worktree |
@@ -293,9 +294,9 @@ Everything after the delimiter until the next delimiter (or end of description) 
 
 ### Lifecycle
 
-1. **Write** at enqueue — `FormatQueueMetadata()` appends block to description
-2. **Read** at dispatch — `ParseQueueMetadata()` extracts fields for `SlingParams`
-3. **Strip** after dispatch — `StripQueueMetadata()` removes the block on success
+1. **Write** at schedule — `FormatMetadata()` appends block to description
+2. **Read** at dispatch — `ParseMetadata()` extracts fields for `SlingParams`
+3. **Strip** after dispatch — `StripMetadata()` removes the block on success
 
 ---
 
@@ -305,18 +306,17 @@ Everything after the delimiter until the next delimiter (or end of description) 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `queue.enabled` | bool | `false` | Enable daemon auto-dispatch (must opt in) |
-| `queue.max_polecats` | *int | `10` | Max concurrent polecats across ALL rigs |
-| `queue.batch_size` | *int | `3` | Beads dispatched per heartbeat tick |
-| `queue.spawn_delay` | string | `"2s"` | Delay between spawns (Dolt lock contention) |
+| `scheduler.max_polecats` | *int | `-1` | Max concurrent polecats (-1=direct, 0=disabled, N=deferred) |
+| `scheduler.batch_size` | *int | `1` | Beads dispatched per heartbeat tick |
+| `scheduler.spawn_delay` | string | `"0s"` | Delay between spawns (Dolt lock contention) |
 
 Set via `gt config set`:
 
 ```bash
-gt config set queue.enabled true
-gt config set queue.max_polecats 5
-gt config set queue.batch_size 2
-gt config set queue.spawn_delay 3s
+gt config set scheduler.max_polecats 5    # Enable deferred dispatch
+gt config set scheduler.max_polecats -1   # Direct dispatch (default)
+gt config set scheduler.batch_size 2
+gt config set scheduler.spawn_delay 3s
 ```
 
 ### Dispatch Count Formula
@@ -325,14 +325,14 @@ gt config set queue.spawn_delay 3s
 toDispatch = min(capacity, batchSize, readyCount)
 
 where:
-  capacity   = maxPolecats - activePolecats   (0 if maxPolecats=0, meaning unlimited)
-  batchSize  = queue.batch_size (default 3)
+  capacity   = maxPolecats - activePolecats
+  batchSize  = scheduler.batch_size (default 1)
   readyCount = number of beads from bd ready --label gt:queued
 ```
 
 ### Active Polecat Counting
 
-Active polecats are counted by scanning tmux sessions and matching role via `session.ParseSessionName()`. This counts **all** polecats (both queue-dispatched and directly-slung) because API rate limits, memory, and CPU are shared resources.
+Active polecats are counted by scanning tmux sessions and matching role via `session.ParseSessionName()`. This counts **all** polecats (both scheduler-dispatched and directly-slung) because API rate limits, memory, and CPU are shared resources.
 
 ---
 
@@ -343,7 +343,7 @@ The circuit breaker prevents permanently-failing beads from causing infinite ret
 | Property | Value |
 |----------|-------|
 | Threshold | `maxDispatchFailures = 3` |
-| Counter | `dispatch_failures` field in queue metadata |
+| Counter | `dispatch_failures` field in scheduler metadata |
 | Break action | Add `gt:dispatch-failed` label, remove `gt:queued` |
 | Reset | No automatic reset (manual intervention required) |
 
@@ -351,104 +351,85 @@ The circuit breaker prevents permanently-failing beads from causing infinite ret
 
 ```
 Dispatch attempt fails
-    │
-    ├─ Increment dispatch_failures in metadata
-    ├─ Store last_failure error message
-    │
-    └─ dispatch_failures >= 3?
-         ├─ Yes → add gt:dispatch-failed, remove gt:queued
-         │         (bead exits queue permanently)
-         └─ No  → bead stays queued, retried next cycle
+    |
+    +- Increment dispatch_failures in metadata
+    +- Store last_failure error message
+    |
+    +- dispatch_failures >= 3?
+         +- Yes -> add gt:dispatch-failed, remove gt:queued
+         |         (bead exits scheduler permanently)
+         +- No  -> bead stays scheduled, retried next cycle
 ```
 
 Beads without metadata are **quarantined immediately** (no circuit breaker retries) since they can never succeed:
 
 ```
 dispatchSingleBead: meta == nil || meta.TargetRig == ""
-    └─ add gt:dispatch-failed, remove gt:queued (instant quarantine)
+    +- add gt:dispatch-failed, remove gt:queued (instant quarantine)
 ```
 
 ---
 
-## Queue Control
+## Scheduler Control
 
 ### Pause / Resume
 
-Pausing stops all dispatch town-wide. The state is stored in `.runtime/queue-state.json`.
+Pausing stops all dispatch town-wide. The state is stored in `.runtime/scheduler-state.json`.
 
 ```bash
-gt queue pause    # Sets paused=true, records actor and timestamp
-gt queue resume   # Clears paused state
-```
-
-State file (`<townRoot>/.runtime/queue-state.json`):
-```json
-{
-  "paused": true,
-  "paused_by": "mayor/",
-  "paused_at": "2026-02-19T10:00:00Z",
-  "last_dispatch_at": "2026-02-19T09:57:00Z",
-  "last_dispatch_count": 3
-}
+gt scheduler pause    # Sets paused=true, records actor and timestamp
+gt scheduler resume   # Clears paused state
 ```
 
 Write is atomic (temp file + rename) to prevent corruption from concurrent writers.
 
 ### Clear
 
-Removes beads from the queue by stripping the `gt:queued` label:
+Removes beads from the scheduler by stripping the `gt:queued` label:
 
 ```bash
-gt queue clear              # Remove ALL beads from queue
-gt queue clear --bead gt-abc  # Remove specific bead
+gt scheduler clear              # Remove ALL beads from scheduler
+gt scheduler clear --bead gt-abc  # Remove specific bead
 ```
 
 ### Status / List
 
 ```bash
-gt queue status         # Summary: paused, queued count, active polecats
-gt queue status --json  # JSON output
+gt scheduler status         # Summary: paused, queued count, active polecats
+gt scheduler status --json  # JSON output
 
-gt queue list           # Beads grouped by target rig, with blocked indicator
-gt queue list --json    # JSON output
+gt scheduler list           # Beads grouped by target rig, with blocked indicator
+gt scheduler list --json    # JSON output
 ```
 
-`list` reconciles `bd list --label=gt:queued` (all queued) with `bd ready --label=gt:queued` (unblocked) to mark blocked beads. Already-dispatched beads (hooked/closed) are filtered out since `gt:queued` is retained as audit trail.
+`list` reconciles `bd list --label=gt:queued` (all queued) with `bd ready --label=gt:queued` (unblocked) to mark blocked beads.
 
 ---
 
-## Queue and Convoy Integration
+## Scheduler and Convoy Integration
 
-Convoys and the work queue are complementary but distinct mechanisms. Convoys track completion of related beads; the queue controls dispatch capacity. Two paths exist for dispatching convoy work:
+Convoys and the scheduler are complementary but distinct mechanisms. Convoys track completion of related beads; the scheduler controls dispatch capacity. Two paths exist for dispatching convoy work:
 
 ### Dispatch Paths
 
 | Path | Trigger | Capacity Control | Use Case |
 |------|---------|-----------------|----------|
-| **Deacon dogs** | `mol-convoy-feed` formula | None (fires immediately) | Autonomous — Deacon observes convoy events and slings directly |
-| **Queue dispatch** | `gt queue <convoy-id>` / `gt queue <epic-id>` | Yes (daemon heartbeat, max_polecats, batch_size) | Operator-initiated — batched work with back-pressure |
+| **Direct dispatch** | `gt sling <convoy-id>` (max_polecats=-1) | None (fires immediately) | Default mode — all issues dispatch at once |
+| **Deferred dispatch** | `gt sling <convoy-id>` (max_polecats>0) | Yes (daemon heartbeat, max_polecats, batch_size) | Capacity-controlled — batched with back-pressure |
 
-**Deacon dogs** (direct sling): The Deacon's `mol-convoy-feed` formula watches convoy activity via `bd activity --follow`. When a new issue is tracked, the Deacon determines the rig from the bead's prefix (`beads.ExtractPrefix` + `beads.GetRigNameForPrefix`) and slings it immediately. No capacity control — all issues dispatch at once.
+**Direct dispatch** (max_polecats=-1): `gt sling <convoy-id>` calls `runConvoySlingByID()` which dispatches all open tracked issues immediately via `executeSling()`. Each issue's rig is auto-resolved from its bead ID prefix. No capacity control — all issues dispatch at once.
 
-**Queue dispatch** (capacity-controlled): `gt queue <convoy-id>` enqueues all open tracked issues. Each issue's rig is auto-resolved from its bead ID prefix. The daemon dispatches incrementally via `gt queue run`, respecting `max_polecats` and `batch_size`. Use this for large batches where simultaneous dispatch would exhaust resources.
+**Deferred dispatch** (max_polecats>0): `gt sling <convoy-id>` calls `runConvoyScheduleByID()` which schedules all open tracked issues. The daemon dispatches incrementally via `gt scheduler run`, respecting `max_polecats` and `batch_size`. Use this for large batches where simultaneous dispatch would exhaust resources.
 
 ### When to Use Which
 
-- **Small convoys (< 5 issues)**: Deacon dogs are fine — simultaneous dispatch is manageable
-- **Large batches (5+ issues)**: Use `gt queue <convoy-id>` for capacity-controlled dispatch
-- **Epics**: Use `gt queue <epic-id>` — same auto-rig-resolution, scoped to epic children
+- **Small convoys (< 5 issues)**: Direct dispatch (default, max_polecats=-1)
+- **Large batches (5+ issues)**: Set `scheduler.max_polecats` for capacity-controlled dispatch
+- **Epics**: Same logic — `gt sling <epic-id>` auto-resolves mode from config
 
 ### Rig Resolution
 
-`gt queue <convoy-id>` and `gt queue <epic-id>` auto-resolve the target rig per-bead from its ID prefix using `beads.ExtractPrefix()` + `beads.GetRigNameForPrefix()`. This matches the pattern used by the Deacon's `mol-convoy-feed` and `redispatch`. Town-root beads (`hq-*`) are skipped with a warning since they are coordination artifacts, not dispatchable work.
-
-### ConvoyWatcher Event-Driven Completion
-
-The `ConvoyWatcher` (in `internal/convoy/observer.go`) streams `bd activity --follow` on the convoy bead. When a tracked issue closes, the watcher updates convoy progress and checks completion conditions. This works identically regardless of whether the issue was dispatched via Deacon dogs or the queue.
-
-### Auto-Convoy at Enqueue
-
-`enqueueBead()` automatically creates a convoy for each queued bead (unless `--no-convoy` is set or the bead is already tracked). When queuing a convoy's issues via `gt queue <convoy-id>`, auto-convoy is disabled (`NoConvoy: true`) since the bead is already tracked by the source convoy.
+`gt sling <convoy-id>` and `gt sling <epic-id>` auto-resolve the target rig per-bead from its ID prefix using `beads.ExtractPrefix()` + `beads.GetRigNameForPrefix()`. Town-root beads (`hq-*`) are skipped with a warning since they are coordination artifacts, not dispatchable work.
 
 ---
 
@@ -456,29 +437,36 @@ The `ConvoyWatcher` (in `internal/convoy/observer.go`) streams `bd activity --fo
 
 | Property | Mechanism |
 |----------|-----------|
-| **Enqueue idempotency** | Skip if bead is open with `gt:queued` label |
+| **Schedule idempotency** | Skip if bead is open with `gt:queued` label |
 | **Cross-rig guard** | Reject if bead prefix doesn't match target rig (unless `--force`) |
-| **Dispatch serialization** | `flock(queue-dispatch.lock)` prevents double-dispatch |
+| **Dispatch serialization** | `flock(scheduler-dispatch.lock)` prevents double-dispatch |
 | **Metadata-before-label** | Metadata is inert without label; label is atomic activation |
-| **Post-dispatch label swap** | `gt:queued` → `gt:queue-dispatched` prevents reopened beads from re-entering queue |
-| **Formula pre-cooking** | `bd cook` at enqueue time catches bad protos before daemon dispatch loop |
+| **Post-dispatch label swap** | `gt:queued` -> `gt:queue-dispatched` prevents reopened beads from re-entering scheduler |
+| **Formula pre-cooking** | `bd cook` at schedule time catches bad protos before daemon dispatch loop |
 | **Rollback on label failure** | Metadata stripped if label-add fails (no orphaned metadata) |
-| **Fresh state on save** | Dispatch re-reads QueueState before saving to avoid clobbering concurrent pause |
+| **Fresh state on save** | Dispatch re-reads state before saving to avoid clobbering concurrent pause |
 
 ---
 
-## Known Limitations
+## Code Layout
 
-1. **Stale dispatch snapshot** — `bd ready` is called once per dispatch cycle. A `gt queue clear` between the query and the dispatch loop can result in dispatching a bead that was just cleared. The window is narrow (seconds) and the bead would simply process normally.
-
-2. **Delimiter substring match** — `StripQueueMetadata()` uses `strings.Index(description, "---gt:queue:v1---")`. If user content contains the exact delimiter string, the strip would truncate real content. The namespaced delimiter (`gt:queue:v1`) makes collision extremely unlikely.
-
-3. **Single-sling path not yet unified** — Single bead sling to a rig (`gt sling gt-abc gastown`) still uses inline dispatch logic rather than the unified `executeSling()` path. Batch sling and queue dispatch already use the unified path.
+| Path | Purpose |
+|------|---------|
+| `internal/scheduler/capacity/config.go` | `SchedulerConfig` type, defaults, `IsDeferred()` |
+| `internal/scheduler/capacity/metadata.go` | Metadata format/parse/strip |
+| `internal/scheduler/capacity/pipeline.go` | `PlanDispatch()` pure function |
+| `internal/cmd/sling.go` | CLI entry, config-driven routing |
+| `internal/cmd/sling_schedule.go` | `scheduleBead()`, `shouldDeferDispatch()` |
+| `internal/cmd/scheduler.go` | `gt scheduler` command tree |
+| `internal/cmd/scheduler_epic.go` | Epic schedule/sling handlers |
+| `internal/cmd/scheduler_convoy.go` | Convoy schedule/sling handlers |
+| `internal/cmd/capacity_dispatch.go` | `dispatchScheduledWork()`, dispatch loop |
+| `internal/daemon/daemon.go` | Heartbeat integration (`gt scheduler run`) |
 
 ---
 
 ## See Also
 
-- [Watchdog Chain](watchdog-chain.md) — Daemon heartbeat, where queue dispatch runs as step 14
-- [Convoys](../concepts/convoy.md) — Convoy tracking, auto-convoy on enqueue
-- [Operational State](operational-state.md) — Labels-as-state pattern used by queue labels
+- [Watchdog Chain](watchdog-chain.md) — Daemon heartbeat, where scheduler dispatch runs as step 14
+- [Convoys](../concepts/convoy.md) — Convoy tracking, auto-convoy on schedule
+- [Operational State](operational-state.md) — Labels-as-state pattern used by scheduler labels

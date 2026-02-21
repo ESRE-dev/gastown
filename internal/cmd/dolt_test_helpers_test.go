@@ -325,9 +325,8 @@ func dropStaleBeadsDatabases() error {
 
 	var dropped []string
 
-	// Strategy 1: Drop ALL non-system databases. Tests from beads_db_init_test.go
-	// create databases like "hq", "beads_reinit-prefix", etc. that can interfere
-	// with queue test initialization.
+	// Strategy 1: Drop beads_* and known test databases (not ALL non-system databases,
+	// to avoid destroying unrelated integration state on shared servers).
 	systemDBs := map[string]bool{
 		"information_schema": true,
 		"mysql":              true,
@@ -343,7 +342,14 @@ func dropStaleBeadsDatabases() error {
 				continue
 			}
 			allDBs = append(allDBs, name)
-			if !systemDBs[name] {
+			// Only drop databases matching known test patterns
+			shouldDrop := false
+			if strings.HasPrefix(name, "beads_") {
+				shouldDrop = true
+			} else if name == "hq" {
+				shouldDrop = true // Created by beads_db_init_test.go
+			}
+			if shouldDrop && !systemDBs[name] {
 				if _, err := db.Exec("DROP DATABASE IF EXISTS `" + name + "`"); err != nil {
 					fmt.Fprintf(os.Stderr, "[dropStaleBeadsDatabases] DROP %s failed: %v\n", name, err)
 				} else {
@@ -377,11 +383,8 @@ func dropStaleBeadsDatabases() error {
 		fmt.Fprintf(os.Stderr, "[dropStaleBeadsDatabases] purge failed: %v\n", err)
 	}
 
-	// Strategy 4: Remove non-system database directories from the server's data-dir.
-	// This handles cases where the catalog is rebuilt from disk on next access.
-	systemDirs := map[string]bool{
-		".dolt": true, ".doltcfg": true, "config.yaml": true,
-	}
+	// Strategy 4: Remove beads_* and known test database directories from the
+	// server's data-dir. Scoped to avoid removing unrelated databases.
 	pidData, _ := os.ReadFile(pidFilePath)
 	if pidData != nil {
 		lines := strings.SplitN(string(pidData), "\n", 3)
@@ -390,7 +393,11 @@ func dropStaleBeadsDatabases() error {
 			if dataDir != "" {
 				entries, _ := os.ReadDir(dataDir)
 				for _, e := range entries {
-					if e.IsDir() && !systemDirs[e.Name()] {
+					if !e.IsDir() {
+						continue
+					}
+					shouldRemove := strings.HasPrefix(e.Name(), "beads_") || e.Name() == "hq"
+					if shouldRemove {
 						os.RemoveAll(dataDir + "/" + e.Name())
 						dropped = append(dropped, e.Name()+"(disk)")
 					}

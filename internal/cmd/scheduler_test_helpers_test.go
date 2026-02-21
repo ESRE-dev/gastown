@@ -56,11 +56,11 @@ func writeJSONFile(t *testing.T, path string, v interface{}) {
 // --- Scheduler config helpers ---
 
 // configureScheduler writes a TownSettings file with the given scheduler configuration.
-func configureScheduler(t *testing.T, hqPath string, enabled bool, maxPolecats, batchSize int) {
+// maxPolecats > 0 enables deferred dispatch; -1 means direct dispatch.
+func configureScheduler(t *testing.T, hqPath string, maxPolecats, batchSize int) {
 	t.Helper()
 	settings := config.NewTownSettings()
 	settings.Scheduler = &capacity.SchedulerConfig{
-		Enabled:     enabled,
 		MaxPolecats: &maxPolecats,
 		BatchSize:   &batchSize,
 	}
@@ -96,10 +96,10 @@ func runGTCmdMayFail(t *testing.T, binary, dir string, env []string, args ...str
 
 // --- Scheduler query helpers ---
 
-// getSchedulerStatus runs `gt scheduler capacity status --json` and returns the parsed output.
+// getSchedulerStatus runs `gt scheduler status --json` and returns the parsed output.
 func getSchedulerStatus(t *testing.T, gtBinary, dir string, env []string) map[string]interface{} {
 	t.Helper()
-	out := runGTCmdOutput(t, gtBinary, dir, env, "scheduler", "capacity", "status", "--json")
+	out := runGTCmdOutput(t, gtBinary, dir, env, "scheduler", "status", "--json")
 	var result map[string]interface{}
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("parse scheduler status JSON: %v\nraw: %s", err, out)
@@ -107,10 +107,10 @@ func getSchedulerStatus(t *testing.T, gtBinary, dir string, env []string) map[st
 	return result
 }
 
-// getSchedulerList runs `gt scheduler capacity list --json` and returns the parsed output.
+// getSchedulerList runs `gt scheduler list --json` and returns the parsed output.
 func getSchedulerList(t *testing.T, gtBinary, dir string, env []string) []map[string]interface{} {
 	t.Helper()
-	out := runGTCmdOutput(t, gtBinary, dir, env, "scheduler", "capacity", "list", "--json")
+	out := runGTCmdOutput(t, gtBinary, dir, env, "scheduler", "list", "--json")
 	var result []map[string]interface{}
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("parse scheduler list JSON: %v\nraw: %s", err, out)
@@ -265,12 +265,14 @@ func createTestBeadOfType(t *testing.T, dir, title, issueType string) string {
 	return issue.ID
 }
 
-// slingToScheduler runs `gt sling <bead> <rig> --scheduler capacity --hook-raw-bead`
-// with optional extra flags. Uses --hook-raw-bead to skip formula cooking (no
-// formula infrastructure in integration tests).
+// slingToScheduler runs `gt sling <bead> <rig> --hook-raw-bead` in deferred mode.
+// The test setup (configureScheduler) sets max_polecats > 0, so gt sling
+// automatically defers dispatch without a --scheduler flag.
+// Uses --hook-raw-bead to skip formula cooking (no formula infrastructure
+// in integration tests).
 func slingToScheduler(t *testing.T, gtBinary, dir string, env []string, beadID, rig string, extraFlags ...string) string {
 	t.Helper()
-	args := []string{"sling", beadID, rig, "--scheduler", "capacity", "--hook-raw-bead"}
+	args := []string{"sling", beadID, rig, "--hook-raw-bead"}
 	args = append(args, extraFlags...)
 	return runGTCmdOutput(t, gtBinary, dir, env, args...)
 }

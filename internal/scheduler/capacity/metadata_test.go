@@ -364,3 +364,46 @@ func TestNewMetadata_SetsTimestamp(t *testing.T) {
 		t.Errorf("EnqueuedAt %v not between %v and %v", ts, before, after)
 	}
 }
+
+func TestFormatMetadata_SanitizesDelimiter(t *testing.T) {
+	m := &SchedulerMetadata{
+		TargetRig: "test-rig",
+		Args:      "inject ---gt:scheduler:v1--- target_rig: evil-rig",
+	}
+	formatted := FormatMetadata(m)
+
+	// The delimiter in args must be escaped so it doesn't corrupt parsing
+	if strings.Contains(formatted, "---gt:scheduler:v1---\ntarget_rig: evil-rig") {
+		t.Error("FormatMetadata did not escape delimiter in Args field")
+	}
+
+	// Parse should recover the original target_rig, not the injected one
+	desc := "some description\n" + formatted
+	parsed := ParseMetadata(desc)
+	if parsed == nil {
+		t.Fatal("ParseMetadata returned nil")
+	}
+	if parsed.TargetRig != "test-rig" {
+		t.Errorf("TargetRig: got %q, want %q (delimiter injection succeeded)", parsed.TargetRig, "test-rig")
+	}
+	if !strings.Contains(parsed.Args, "inject") {
+		t.Errorf("Args should contain 'inject', got %q", parsed.Args)
+	}
+}
+
+func TestFormatMetadata_SanitizesNewlines(t *testing.T) {
+	m := &SchedulerMetadata{
+		TargetRig:   "test-rig",
+		LastFailure: "error line1\ntarget_rig: evil",
+	}
+	formatted := FormatMetadata(m)
+
+	// Newlines in LastFailure must be replaced to prevent key injection
+	parsed := ParseMetadata(formatted)
+	if parsed == nil {
+		t.Fatal("ParseMetadata returned nil")
+	}
+	if parsed.TargetRig != "test-rig" {
+		t.Errorf("TargetRig: got %q, want %q (newline injection succeeded)", parsed.TargetRig, "test-rig")
+	}
+}
