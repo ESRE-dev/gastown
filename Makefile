@@ -58,6 +58,16 @@ install: check-up-to-date build
 		fi; \
 	done
 	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
+	@# Restart daemon so it picks up the new binary.
+	@# A stale daemon is a recurring source of bugs (wrong session prefixes, etc.)
+	@if $(INSTALL_DIR)/$(BINARY) daemon status >/dev/null 2>&1; then \
+		echo "Restarting daemon to pick up new binary..."; \
+		$(INSTALL_DIR)/$(BINARY) daemon stop >/dev/null 2>&1 || true; \
+		sleep 1; \
+		$(INSTALL_DIR)/$(BINARY) daemon start >/dev/null 2>&1 && \
+			echo "Daemon restarted." || \
+			echo "Warning: daemon restart failed (start manually with: gt daemon start)"; \
+	fi
 
 clean:
 	rm -f $(BUILD_DIR)/$(BINARY)
