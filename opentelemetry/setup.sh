@@ -17,15 +17,24 @@ export BD_OTEL_METRICS_URL="$GT_OTEL_METRICS_URL"
 export BD_OTEL_LOGS_URL="$GT_OTEL_LOGS_URL"
 
 # ── Claude Code telemetry ──────────────────────────────────────────────────
-# Enables Claude Code's built-in OTLP metrics export.
+# Enables Claude Code's built-in OTLP metrics + logs export.
 # gt injects these automatically for agent sessions, but they're also
 # useful when running `claude` directly in a terminal.
 export CLAUDE_CODE_ENABLE_TELEMETRY=1
+# Metrics → VictoriaMetrics
 export OTEL_METRICS_EXPORTER=otlp
 export OTEL_METRIC_EXPORT_INTERVAL=1000
 export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT="$GT_OTEL_METRICS_URL"
-# VictoriaMetrics requires protobuf; Node.js SDK defaults to JSON.
+# VictoriaMetrics and VictoriaLogs both require protobuf (reject JSON).
 export OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=http/protobuf
+# Logs → VictoriaLogs
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_LOGS_ENDPOINT="$GT_OTEL_LOGS_URL"
+export OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/protobuf
+# Log tool usage (which tools ran and their status, not content).
+# To also log tool output set: OTEL_LOG_TOOL_CONTENT=true
+# To also log user prompts set: OTEL_LOG_USER_PROMPTS=true (sensitive)
+export OTEL_LOG_TOOL_DETAILS=true
 
 echo "✓ Gas Town telemetry enabled"
 echo ""

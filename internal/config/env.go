@@ -163,6 +163,15 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["BD_OTEL_METRICS_URL"] = metricsURL
 		if logsURL := os.Getenv("GT_OTEL_LOGS_URL"); logsURL != "" {
 			env["BD_OTEL_LOGS_URL"] = logsURL
+			// Claude Code supports OTLP log export; route to the same VictoriaLogs
+			// instance. Uses protobuf (VictoriaLogs rejects JSON).
+			env["OTEL_LOGS_EXPORTER"] = "otlp"
+			env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = logsURL
+			env["OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"] = "http/protobuf"
+			// Log tool usage details (which tools ran, their status).
+			// Does not include tool output content (set OTEL_LOG_TOOL_CONTENT=true
+			// to enable that, or OTEL_LOG_USER_PROMPTS=true for prompt logging).
+			env["OTEL_LOG_TOOL_DETAILS"] = "true"
 		}
 
 		// Attach GT context as OTEL resource attributes so Claude's metrics
