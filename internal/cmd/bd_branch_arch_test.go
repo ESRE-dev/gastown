@@ -484,15 +484,15 @@ var expectedLookPathBdCounts = map[string]int{
 // expectedExecBdCounts maps filename → expected exec.Command("bd",...) call count.
 var expectedExecBdCounts = map[string]int{
 	"agent_state.go":           2,
-	"bd_helpers.go":            1, // BdCmd helper wraps exec.Command("bd", ...)
+	"bd_helpers.go":            2, // BdCmd helper wraps exec.Command("bd", ...) in Build() and CombinedOutput()
 	"bead.go":                  4,
 	"boot.go":                  3,
 	"cat.go":                   1,
 	"close.go":                 1,
 	"compact_report.go":        3,
-	"convoy.go":                22,
+	"convoy.go":                19,
 	"convoy_launch.go":         1,
-	"convoy_stage.go":          5,
+	"convoy_stage.go":          3,
 	"costs.go":                 9,
 	"crew_lifecycle.go":        4,
 	"deacon.go":                2,

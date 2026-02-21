@@ -260,8 +260,10 @@ var _ = beads.StripBdBranch
 // ===================================================================
 
 func TestBdCmd_WithAutoCommit_OverridesParentOff(t *testing.T) {
-	// Test that WithAutoCommit() overrides a parent env BD_DOLT_AUTO_COMMIT=off
-	// In exec, last value wins, so appending BD_DOLT_AUTO_COMMIT=on should win
+	// Test that WithAutoCommit() removes the existing BD_DOLT_AUTO_COMMIT=off
+	// before appending BD_DOLT_AUTO_COMMIT=on. This is critical because
+	// glibc getenv() returns the first match in the env array, so a duplicate
+	// "off" entry would shadow the appended "on".
 	baseEnv := []string{"PATH=/usr/bin", "BD_DOLT_AUTO_COMMIT=off", "HOME=/home/user"}
 
 	bdc := &bdCmd{
@@ -273,9 +275,20 @@ func TestBdCmd_WithAutoCommit_OverridesParentOff(t *testing.T) {
 	cmd := bdc.Build()
 	envMap := parseEnv(cmd.Env)
 
-	// The last value should win in exec
+	// The value should be "on" (old "off" entry removed)
 	if envMap["BD_DOLT_AUTO_COMMIT"] != "on" {
 		t.Errorf("BD_DOLT_AUTO_COMMIT = %q, want 'on' (should override parent's 'off')", envMap["BD_DOLT_AUTO_COMMIT"])
+	}
+
+	// Verify there is exactly one BD_DOLT_AUTO_COMMIT entry (no duplicates)
+	count := 0
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "BD_DOLT_AUTO_COMMIT=") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("found %d BD_DOLT_AUTO_COMMIT entries, want exactly 1 (dedup must remove old entry)", count)
 	}
 }
 
@@ -380,8 +393,9 @@ func TestBdCmd_StripBdBranch_NoBdBranch(t *testing.T) {
 	}
 }
 
-func TestBdCmd_MultipleAutoCommit_LastWins(t *testing.T) {
-	// Test that multiple BD_DOLT_AUTO_COMMIT values - last one wins in exec
+func TestBdCmd_MultipleAutoCommit_DedupRemovesOld(t *testing.T) {
+	// Test that WithAutoCommit() deduplicates: removes existing "off" and adds "on".
+	// This ensures glibc getenv() (first-match-wins) returns the correct value.
 	baseEnv := []string{"BD_DOLT_AUTO_COMMIT=off"}
 
 	bdc := &bdCmd{
@@ -392,7 +406,7 @@ func TestBdCmd_MultipleAutoCommit_LastWins(t *testing.T) {
 	bdc.WithAutoCommit()
 	cmd := bdc.Build()
 
-	// Count occurrences
+	// Count occurrences — should have exactly one "on" and zero "off"
 	offCount := 0
 	onCount := 0
 	for _, e := range cmd.Env {
@@ -405,15 +419,17 @@ func TestBdCmd_MultipleAutoCommit_LastWins(t *testing.T) {
 		}
 	}
 
-	// parseEnv returns last value
 	envMap := parseEnv(cmd.Env)
 	if envMap["BD_DOLT_AUTO_COMMIT"] != "on" {
-		t.Errorf("Expected last value 'on' to win, got %q", envMap["BD_DOLT_AUTO_COMMIT"])
+		t.Errorf("Expected 'on', got %q", envMap["BD_DOLT_AUTO_COMMIT"])
 	}
 
-	// Verify we have both (the override pattern)
-	if offCount != 1 || onCount != 1 {
-		t.Errorf("Expected one 'off' and one 'on', got off=%d, on=%d", offCount, onCount)
+	// Old "off" entry must be removed (deduplication)
+	if offCount != 0 {
+		t.Errorf("Expected 0 'off' entries (dedup should remove old), got %d", offCount)
+	}
+	if onCount != 1 {
+		t.Errorf("Expected exactly 1 'on' entry, got %d", onCount)
 	}
 }
 

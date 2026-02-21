@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
 )
@@ -74,6 +75,20 @@ func (b *bdCmd) Stderr(w io.Writer) *bdCmd {
 	return b
 }
 
+// filterEnvKey removes all entries matching the given key from the env slice.
+// This ensures appended values aren't shadowed by existing entries, since
+// glibc getenv() returns the first match in the environment array.
+func filterEnvKey(env []string, key string) []string {
+	prefix := key + "="
+	result := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
 // buildEnv constructs the final environment slice based on configured options.
 func (b *bdCmd) buildEnv() []string {
 	env := b.env
@@ -83,13 +98,18 @@ func (b *bdCmd) buildEnv() []string {
 		env = beads.StripBdBranch(env)
 	}
 
-	// Add BD_DOLT_AUTO_COMMIT=on for sequential dependent calls
+	// Add BD_DOLT_AUTO_COMMIT=on for sequential dependent calls.
+	// Filter existing entries first — glibc getenv() returns the first match,
+	// so an existing "off" entry would shadow the appended "on".
 	if b.autoCommit {
+		env = filterEnvKey(env, "BD_DOLT_AUTO_COMMIT")
 		env = append(env, "BD_DOLT_AUTO_COMMIT=on")
 	}
 
-	// Add GT_ROOT if specified
+	// Add GT_ROOT if specified.
+	// Filter existing entries first for the same reason as above.
 	if b.gtRoot != "" {
+		env = filterEnvKey(env, "GT_ROOT")
 		env = append(env, "GT_ROOT="+b.gtRoot)
 	}
 
@@ -118,4 +138,14 @@ func (b *bdCmd) Run() error {
 // separately if you want to capture stderr instead of it going to os.Stderr.
 func (b *bdCmd) Output() ([]byte, error) {
 	return b.Build().Output()
+}
+
+// CombinedOutput builds and runs the command, returning combined stdout+stderr.
+// This overrides the configured Stderr writer to capture both streams.
+// Useful for including command output in error messages.
+func (b *bdCmd) CombinedOutput() ([]byte, error) {
+	cmd := exec.Command("bd", b.args...)
+	cmd.Dir = b.dir
+	cmd.Env = b.buildEnv()
+	return cmd.CombinedOutput()
 }

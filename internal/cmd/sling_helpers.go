@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -194,6 +195,7 @@ func verifyBeadExists(beadID string) error {
 	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 		Dir(resolveBeadDir(beadID)).
 		StripBdBranch().
+		Stderr(io.Discard).
 		Output()
 	if err != nil {
 		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
@@ -210,6 +212,7 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 		Dir(resolveBeadDir(beadID)).
 		StripBdBranch().
+		Stderr(io.Discard).
 		Output()
 	if err != nil {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
@@ -255,6 +258,7 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 		out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 			Dir(resolveBeadDir(beadID)).
 			StripBdBranch().
+			Stderr(io.Discard).
 			Output()
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
