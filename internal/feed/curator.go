@@ -188,7 +188,7 @@ func (c *Curator) shouldDedupe(event *events.Event) bool {
 		recentFeedEvents, err := c.readRecentFeedEvents(c.doneDedupeWindow)
 		if err != nil {
 			log.Printf("warning: reading recent feed events for dedup: %v", err)
-			// Fail-open: don't dedupe if we can't read the feed
+			return false // Fail-open: don't dedupe if we can't read the feed
 		}
 		for _, e := range recentFeedEvents {
 			if e.Type == events.TypeDone && e.Actor == event.Actor {
@@ -405,7 +405,9 @@ func (c *Curator) writeFeedEvent(event *events.Event) {
 	}
 
 	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
 		log.Printf("warning: writing feed event: %v", err)
+		return
 	}
 	if err := f.Close(); err != nil {
 		log.Printf("warning: closing feed file after write: %v", err)
