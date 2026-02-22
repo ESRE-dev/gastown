@@ -65,6 +65,7 @@ var beadsExemptCommands = map[string]bool{
 	"tap":        true,
 	"dnd":        true,
 	"signal":        true, // Hook signal handlers must be fast, handle beads internally
+	"metrics":       true, // Metrics reads local JSONL, no beads needed
 	"krc":           true, // KRC doesn't require beads
 	"run-migration":       true, // Migration orchestrator handles its own beads checks
 }
@@ -97,6 +98,9 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 
 	// Initialize CLI theme (dark/light mode support)
 	initCLITheme()
+
+	// Log command usage telemetry (fire-and-forget, excludes tap/signal)
+	logCommandUsage(cmd, args)
 
 	// Initialize session prefix registry and agent registry from town root.
 	// Best-effort: if town root not found, the default "gt" prefix is used.
