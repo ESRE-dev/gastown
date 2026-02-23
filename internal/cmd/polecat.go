@@ -464,7 +464,7 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 		displayState := p.State
 		if p.SessionRunning && displayState == polecat.StateDone {
 			displayState = polecat.StateWorking
-		} else if !p.SessionRunning && !p.Zombie && displayState.IsActive() {
+		} else if !p.SessionRunning && !p.Zombie && displayState == polecat.StateWorking {
 			displayState = polecat.StateDone
 		}
 
