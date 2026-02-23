@@ -77,7 +77,7 @@ resolve that placeholder with this rule:
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 8
+version = 7
 
 [vars]
 [vars.wisp_type]
