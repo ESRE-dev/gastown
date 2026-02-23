@@ -179,27 +179,38 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 
 	description := FormatAgentDescription(title, fields)
 
-	args := []string{"create", "--json",
-		"--id=" + id,
-		"--title=" + title,
-		"--description=" + description,
-		"--type=agent",
-		"--labels=gt:agent",
-		"--ephemeral",
-	}
-	if NeedsForceForID(id) {
-		args = append(args, "--force")
+	buildArgs := func(ephemeral bool) []string {
+		a := []string{"create", "--json",
+			"--id=" + id,
+			"--title=" + title,
+			"--description=" + description,
+			"--type=agent",
+			"--labels=gt:agent",
+		}
+		if ephemeral {
+			a = append(a, "--ephemeral")
+		}
+		if NeedsForceForID(id) {
+			a = append(a, "--force")
+		}
+		// Default actor from BD_ACTOR env var for provenance tracking
+		// Uses getActor() to respect isolated mode (tests)
+		if actor := b.getActor(); actor != "" {
+			a = append(a, "--actor="+actor)
+		}
+		return a
 	}
 
-	// Default actor from BD_ACTOR env var for provenance tracking
-	// Uses getActor() to respect isolated mode (tests)
-	if actor := b.getActor(); actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
+	// Try ephemeral first (writes to wisps table). On fresh rigs where the
+	// wisps table doesn't exist yet, Dolt can panic with a nil pointer
+	// dereference (GH#1769). Fall back to non-ephemeral (issues table) if
+	// the ephemeral create fails.
+	out, err := b.run(buildArgs(true)...)
 	if err != nil {
-		return nil, err
+		out, err = b.run(buildArgs(false)...)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var issue Issue

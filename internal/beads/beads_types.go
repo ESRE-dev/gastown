@@ -232,6 +232,14 @@ func ensureDatabaseInitialized(beadsDir string) error {
 		_, _ = pfxCmd.CombinedOutput() // Best effort — crash prevention guard
 	}
 
+	// Run bd migrate to ensure the wisps table and auxiliary tables exist.
+	// Without this, bd create --ephemeral crashes with a Dolt nil pointer
+	// dereference when the wisps table is missing (GH#1769).
+	migrateCmd := exec.Command("bd", "migrate", "--yes")
+	migrateCmd.Dir = parentDir
+	migrateCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
+	_, _ = migrateCmd.CombinedOutput() // Best effort — fallback in CreateAgentBead handles failure
+
 	return nil
 }
 
