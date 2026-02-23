@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -235,10 +236,23 @@ func ensureDatabaseInitialized(beadsDir string) error {
 	// Run bd migrate to ensure the wisps table and auxiliary tables exist.
 	// Without this, bd create --ephemeral crashes with a Dolt nil pointer
 	// dereference when the wisps table is missing (GH#1769).
+	//
+	// After bd init --server, the Dolt SQL server may need time to register
+	// the new database in its catalog. Retry once after a short delay if the
+	// first migrate attempt fails (GH#1769).
+	migrateEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
 	migrateCmd := exec.Command("bd", "migrate", "--yes")
 	migrateCmd.Dir = parentDir
-	migrateCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
-	_, _ = migrateCmd.CombinedOutput() // Best effort — fallback in CreateAgentBead handles failure
+	migrateCmd.Env = migrateEnv
+	if _, err := migrateCmd.CombinedOutput(); err != nil {
+		// First attempt failed — server may not have registered the database yet.
+		// Wait briefly and retry once.
+		time.Sleep(500 * time.Millisecond)
+		retryCmd := exec.Command("bd", "migrate", "--yes")
+		retryCmd.Dir = parentDir
+		retryCmd.Env = migrateEnv
+		_, _ = retryCmd.CombinedOutput() // Best effort on retry — CreateAgentBead fallback handles failure
+	}
 
 	return nil
 }
