@@ -964,7 +964,7 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 	} else {
 		// Use cleanup_status from agent bead
 		status.CleanupStatus = polecat.CleanupStatus(fields.CleanupStatus)
-		if status.CleanupStatus.IsSafe() {
+		if status.CleanupStatus.IsSafe() && fields.ActiveMR == "" {
 			status.NeedsRecovery = false
 			status.Verdict = "SAFE_TO_NUKE"
 		} else {

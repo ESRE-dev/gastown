@@ -113,8 +113,12 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 		return nil, err
 	}
 
-	// Sort by timestamp (newest first)
+	// Sort by priority (higher first), then timestamp (newest first).
 	sort.Slice(messages, func(i, j int) bool {
+		pi, pj := PriorityToBeads(messages[i].Priority), PriorityToBeads(messages[j].Priority)
+		if pi != pj {
+			return pi < pj // lower beads int = higher priority
+		}
 		return messages[i].Timestamp.After(messages[j].Timestamp)
 	})
 
@@ -265,8 +269,12 @@ func (m *Mailbox) listLegacy() ([]*Message, error) {
 		return nil, err
 	}
 
-	// Sort by timestamp (newest first)
+	// Sort by priority (higher first), then timestamp (newest first).
 	sort.Slice(messages, func(i, j int) bool {
+		pi, pj := PriorityToBeads(messages[i].Priority), PriorityToBeads(messages[j].Priority)
+		if pi != pj {
+			return pi < pj
+		}
 		return messages[i].Timestamp.After(messages[j].Timestamp)
 	})
 
@@ -828,8 +836,12 @@ func (m *Mailbox) Search(opts SearchOptions) ([]*Message, error) {
 		}
 	}
 
-	// Sort by timestamp (newest first)
+	// Sort by priority (higher first), then timestamp (newest first).
 	sort.Slice(matches, func(i, j int) bool {
+		pi, pj := PriorityToBeads(matches[i].Priority), PriorityToBeads(matches[j].Priority)
+		if pi != pj {
+			return pi < pj
+		}
 		return matches[i].Timestamp.After(matches[j].Timestamp)
 	})
 
