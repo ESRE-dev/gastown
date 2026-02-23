@@ -871,6 +871,9 @@ notifyWitness:
 			bodyLines = append(bodyLines, fmt.Sprintf("MergeStrategy: %s", convoyInfo.MergeStrategy))
 		}
 	}
+	if pushFailed {
+		bodyLines = append(bodyLines, "PushFailed: true")
+	}
 	if mrFailed {
 		bodyLines = append(bodyLines, "MRFailed: true")
 	}
@@ -926,35 +929,21 @@ notifyWitness:
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
 
-	// Self-cleaning: Nuke our own sandbox and session (if we're a polecat)
-	// This is the self-cleaning model - polecats clean up after themselves
-	// "done means gone" - both worktree and session are terminated
+	// Persistent polecat model (gt-4ac): polecats keep their sandbox after completion.
+	// Session is killed but worktree is preserved for reuse by future gt sling.
+	// "done means idle" - session terminates, sandbox persists.
 	selfCleanAttempted := false
 	if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
 		selfCleanAttempted = true
 
-		// Step 1: Nuke the worktree (only for COMPLETED with successful push AND MR)
-		// If push or MR creation failed, preserve the worktree so
-		// Witness/Refinery can still access the branch for recovery.
-		// selfNukePolecat also checks branch-on-remote, so this is defense-in-depth.
-		if exitType == ExitCompleted && !pushFailed && !mrFailed {
-			if err := selfNukePolecat(roleInfo, townRoot); err != nil {
-				// Non-fatal: Witness will clean up if we fail
-				style.PrintWarning("worktree nuke failed: %v (Witness will clean up)", err)
-			} else {
-				fmt.Printf("%s Worktree nuked\n", style.Bold.Render("✓"))
-				// Restore a valid cwd after worktree deletion. Without this,
-				// subsequent exec.Command calls (tmux, kill) fail with
-				// "ENOENT: posix_spawn '/bin/sh'" because the child process
-				// inherits the deleted cwd.
-				_ = os.Chdir("/")
-			}
-		}
+		// Worktree is preserved for reuse — no self-nuke.
+		// The polecat's agent state was set to "idle" in updateAgentStateOnDone.
+		fmt.Printf("%s Sandbox preserved for reuse (persistent polecat)\n", style.Bold.Render("✓"))
 
-		// Step 2: Kill our own session (this terminates Claude and the shell)
+		// Kill our own session (this terminates Claude and the shell)
 		// This is the last thing we do - the process will be killed when tmux session dies
-		// All exit types kill the session - "done means gone"
-		fmt.Printf("%s Terminating session (done means gone)\n", style.Bold.Render("→"))
+		// All exit types kill the session - "done means idle"
+		fmt.Printf("%s Terminating session (done means idle)\n", style.Bold.Render("→"))
 		if err := selfKillSession(townRoot, roleInfo); err != nil {
 			// If session kill fails, fall through to normal exit
 			style.PrintWarning("session kill failed: %v", err)
@@ -1233,16 +1222,20 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		fmt.Fprintf(os.Stderr, "Warning: couldn't clear agent %s hook: %v\n", agentBeadID, err)
 	}
 
-	// Only set non-observable states - "stuck" and "awaiting-gate" are intentional
-	// agent decisions that can't be discovered from tmux. Skip "done" and "idle"
-	// since those are observable (no session = done, session + no hook = idle).
+	// Set agent state based on exit type.
+	// Persistent polecats (gt-4ac): set "idle" on completion so gt sling can find
+	// and reuse them. "stuck" for escalated exits (requesting help).
 	switch exitType {
+	case ExitCompleted, ExitDeferred:
+		// "idle" = work done, sandbox preserved, ready for reuse
+		if _, err := bd.Run("agent", "state", agentBeadID, "idle"); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to idle: %v\n", agentBeadID, err)
+		}
 	case ExitEscalated:
 		// "stuck" = agent is requesting help - not observable from tmux
 		if _, err := bd.Run("agent", "state", agentBeadID, "stuck"); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to stuck: %v\n", agentBeadID, err)
 		}
-	// ExitCompleted and ExitDeferred don't set state - observable from tmux
 	}
 
 	// ZFC #10: Self-report cleanup status
