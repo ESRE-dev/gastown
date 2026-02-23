@@ -786,6 +786,18 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 			mrID = mrIssue.ID
 
+			// GH#1945: Verify MR bead is readable before considering it confirmed.
+			// bd.Create() succeeds when the bead is written locally, but if the write
+			// didn't persist (Dolt failure, corrupt state), we'd nuke the worktree
+			// with no MR in the queue — losing the polecat's work permanently.
+			if verifiedMR, verifyErr := bd.Show(mrID); verifyErr != nil || verifiedMR == nil {
+				mrFailed = true
+				errMsg := fmt.Sprintf("MR bead created but verification read-back failed (id=%s): %v", mrID, verifyErr)
+				doneErrors = append(doneErrors, errMsg)
+				style.PrintWarning("%s\nBranch is pushed but MR bead not confirmed. Preserving worktree.", errMsg)
+				goto notifyWitness
+			}
+
 			// Update agent bead with active_mr reference (for traceability)
 			if agentBeadID != "" {
 				if err := bd.UpdateAgentActiveMR(agentBeadID, mrID); err != nil {
@@ -794,7 +806,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 
 			// Success output
-			fmt.Printf("%s Work submitted to merge queue\n", style.Bold.Render("✓"))
+			fmt.Printf("%s Work submitted to merge queue (verified)\n", style.Bold.Render("✓"))
 			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
 
 			// NOTE: Refinery nudge is deferred to AFTER the Dolt branch merge
