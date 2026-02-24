@@ -15,6 +15,7 @@ var (
 	doctorVerbose         bool
 	doctorRig             string
 	doctorRestartSessions bool
+	doctorNoStart         bool
 	doctorSlow            string
 )
 
@@ -100,6 +101,7 @@ Patrol checks:
   - patrol-plugins-accessible Verify plugin directories
 
 Use --fix to attempt automatic fixes for issues that support it.
+Use --no-start with --fix to suppress starting the daemon and agents.
 Use --rig to check a specific rig instead of the entire workspace.
 Use --slow to highlight slow checks (default threshold: 1s, e.g. --slow=500ms).`,
 	RunE: runDoctor,
@@ -110,6 +112,7 @@ func init() {
 	doctorCmd.Flags().BoolVarP(&doctorVerbose, "verbose", "v", false, "Show detailed output")
 	doctorCmd.Flags().StringVar(&doctorRig, "rig", "", "Check specific rig only")
 	doctorCmd.Flags().BoolVar(&doctorRestartSessions, "restart-sessions", false, "Restart patrol sessions when fixing stale settings (use with --fix)")
+	doctorCmd.Flags().BoolVar(&doctorNoStart, "no-start", false, "Suppress starting daemon/agents during --fix")
 	doctorCmd.Flags().StringVar(&doctorSlow, "slow", "", "Highlight slow checks (optional threshold, default 1s)")
 	// Allow --slow without a value (uses default 1s)
 	doctorCmd.Flags().Lookup("slow").NoOptDefVal = "1s"
@@ -129,6 +132,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		RigName:         doctorRig,
 		Verbose:         doctorVerbose,
 		RestartSessions: doctorRestartSessions,
+		NoStart:         doctorNoStart,
 	}
 
 	// Create doctor and register checks
