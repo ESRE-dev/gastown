@@ -940,17 +940,28 @@ notifyWitness:
 		// The polecat's agent state was set to "idle" in updateAgentStateOnDone.
 		fmt.Printf("%s Sandbox preserved for reuse (persistent polecat)\n", style.Bold.Render("✓"))
 
-		// Kill our own session (this terminates Claude and the shell)
-		// This is the last thing we do - the process will be killed when tmux session dies
-		// All exit types kill the session - "done means idle"
-		fmt.Printf("%s Terminating session (done means idle)\n", style.Bold.Render("→"))
-		if err := selfKillSession(townRoot, roleInfo); err != nil {
-			// If session kill fails, fall through to normal exit
-			style.PrintWarning("session kill failed: %v", err)
+		// GH#1945: Do NOT kill session if push or MR submission failed.
+		// When MQ submission fails, keeping the session alive preserves the
+		// polecat so the Witness can investigate or the work can be retried.
+		// The Witness was already notified of the failure above.
+		if pushFailed || mrFailed {
+			fmt.Printf("%s Session preserved (push or MR failed — work needs recovery)\n", style.Bold.Render("⚠"))
+			// Set sessionKilled to prevent the deferred backstop from killing us.
+			// The session is intentionally preserved, not accidentally orphaned.
+			sessionKilled = true
 		} else {
-			sessionKilled = true // Prevent deferred kill from double-killing
+			// Kill our own session (this terminates Claude and the shell)
+			// This is the last thing we do - the process will be killed when tmux session dies
+			// All exit types kill the session - "done means idle"
+			fmt.Printf("%s Terminating session (done means idle)\n", style.Bold.Render("→"))
+			if err := selfKillSession(townRoot, roleInfo); err != nil {
+				// If session kill fails, fall through to normal exit
+				style.PrintWarning("session kill failed: %v", err)
+			} else {
+				sessionKilled = true // Prevent deferred kill from double-killing
+			}
+			// If selfKillSession succeeds, we won't reach here (process killed by tmux)
 		}
-		// If selfKillSession succeeds, we won't reach here (process killed by tmux)
 	}
 
 	// Fallback exit for non-polecats or if self-clean failed
