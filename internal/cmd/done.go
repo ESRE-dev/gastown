@@ -1289,8 +1289,9 @@ func parseCleanupStatus(s string) polecat.CleanupStatus {
 	}
 }
 
-// selfNukePolecat deletes this polecat's worktree (self-cleaning model).
-// Called by polecats when they complete work via `gt done`.
+// selfNukePolecat deletes this polecat's worktree.
+// DEPRECATED (gt-4ac): No longer called from gt done. Polecats now go idle
+// instead of self-nuking. Kept for explicit nuke scenarios.
 // This is safe because:
 // 1. Work has been pushed to origin (verified below)
 // 2. We're about to exit anyway
@@ -1349,7 +1350,7 @@ func isPolecatActor(actor string) bool {
 }
 
 // selfKillSession terminates the polecat's own tmux session after logging the event.
-// This completes the self-cleaning model: "done means gone" - both worktree and session.
+// In the persistent model (gt-4ac): "done means idle" - session killed, sandbox preserved.
 //
 // The polecat determines its session from environment variables:
 // - GT_RIG: the rig name
@@ -1378,12 +1379,12 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 	// Log to townlog (human-readable audit log)
 	if townRoot != "" {
 		logger := townlog.NewLogger(townRoot)
-		_ = logger.Log(townlog.EventKill, agentID, "self-clean: done means gone")
+		_ = logger.Log(townlog.EventKill, agentID, "self-clean: done means idle")
 	}
 
 	// Log to events (JSON audit log with structured payload)
 	_ = events.LogFeed(events.TypeSessionDeath, agentID,
-		events.SessionDeathPayload(sessionName, agentID, "self-clean: done means gone", "gt done"))
+		events.SessionDeathPayload(sessionName, agentID, "self-clean: done means idle", "gt done"))
 
 	// Kill our own tmux session with proper process cleanup
 	// This will terminate Claude and all child processes, completing the self-cleaning cycle.
