@@ -31,12 +31,12 @@ type Dog struct {
 
 // DogState is the persistent state stored in .dog.json.
 type DogState struct {
-	Name       string            `json:"name"`
-	State      State             `json:"state"`
-	LastActive time.Time         `json:"last_active"`
-	Work          string            `json:"work,omitempty"`             // Current work assignment
+	Name          string            `json:"name"`
+	State         State             `json:"state"`
+	LastActive    time.Time         `json:"last_active"`
+	Work          string            `json:"work,omitempty"`            // Current work assignment
 	WorkStartedAt time.Time         `json:"work_started_at,omitempty"` // When work was assigned
 	Worktrees     map[string]string `json:"worktrees,omitempty"`       // Rig -> path (for verification)
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }

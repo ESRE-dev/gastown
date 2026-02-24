@@ -90,8 +90,7 @@ func (hc *HealthChecker) Check(d *Dog, maxInactivity time.Duration, autoClear bo
 			result.NeedsAttention = true
 			result.Recommendation = "hung: agent alive but no tmux activity"
 
-		default: // SessionHealthy
-			result.SessionStatus = "healthy"
+		default: // SessionHealthy — status.String() already set above
 		}
 
 	case StateIdle:
