@@ -1524,14 +1524,20 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 	// Track this death for mass death detection
 	d.recordSessionDeath(sessionName)
 
+	// Emit session_death event for audit trail / feed visibility
+	_ = events.LogFeed(events.TypeSessionDeath, sessionName,
+		events.SessionDeathPayload(sessionName, rigName+"/polecats/"+polecatName, "crash detected by daemon health check", "daemon"))
+
 	// Auto-restart the polecat
-	if err := d.restartPolecatSession(rigName, polecatName, sessionName); err != nil {
-		d.logger.Printf("Error restarting polecat %s/%s: %v", rigName, polecatName, err)
-		// Notify witness as fallback
-		d.notifyWitnessOfCrashedPolecat(rigName, polecatName, info.HookBead, err)
+	restartErr := d.restartPolecatSession(rigName, polecatName, sessionName)
+	if restartErr != nil {
+		d.logger.Printf("Error restarting polecat %s/%s: %v", rigName, polecatName, restartErr)
 	} else {
 		d.logger.Printf("Successfully restarted crashed polecat %s/%s", rigName, polecatName)
 	}
+
+	// Always notify witness of crash (with restart outcome)
+	d.notifyWitnessOfCrashedPolecat(rigName, polecatName, info.HookBead, restartErr)
 }
 
 // recordSessionDeath records a session death and checks for mass death pattern.
@@ -1668,17 +1674,30 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	return nil
 }
 
-// notifyWitnessOfCrashedPolecat notifies the witness when a polecat restart fails.
+// notifyWitnessOfCrashedPolecat notifies the witness when a polecat crash is detected.
+// If restartErr is nil, the notification is informational (restart succeeded).
+// If restartErr is non-nil, the notification indicates manual intervention may be needed.
 func (d *Daemon) notifyWitnessOfCrashedPolecat(rigName, polecatName, hookBead string, restartErr error) {
 	witnessAddr := rigName + "/witness"
-	subject := fmt.Sprintf("CRASHED_POLECAT: %s/%s restart failed", rigName, polecatName)
-	body := fmt.Sprintf(`Polecat %s crashed and automatic restart failed.
+	var subject, body string
+	if restartErr == nil {
+		subject = fmt.Sprintf("CRASHED_POLECAT: %s/%s restarted", rigName, polecatName)
+		body = fmt.Sprintf(`Polecat %s crashed and was automatically restarted.
+
+hook_bead: %s
+
+No action required.`,
+			polecatName, hookBead)
+	} else {
+		subject = fmt.Sprintf("CRASHED_POLECAT: %s/%s restart failed", rigName, polecatName)
+		body = fmt.Sprintf(`Polecat %s crashed and automatic restart failed.
 
 hook_bead: %s
 restart_error: %v
 
 Manual intervention may be required.`,
-		polecatName, hookBead, restartErr)
+			polecatName, hookBead, restartErr)
+	}
 
 	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body) //nolint:gosec // G204: args are constructed internally
 	cmd.Dir = d.config.TownRoot
