@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -925,7 +926,46 @@ func (r *Router) validateRecipient(identity string) error {
 		}
 	}
 
+	// Fall back to workspace directory validation. Agent beads may be missing
+	// (e.g., Dolt DB reset) even though the agent's workspace directory exists.
+	if r.townRoot != "" && r.validateAgentWorkspace(identity) {
+		return nil
+	}
+
 	return fmt.Errorf("no agent found")
+}
+
+// validateAgentWorkspace checks if an agent's workspace directory exists on disk.
+// Used as a fallback when the agent isn't found in the bead registry.
+func (r *Router) validateAgentWorkspace(identity string) bool {
+	parts := strings.Split(identity, "/")
+
+	switch len(parts) {
+	case 1:
+		// Town-level singleton: "mayor", "deacon"
+		name := strings.TrimSuffix(parts[0], "/")
+		return dirExists(filepath.Join(r.townRoot, name))
+	case 2:
+		rig, name := parts[0], parts[1]
+		// Singleton role: gastown/witness, gastown/refinery
+		if dirExists(filepath.Join(r.townRoot, rig, name)) {
+			return true
+		}
+		// Named role (identity normalized away crew/polecats): check both
+		for _, role := range []string{"crew", "polecats"} {
+			if dirExists(filepath.Join(r.townRoot, rig, role, name)) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// dirExists returns true if the path exists and is a directory.
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // sendToSingle sends a message to a single recipient.
