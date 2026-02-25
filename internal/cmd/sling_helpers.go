@@ -754,7 +754,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		// gt-4gjd: Clean up orphaned wisp from the failed legacy path.
 		// bd mol wisp may have created a wisp that we can't bond (bad ID or
 		// ephemeral storage issue). Best-effort cleanup to prevent wisp accumulation.
-		cleanupOrphanedWisp(wispRootID, formulaWorkDir, townRoot)
+		cleanupOrphanedWisp(wispRootID, formulaWorkDir)
 
 		fallbackRootID, fallbackErr := bondFormulaDirect(resolvedFormula, beadID, formulaWorkDir, townRoot, formulaVars)
 		if fallbackErr != nil {
@@ -775,7 +775,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	parsedRootID, parsed := parseBondSpawnRootIDWithStatus(bondOut, formulaName, beadID, wispRootID)
 	if !parsed {
 		// gt-4gjd: Clean up orphaned wisp before fallback.
-		cleanupOrphanedWisp(wispRootID, formulaWorkDir, townRoot)
+		cleanupOrphanedWisp(wispRootID, formulaWorkDir)
 
 		fallbackRootID, fallbackErr := bondFormulaDirect(resolvedFormula, beadID, formulaWorkDir, townRoot, formulaVars)
 		if fallbackErr != nil {
@@ -1119,7 +1119,7 @@ func isMalformedWispID(wispID string) bool {
 // bd mol wisp but could not be bonded. This prevents orphaned wisp accumulation
 // when the legacy bond path fails and the direct-bond fallback is used (gt-4gjd).
 // Best-effort: errors are logged but not propagated.
-func cleanupOrphanedWisp(wispID, formulaWorkDir, townRoot string) {
+func cleanupOrphanedWisp(wispID, formulaWorkDir string) {
 	if wispID == "" {
 		return
 	}
