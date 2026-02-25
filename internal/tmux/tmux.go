@@ -2133,6 +2133,18 @@ func (t *Tmux) isGTBinding(table, key string) bool {
 	return strings.Contains(output, "if-shell") && strings.Contains(output, "gt ")
 }
 
+// isGTBindingWithClient checks if the given key has a GT binding that includes
+// --client for multi-client support. Older GT bindings without --client cause
+// switch-client to target the wrong client when multiple clients are attached.
+func (t *Tmux) isGTBindingWithClient(table, key string) bool {
+	output, err := t.run("list-keys", "-T", table, key)
+	if err != nil || output == "" {
+		return false
+	}
+	return strings.Contains(output, "if-shell") && strings.Contains(output, "gt ") &&
+		strings.Contains(output, "--client")
+}
+
 // getKeyBinding returns the current tmux command bound to the given key in the
 // specified key table. Returns empty string if no binding exists or if querying
 // fails. This is used to capture user bindings before overwriting them, so the
@@ -2247,8 +2259,10 @@ func sessionPrefixPattern() string {
 // reliably preserve the session context. tmux expands #{session_name} at binding
 // resolution time (when the key is pressed), giving us the correct session.
 func (t *Tmux) SetCycleBindings(session string) error {
-	// Skip if already configured — preserves user's original fallback from first call
-	if t.isGTBinding("prefix", "n") {
+	// Skip if already correctly configured (has --client for multi-client support).
+	// We must re-bind if an older GT binding exists without --client, since that
+	// version targets the wrong client when multiple tmux clients are attached.
+	if t.isGTBindingWithClient("prefix", "n") {
 		return nil
 	}
 	pattern := sessionPrefixPattern()
@@ -2265,16 +2279,18 @@ func (t *Tmux) SetCycleBindings(session string) error {
 	}
 
 	// C-b n → gt cycle next for Gas Town sessions, original binding otherwise
+	// Pass --client #{client_tty} so switch-client targets the correct client
+	// when multiple tmux clients are attached (e.g., gastown + beads rigs).
 	if _, err := t.run("bind-key", "-T", "prefix", "n",
 		"if-shell", ifShell,
-		"run-shell 'gt cycle next --session #{session_name}'",
+		"run-shell 'gt cycle next --session #{session_name} --client #{client_tty}'",
 		nextFallback); err != nil {
 		return err
 	}
 	// C-b p → gt cycle prev for Gas Town sessions, original binding otherwise
 	if _, err := t.run("bind-key", "-T", "prefix", "p",
 		"if-shell", ifShell,
-		"run-shell 'gt cycle prev --session #{session_name}'",
+		"run-shell 'gt cycle prev --session #{session_name} --client #{client_tty}'",
 		prevFallback); err != nil {
 		return err
 	}
