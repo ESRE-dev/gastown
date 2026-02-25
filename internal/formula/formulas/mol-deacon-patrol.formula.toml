@@ -313,7 +313,7 @@ The molecule state IS the waiter - patrol discovers reality each cycle.
 
 **Step 1: Find gate-ready molecules**
 ```bash
-bd mol ready --gated --json
+bd ready --gated --json
 ```
 
 This returns molecules where:
