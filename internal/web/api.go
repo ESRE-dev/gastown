@@ -70,6 +70,9 @@ const maxConcurrentCommands = 12
 
 // NewAPIHandler creates a new API handler with the given run timeouts and CSRF token.
 func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration, csrfToken string) *APIHandler {
+	if csrfToken == "" {
+		log.Printf("WARNING: APIHandler created with empty CSRF token — POST requests will not be protected")
+	}
 	// Use PATH lookup for gt binary. Do NOT use os.Executable() here - during
 	// tests it returns the test binary, causing fork bombs when executed.
 	workDir, _ := os.Getwd()

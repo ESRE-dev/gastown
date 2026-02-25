@@ -38,6 +38,9 @@ type SetupAPIHandler struct {
 
 // NewSetupAPIHandler creates a new setup API handler with the given CSRF token.
 func NewSetupAPIHandler(csrfToken string) *SetupAPIHandler {
+	if csrfToken == "" {
+		log.Printf("WARNING: SetupAPIHandler created with empty CSRF token — POST requests will not be protected")
+	}
 	return &SetupAPIHandler{csrfToken: csrfToken}
 }
 
@@ -53,7 +56,7 @@ func (h *SetupAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Validate CSRF token on all POST requests.
 	if r.Method == http.MethodPost && h.csrfToken != "" {
 		if r.Header.Get("X-Dashboard-Token") != h.csrfToken {
-			h.sendJSON(w, SetupResponse{Success: false, Message: "Invalid or missing dashboard token"})
+			h.sendError(w, "Invalid or missing dashboard token", http.StatusForbidden)
 			return
 		}
 	}
