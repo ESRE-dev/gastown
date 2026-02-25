@@ -1315,9 +1315,9 @@ func collectHandoffState() string {
 }
 
 // collectGitState captures deterministic workspace state using the Go git library.
-// This never shells out, so it works reliably even when PATH is broken or
-// external commands (gt, bd) are unavailable. Returns empty string if git
-// state cannot be read (e.g., not in a git repo). (GH#1996)
+// This uses only the git.Git wrapper (no shelling out to gt/bd), so it works
+// reliably even when PATH is broken or external commands are unavailable.
+// Returns empty string if git state cannot be read (e.g., not in a git repo). (GH#1996)
 func collectGitState() string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -1325,6 +1325,10 @@ func collectGitState() string {
 	}
 
 	g := git.NewGit(cwd)
+	if !g.IsRepo() {
+		return ""
+	}
+
 	var lines []string
 
 	// Branch
@@ -1332,46 +1336,35 @@ func collectGitState() string {
 		lines = append(lines, "Branch: "+branch)
 	}
 
-	// Uncommitted work summary
-	work, err := g.CheckUncommittedWork()
-	if err != nil {
-		return ""
-	}
-
-	if work.HasUncommittedChanges {
-		if len(work.ModifiedFiles) > 0 {
-			files := work.ModifiedFiles
-			if len(files) > 10 {
-				files = append(files[:10], fmt.Sprintf("... (+%d more)", len(work.ModifiedFiles)-10))
+	// Uncommitted work summary (skip section on error, don't bail entirely)
+	if work, err := g.CheckUncommittedWork(); err == nil {
+		if work.HasUncommittedChanges {
+			if len(work.ModifiedFiles) > 0 {
+				files := work.ModifiedFiles
+				if len(files) > 10 {
+					files = append(files[:10], fmt.Sprintf("... (+%d more)", len(work.ModifiedFiles)-10))
+				}
+				lines = append(lines, "Modified: "+strings.Join(files, ", "))
 			}
-			lines = append(lines, "Modified: "+strings.Join(files, ", "))
-		}
-		if len(work.UntrackedFiles) > 0 {
-			files := work.UntrackedFiles
-			if len(files) > 5 {
-				files = append(files[:5], fmt.Sprintf("... (+%d more)", len(work.UntrackedFiles)-5))
+			if len(work.UntrackedFiles) > 0 {
+				files := work.UntrackedFiles
+				if len(files) > 5 {
+					files = append(files[:5], fmt.Sprintf("... (+%d more)", len(work.UntrackedFiles)-5))
+				}
+				lines = append(lines, "Untracked: "+strings.Join(files, ", "))
 			}
-			lines = append(lines, "Untracked: "+strings.Join(files, ", "))
 		}
-	}
-
-	if work.StashCount > 0 {
-		lines = append(lines, fmt.Sprintf("Stashes: %d", work.StashCount))
-	}
-
-	if work.UnpushedCommits > 0 {
-		lines = append(lines, fmt.Sprintf("Unpushed commits: %d", work.UnpushedCommits))
+		if work.StashCount > 0 {
+			lines = append(lines, fmt.Sprintf("Stashes: %d", work.StashCount))
+		}
+		if work.UnpushedCommits > 0 {
+			lines = append(lines, fmt.Sprintf("Unpushed commits: %d", work.UnpushedCommits))
+		}
 	}
 
 	// Recent commits (last 5) for context on what was being worked on.
-	// Uses exec.Command directly since git.Git has no exported Run method.
-	logCmd := exec.Command("git", "log", "--oneline", "-5")
-	logCmd.Dir = cwd
-	if logOut, err := logCmd.Output(); err == nil {
-		logStr := strings.TrimSpace(string(logOut))
-		if logStr != "" {
-			lines = append(lines, "Recent commits:\n"+logStr)
-		}
+	if logStr, err := g.RecentCommits(5); err == nil && logStr != "" {
+		lines = append(lines, "Recent commits:\n"+logStr)
 	}
 
 	if len(lines) == 0 {

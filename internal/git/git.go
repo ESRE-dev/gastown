@@ -654,6 +654,12 @@ func (g *Git) GetBranchCommitMessage(branch string) (string, error) {
 	return g.run("log", "-1", "--format=%B", branch)
 }
 
+// RecentCommits returns the last n commits as one-line summaries (hash + subject).
+// Returns empty string if there are no commits or the repo is empty.
+func (g *Git) RecentCommits(n int) (string, error) {
+	return g.run("log", "--oneline", fmt.Sprintf("-%d", n))
+}
+
 // DeleteRemoteBranch deletes a branch on the remote.
 func (g *Git) DeleteRemoteBranch(remote, branch string) error {
 	_, err := g.run("push", remote, "--delete", branch)

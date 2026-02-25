@@ -612,9 +612,7 @@ func TestCollectGitState(t *testing.T) {
 		}
 
 		// Run collectGitState from the temp repo
-		origCwd, _ := os.Getwd()
-		os.Chdir(tmpDir)
-		t.Cleanup(func() { os.Chdir(origCwd) })
+		t.Chdir(tmpDir)
 
 		state := collectGitState()
 
@@ -634,9 +632,7 @@ func TestCollectGitState(t *testing.T) {
 
 	t.Run("returns_empty_outside_git_repo", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		origCwd, _ := os.Getwd()
-		os.Chdir(tmpDir)
-		t.Cleanup(func() { os.Chdir(origCwd) })
+		t.Chdir(tmpDir)
 
 		state := collectGitState()
 		if state != "" {
