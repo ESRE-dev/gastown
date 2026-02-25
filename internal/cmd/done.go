@@ -631,6 +631,12 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 		fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
 
+		// Fix cleanup_status after successful push (gt-wcr).
+		// Status was detected before push, so "unpushed" is now stale.
+		if doneCleanupStatus == "unpushed" {
+			doneCleanupStatus = "clean"
+		}
+
 		// Write push checkpoint for resume (gt-aufru)
 		if agentBeadID != "" {
 			cpBd := beads.New(beads.ResolveBeadsDir(cwd))
