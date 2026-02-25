@@ -468,7 +468,7 @@ exit /b 0
 }
 
 func TestRollbackSlingArtifactsBurnsAttachedMolecules(t *testing.T) {
-	townRoot := t.TempDir()
+	townRoot, _ := filepath.EvalSymlinks(t.TempDir())
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
