@@ -15,7 +15,6 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // PrefixRegistry maps beads prefixes to rig names and vice versa.
@@ -114,17 +113,15 @@ func InitRegistry(townRoot string) error {
 
 	// Set tmux socket for session discovery.
 	// If we're inside tmux, parse the socket from $TMUX (e.g. /tmp/tmux-501/default,pid,idx)
-	// so we query the same server our session lives on. Otherwise, fall back to the town
-	// name for multi-instance isolation when spawning new tmux servers.
+	// so we query the same server our session lives on. When not inside tmux
+	// (e.g., daemon process), leave the socket unset so tmux uses its default
+	// server — the same one the user's interactive sessions live on.
+	// Session names already include rig prefixes (hq-deacon, gt-witness, etc.)
+	// so there's no collision risk on the default server.
 	if tmuxEnv := os.Getenv("TMUX"); tmuxEnv != "" {
 		// $TMUX format: /path/to/socket,server_pid,session_index
 		if socketPath, _, ok := strings.Cut(tmuxEnv, ","); ok && socketPath != "" {
 			tmux.SetDefaultSocket(filepath.Base(socketPath))
-		}
-	} else {
-		townName, err := workspace.GetTownName(townRoot)
-		if err == nil && townName != "" {
-			tmux.SetDefaultSocket(sanitizeTownName(townName))
 		}
 	}
 
