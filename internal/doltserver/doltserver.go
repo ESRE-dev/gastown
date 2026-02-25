@@ -537,8 +537,10 @@ func CheckPortConflict(townRoot string) (int, string) {
 // findDoltServerOnPort finds a dolt sql-server process listening on the given port.
 // Returns the PID or 0 if not found.
 func findDoltServerOnPort(port int) int {
-	// Use lsof to find process on port
-	cmd := exec.Command("lsof", "-i", fmt.Sprintf(":%d", port), "-t")
+	// Use lsof to find the LISTENING process on port (not clients connected to it).
+	// Without -sTCP:LISTEN, lsof returns client PIDs (e.g., gt daemon) first,
+	// which aren't dolt processes — causing false negatives.
+	cmd := exec.Command("lsof", "-i", fmt.Sprintf(":%d", port), "-sTCP:LISTEN", "-t")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0
@@ -816,7 +818,7 @@ func Start(townRoot string) error {
 						_ = SaveState(townRoot, state)
 					}
 				}
-				return fmt.Errorf("Dolt server already running (PID %d)", pid)
+				return nil // already running and legitimate — idempotent success
 			}
 		}
 	}
