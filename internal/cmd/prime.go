@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -439,6 +440,9 @@ func checkSlungWork(ctx RoleContext) bool {
 // findAgentWork looks up hooked or in-progress beads assigned to this agent.
 // Primary: reads hook_bead from the agent bead (same strategy as detectSessionState/gt hook).
 // Fallback: queries by assignee for agents without an agent bead.
+// For polecats and crew, retries up to 3 times with 2-second delays to handle
+// the timing race where hook state hasn't propagated by the time gt prime runs.
+// See: https://github.com/steveyegge/gastown/issues/1438
 // Returns nil if no work is found.
 func findAgentWork(ctx RoleContext) *beads.Issue {
 	agentID := getAgentIdentity(ctx)
@@ -446,6 +450,29 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 		return nil
 	}
 
+	// Polecats and crew use a retry loop to handle the timing race where
+	// the hook slot write (SetHookBead) hasn't propagated to the database
+	// by the time gt prime runs on session startup.
+	maxAttempts := 1
+	if ctx.Role == RolePolecat || ctx.Role == RoleCrew {
+		maxAttempts = 3
+	}
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			time.Sleep(2 * time.Second)
+		}
+
+		if result := findAgentWorkOnce(ctx, agentID); result != nil {
+			return result
+		}
+	}
+
+	return nil
+}
+
+// findAgentWorkOnce performs a single attempt to find hooked work for an agent.
+func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 	b := beads.New(ctx.WorkDir)
 	// Primary: agent bead's hook_bead field (authoritative, set by bd slot set during sling)
 	agentBeadID := buildAgentBeadID(agentID, ctx.Role, ctx.TownRoot)
