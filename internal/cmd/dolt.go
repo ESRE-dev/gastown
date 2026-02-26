@@ -273,6 +273,7 @@ var (
 	doltLogFollow         bool
 	doltMigrateDry        bool
 	doltCleanupDry        bool
+	doltCleanupForce      bool
 
 	doltMigrateWispsDry   bool
 	doltMigrateWispsDB    string
@@ -303,6 +304,7 @@ func init() {
 	doltCmd.AddCommand(doltMigrateWispsCmd)
 
 	doltCleanupCmd.Flags().BoolVar(&doltCleanupDry, "dry-run", false, "Preview what would be removed without making changes")
+	doltCleanupCmd.Flags().BoolVar(&doltCleanupForce, "force", false, "Remove databases even if they have user tables")
 	doltLogsCmd.Flags().IntVarP(&doltLogLines, "lines", "n", 50, "Number of lines to show")
 	doltLogsCmd.Flags().BoolVarP(&doltLogFollow, "follow", "f", false, "Follow log output")
 
@@ -832,12 +834,34 @@ func runDoltCleanup(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	removed := 0
 	for _, o := range orphans {
-		if err := doltserver.RemoveDatabase(townRoot, o.Name); err != nil {
+		if err := doltserver.RemoveDatabase(townRoot, o.Name, doltCleanupForce); err != nil {
+			// If DROP caused read-only, stop immediately and recover (gt-r1cyd)
+			if doltserver.IsReadOnlyError(err.Error()) {
+				fmt.Printf("  %s DROP put server into read-only mode — attempting recovery...\n", style.Bold.Render("!"))
+				if recoverErr := doltserver.RecoverReadOnly(townRoot); recoverErr != nil {
+					fmt.Printf("  %s Recovery failed: %v\n", style.Bold.Render("✗"), recoverErr)
+					fmt.Printf("  Run: gt dolt stop && gt dolt start\n")
+				} else {
+					fmt.Printf("  %s Server recovered from read-only state\n", style.Bold.Render("✓"))
+				}
+				break
+			}
 			fmt.Printf("  %s Failed to remove %s: %v\n", style.Bold.Render("✗"), o.Name, err)
 			continue
 		}
 		fmt.Printf("  %s Removed %s\n", style.Bold.Render("✓"), o.Name)
 		removed++
+
+		// Health check after each DROP to catch read-only early (gt-r1cyd)
+		if readOnly, _ := doltserver.CheckReadOnly(townRoot); readOnly {
+			fmt.Printf("  %s Server went read-only after DROP — attempting recovery...\n", style.Bold.Render("!"))
+			if recoverErr := doltserver.RecoverReadOnly(townRoot); recoverErr != nil {
+				fmt.Printf("  %s Recovery failed: %v\n", style.Bold.Render("✗"), recoverErr)
+				fmt.Printf("  Run: gt dolt stop && gt dolt start\n")
+				break
+			}
+			fmt.Printf("  %s Server recovered — continuing cleanup\n", style.Bold.Render("✓"))
+		}
 	}
 
 	fmt.Printf("\n%s Removed %d/%d orphaned database(s)\n",
