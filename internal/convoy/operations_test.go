@@ -1398,10 +1398,10 @@ func TestGetConvoyTrackedIssues_CrossRigFallback(t *testing.T) {
 	}
 
 	// The cross-rig bead (oag-19dd9) is NOT in the local store.
-	// Add tracks dependency: convoy tracks oag-19dd9
+	// Add tracks dependency using external reference format expected by beads.
 	dep := &beadsdk.Dependency{
 		IssueID:     convoy.ID,
-		DependsOnID: "oag-19dd9",
+		DependsOnID: "external:oag:oag-19dd9",
 		Type:        beadsdk.DependencyType("tracks"),
 		CreatedAt:   now,
 		CreatedBy:   "test",
