@@ -1,0 +1,141 @@
+package daemon
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+const (
+	defaultDoltBackupInterval = 15 * time.Minute
+	doltBackupTimeout         = 120 * time.Second
+)
+
+// doltBackupInterval returns the configured backup interval, or the default (15m).
+func doltBackupInterval(config *DaemonPatrolConfig) time.Duration {
+	if config != nil && config.Patrols != nil && config.Patrols.DoltBackup != nil {
+		if config.Patrols.DoltBackup.IntervalStr != "" {
+			if d, err := time.ParseDuration(config.Patrols.DoltBackup.IntervalStr); err == nil && d > 0 {
+				return d
+			}
+		}
+	}
+	return defaultDoltBackupInterval
+}
+
+// syncDoltBackups syncs each production database to its configured backup location.
+// Non-fatal: errors are logged but don't stop the daemon.
+func (d *Daemon) syncDoltBackups() {
+	if !IsPatrolEnabled(d.patrolConfig, "dolt_backup") {
+		return
+	}
+
+	// Resolve data dir: use DoltServerManager if available, else conventional path.
+	var dataDir string
+	if d.doltServer != nil && d.doltServer.IsEnabled() && d.doltServer.config.DataDir != "" {
+		dataDir = d.doltServer.config.DataDir
+	} else {
+		dataDir = filepath.Join(d.config.TownRoot, ".dolt-data")
+	}
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		d.logger.Printf("dolt_backup: data dir %s does not exist, skipping", dataDir)
+		return
+	}
+
+	config := d.patrolConfig.Patrols.DoltBackup
+	databases := config.Databases
+	if len(databases) == 0 {
+		databases = d.discoverDatabasesWithBackups(dataDir)
+	}
+
+	if len(databases) == 0 {
+		d.logger.Printf("dolt_backup: no databases with backup remotes found")
+		return
+	}
+
+	d.logger.Printf("dolt_backup: syncing %d database(s)", len(databases))
+
+	synced := 0
+	for _, db := range databases {
+		backupName := db + "-backup"
+		if err := d.syncBackup(dataDir, db, backupName); err != nil {
+			d.logger.Printf("dolt_backup: %s: sync failed: %v", db, err)
+		} else {
+			synced++
+		}
+	}
+
+	d.logger.Printf("dolt_backup: synced %d/%d database(s)", synced, len(databases))
+}
+
+// syncBackup runs `dolt backup sync <backup-name>` for a single database.
+func (d *Daemon) syncBackup(dataDir, db, backupName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), doltBackupTimeout)
+	defer cancel()
+
+	dbDir := dataDir + "/" + db
+	cmd := exec.CommandContext(ctx, "dolt", "backup", "sync", backupName)
+	cmd.Dir = dbDir
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	d.logger.Printf("dolt_backup: %s: synced to %s", db, backupName)
+	return nil
+}
+
+// discoverDatabasesWithBackups lists databases in the data directory
+// that have a <name>-backup backup remote configured.
+func (d *Daemon) discoverDatabasesWithBackups(dataDir string) []string {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		d.logger.Printf("dolt_backup: error reading data dir: %v", err)
+		return nil
+	}
+
+	var databases []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		// Check if this directory has a <name>-backup configured
+		backupName := name + "-backup"
+		if d.hasBackupRemote(dataDir, name, backupName) {
+			databases = append(databases, name)
+		}
+	}
+
+	return databases
+}
+
+// hasBackupRemote checks if a database has the specified backup remote configured.
+func (d *Daemon) hasBackupRemote(dataDir, db, backupName string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dbDir := dataDir + "/" + db
+	cmd := exec.CommandContext(ctx, "dolt", "backup", "ls")
+	cmd.Dir = dbDir
+
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.TrimSpace(line) == backupName {
+			return true
+		}
+	}
+	return false
+}
