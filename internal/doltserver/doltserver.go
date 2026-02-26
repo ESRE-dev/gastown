@@ -172,6 +172,10 @@ type Config struct {
 	// Set to 0 to use the Dolt default (1000). Gas Town defaults to 50 to prevent
 	// connection storms during mass polecat slings.
 	MaxConnections int
+
+	// LogLevel is the Dolt server log level (trace, debug, info, warn, error, fatal).
+	// Empty or unset uses the Dolt default ("info").
+	LogLevel string
 }
 
 // DefaultConfig returns the default Dolt server configuration.
@@ -180,6 +184,7 @@ type Config struct {
 //   - GT_DOLT_PORT → Port
 //   - GT_DOLT_USER → User
 //   - GT_DOLT_PASSWORD → Password
+//   - GT_DOLT_LOGLEVEL → LogLevel (trace, debug, info, warn, error, fatal)
 func DefaultConfig(townRoot string) *Config {
 	daemonDir := filepath.Join(townRoot, "daemon")
 	config := &Config{
@@ -205,6 +210,9 @@ func DefaultConfig(townRoot string) *Config {
 	}
 	if pw := os.Getenv("GT_DOLT_PASSWORD"); pw != "" {
 		config.Password = pw
+	}
+	if ll := os.Getenv("GT_DOLT_LOGLEVEL"); ll != "" {
+		config.LogLevel = ll
 	}
 
 	return config
@@ -906,6 +914,9 @@ func Start(townRoot string) error {
 	}
 	if config.MaxConnections > 0 {
 		args = append(args, "--max-connections", strconv.Itoa(config.MaxConnections))
+	}
+	if config.LogLevel != "" {
+		args = append(args, "--loglevel", config.LogLevel)
 	}
 	cmd := exec.Command("dolt", args...)
 	cmd.Stdout = logFile
