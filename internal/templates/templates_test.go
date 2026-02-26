@@ -243,6 +243,82 @@ func TestRenderMessage_Nudge(t *testing.T) {
 	}
 }
 
+func TestRenderRole_Dog(t *testing.T) {
+	tmpl, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	data := RoleData{
+		Role:          "dog",
+		DogName:       "Fido",
+		TownRoot:      "/test/town",
+		TownName:      "town",
+		WorkDir:       "/test/town/deacon/dogs/Fido",
+		DefaultBranch: "main",
+		MayorSession:  "gt-town-mayor",
+		DeaconSession: "gt-town-deacon",
+	}
+
+	output, err := tmpl.RenderRole("dog", data)
+	if err != nil {
+		t.Fatalf("RenderRole() error = %v", err)
+	}
+
+	// Check for key content
+	if !strings.Contains(output, "Dog Context") {
+		t.Error("output missing 'Dog Context'")
+	}
+	if !strings.Contains(output, "Fido") {
+		t.Error("output missing dog name")
+	}
+	if !strings.Contains(output, "/test/town") {
+		t.Error("output missing town root")
+	}
+}
+
+// TestRenderRole_Dog_NoHardcodedGtPath verifies the dog template uses {{ .TownRoot }}
+// and does not contain hardcoded ~/gt paths.
+func TestRenderRole_Dog_NoHardcodedGtPath(t *testing.T) {
+	tmpl, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	const customTownRoot = "/custom/test/instance"
+
+	data := RoleData{
+		Role:          "dog",
+		DogName:       "Rover",
+		TownRoot:      customTownRoot,
+		TownName:      "instance",
+		WorkDir:       customTownRoot + "/deacon/dogs/Rover",
+		DefaultBranch: "main",
+		MayorSession:  "gt-instance-mayor",
+		DeaconSession: "gt-instance-deacon",
+	}
+
+	output, err := tmpl.RenderRole("dog", data)
+	if err != nil {
+		t.Fatalf("RenderRole() error = %v", err)
+	}
+
+	if strings.Contains(output, "~/gt") {
+		var offending []string
+		for i, line := range strings.Split(output, "\n") {
+			if strings.Contains(line, "~/gt") {
+				offending = append(offending, fmt.Sprintf("  line %d: %s", i+1, strings.TrimSpace(line)))
+			}
+		}
+		t.Errorf("rendered dog template still contains hardcoded ~/gt (TownRoot=%q):\n%s",
+			customTownRoot, strings.Join(offending, "\n"))
+	}
+
+	if !strings.Contains(output, customTownRoot) {
+		t.Errorf("rendered dog template does not contain TownRoot %q — paths may be hardcoded", customTownRoot)
+	}
+}
+
 // TestRenderRole_NoHardcodedGtPath verifies that no role template renders
 // a literal "~/gt" path — all path references must use {{ .TownRoot }}.
 // This is a regression test for instances running outside ~/gt
@@ -253,7 +329,7 @@ func TestRenderRole_NoHardcodedGtPath(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	const customTownRoot = "/custom/test/instance"
+	const customTownRoot2 = "/custom/test/instance"
 
 	roles := []struct {
 		role string
@@ -263,8 +339,8 @@ func TestRenderRole_NoHardcodedGtPath(t *testing.T) {
 			role: "polecat",
 			data: RoleData{
 				Role: "polecat", RigName: "myrig", Polecat: "TestCat",
-				TownRoot: customTownRoot, TownName: "instance",
-				WorkDir:       customTownRoot + "/myrig/polecats/TestCat",
+				TownRoot: customTownRoot2, TownName: "instance",
+				WorkDir:       customTownRoot2 + "/myrig/polecats/TestCat",
 				DefaultBranch: "main",
 				MayorSession:  "gt-instance-mayor", DeaconSession: "gt-instance-deacon",
 			},
@@ -272,8 +348,8 @@ func TestRenderRole_NoHardcodedGtPath(t *testing.T) {
 		{
 			role: "mayor",
 			data: RoleData{
-				Role: "mayor", TownRoot: customTownRoot, TownName: "instance",
-				WorkDir:       customTownRoot,
+				Role: "mayor", TownRoot: customTownRoot2, TownName: "instance",
+				WorkDir:       customTownRoot2,
 				DefaultBranch: "main",
 				MayorSession:  "gt-instance-mayor", DeaconSession: "gt-instance-deacon",
 			},
@@ -282,8 +358,8 @@ func TestRenderRole_NoHardcodedGtPath(t *testing.T) {
 			role: "witness",
 			data: RoleData{
 				Role: "witness", RigName: "myrig",
-				TownRoot: customTownRoot, TownName: "instance",
-				WorkDir:       customTownRoot + "/myrig/witness",
+				TownRoot: customTownRoot2, TownName: "instance",
+				WorkDir:       customTownRoot2 + "/myrig/witness",
 				DefaultBranch: "main",
 				Polecats:      []string{"Cat1", "Cat2"},
 				MayorSession:  "gt-instance-mayor", DeaconSession: "gt-instance-deacon",
@@ -293,8 +369,8 @@ func TestRenderRole_NoHardcodedGtPath(t *testing.T) {
 			role: "crew",
 			data: RoleData{
 				Role: "crew", RigName: "myrig", Polecat: "TestCrew",
-				TownRoot: customTownRoot, TownName: "instance",
-				WorkDir:       customTownRoot + "/myrig/crew/TestCrew",
+				TownRoot: customTownRoot2, TownName: "instance",
+				WorkDir:       customTownRoot2 + "/myrig/crew/TestCrew",
 				DefaultBranch: "main",
 				MayorSession:  "gt-instance-mayor", DeaconSession: "gt-instance-deacon",
 			},
@@ -302,16 +378,14 @@ func TestRenderRole_NoHardcodedGtPath(t *testing.T) {
 		{
 			role: "deacon",
 			data: RoleData{
-				Role: "deacon", TownRoot: customTownRoot, TownName: "instance",
-				WorkDir:       customTownRoot,
+				Role: "deacon", TownRoot: customTownRoot2, TownName: "instance",
+				WorkDir:       customTownRoot2,
 				DefaultBranch: "main",
 				MayorSession:  "gt-instance-mayor", DeaconSession: "gt-instance-deacon",
 			},
 		},
-		// dog is excluded: its template uses .DogName which is not in RoleData
-		// (rendered via a different code path with a custom struct).
-		// The ~/gt reference in dog.md.tmpl (routes line) was fixed in the same
-		// change as the others; confirm with grep: grep -c ~/gt internal/templates/roles/dog.md.tmpl
+		// dog tested separately in TestRenderRole_Dog_NoHardcodedGtPath
+		// (requires DogName field)
 	}
 
 	for _, tc := range roles {
@@ -321,7 +395,6 @@ func TestRenderRole_NoHardcodedGtPath(t *testing.T) {
 				t.Fatalf("RenderRole(%q) error = %v", tc.role, err)
 			}
 			if strings.Contains(output, "~/gt") {
-				// Find all lines with the offending string for a helpful error message.
 				var offending []string
 				for i, line := range strings.Split(output, "\n") {
 					if strings.Contains(line, "~/gt") {
@@ -329,7 +402,7 @@ func TestRenderRole_NoHardcodedGtPath(t *testing.T) {
 					}
 				}
 				t.Errorf("rendered %q template still contains hardcoded ~/gt (TownRoot=%q):\n%s",
-					tc.role, customTownRoot, strings.Join(offending, "\n"))
+					tc.role, customTownRoot2, strings.Join(offending, "\n"))
 			}
 		})
 	}
