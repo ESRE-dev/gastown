@@ -64,13 +64,17 @@ func (b *Beads) GetOrCreateHandoffBead(role string) (*Issue, error) {
 		return nil, fmt.Errorf("creating handoff bead: %w", err)
 	}
 
-	// Update to pinned status
+	// Update to pinned status. If this fails, clean up the orphaned bead
+	// to prevent duplicates on retry (FindHandoffBead only searches pinned beads).
 	status := StatusPinned
 	if err := b.Update(issue.ID, UpdateOptions{Status: &status}); err != nil {
+		// Best-effort cleanup — ignore delete error since pin failure is the real problem
+		_ = b.CloseWithReason("orphaned: failed to pin", issue.ID)
 		return nil, fmt.Errorf("setting handoff bead to pinned: %w", err)
 	}
 
-	// Re-fetch to get updated status
+	// Re-fetch to get updated status. If this fails, the bead is already
+	// created and pinned — a retry of GetOrCreateHandoffBead will find it.
 	return b.Show(issue.ID)
 }
 
