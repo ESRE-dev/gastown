@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -97,6 +98,18 @@ var doltLogsCmd = &cobra.Command{
 	Short: "View Dolt server logs",
 	Long:  `View the Dolt server log file.`,
 	RunE:  runDoltLogs,
+}
+
+var doltDumpCmd = &cobra.Command{
+	Use:   "dump",
+	Short: "Dump Dolt server goroutine stacks for debugging",
+	Long: `Send SIGQUIT to the Dolt server to dump goroutine stacks to its log file.
+
+Per Tim Sehn (Dolt CEO): kill -QUIT prints all goroutine stacks to stderr,
+which is redirected to the server log. Useful for diagnosing hung servers.
+
+The dump is written to the server log file. Use 'gt dolt logs' to view it.`,
+	RunE: runDoltDump,
 }
 
 var doltSQLCmd = &cobra.Command{
@@ -292,6 +305,7 @@ func init() {
 	doltCmd.AddCommand(doltRestartCmd)
 	doltCmd.AddCommand(doltStatusCmd)
 	doltCmd.AddCommand(doltLogsCmd)
+	doltCmd.AddCommand(doltDumpCmd)
 	doltCmd.AddCommand(doltSQLCmd)
 	doltCmd.AddCommand(doltInitRigCmd)
 	doltCmd.AddCommand(doltListCmd)
@@ -620,6 +634,42 @@ func runDoltLogs(cmd *cobra.Command, args []string) error {
 	tailCmd.Stdout = os.Stdout
 	tailCmd.Stderr = os.Stderr
 	return tailCmd.Run()
+}
+
+func runDoltDump(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	running, pid, err := doltserver.IsRunning(townRoot)
+	if err != nil {
+		return fmt.Errorf("checking server status: %w", err)
+	}
+	if !running {
+		return fmt.Errorf("Dolt server is not running — nothing to dump")
+	}
+
+	config := doltserver.DefaultConfig(townRoot)
+
+	// Send SIGQUIT to get goroutine stack dump (written to server's stderr = log file)
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("finding process %d: %w", pid, err)
+	}
+
+	fmt.Printf("Sending SIGQUIT to Dolt server (PID %d)...\n", pid)
+	if err := proc.Signal(syscall.SIGQUIT); err != nil {
+		return fmt.Errorf("sending SIGQUIT: %w", err)
+	}
+
+	// Give the server a moment to write the dump
+	time.Sleep(500 * time.Millisecond)
+
+	fmt.Printf("Goroutine stack dump written to: %s\n", config.LogFile)
+	fmt.Printf("View with: gt dolt logs -n 200\n")
+
+	return nil
 }
 
 func runDoltSQL(cmd *cobra.Command, args []string) error {
