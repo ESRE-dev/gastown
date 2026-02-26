@@ -183,9 +183,7 @@ func TestParseCrewOrPolecatFromID(t *testing.T) {
 		prefix     string
 		rigName    string
 		role       string
-		wantPrefix string
 		wantWorker string
-		wantOK     bool
 	}{
 		{
 			name:       "standard crew ID",
@@ -193,9 +191,7 @@ func TestParseCrewOrPolecatFromID(t *testing.T) {
 			prefix:     "gt",
 			rigName:    "gastown",
 			role:       "crew",
-			wantPrefix: "gt",
 			wantWorker: "alice",
-			wantOK:     true,
 		},
 		{
 			name:       "standard polecat ID",
@@ -203,9 +199,7 @@ func TestParseCrewOrPolecatFromID(t *testing.T) {
 			prefix:     "gt",
 			rigName:    "gastown",
 			role:       "polecat",
-			wantPrefix: "gt",
 			wantWorker: "nux",
-			wantOK:     true,
 		},
 		{
 			name:       "collapsed form (prefix == rigName)",
@@ -213,9 +207,7 @@ func TestParseCrewOrPolecatFromID(t *testing.T) {
 			prefix:     "ff",
 			rigName:    "ff",
 			role:       "crew",
-			wantPrefix: "ff",
 			wantWorker: "joe",
-			wantOK:     true,
 		},
 		{
 			name:       "collapsed polecat (prefix == rigName)",
@@ -223,9 +215,7 @@ func TestParseCrewOrPolecatFromID(t *testing.T) {
 			prefix:     "ff",
 			rigName:    "ff",
 			role:       "polecat",
-			wantPrefix: "ff",
 			wantWorker: "toast",
-			wantOK:     true,
 		},
 		{
 			name:       "different prefix and rigName",
@@ -233,9 +223,7 @@ func TestParseCrewOrPolecatFromID(t *testing.T) {
 			prefix:     "sh",
 			rigName:    "shippercrm",
 			role:       "crew",
-			wantPrefix: "sh",
 			wantWorker: "controllers",
-			wantOK:     true,
 		},
 		{
 			name:       "ID does not match pattern",
@@ -243,9 +231,7 @@ func TestParseCrewOrPolecatFromID(t *testing.T) {
 			prefix:     "gt",
 			rigName:    "gastown",
 			role:       "crew",
-			wantPrefix: "",
 			wantWorker: "",
-			wantOK:     false,
 		},
 		{
 			name:       "wrong prefix",
@@ -253,9 +239,7 @@ func TestParseCrewOrPolecatFromID(t *testing.T) {
 			prefix:     "gt",
 			rigName:    "gastown",
 			role:       "crew",
-			wantPrefix: "",
 			wantWorker: "",
-			wantOK:     false,
 		},
 		{
 			name:       "empty worker name after prefix strip",
@@ -263,21 +247,13 @@ func TestParseCrewOrPolecatFromID(t *testing.T) {
 			prefix:     "gt",
 			rigName:    "gastown",
 			role:       "crew",
-			wantPrefix: "",
 			wantWorker: "",
-			wantOK:     false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prefix, worker, ok := parseCrewOrPolecatFromID(tt.id, tt.prefix, tt.rigName, tt.role)
-			if ok != tt.wantOK {
-				t.Errorf("ok = %v, want %v", ok, tt.wantOK)
-			}
-			if prefix != tt.wantPrefix {
-				t.Errorf("prefix = %q, want %q", prefix, tt.wantPrefix)
-			}
+			worker := parseCrewOrPolecatFromID(tt.id, tt.prefix, tt.rigName, tt.role)
 			if worker != tt.wantWorker {
 				t.Errorf("worker = %q, want %q", worker, tt.wantWorker)
 			}

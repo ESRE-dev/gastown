@@ -177,7 +177,7 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 			if info, exists := prefixToRig[idPrefix]; exists {
 				switch role {
 				case "crew":
-					_, workerName, _ := parseCrewOrPolecatFromID(id, idPrefix, info.name, "crew")
+					workerName := parseCrewOrPolecatFromID(id, idPrefix, info.name, "crew")
 					if workerName != "" {
 						crewWorkers := listCrewWorkers(ctx.TownRoot, info.name)
 						found := false
@@ -192,7 +192,7 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 						}
 					}
 				case "polecat":
-					_, workerName, _ := parseCrewOrPolecatFromID(id, idPrefix, info.name, "polecat")
+					workerName := parseCrewOrPolecatFromID(id, idPrefix, info.name, "polecat")
 					if workerName != "" {
 						polecats := listPolecats(ctx.TownRoot, info.name)
 						found := false
@@ -232,8 +232,8 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // parseCrewOrPolecatFromID extracts the worker name from a crew or polecat bead ID.
-// Returns the prefix, worker name, and whether parsing succeeded.
-func parseCrewOrPolecatFromID(id, prefix, rigName, role string) (string, string, bool) {
+// Returns the worker name, or empty string if the ID doesn't match the expected pattern.
+func parseCrewOrPolecatFromID(id, prefix, rigName, role string) string {
 	// Build the expected prefix pattern: prefix-rig-role- or prefix-role- (collapsed)
 	var idPrefix string
 	if prefix == rigName {
@@ -242,12 +242,9 @@ func parseCrewOrPolecatFromID(id, prefix, rigName, role string) (string, string,
 		idPrefix = prefix + "-" + rigName + "-" + role + "-"
 	}
 	if strings.HasPrefix(id, idPrefix) {
-		workerName := strings.TrimPrefix(id, idPrefix)
-		if workerName != "" {
-			return prefix, workerName, true
-		}
+		return strings.TrimPrefix(id, idPrefix)
 	}
-	return "", "", false
+	return ""
 }
 
 // dedup removes duplicate strings from a slice, preserving order.
