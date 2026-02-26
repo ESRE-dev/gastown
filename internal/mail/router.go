@@ -1488,36 +1488,36 @@ func (r *Router) notifyRecipient(msg *Message) error {
 
 		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
 
-		// Idle-aware notification: try immediate nudge first, fall back to queue.
-		waitErr := r.tmux.WaitForIdle(sessionID, timeout)
-		if waitErr == nil {
-			// Session is idle → send immediate nudge
-			if err := r.tmux.NudgeSession(sessionID, notification); err == nil {
-				return nil
-			} else if errors.Is(err, tmux.ErrSessionNotFound) {
-				// Session disappeared between idle check and nudge — try next candidate
-				continue
-			} else if errors.Is(err, tmux.ErrNoServer) {
-				return nil
-			}
-			// NudgeSession failed for non-terminal reason — fall through to queue
-		} else if errors.Is(waitErr, tmux.ErrNoServer) {
-			// No tmux server — no point trying other candidates
-			return nil
-		} else if errors.Is(waitErr, tmux.ErrSessionNotFound) {
-			// Session disappeared — try next candidate
-			continue
-		}
-
-		// Busy or nudge failed → enqueue for cooperative delivery at the
-		// agent's next turn boundary.
+		// Always enqueue mail notifications for cooperative delivery.
+		// Mail is not urgent enough to justify immediate NudgeSession,
+		// which risks a TOCTOU race: WaitForIdle may detect a brief
+		// inter-tool-call idle flash, then NudgeSession's Escape key
+		// disrupts the session that has resumed Cerebrating, leaving
+		// the notification text stuck in the input buffer with Enter
+		// never firing. See: https://github.com/steveyegge/gastown/issues/2032
 		if r.townRoot != "" {
 			return nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
 				Sender:  msg.From,
 				Message: notification,
 			})
 		}
-		// Fallback to direct nudge if town root unavailable
+		// Fallback to idle-aware nudge if town root unavailable.
+		// This preserves the original behavior for edge cases where
+		// cooperative delivery isn't possible.
+		waitErr := r.tmux.WaitForIdle(sessionID, timeout)
+		if waitErr == nil {
+			if err := r.tmux.NudgeSession(sessionID, notification); err == nil {
+				return nil
+			} else if errors.Is(err, tmux.ErrSessionNotFound) {
+				continue
+			} else if errors.Is(err, tmux.ErrNoServer) {
+				return nil
+			}
+		} else if errors.Is(waitErr, tmux.ErrNoServer) {
+			return nil
+		} else if errors.Is(waitErr, tmux.ErrSessionNotFound) {
+			continue
+		}
 		return r.tmux.NudgeSession(sessionID, notification)
 	}
 
