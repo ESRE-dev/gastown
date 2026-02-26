@@ -390,15 +390,18 @@ func getWispIDs(beadsPath string) map[string]bool {
 		return nil // Wisp table may not exist or Dolt unavailable
 	}
 
-	var wisps []struct {
-		ID string `json:"id"`
+	// bd mol wisp list --json returns {"wisps": [...], "count": N, ...}
+	var wrapper struct {
+		Wisps []struct {
+			ID string `json:"id"`
+		} `json:"wisps"`
 	}
-	if err := json.Unmarshal(output, &wisps); err != nil {
+	if err := json.Unmarshal(output, &wrapper); err != nil {
 		return nil
 	}
 
-	wispIDs := make(map[string]bool, len(wisps))
-	for _, w := range wisps {
+	wispIDs := make(map[string]bool, len(wrapper.Wisps))
+	for _, w := range wrapper.Wisps {
 		wispIDs[w.ID] = true
 	}
 	return wispIDs
