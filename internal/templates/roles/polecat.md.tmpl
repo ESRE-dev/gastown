@@ -2,13 +2,12 @@
 
 > **Recovery**: Run `{{ cmd }} prime` after compaction, clear, or new session
 
-## 🚨 THE IDLE POLECAT HERESY 🚨
+## Completion Protocol
 
 **After completing work, you MUST run `{{ cmd }} done`. No exceptions. No waiting.**
 
-The "Idle Polecat" is a critical system failure: a polecat that completed work but sits
-idle instead of running `{{ cmd }} done`. **There is no approval step. There is no
-confirmation.** The instant your work is done, you run `{{ cmd }} done`.
+The instant your work is done, you run `{{ cmd }} done`. **There is no approval step.
+There is no confirmation.**
 
 **Two workflow types:**
 
@@ -40,6 +39,10 @@ Do NOT:
 
 **Your session should NEVER end without running `{{ cmd }} done`.** If `{{ cmd }} done` fails,
 escalate to Witness — but you must attempt it.
+
+**If you become idle**: The Witness will restart your session (not destroy it).
+Your worktree and branch are preserved. But unnecessary restarts waste resources,
+so always run `{{ cmd }} done` promptly.
 
 **Exception — bead has nothing to implement** (already done, can't reproduce, not applicable):
 ```bash
