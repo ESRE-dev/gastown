@@ -175,8 +175,13 @@ func (m *DoltServerManager) doSleep(d time.Duration) {
 }
 
 // pidFile returns the path to the Dolt server PID file.
+// Production (port 3307) uses the canonical "dolt.pid" for compatibility with
+// gt dolt start/stop. Other ports get a port-specific name to avoid collisions.
 func (m *DoltServerManager) pidFile() string {
-	return filepath.Join(m.townRoot, "daemon", "dolt.pid")
+	if m.config.Port == 3307 {
+		return filepath.Join(m.townRoot, "daemon", "dolt.pid")
+	}
+	return filepath.Join(m.townRoot, "daemon", fmt.Sprintf("dolt-%d.pid", m.config.Port))
 }
 
 // IsEnabled returns whether Dolt server management is enabled.
@@ -697,8 +702,13 @@ func sendDoltAlertToWitnesses(townRoot, subject, body string, logger func(format
 
 // unhealthySignalFile returns the path to the DOLT_UNHEALTHY signal file.
 // Witness patrols can check for this file to detect degraded Dolt state.
+// Production (port 3307) uses the canonical name; other ports get a suffix
+// so multiple instances don't clobber each other's signal files.
 func (m *DoltServerManager) unhealthySignalFile() string {
-	return filepath.Join(m.townRoot, "daemon", "DOLT_UNHEALTHY")
+	if m.config.Port == 3307 {
+		return filepath.Join(m.townRoot, "daemon", "DOLT_UNHEALTHY")
+	}
+	return filepath.Join(m.townRoot, "daemon", fmt.Sprintf("DOLT_UNHEALTHY_%d", m.config.Port))
 }
 
 // writeUnhealthySignal writes the DOLT_UNHEALTHY signal file.

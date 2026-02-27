@@ -118,6 +118,7 @@ type PatrolsConfig struct {
 	Deacon         *PatrolConfig          `json:"deacon,omitempty"`
 	Handler        *PatrolConfig          `json:"handler,omitempty"`
 	DoltServer     *DoltServerConfig      `json:"dolt_server,omitempty"`
+	DoltTestServer *DoltServerConfig      `json:"dolt_test_server,omitempty"`
 	DoltRemotes    *DoltRemotesConfig     `json:"dolt_remotes,omitempty"`
 	DoltBackup     *DoltBackupConfig      `json:"dolt_backup,omitempty"`
 	JsonlGitBackup *JsonlGitBackupConfig  `json:"jsonl_git_backup,omitempty"`

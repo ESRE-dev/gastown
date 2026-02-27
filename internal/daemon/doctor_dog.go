@@ -105,8 +105,12 @@ func (d *Daemon) runDoctorDog() {
 	// 4. Dolt GC on each production database
 	d.doctorDogRunGC()
 
-	// 5. Zombie server detection
-	d.doctorDogZombieCheck(port)
+	// 5. Zombie server detection (exclude both prod and test server ports)
+	expectedPorts := []int{port}
+	if d.doltTestServer != nil && d.doltTestServer.IsEnabled() {
+		expectedPorts = append(expectedPorts, d.doltTestServer.config.Port)
+	}
+	d.doctorDogZombieCheck(expectedPorts)
 
 	// 6. Backup staleness check
 	d.doctorDogBackupStalenessCheck()
@@ -258,8 +262,8 @@ func (d *Daemon) doctorDogGCDatabase(dbDir, dbName string) {
 	d.logger.Printf("doctor_dog: gc: %s: completed in %v", dbName, elapsed)
 }
 
-// doctorDogZombieCheck scans for dolt sql-server processes NOT on the expected port.
-func (d *Daemon) doctorDogZombieCheck(expectedPort int) {
+// doctorDogZombieCheck scans for dolt sql-server processes NOT on any of the expected ports.
+func (d *Daemon) doctorDogZombieCheck(expectedPorts []int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -272,8 +276,13 @@ func (d *Daemon) doctorDogZombieCheck(expectedPort int) {
 		return
 	}
 
+	// Build a set of expected port strings for fast lookup
+	expectedPortStrs := make(map[string]bool, len(expectedPorts))
+	for _, p := range expectedPorts {
+		expectedPortStrs[strconv.Itoa(p)] = true
+	}
+
 	pids := strings.Fields(strings.TrimSpace(string(output)))
-	expectedPortStr := strconv.Itoa(expectedPort)
 	var zombies []int
 
 	for _, pidStr := range pids {
@@ -282,7 +291,7 @@ func (d *Daemon) doctorDogZombieCheck(expectedPort int) {
 			continue
 		}
 
-		// Check if this process is using the expected port
+		// Check if this process is using an expected port
 		cmdlineCtx, cmdlineCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		cmdlineCmd := exec.CommandContext(cmdlineCtx, "ps", "-p", pidStr, "-o", "command=")
 		cmdlineOutput, cmdlineErr := cmdlineCmd.Output()
@@ -297,12 +306,19 @@ func (d *Daemon) doctorDogZombieCheck(expectedPort int) {
 			continue
 		}
 
-		// Check if this is on the expected port
-		if strings.Contains(cmdline, "--port="+expectedPortStr) ||
-			strings.Contains(cmdline, "--port "+expectedPortStr) ||
-			strings.Contains(cmdline, "-p "+expectedPortStr) ||
-			strings.Contains(cmdline, "-p="+expectedPortStr) {
-			continue // This is the expected server
+		// Check if this is on any expected port
+		isExpected := false
+		for portStr := range expectedPortStrs {
+			if strings.Contains(cmdline, "--port="+portStr) ||
+				strings.Contains(cmdline, "--port "+portStr) ||
+				strings.Contains(cmdline, "-p "+portStr) ||
+				strings.Contains(cmdline, "-p="+portStr) {
+				isExpected = true
+				break
+			}
+		}
+		if isExpected {
+			continue
 		}
 
 		// If no port specified explicitly and it's the only process, it could
