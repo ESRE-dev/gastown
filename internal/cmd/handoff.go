@@ -946,11 +946,18 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
 
+	bootSession := session.BootSessionName()
+
 	switch {
 	case sessionName == mayorSession:
 		// Mayor runs from ~/gt/mayor/, not town root.
 		// Tools use workspace.FindFromCwd() which walks UP to find town root.
 		return townRoot + "/mayor", nil
+
+	case sessionName == bootSession:
+		// Boot watchdog runs from ~/gt/deacon/dogs/boot/, not ~/gt/deacon/.
+		// Boot is ephemeral (fresh each daemon tick) with its own CLAUDE.md.
+		return townRoot + "/deacon/dogs/boot", nil
 
 	case sessionName == deaconSession:
 		return townRoot + "/deacon", nil
