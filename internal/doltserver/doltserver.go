@@ -29,6 +29,7 @@ package doltserver
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,6 +45,7 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
@@ -2460,17 +2462,31 @@ func doltSQLWithRecovery(townRoot, rigDB, query string) error {
 // MeasureQueryLatency times a SELECT active_branch() query against the Dolt server.
 // Per Tim Sehn (Dolt CEO): active_branch() is a lightweight probe that won't block
 // behind queued queries, unlike SELECT 1 which goes through the full query executor.
+// Uses a direct TCP connection via the Go MySQL driver to measure actual query
+// latency, not subprocess startup time.
 func MeasureQueryLatency(townRoot string) (time.Duration, error) {
 	config := DefaultConfig(townRoot)
 
+	dsn := fmt.Sprintf("%s@tcp(127.0.0.1:%d)/", config.User, config.Port)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return 0, fmt.Errorf("opening mysql connection: %w", err)
+	}
+	defer db.Close()
+
+	db.SetConnMaxLifetime(5 * time.Second)
+	db.SetMaxOpenConns(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	start := time.Now()
-	ctx := context.Background()
-	cmd := buildDoltSQLCmd(ctx, config, "-q", "SELECT active_branch()")
-	output, err := cmd.CombinedOutput()
+	var branch string
+	err = db.QueryRowContext(ctx, "SELECT active_branch()").Scan(&branch)
 	elapsed := time.Since(start)
 
 	if err != nil {
-		return 0, fmt.Errorf("SELECT active_branch() failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+		return 0, fmt.Errorf("SELECT active_branch() failed: %w", err)
 	}
 
 	return elapsed, nil
