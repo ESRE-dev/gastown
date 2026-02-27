@@ -146,6 +146,65 @@ and design planes federate via DoltHub using the Highway Operations
 Protocol — Gas Town's public federation layer built on Dolt's native
 push/pull remotes.
 
+## Ephemeral Data Lifecycle (CRITICAL)
+
+Dolt is sensitive to row volume and versioning overhead. Every row change
+creates a new chunk in Dolt's content-addressed storage. Without active
+garbage collection, databases bloat rapidly.
+
+### Two Data Streams
+
+```
+EPHEMERAL (wisps, patrol data)          SACRED (issues, molecules, mail, agents)
+  CREATE                                  CREATE
+  → work                                  → work
+  → CLOSE (>24h)                          → CLOSE
+  → SQUASH to digest summary              → JSONL export (scrubbed)
+  → DELETE original rows                  → git push to GitHub
+  → digest into git                       → never delete from Dolt
+```
+
+**Ephemeral data** (wisps, wisp_events, wisp_labels, wisp_deps) is
+high-volume patrol exhaust. It's valuable in real-time but worthless
+after 24 hours. The Reaper Dog squashes it into digest summaries
+(aggregate stats per cycle), then DELETES the original rows. Without
+this, wisp tables grow without bound and Dolt performance degrades.
+
+**Sacred data** (issues, molecules, agents, mail, dependencies, labels)
+is the permanent ledger. It's backed up via JSONL exports (scrubbed of
+test artifacts and pollution) and pushed to GitHub. Never deleted from
+Dolt unless corrupted.
+
+### Dolt GC (Non-Negotiable)
+
+`dolt gc` compacts old chunk data. Without it, databases bloat by 10-50x.
+The Doctor Dog runs gc at least daily. This is the single most important
+maintenance operation.
+
+```bash
+# Manual gc (stop server first for exclusive access)
+gt dolt stop
+cd ~/.dolt-data/<db> && dolt gc
+gt dolt start
+
+# Or: Doctor Dog runs it automatically via daemon
+```
+
+### Pollution Prevention
+
+Pollution enters Dolt via:
+1. **Test artifacts**: test code creates issues on production server
+2. **Wisp accumulation**: wisps closed but never deleted
+3. **Orphan databases**: test DBs that survive cleanup
+4. **Zombie servers**: test dolt-server processes in /tmp
+
+Prevention is layered:
+- **Firewall** (store.go): refuses test-prefixed CREATE DATABASE on port 3307
+- **Reaper Dog**: deletes closed wisps, auto-closes stale issues
+- **Doctor Dog**: runs gc, kills zombie servers, detects orphan DBs
+- **JSONL Dog**: scrubs exports, rejects pollution, spike-detects before commit
+- **Janitor Dog**: cleans test server (port 3308)
+
 ## Standalone Beads Note
 
 The `bd` CLI retains an embedded Dolt option for standalone use (outside

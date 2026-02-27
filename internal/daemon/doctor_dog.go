@@ -337,25 +337,42 @@ func (d *Daemon) doctorDogZombieCheck(expectedPort int) {
 	}
 }
 
-// doctorDogBackupStalenessCheck checks if the backup directory mtime is stale.
+// doctorDogBackupStalenessCheck checks if backups are stale by finding the most
+// recently modified file across all backup subdirectories. Parent directory mtime
+// doesn't update when files inside subdirectories change, so we walk the tree.
 func (d *Daemon) doctorDogBackupStalenessCheck() {
 	backupDir := filepath.Join(d.config.TownRoot, ".dolt-backup")
-	info, err := os.Stat(backupDir)
-	if os.IsNotExist(err) {
+	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
 		d.logger.Printf("doctor_dog: backup check: %s does not exist, skipping", backupDir)
 		return
 	}
+
+	var newest time.Time
+	err := filepath.Walk(backupDir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		if !info.IsDir() && info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		return nil
+	})
 	if err != nil {
-		d.logger.Printf("doctor_dog: backup check: stat error: %v", err)
+		d.logger.Printf("doctor_dog: backup check: walk error: %v", err)
+		return
+	}
+	if newest.IsZero() {
+		d.logger.Printf("doctor_dog: backup check: no files found in %s", backupDir)
+		d.escalate("doctor_dog", fmt.Sprintf("Backup directory %s contains no files", backupDir))
 		return
 	}
 
-	age := time.Since(info.ModTime())
+	age := time.Since(newest)
 	if age > doctorDogBackupStaleAge {
-		d.logger.Printf("doctor_dog: backup check: backup is %v old (threshold %v)", age, doctorDogBackupStaleAge)
-		d.escalate("doctor_dog", fmt.Sprintf("Backup directory %s last modified %v ago (threshold %v)", backupDir, age.Round(time.Minute), doctorDogBackupStaleAge))
+		d.logger.Printf("doctor_dog: backup check: newest file is %v old (threshold %v)", age.Round(time.Second), doctorDogBackupStaleAge)
+		d.escalate("doctor_dog", fmt.Sprintf("Backup newest file %v ago (threshold %v)", age.Round(time.Minute), doctorDogBackupStaleAge))
 	} else {
-		d.logger.Printf("doctor_dog: backup check: backup is %v old (OK)", age.Round(time.Second))
+		d.logger.Printf("doctor_dog: backup check: newest file is %v old (OK)", age.Round(time.Second))
 	}
 }
 

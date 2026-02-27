@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
@@ -236,6 +237,10 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return handoffRemoteSession(townTmux, targetSession, restartCmd)
 	}
 
+	// Close any in-progress molecule steps before cycling (gt-e26g).
+	// Without this, patrol agents that handoff mid-cycle leak orphaned wisps.
+	cleanupMoleculeOnHandoff()
+
 	// Handing off ourselves - print feedback then respawn
 	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), currentSession)
 
@@ -356,6 +361,9 @@ func runHandoffAuto() error {
 		return nil
 	}
 
+	// Close any in-progress molecule steps before state save (gt-e26g).
+	cleanupMoleculeOnHandoff()
+
 	// Send handoff mail to self
 	beadID, err := sendHandoffMail(subject, message)
 	if err != nil {
@@ -460,6 +468,9 @@ func runHandoffCycle() error {
 		fmt.Printf("[cycle] Would execute: tmux respawn-pane -k -t %s <restart-cmd>\n", pane)
 		return nil
 	}
+
+	// Close any in-progress molecule steps before cycling (gt-e26g).
+	cleanupMoleculeOnHandoff()
 
 	// Send handoff mail to self (auto-hooked for successor)
 	beadID, err := sendHandoffMail(subject, message)
@@ -1445,4 +1456,81 @@ func collectGitState() string {
 	}
 
 	return "## Workspace State\n" + strings.Join(lines, "\n")
+}
+
+// cleanupMoleculeOnHandoff closes any in-progress molecule steps before session
+// handoff, preventing orphaned wisps from accumulating. (gt-e26g)
+//
+// Without this, patrol agents (witness, refinery, deacon) that handoff mid-cycle
+// leave unfinished molecule steps open forever. The next session pours a new
+// molecule, so the old steps are never completed.
+//
+// All errors are non-fatal — handoff must succeed even if cleanup fails.
+func cleanupMoleculeOnHandoff() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return
+	}
+
+	// Detect agent identity
+	roleInfo, err := GetRoleWithContext(cwd, townRoot)
+	if err != nil {
+		return
+	}
+	roleCtx := RoleContext{
+		Role:     roleInfo.Role,
+		Rig:      roleInfo.Rig,
+		Polecat:  roleInfo.Polecat,
+		TownRoot: townRoot,
+		WorkDir:  cwd,
+	}
+	agentID := buildAgentIdentity(roleCtx)
+	if agentID == "" {
+		return
+	}
+
+	workDir, err := findLocalBeadsDir()
+	if err != nil {
+		return
+	}
+
+	b := beads.New(workDir)
+
+	// Extract the role name for FindHandoffBead
+	parts := strings.Split(agentID, "/")
+	role := parts[len(parts)-1]
+
+	handoffBead, err := b.FindHandoffBead(role)
+	if err != nil || handoffBead == nil {
+		return
+	}
+
+	// Check for attached molecule on the handoff bead
+	attachment := beads.ParseAttachmentFields(handoffBead)
+	if attachment == nil || attachment.AttachedMolecule == "" {
+		return
+	}
+
+	molID := attachment.AttachedMolecule
+
+	// Close descendant steps (the leaked wisps)
+	if n := closeDescendants(b, molID); n > 0 {
+		fmt.Fprintf(os.Stderr, "handoff: closed %d molecule step(s) for %s\n", n, molID)
+	}
+
+	// Detach molecule with audit trail
+	b.DetachMoleculeWithAudit(handoffBead.ID, beads.DetachOptions{
+		Operation: "squash",
+		Reason:    "handoff: session cycling",
+	})
+
+	// Force-close the molecule root wisp
+	if err := b.ForceCloseWithReason("handoff", molID); err != nil {
+		fmt.Fprintf(os.Stderr, "handoff: warning: couldn't close molecule %s: %v\n", molID, err)
+	}
 }
