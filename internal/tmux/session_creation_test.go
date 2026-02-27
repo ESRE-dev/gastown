@@ -60,12 +60,12 @@ func TestNewSessionWithCommand_Success(t *testing.T) {
 	_ = tm.KillSession(session)
 	defer func() { _ = tm.KillSession(session) }()
 
-	err := tm.NewSessionWithCommand(session, "", `echo "SESSION_OK"`)
+	err := tm.NewSessionWithCommand(session, "", `sh -c 'echo "SESSION_OK"; sleep 10'`)
 	if err != nil {
 		t.Fatalf("NewSessionWithCommand failed: %v", err)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 	output, _ := tm.CapturePane(session, 50)
 	if !strings.Contains(output, "SESSION_OK") {
 		t.Errorf("expected output to contain SESSION_OK, got: %q", strings.TrimSpace(output))
