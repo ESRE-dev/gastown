@@ -558,7 +558,13 @@ func getCurrentTmuxSession() (string, error) {
 		// Fall through to tmux detection if role resolution fails
 	}
 
-	out, err := tmux.BuildCommand("display-message", "-p", "#{session_name}").Output()
+	// Use TMUX_PANE for targeted display-message to avoid returning an
+	// arbitrary session when multiple sessions share the town socket.
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		return "", fmt.Errorf("TMUX_PANE not set")
+	}
+	out, err := tmux.BuildCommand("display-message", "-t", pane, "-p", "#{session_name}").Output()
 	if err != nil {
 		return "", err
 	}

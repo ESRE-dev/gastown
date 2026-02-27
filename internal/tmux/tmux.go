@@ -2891,16 +2891,14 @@ func SocketFromEnv() string {
 }
 
 // CurrentSessionName returns the tmux session name for the current process.
-// It parses the TMUX environment variable (format: socket,pid,session_index)
-// and queries tmux for the session name. Returns empty string if not in tmux.
+// Uses TMUX_PANE to target the caller's actual pane, avoiding tmux picking
+// a random session when multiple sessions exist. Returns empty string if not in tmux.
 func CurrentSessionName() string {
-	tmuxEnv := os.Getenv("TMUX")
-	if tmuxEnv == "" {
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
 		return ""
 	}
-	// TMUX format: /path/to/socket,server_pid,session_index
-	// We can use display-message to get the session name directly
-	out, err := BuildCommand("display-message", "-p", "#{session_name}").Output()
+	out, err := BuildCommand("display-message", "-t", pane, "-p", "#{session_name}").Output()
 	if err != nil {
 		return ""
 	}
