@@ -937,6 +937,12 @@ func (m *DoltServerManager) checkHealthLocked() error {
 	// 3. Disk space (best-effort, non-fatal)
 	m.checkDiskUsage()
 
+	// 4. Database count (best-effort, non-fatal) — orphan detection
+	m.checkDatabaseCount()
+
+	// 5. Backup freshness (best-effort, non-fatal)
+	m.checkBackupFreshness()
+
 	return nil
 }
 
@@ -995,6 +1001,56 @@ func (m *DoltServerManager) checkDiskUsage() {
 	const gb = 1024 * 1024 * 1024
 	if total > gb {
 		m.logger("Warning: Dolt data directory %s is %.1f GB", dataDir, float64(total)/float64(gb))
+	}
+}
+
+// checkDatabaseCount queries the database list and warns if the count exceeds
+// a threshold (orphan/phantom database detection). Non-fatal: failures are silently ignored.
+// Threshold is intentionally generous — accounts for all registered rigs plus headroom.
+func (m *DoltServerManager) checkDatabaseCount() {
+	databases, err := m.getDatabases()
+	if err != nil {
+		return // non-fatal
+	}
+
+	// Expected: one database per rig (hq, beads, gastown, wyvern, sky, beads_hop, etc.)
+	// plus potential new rigs the user adds. Threshold of 10 gives plenty of headroom.
+	const orphanThreshold = 10
+	if len(databases) > orphanThreshold {
+		m.logger("Warning: %d databases detected (threshold %d) — possible orphan/test database accumulation: %v",
+			len(databases), orphanThreshold, databases)
+	}
+}
+
+// checkBackupFreshness checks if Dolt backups are fresh. Warns if any configured
+// backup database hasn't been synced in over 2 hours. Non-fatal: failures are silently ignored.
+func (m *DoltServerManager) checkBackupFreshness() {
+	backupDir := filepath.Join(m.townRoot, ".dolt-backup")
+	info, err := os.Stat(backupDir)
+	if err != nil || !info.IsDir() {
+		return // No backup directory — backup patrol may not be configured
+	}
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		return
+	}
+
+	const staleThreshold = 2 * time.Hour
+	now := time.Now()
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dbInfo, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		age := now.Sub(dbInfo.ModTime())
+		if age > staleThreshold {
+			m.logger("Warning: Dolt backup %q is %.0f minutes old (threshold %.0fm) — backup patrol may be stalled",
+				entry.Name(), age.Minutes(), staleThreshold.Minutes())
+		}
 	}
 }
 
