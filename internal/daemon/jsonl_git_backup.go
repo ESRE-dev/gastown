@@ -268,7 +268,8 @@ func (d *Daemon) exportTableToJsonl(db, table, query, dir, dataDir string) (int,
 // databases, so partial failures are visible in git history.
 func (d *Daemon) commitAndPushJsonlBackup(gitRepo string, databases []string, counts map[string]int, failed []string) error {
 	// Stage all JSONL files (flat legacy files + subdirectory structure).
-	if err := d.runGitCmd(gitRepo, gitCmdTimeout, "add", "-A", "*.jsonl", "*/"); err != nil {
+	// Use "." instead of "*/" to correctly handle initially-untracked subdirectories.
+	if err := d.runGitCmd(gitRepo, gitCmdTimeout, "add", "-A", "."); err != nil {
 		return fmt.Errorf("git add: %w", err)
 	}
 
