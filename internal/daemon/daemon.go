@@ -371,6 +371,18 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Wisp reaper ticker started (interval %v)", interval)
 	}
 
+	// Start doctor dog ticker if configured.
+	// Health monitor: TCP check, latency, DB count, gc, zombie detection, backup/disk checks.
+	var doctorDogTicker *time.Ticker
+	var doctorDogChan <-chan time.Time
+	if IsPatrolEnabled(d.patrolConfig, "doctor_dog") {
+		interval := doctorDogInterval(d.patrolConfig)
+		doctorDogTicker = time.NewTicker(interval)
+		doctorDogChan = doctorDogTicker.C
+		defer doctorDogTicker.Stop()
+		d.logger.Printf("Doctor dog ticker started (interval %v)", interval)
+	}
+
 	// Note: PATCH-010 uses per-session hooks in deacon/manager.go (SetAutoRespawnHook).
 	// Global pane-died hooks don't fire reliably in tmux 3.2a, so we rely on the
 	// per-session approach which has been tested to work for continuous recovery.
@@ -427,6 +439,13 @@ func (d *Daemon) Run() error {
 			// old patrol data) to prevent unbounded table growth (Clown Show audit).
 			if !d.isShutdownInProgress() {
 				d.reapWisps()
+			}
+
+		case <-doctorDogChan:
+			// Doctor dog — comprehensive Dolt health monitor: connectivity, latency,
+			// gc, zombie detection, backup staleness, and disk usage checks.
+			if !d.isShutdownInProgress() {
+				d.runDoctorDog()
 			}
 
 		case <-timer.C:
