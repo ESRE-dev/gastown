@@ -1,15 +1,18 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,7 +23,18 @@ const (
 	gitPushTimeout                = 120 * time.Second
 	gitCmdTimeout                 = 30 * time.Second
 	maxConsecutivePushFailures    = 3
+	defaultSpikeThreshold         = 0.20 // 20% delta triggers halt
 )
+
+// testPollutionPatterns matches issue IDs or titles that indicate test data leaked
+// into production exports. These records are filtered out before writing JSONL.
+var testPollutionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^Test Issue`),                              // title: "Test Issue ..."
+	regexp.MustCompile(`(?i)^test[_\s]`),                               // title: "test_something" or "test something"
+	regexp.MustCompile(`^bd-[0-9]{1,2}$`),                              // id: bd-1, bd-99 (suspiciously short IDs)
+	regexp.MustCompile(`^bd-[a-z]{3,5}[0-9]{1,2}$`),                   // id: bd-abc12 (test-style IDs)
+	regexp.MustCompile(`^(testdb_|beads_t|beads_pt|doctest_)`),         // id prefixes from test databases
+}
 
 // validDBName matches safe database names (alphanumeric + underscore only).
 var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
@@ -121,6 +135,24 @@ func (d *Daemon) syncJsonlGitBackup() {
 	if exported == 0 {
 		d.logger.Printf("jsonl_git_backup: no databases exported successfully")
 		return
+	}
+
+	// Phase D: Pollution firewall — filter test data from exports.
+	removed := d.applyPollutionFilter(gitRepo, databases)
+	if removed > 0 {
+		d.logger.Printf("jsonl_git_backup: filtered %d total test-pollution record(s)", removed)
+		// Recount after filtering so spike detection uses accurate numbers.
+		recountAfterFilter(gitRepo, databases, counts)
+	}
+
+	// Phase D: Spike detection — compare current counts to previous commit.
+	threshold := spikeThreshold(config)
+	spikes := d.verifyExportCounts(gitRepo, databases, counts, threshold)
+	if len(spikes) > 0 {
+		report := formatSpikeReport(spikes)
+		d.logger.Printf("jsonl_git_backup: HALTING — spike detected:\n%s", report)
+		d.escalate("jsonl_git_backup", report)
+		return // Do NOT commit — spike detected.
 	}
 
 	// Commit and push if anything changed.
@@ -339,4 +371,235 @@ func (d *Daemon) escalate(source, message string) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		d.logger.Printf("jsonl_git_backup: escalation failed: %v (%s)", err, strings.TrimSpace(string(output)))
 	}
+}
+
+// spikeThreshold returns the configured spike threshold or the default (20%).
+func spikeThreshold(config *JsonlGitBackupConfig) float64 {
+	if config != nil && config.SpikeThreshold != nil {
+		t := *config.SpikeThreshold
+		if t > 0 && t <= 1.0 {
+			return t
+		}
+	}
+	return defaultSpikeThreshold
+}
+
+// isTestPollution checks if a JSONL record looks like test data that leaked into
+// production. Checks both "id" and "title" fields against known test patterns.
+func isTestPollution(record map[string]interface{}) bool {
+	for _, field := range []string{"id", "title"} {
+		val, ok := record[field]
+		if !ok {
+			continue
+		}
+		s, ok := val.(string)
+		if !ok {
+			continue
+		}
+		for _, pat := range testPollutionPatterns {
+			if pat.MatchString(s) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// filterTestPollution removes test-data records from a JSONL byte buffer.
+// Returns the filtered buffer and the number of records removed.
+func filterTestPollution(data []byte) ([]byte, int) {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	// Increase buffer for large JSONL lines.
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+
+	var out bytes.Buffer
+	removed := 0
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var record map[string]interface{}
+		if err := json.Unmarshal(line, &record); err != nil {
+			// Can't parse — keep it (don't silently drop unknown data).
+			out.Write(line)
+			out.WriteByte('\n')
+			continue
+		}
+		if isTestPollution(record) {
+			removed++
+			continue
+		}
+		out.Write(line)
+		out.WriteByte('\n')
+	}
+	return out.Bytes(), removed
+}
+
+// previousCommitLineCount returns the line count of a file in the previous git
+// commit (HEAD). Returns 0, nil if the file doesn't exist in HEAD (first export).
+func previousCommitLineCount(gitRepo, relPath string) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "-C", gitRepo, "show", "HEAD:"+relPath)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	// stderr intentionally not captured — "does not exist" is an expected case.
+
+	if err := cmd.Run(); err != nil {
+		// File doesn't exist in HEAD — first export, no baseline.
+		return 0, nil
+	}
+
+	lines := 0
+	scanner := bufio.NewScanner(&stdout)
+	for scanner.Scan() {
+		lines++
+	}
+	return lines, nil
+}
+
+// spikeInfo holds the result of a spike check for a single database file.
+type spikeInfo struct {
+	DB       string
+	File     string
+	Previous int
+	Current  int
+	Delta    float64 // absolute fractional change (0.0–1.0+)
+}
+
+// verifyExportCounts compares current export line counts against the previous
+// commit for each database. Returns a list of anomalies that exceed the spike
+// threshold. On first export (no baseline), verification is skipped.
+func (d *Daemon) verifyExportCounts(gitRepo string, databases []string, counts map[string]int, threshold float64) []spikeInfo {
+	var spikes []spikeInfo
+
+	for _, db := range databases {
+		currentCount, ok := counts[db]
+		if !ok {
+			continue // database failed export, skip
+		}
+
+		relPath := filepath.Join(db, "issues.jsonl")
+		prevCount, err := previousCommitLineCount(gitRepo, relPath)
+		if err != nil {
+			d.logger.Printf("jsonl_git_backup: verify: %s: error reading baseline: %v", db, err)
+			continue
+		}
+		if prevCount == 0 {
+			// First export — no baseline to compare against.
+			d.logger.Printf("jsonl_git_backup: verify: %s: first export (%d records), skipping spike check", db, currentCount)
+			continue
+		}
+
+		delta := math.Abs(float64(currentCount-prevCount)) / float64(prevCount)
+		if delta > threshold {
+			spike := spikeInfo{
+				DB:       db,
+				File:     relPath,
+				Previous: prevCount,
+				Current:  currentCount,
+				Delta:    delta,
+			}
+			spikes = append(spikes, spike)
+
+			direction := "jump"
+			if currentCount < prevCount {
+				direction = "drop"
+			}
+			d.logger.Printf("jsonl_git_backup: SPIKE DETECTED: %s: %s from %d to %d (%.1f%% %s, threshold %.1f%%)",
+				db, direction, prevCount, currentCount, delta*100, direction, threshold*100)
+		}
+	}
+	return spikes
+}
+
+// formatSpikeReport creates a human-readable summary of spike anomalies for escalation.
+func formatSpikeReport(spikes []spikeInfo) string {
+	var b strings.Builder
+	b.WriteString("JSONL export spike detection triggered:\n")
+	for _, s := range spikes {
+		direction := "JUMP (possible pollution)"
+		if s.Current < s.Previous {
+			direction = "DROP (possible data loss)"
+		}
+		fmt.Fprintf(&b, "  %s: %d → %d (%.1f%% change) — %s\n",
+			s.DB, s.Previous, s.Current, s.Delta*100, direction)
+	}
+	b.WriteString("Export halted. Manual review required.")
+	return b.String()
+}
+
+// countFileLines counts the number of non-empty lines in a file.
+func countFileLines(path string) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	for scanner.Scan() {
+		if len(scanner.Bytes()) > 0 {
+			count++
+		}
+	}
+	return count, scanner.Err()
+}
+
+// recountAfterFilter re-reads the issues.jsonl file for each database to get
+// accurate post-filter line counts. This is needed because counts from
+// exportDatabaseToJsonl reflect pre-filter totals.
+func recountAfterFilter(gitRepo string, databases []string, counts map[string]int) {
+	for _, db := range databases {
+		if _, ok := counts[db]; !ok {
+			continue
+		}
+		issuesPath := filepath.Join(gitRepo, db, "issues.jsonl")
+		n, err := countFileLines(issuesPath)
+		if err != nil {
+			continue
+		}
+		counts[db] = n
+	}
+}
+
+// applyPollutionFilter reads each database's issues.jsonl, filters out test
+// pollution records, and rewrites the file. Returns total records removed.
+func (d *Daemon) applyPollutionFilter(gitRepo string, databases []string) int {
+	totalRemoved := 0
+	for _, db := range databases {
+		issuesPath := filepath.Join(gitRepo, db, "issues.jsonl")
+		data, err := os.ReadFile(issuesPath)
+		if err != nil {
+			continue
+		}
+		filtered, removed := filterTestPollution(data)
+		if removed > 0 {
+			d.logger.Printf("jsonl_git_backup: %s: filtered %d test-pollution record(s)", db, removed)
+			if err := os.WriteFile(issuesPath, filtered, 0644); err != nil {
+				d.logger.Printf("jsonl_git_backup: %s: error writing filtered file: %v", db, err)
+				continue
+			}
+			// Also update legacy flat file.
+			legacyPath := filepath.Join(gitRepo, db+".jsonl")
+			_ = os.WriteFile(legacyPath, filtered, 0644)
+			totalRemoved += removed
+		}
+	}
+	return totalRemoved
+}
+
+// parseLineCount parses a line count from `wc -l` style output or plain integer.
+func parseLineCount(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	// wc -l output format: "  42 filename" or just "42"
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return 0, fmt.Errorf("empty input")
+	}
+	return strconv.Atoi(fields[0])
 }

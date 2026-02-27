@@ -181,6 +181,11 @@ type JsonlGitBackupConfig struct {
 	// Scrub controls whether ephemeral data is filtered out.
 	// Default: true
 	Scrub *bool `json:"scrub,omitempty"`
+
+	// SpikeThreshold is the maximum allowed percentage change in record counts
+	// between consecutive exports. If the delta exceeds this threshold (in either
+	// direction), the export is halted and escalated. Default: 0.20 (20%).
+	SpikeThreshold *float64 `json:"spike_threshold,omitempty"`
 }
 
 // DaemonPatrolConfig is the structure of mayor/daemon.json.

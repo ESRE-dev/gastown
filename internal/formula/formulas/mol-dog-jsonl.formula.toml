@@ -69,9 +69,42 @@ dolt sql -r json -q "SELECT * FROM <db>.issues <scrub_filter>" > <output>
 **Exit criteria:** All databases exported to JSONL."""
 
 [[steps]]
+id = "verify"
+title = "Verify export counts and filter pollution"
+needs = ["export"]
+description = """
+Verify export integrity before committing.
+
+**1. Filter test pollution:**
+Remove records matching test patterns from exported JSONL:
+- Titles starting with "Test Issue" or "test_"
+- IDs matching test patterns: bd-1, bd-abc12, testdb_*, beads_t*, etc.
+
+```go
+applyPollutionFilter(gitRepo, databases)
+```
+
+**2. Spike detection:**
+Compare current export record counts against previous commit:
+```go
+verifyExportCounts(gitRepo, databases, counts, threshold)
+```
+
+**3. Evaluate results:**
+- If delta > {{spike_threshold}} (default 20%) for ANY database → HALT
+- Log anomalies: sudden jumps = pollution, sudden drops = data loss
+- Escalate to Mayor with spike report
+- Do NOT proceed to commit/push
+
+**4. First export:**
+Skip verification when no baseline exists (previous commit has no file).
+
+**Exit criteria:** All databases within threshold, or halted with escalation."""
+
+[[steps]]
 id = "push"
 title = "Commit and push to git archive"
-needs = ["export"]
+needs = ["verify"]
 description = """
 Stage, commit, and push JSONL files to the archive repository.
 
@@ -154,6 +187,10 @@ default = ""
 [vars.scrub]
 description = "Whether to filter ephemeral data from exports"
 default = "true"
+
+[vars.spike_threshold]
+description = "Maximum allowed percentage change in record counts between exports (0.0-1.0)"
+default = "0.20"
 
 [vars.max_push_failures]
 description = "Consecutive push failures before escalation"
