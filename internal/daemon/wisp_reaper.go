@@ -94,7 +94,8 @@ func staleIssueAge(config *DaemonPatrolConfig) time.Duration {
 	return defaultStaleIssueAge
 }
 
-// reapWisps closes stale wisps across all configured databases.
+// reapWisps closes stale wisps and purges old closed wisps across all databases.
+// Tracks progress via mol-dog-reaper molecule lifecycle.
 // Non-fatal: errors are logged but don't stop the daemon.
 func (d *Daemon) reapWisps() {
 	if !IsPatrolEnabled(d.patrolConfig, "wisp_reaper") {
@@ -103,27 +104,40 @@ func (d *Daemon) reapWisps() {
 
 	config := d.patrolConfig.Patrols.WispReaper
 	maxAge := wispReaperMaxAge(d.patrolConfig)
-	cutoff := time.Now().UTC().Add(-maxAge)
+	deleteAge := wispDeleteAge(d.patrolConfig)
 
-	// Determine databases to reap.
+	// Pour molecule to track this patrol cycle.
+	mol := d.pourDogMolecule("mol-dog-reaper", map[string]string{
+		"max_age":   maxAge.String(),
+		"purge_age": deleteAge.String(),
+	})
+	defer mol.close()
+
+	// --- SCAN STEP: discover databases and count candidates ---
+
+	cutoff := time.Now().UTC().Add(-maxAge)
+	deleteCutoff := time.Now().UTC().Add(-deleteAge)
+	issueAge := staleIssueAge(d.patrolConfig)
+	issueCutoff := time.Now().UTC().Add(-issueAge)
+
 	databases := config.Databases
 	if len(databases) == 0 {
 		databases = d.discoverDoltDatabases()
 	}
 	if len(databases) == 0 {
 		d.logger.Printf("wisp_reaper: no databases to reap")
+		mol.failStep("scan", "no databases found")
 		return
 	}
 
-	deleteAge := wispDeleteAge(d.patrolConfig)
-	deleteCutoff := time.Now().UTC().Add(-deleteAge)
-	issueAge := staleIssueAge(d.patrolConfig)
-	issueCutoff := time.Now().UTC().Add(-issueAge)
+	d.logger.Printf("wisp_reaper: scanning %d databases", len(databases))
+	mol.closeStep("scan")
+
+	// --- REAP STEP: close stale wisps ---
 
 	totalReaped := 0
 	totalOpen := 0
-	totalDeleted := 0
-	totalIssuesClosed := 0
+	reapErrors := 0
 
 	for _, dbName := range databases {
 		if !validDBName.MatchString(dbName) {
@@ -131,10 +145,10 @@ func (d *Daemon) reapWisps() {
 			continue
 		}
 
-		// Pass 1: Close stale wisps.
 		reaped, open, err := d.reapWispsInDB(dbName, cutoff)
 		if err != nil {
 			d.logger.Printf("wisp_reaper: %s: close error: %v", dbName, err)
+			reapErrors++
 		} else {
 			totalReaped += reaped
 			totalOpen += open
@@ -144,20 +158,12 @@ func (d *Daemon) reapWisps() {
 			}
 		}
 
-		// Pass 2: Delete closed wisps older than delete age.
-		deleted, err := d.deleteClosedWispsInDB(dbName, deleteCutoff)
-		if err != nil {
-			d.logger.Printf("wisp_reaper: %s: delete error: %v", dbName, err)
-		} else {
-			totalDeleted += deleted
-		}
-
-		// Pass 3: Auto-close stale issues.
+		// Auto-close stale issues (part of the reap phase).
 		closed, err := d.autoCloseStaleIssuesInDB(dbName, issueCutoff)
 		if err != nil {
 			d.logger.Printf("wisp_reaper: %s: auto-close issues error: %v", dbName, err)
-		} else {
-			totalIssuesClosed += closed
+		} else if closed > 0 {
+			totalReaped += closed
 		}
 	}
 
@@ -165,20 +171,54 @@ func (d *Daemon) reapWisps() {
 		d.logger.Printf("wisp_reaper: total closed %d stale wisps across %d databases, %d open remain",
 			totalReaped, len(databases), totalOpen)
 	}
-	if totalDeleted > 0 {
-		d.logger.Printf("wisp_reaper: total deleted %d closed wisp rows across %d databases",
-			totalDeleted, len(databases))
-	}
-	if totalIssuesClosed > 0 {
-		d.logger.Printf("wisp_reaper: total auto-closed %d stale issues across %d databases",
-			totalIssuesClosed, len(databases))
+
+	if reapErrors > 0 {
+		mol.failStep("reap", fmt.Sprintf("%d databases had reap errors", reapErrors))
+	} else {
+		mol.closeStep("reap")
 	}
 
-	// Alert if open wisp count is too high.
+	// --- PURGE STEP: delete closed wisps older than purge age ---
+
+	totalPurged := 0
+	purgeErrors := 0
+
+	for _, dbName := range databases {
+		if !validDBName.MatchString(dbName) {
+			continue
+		}
+
+		purged, err := d.purgeClosedWispsInDB(dbName, deleteCutoff)
+		if err != nil {
+			d.logger.Printf("wisp_reaper: %s: purge error: %v", dbName, err)
+			purgeErrors++
+		} else {
+			totalPurged += purged
+		}
+	}
+
+	if totalPurged > 0 {
+		d.logger.Printf("wisp_reaper: total purged %d closed wisp rows across %d databases",
+			totalPurged, len(databases))
+	}
+
+	if purgeErrors > 0 {
+		mol.failStep("purge", fmt.Sprintf("%d databases had purge errors", purgeErrors))
+	} else {
+		mol.closeStep("purge")
+	}
+
+	// --- REPORT STEP: log summary and alert ---
+
 	if totalOpen > wispAlertThreshold {
 		d.logger.Printf("wisp_reaper: WARNING: %d open wisps exceed threshold %d — investigate wisp lifecycle",
 			totalOpen, wispAlertThreshold)
 	}
+
+	d.logger.Printf("wisp_reaper: cycle complete — reaped=%d purged=%d open=%d databases=%d",
+		totalReaped, totalPurged, totalOpen, len(databases))
+
+	mol.closeStep("report")
 }
 
 // reapWispsInDB closes stale wisps in a single database.
@@ -218,10 +258,10 @@ func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error
 	return int(reaped), openCount, nil
 }
 
-// deleteClosedWispsInDB deletes closed wisp rows (and their auxiliary data) older than
+// purgeClosedWispsInDB deletes closed wisp rows (and their auxiliary data) older than
 // the delete cutoff. Deletes in batches to avoid long-running transactions.
 // Returns the number of wisp rows deleted.
-func (d *Daemon) deleteClosedWispsInDB(dbName string, deleteCutoff time.Time) (int, error) {
+func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
