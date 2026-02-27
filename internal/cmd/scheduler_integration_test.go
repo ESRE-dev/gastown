@@ -43,11 +43,7 @@ var schedulerTestCounter atomic.Int32
 func initBeadsDBForServer(t *testing.T, dir, prefix string) {
 	t.Helper()
 
-	bdInitArgs := []string{"init", "--prefix", prefix}
-	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		bdInitArgs = append(bdInitArgs, "--server-port", p)
-	}
-	cmd := exec.Command("bd", bdInitArgs...)
+	cmd := exec.Command("bd", "init", "--prefix", prefix)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	t.Logf("bd init --prefix %s in %s: exit=%v\n%s", prefix, dir, err, out)
