@@ -112,8 +112,11 @@ func (d *Daemon) runDoctorDog() {
 	}
 	d.doctorDogZombieCheck(expectedPorts)
 
-	// 6. Backup staleness check
+	// 6. Backup staleness check (Dolt filesystem)
 	d.doctorDogBackupStalenessCheck()
+
+	// 6b. JSONL git backup freshness check
+	d.doctorDogJsonlBackupFreshnessCheck()
 
 	// 7. Disk usage per DB
 	d.doctorDogDiskUsageCheck()
@@ -389,6 +392,64 @@ func (d *Daemon) doctorDogBackupStalenessCheck() {
 		d.escalate("doctor_dog", fmt.Sprintf("Backup newest file %v ago (threshold %v)", age.Round(time.Minute), doctorDogBackupStaleAge))
 	} else {
 		d.logger.Printf("doctor_dog: backup check: newest file is %v old (OK)", age.Round(time.Second))
+	}
+}
+
+// doctorDogJsonlBackupFreshnessCheck checks if the JSONL git backup is current.
+// Alert threshold is 2x the configured JSONL backup interval (default: 30 min).
+func (d *Daemon) doctorDogJsonlBackupFreshnessCheck() {
+	// Determine the JSONL git repo path from config or default.
+	var gitRepo string
+	if d.patrolConfig != nil && d.patrolConfig.Patrols != nil && d.patrolConfig.Patrols.JsonlGitBackup != nil {
+		gitRepo = d.patrolConfig.Patrols.JsonlGitBackup.GitRepo
+	}
+	if gitRepo == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			d.logger.Printf("doctor_dog: jsonl backup check: cannot determine home dir: %v", err)
+			return
+		}
+		gitRepo = filepath.Join(homeDir, ".dolt-archive", "git")
+	}
+
+	if _, err := os.Stat(filepath.Join(gitRepo, ".git")); os.IsNotExist(err) {
+		d.logger.Printf("doctor_dog: jsonl backup check: %s not a git repo, skipping", gitRepo)
+		return
+	}
+
+	// Get the timestamp of the latest commit.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "-C", gitRepo, "log", "-1", "--format=%ci")
+	output, err := cmd.Output()
+	if err != nil {
+		d.logger.Printf("doctor_dog: jsonl backup check: git log failed: %v", err)
+		return
+	}
+
+	commitTimeStr := strings.TrimSpace(string(output))
+	if commitTimeStr == "" {
+		d.logger.Printf("doctor_dog: jsonl backup check: no commits in %s", gitRepo)
+		return
+	}
+
+	commitTime, err := time.Parse("2006-01-02 15:04:05 -0700", commitTimeStr)
+	if err != nil {
+		d.logger.Printf("doctor_dog: jsonl backup check: cannot parse commit time %q: %v", commitTimeStr, err)
+		return
+	}
+
+	// Stale threshold: 2x the configured JSONL backup interval.
+	interval := jsonlGitBackupInterval(d.patrolConfig)
+	staleThreshold := 2 * interval
+
+	age := time.Since(commitTime)
+	if age > staleThreshold {
+		d.logger.Printf("doctor_dog: jsonl backup check: last commit %v ago (threshold %v)", age.Round(time.Second), staleThreshold)
+		d.escalate("doctor_dog", fmt.Sprintf("JSONL git backup stale: last commit %v ago (threshold %v)", age.Round(time.Minute), staleThreshold))
+	} else {
+		d.logger.Printf("doctor_dog: jsonl backup check: last commit %v ago (OK)", age.Round(time.Second))
 	}
 }
 

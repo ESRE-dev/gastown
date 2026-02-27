@@ -418,17 +418,10 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Doctor dog ticker started (interval %v)", interval)
 	}
 
-	// Start janitor dog ticker if configured.
-	// Cleans up orphan test databases on the test server (port 3308).
-	var janitorDogTicker *time.Ticker
-	var janitorDogChan <-chan time.Time
-	if IsPatrolEnabled(d.patrolConfig, "janitor_dog") {
-		interval := janitorDogInterval(d.patrolConfig)
-		janitorDogTicker = time.NewTicker(interval)
-		janitorDogChan = janitorDogTicker.C
-		defer janitorDogTicker.Stop()
-		d.logger.Printf("Janitor dog ticker started (interval %v)", interval)
-	}
+	// Janitor dog: no longer uses a dedicated ticker.
+	// Dispatched via plugin system (dolt-janitor/plugin.md) through handleDogs().
+	// See docs/design/dog-execution-model.md for rationale.
+	var janitorDogChan <-chan time.Time // nil channel — never fires
 
 	// Start compactor dog ticker if configured.
 	// Flattens Dolt commit history to reclaim graph storage (daily).

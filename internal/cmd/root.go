@@ -68,6 +68,7 @@ var beadsExemptCommands = map[string]bool{
 	"metrics":       true, // Metrics reads local JSONL, no beads needed
 	"krc":           true, // KRC doesn't require beads
 	"run-migration":       true, // Migration orchestrator handles its own beads checks
+	"health":              true, // Health check doesn't require beads
 }
 
 // Commands exempt from the town root branch warning.
