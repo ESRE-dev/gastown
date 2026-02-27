@@ -163,7 +163,15 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	t := tmux.NewTmux()
+	// Use a socket-aware Tmux for pane operations. The calling process may be
+	// on a different tmux server than the town socket (e.g., default socket).
+	// For self-handoff, pane operations (clear-history, respawn-pane) must target
+	// the caller's own server. SocketFromEnv() reads $TMUX to find the right one.
+	callerSocket := tmux.SocketFromEnv()
+	t := tmux.NewTmuxWithSocket(callerSocket)
+	// Town-socket Tmux for session-level queries (getSessionPane, etc.)
+	townTmux := tmux.NewTmux()
+	_ = townTmux // used later for remote handoff
 
 	// Verify we're in tmux
 	if !tmux.IsInsideTmux() {
@@ -175,20 +183,10 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("TMUX_PANE not set - cannot hand off")
 	}
 
-	// Get current session name
+	// Get current session name from GT_ROLE (preferred) or tmux display-message.
 	currentSession, err := getCurrentTmuxSession()
 	if err != nil {
 		return fmt.Errorf("getting session name: %w", err)
-	}
-
-	// Resolve the actual pane ID from the live tmux session. TMUX_PANE can be
-	// stale if the session was respawned since this process started (e.g., boot
-	// watchdog respawns panes but child processes retain the old TMUX_PANE).
-	if livePane, err := getSessionPane(currentSession); err == nil && livePane != "" {
-		if livePane != pane {
-			style.PrintWarning("TMUX_PANE %s is stale, using live pane %s", pane, livePane)
-			pane = livePane
-		}
 	}
 
 	// Warn if workspace has uncommitted or unpushed work (wa-7967c).
@@ -230,11 +228,12 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// If handing off a different session, we need to find its pane and respawn there
+	// If handing off a different session, we need to find its pane and respawn there.
+	// Remote sessions live on the town socket, so use townTmux for their operations.
 	if targetSession != currentSession {
 		// Update tmux session env before respawn (not during dry-run — see below)
-		updateSessionEnvForHandoff(t, targetSession, "")
-		return handoffRemoteSession(t, targetSession, restartCmd)
+		updateSessionEnvForHandoff(townTmux, targetSession, "")
+		return handoffRemoteSession(townTmux, targetSession, restartCmd)
 	}
 
 	// Handing off ourselves - print feedback then respawn
@@ -450,15 +449,9 @@ func runHandoffCycle() error {
 		return runHandoffAuto()
 	}
 
-	// Resolve stale TMUX_PANE (same fix as runHandoff — see comment there)
-	if livePane, err := getSessionPane(currentSession); err == nil && livePane != "" {
-		if livePane != pane {
-			fmt.Fprintf(os.Stderr, "handoff --cycle: TMUX_PANE %s stale, using live pane %s\n", pane, livePane)
-			pane = livePane
-		}
-	}
-
-	t := tmux.NewTmux()
+	// Use the caller's socket for pane operations (same as runHandoff).
+	callerSocket := tmux.SocketFromEnv()
+	t := tmux.NewTmuxWithSocket(callerSocket)
 
 	if handoffDryRun {
 		fmt.Printf("[cycle] Would send handoff mail: subject=%q\n", subject)
@@ -541,6 +534,19 @@ func runHandoffCycle() error {
 
 // getCurrentTmuxSession returns the current tmux session name.
 func getCurrentTmuxSession() (string, error) {
+	// Prefer GT_ROLE for session resolution. BuildCommand uses -L <town-socket>,
+	// but the calling process may live on the default socket (e.g., Claude Code
+	// spawned by tmux on the default server). In that case, display-message on
+	// the town socket returns an arbitrary session (often hq-boot) instead of
+	// the caller's actual session.
+	if role := os.Getenv("GT_ROLE"); role != "" {
+		resolved, err := resolveRoleToSession(role)
+		if err == nil && resolved != "" {
+			return resolved, nil
+		}
+		// Fall through to tmux detection if role resolution fails
+	}
+
 	out, err := tmux.BuildCommand("display-message", "-p", "#{session_name}").Output()
 	if err != nil {
 		return "", err
