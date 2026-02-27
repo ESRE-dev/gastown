@@ -119,9 +119,44 @@ retention window. Active wisps are never touched.
 **Exit criteria:** Old closed wisps purged."""
 
 [[steps]]
+id = "auto-close"
+title = "Auto-close stale issues"
+needs = ["purge"]
+description = """
+Close issues that have been open with no status change for >30 days.
+
+**1. For each production database, find stale issues:**
+```sql
+-- Candidates: open >30 days, not updated, not P0/P1, not epic
+SELECT id, title, updated_at FROM issues
+WHERE status IN ('open', 'in_progress')
+AND updated_at < NOW() - INTERVAL {{stale_issue_age}}
+AND priority > 1
+AND issue_type != 'epic'
+AND id NOT IN (
+  -- Exclude issues with active dependencies (blocking or blocked-by open issues)
+  SELECT DISTINCT d.issue_id FROM dependencies d
+  INNER JOIN issues i ON d.depends_on_id = i.id
+  WHERE i.status IN ('open', 'in_progress')
+  UNION
+  SELECT DISTINCT d.depends_on_id FROM dependencies d
+  INNER JOIN issues i ON d.issue_id = i.id
+  WHERE i.status IN ('open', 'in_progress')
+)
+```
+
+**2. Close each candidate with reason 'stale:auto-closed by reaper'.**
+
+**3. Log each closure:** issue ID, title, age, database.
+
+**4. Record total closed for report.**
+
+**Exit criteria:** All eligible stale issues auto-closed."""
+
+[[steps]]
 id = "report"
 title = "Report findings and return to kennel"
-needs = ["purge"]
+needs = ["auto-close"]
 description = """
 Generate summary and signal completion.
 
@@ -132,6 +167,7 @@ Generate summary and signal completion.
 **Databases scanned**: {{db_count}}
 **Wisps reaped**: {{reap_count}} (closed stale open wisps)
 **Wisps purged**: {{purge_count}} (deleted old closed wisps)
+**Issues auto-closed**: {{issues_closed}} (stale >30 days, excl. epics/P0-P1/deps)
 **Open wisps remaining**: {{open_count}}
 
 ### Per Database
@@ -145,6 +181,7 @@ Generate summary and signal completion.
 gt mail send deacon/ -s "DOG_DONE: reaper" -m "Task: wisp-reaper
 Reaped: {{reap_count}}
 Purged: {{purge_count}}
+Issues auto-closed: {{issues_closed}}
 Open remaining: {{open_count}}
 Status: COMPLETE"
 ```
@@ -160,6 +197,10 @@ default = "24h"
 description = "Max closed wisp age before purging (e.g., '168h' = 7 days)"
 default = "168h"
 
+[vars.stale_issue_age]
+description = "Max issue staleness before auto-close (e.g., '720h' = 30 days)"
+default = "720h"
+
 [vars.db_count]
 description = "Number of databases scanned (computed during execution)"
 default = ""
@@ -170,6 +211,10 @@ default = ""
 
 [vars.purge_count]
 description = "Total wisps purged (computed during execution)"
+default = ""
+
+[vars.issues_closed]
+description = "Total issues auto-closed (computed during execution)"
 default = ""
 
 [vars.open_count]

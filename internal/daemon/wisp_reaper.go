@@ -369,7 +369,12 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 }
 
 // autoCloseStaleIssuesInDB closes issues that have been open with no status change
-// for longer than the stale cutoff. Exempts P0 and P1 issues (priority <= 1).
+// for longer than the stale cutoff. Excludes:
+//   - P0 and P1 issues (priority <= 1)
+//   - Epics (issue_type = 'epic')
+//   - Issues with active dependencies (blocking or blocked-by open issues)
+//
+// Logs each closure individually with issue ID, title, age, and database.
 // Returns the number of issues auto-closed.
 func (d *Daemon) autoCloseStaleIssuesInDB(dbName string, staleCutoff time.Time) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), wispReaperQueryTimeout)
@@ -392,23 +397,121 @@ func (d *Daemon) autoCloseStaleIssuesInDB(dbName string, staleCutoff time.Time) 
 		return 0, nil
 	}
 
-	// Auto-close stale issues: open >30 days, priority > 1 (exempt P0/P1).
-	// Use updated_at as proxy for "last status change".
-	closeQuery := fmt.Sprintf(
-		"UPDATE `%s`.issues SET status='closed', closed_at=NOW(), close_reason='stale:auto-closed by reaper' WHERE status IN ('open', 'in_progress') AND updated_at < ? AND priority > 1",
-		dbName)
-	result, err := db.ExecContext(ctx, closeQuery, staleCutoff)
+	// Find stale issue candidates: open >30 days, priority > 1 (exempt P0/P1),
+	// not epics, and not linked to any open issues via dependencies.
+	// We SELECT first (instead of blind UPDATE) so we can log each closure individually.
+	candidateQuery := fmt.Sprintf(
+		`SELECT id, title, updated_at FROM `+"`%s`"+`.issues
+		WHERE status IN ('open', 'in_progress')
+		AND updated_at < ?
+		AND priority > 1
+		AND issue_type != 'epic'
+		AND id NOT IN (
+			SELECT DISTINCT d.issue_id FROM `+"`%s`"+`.dependencies d
+			INNER JOIN `+"`%s`"+`.issues i ON d.depends_on_id = i.id
+			WHERE i.status IN ('open', 'in_progress')
+		)
+		AND id NOT IN (
+			SELECT DISTINCT d.depends_on_id FROM `+"`%s`"+`.dependencies d
+			INNER JOIN `+"`%s`"+`.issues i ON d.issue_id = i.id
+			WHERE i.status IN ('open', 'in_progress')
+		)`,
+		dbName, dbName, dbName, dbName, dbName)
+
+	rows, err := db.QueryContext(ctx, candidateQuery, staleCutoff)
 	if err != nil {
-		return 0, fmt.Errorf("auto-close stale issues: %w", err)
+		// Dependencies table might not exist — fall back to simpler query without dep check.
+		return d.autoCloseStaleIssuesSimple(ctx, db, dbName, staleCutoff)
+	}
+	defer rows.Close()
+
+	var candidates []struct {
+		id        string
+		title     string
+		updatedAt time.Time
+	}
+	for rows.Next() {
+		var c struct {
+			id        string
+			title     string
+			updatedAt time.Time
+		}
+		if err := rows.Scan(&c.id, &c.title, &c.updatedAt); err != nil {
+			return 0, fmt.Errorf("scan candidate: %w", err)
+		}
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate candidates: %w", err)
 	}
 
-	closed, _ := result.RowsAffected()
-	if closed > 0 {
-		d.logger.Printf("wisp_reaper: %s: auto-closed %d stale issues (unchanged for >%v, priority > P1)",
-			dbName, closed, defaultStaleIssueAge)
+	if len(candidates) == 0 {
+		return 0, nil
 	}
 
-	return int(closed), nil
+	// Close each candidate and log individually.
+	closed := 0
+	now := time.Now().UTC()
+	for _, c := range candidates {
+		closeQuery := fmt.Sprintf(
+			"UPDATE `%s`.issues SET status='closed', closed_at=NOW(), close_reason='stale:auto-closed by reaper' WHERE id = ? AND status IN ('open', 'in_progress')",
+			dbName)
+		result, err := db.ExecContext(ctx, closeQuery, c.id)
+		if err != nil {
+			d.logger.Printf("wisp_reaper: %s: failed to auto-close %s: %v", dbName, c.id, err)
+			continue
+		}
+		affected, _ := result.RowsAffected()
+		if affected > 0 {
+			age := now.Sub(c.updatedAt).Truncate(time.Hour)
+			d.logger.Printf("wisp_reaper: %s: auto-closed %s %q (age: %v)", dbName, c.id, c.title, age)
+			closed++
+		}
+	}
+
+	return closed, nil
+}
+
+// autoCloseStaleIssuesSimple is a fallback for databases without a dependencies table.
+// Closes stale issues excluding epics and P0/P1, but cannot check dependencies.
+func (d *Daemon) autoCloseStaleIssuesSimple(ctx context.Context, db *sql.DB, dbName string, staleCutoff time.Time) (int, error) {
+	// Find candidates without dependency check.
+	candidateQuery := fmt.Sprintf(
+		"SELECT id, title, updated_at FROM `%s`.issues WHERE status IN ('open', 'in_progress') AND updated_at < ? AND priority > 1 AND issue_type != 'epic'",
+		dbName)
+
+	rows, err := db.QueryContext(ctx, candidateQuery, staleCutoff)
+	if err != nil {
+		return 0, fmt.Errorf("auto-close stale issues (simple): %w", err)
+	}
+	defer rows.Close()
+
+	closed := 0
+	now := time.Now().UTC()
+	for rows.Next() {
+		var id, title string
+		var updatedAt time.Time
+		if err := rows.Scan(&id, &title, &updatedAt); err != nil {
+			return closed, fmt.Errorf("scan candidate: %w", err)
+		}
+
+		closeQuery := fmt.Sprintf(
+			"UPDATE `%s`.issues SET status='closed', closed_at=NOW(), close_reason='stale:auto-closed by reaper' WHERE id = ? AND status IN ('open', 'in_progress')",
+			dbName)
+		result, err := db.ExecContext(ctx, closeQuery, id)
+		if err != nil {
+			d.logger.Printf("wisp_reaper: %s: failed to auto-close %s: %v", dbName, id, err)
+			continue
+		}
+		affected, _ := result.RowsAffected()
+		if affected > 0 {
+			age := now.Sub(updatedAt).Truncate(time.Hour)
+			d.logger.Printf("wisp_reaper: %s: auto-closed %s %q (age: %v, no dep check)", dbName, id, title, age)
+			closed++
+		}
+	}
+
+	return closed, nil
 }
 
 // joinStrings joins strings with a separator. Simple helper to avoid importing strings.
