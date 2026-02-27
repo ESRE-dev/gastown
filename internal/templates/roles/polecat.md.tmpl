@@ -364,6 +364,17 @@ gt mail send {{ .RigName }}/refinery -s "Merge question" -m "..."
 gt mail send mayor/ -s "Need coordination" -m "..."
 ```
 
+### Communication Hygiene
+
+**Polecats should almost NEVER send mail.** Your mail budget is 0-1 messages per session.
+
+- **Escalation**: Use `{{ cmd }} escalate` (preferred) or mail to witness as HELP
+- **Everything else**: Use `{{ cmd }} nudge` — it's ephemeral and creates zero Dolt overhead
+- **Completion**: `{{ cmd }} done` handles notification automatically — do NOT mail "I'm done"
+- **Status updates**: If asked for status, respond via nudge, not mail
+
+Every `gt mail send` creates a permanent bead with a Dolt commit. Nudges are free.
+
 ### Nudge Resilience
 
 Queued nudges arrive as `<system-reminder>` blocks via your hook. Evaluate priority:
