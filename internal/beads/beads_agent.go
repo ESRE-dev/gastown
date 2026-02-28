@@ -33,6 +33,30 @@ func (b *Beads) lockAgentBead(id string) (*flock.Flock, error) {
 	return fl, nil
 }
 
+// Agent state constants. These are the known values for AgentFields.AgentState.
+const (
+	AgentStateSpawning  = "spawning"
+	AgentStateWorking   = "working"
+	AgentStateRunning   = "running"
+	AgentStateDone      = "done"
+	AgentStateStuck     = "stuck"
+	AgentStateEscalated = "escalated"
+	AgentStateIdle      = "idle"
+	AgentStateNuked     = "nuked"
+)
+
+// IsActiveAgentState returns true if the given agent state indicates the agent
+// was actively working. Used by zombie detection to distinguish stale (was doing
+// work) from orphan (no evidence of recent work) zombies.
+func IsActiveAgentState(state string) bool {
+	switch state {
+	case AgentStateWorking, AgentStateRunning, AgentStateSpawning:
+		return true
+	default:
+		return false
+	}
+}
+
 // AgentFields holds structured fields for agent beads.
 // These are stored as "key: value" lines in the description.
 type AgentFields struct {
@@ -60,9 +84,8 @@ type AgentFields struct {
 // Agent state constants for the agent_state field in agent beads.
 // These represent the beads-level agent lifecycle state, which is distinct from
 // the polecat.State lifecycle type (though values overlap).
+// Note: AgentStateIdle and AgentStateStuck are declared above in the primary block.
 const (
-	AgentStateIdle         = "idle"          // Available for new work
-	AgentStateStuck        = "stuck"         // Explicitly signaled need for assistance
 	AgentStateAwaitingGate = "awaiting-gate" // Waiting for a gate condition, intentional pause
 )
 
