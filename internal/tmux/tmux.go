@@ -2739,6 +2739,7 @@ func sessionPrefixPattern() string {
 // within the appropriate group:
 // - Town sessions: Mayor ↔ Deacon
 // - Crew sessions: All crew members in the same rig
+// - Rig ops sessions: Witness + Refinery + Polecats in the same rig
 //
 // IMPORTANT: These bindings are conditional - they only run gt cycle for
 // Gas Town sessions (those matching a registered rig prefix or "hq-").
