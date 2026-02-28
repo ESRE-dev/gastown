@@ -111,18 +111,12 @@ func SetDefaultRegistry(r *PrefixRegistry) {
 func InitRegistry(townRoot string) error {
 	var errs []error
 
-	// Set tmux socket to isolate this town's sessions on a dedicated server.
-	// The socket name is derived from the town directory name (e.g. "gt" for
-	// /home/user/gt), NOT from the $TMUX environment variable.
-	//
-	// Previous behavior parsed $TMUX to inherit the caller's socket, but this
-	// caused all sessions to land on the "default" server when gt up was run
-	// from an interactive terminal — defeating multi-town isolation. (gt-qkekp)
-	//
-	// By always using the town name, sessions are created on -L <town> regardless
-	// of whether the caller is inside tmux, outside tmux (daemon), or on a
-	// different tmux server.
-	tmux.SetDefaultSocket(sanitizeTownName(filepath.Base(townRoot)))
+	// Use the default tmux socket so all sessions are visible via prefix+s
+	// from any terminal. Multi-town isolation (which would need per-town
+	// sockets) already requires containers/VMs due to singleton mayor/deacon
+	// session names, so a dedicated socket provides no real benefit while
+	// causing cross-socket bugs and split session visibility.
+	tmux.SetDefaultSocket("default")
 
 	r, err := BuildPrefixRegistryFromTown(townRoot)
 	if err != nil {
