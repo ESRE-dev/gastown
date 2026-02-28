@@ -499,16 +499,13 @@ func createCleanupWisp(workDir, polecatName, issueID, branch string) (string, er
 	var created struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal([]byte(output), &created); err == nil && created.ID != "" {
-		return created.ID, nil
+	if err := json.Unmarshal([]byte(output), &created); err != nil {
+		return "", fmt.Errorf("could not parse bead ID from bd create output: %w", err)
 	}
-
-	// Fallback: extract from "Created: <id>" format
-	if strings.HasPrefix(output, "Created:") {
-		return strings.TrimSpace(strings.TrimPrefix(output, "Created:")), nil
+	if created.ID == "" {
+		return "", fmt.Errorf("bd create --json returned empty ID")
 	}
-
-	return "", fmt.Errorf("could not parse bead ID from bd create output: %q", output)
+	return created.ID, nil
 }
 
 // createSwarmWisp creates a wisp to track swarm (batch) work.
@@ -520,6 +517,7 @@ func createSwarmWisp(workDir string, payload *SwarmStartPayload) (string, error)
 
 	output, err := util.ExecWithOutput(workDir, bdCommand, "create",
 		"--ephemeral",
+		"--json",
 		"--title", title,
 		"--description", description,
 		"--labels", labels,
@@ -528,11 +526,17 @@ func createSwarmWisp(workDir string, payload *SwarmStartPayload) (string, error)
 		return "", err
 	}
 
-	if strings.HasPrefix(output, "Created:") {
-		return strings.TrimSpace(strings.TrimPrefix(output, "Created:")), nil
+	// Parse JSON output from bd create --json
+	var created struct {
+		ID string `json:"id"`
 	}
-
-	return output, nil
+	if err := json.Unmarshal([]byte(output), &created); err != nil {
+		return "", fmt.Errorf("could not parse bead ID from bd create output: %w", err)
+	}
+	if created.ID == "" {
+		return "", fmt.Errorf("bd create --json returned empty ID")
+	}
+	return created.ID, nil
 }
 
 // findCleanupWisp finds an existing cleanup wisp for a polecat.
@@ -543,10 +547,6 @@ func findCleanupWisp(workDir, polecatName string) (string, error) {
 		"--json",
 	)
 	if err != nil {
-		// Empty result is fine
-		if strings.Contains(err.Error(), "no issues found") {
-			return "", nil
-		}
 		return "", err
 	}
 
@@ -605,29 +605,19 @@ func getCleanupStatus(workDir, rigName, polecatName string) string {
 		return ""
 	}
 
-	// Parse cleanup_status from description
-	// Description format has "cleanup_status: <value>" line
-	for _, line := range strings.Split(issues[0].Description, "\n") {
-		line = strings.TrimSpace(line)
-		lower := strings.ToLower(line)
-		if strings.HasPrefix(lower, "cleanup_status:") {
-			// Use the lowercased version to ensure consistent prefix removal
-			value := strings.TrimSpace(strings.TrimPrefix(lower, "cleanup_status:"))
-			if value != "" && value != "null" {
-				return value
-			}
-		}
-	}
-
-	return ""
+	// Use structured field parser instead of ad-hoc string parsing
+	fields := beads.ParseAgentFields(issues[0].Description)
+	return fields.CleanupStatus
 }
 
 // findMRBeadForBranch queries beads for an open merge-request bead whose
-// description contains the given branch name. Returns the bead ID if found,
+// branch field matches the given branch name. Returns the bead ID if found,
 // or empty string if no matching MR bead exists.
 func findMRBeadForBranch(workDir, branch string) string {
+	// Use --desc-contains to filter at the bd level instead of fetching all MR beads
 	output, err := util.ExecWithOutput(workDir, bdCommand, "list",
-		"--type=merge-request", "--status=open", "--json", "--limit=0")
+		"--type=merge-request", "--status=open", "--json", "--limit=0",
+		"--desc-contains", "branch: "+branch)
 	if err != nil || output == "" || output == "[]" || output == "null" {
 		return ""
 	}
@@ -640,9 +630,10 @@ func findMRBeadForBranch(workDir, branch string) string {
 		return ""
 	}
 
-	needle := "branch: " + branch
+	// Verify exact branch match using structured field parser
 	for _, item := range items {
-		if strings.Contains(item.Description, needle) {
+		mrFields := beads.ParseMRFields(&beads.Issue{Description: item.Description})
+		if mrFields != nil && mrFields.Branch == branch {
 			return item.ID
 		}
 	}
@@ -957,6 +948,7 @@ type ZombieResult struct {
 	PolecatName   string
 	AgentState    string
 	HookBead      string
+	WasActive     bool   // true if evidence of recent work (active state or hooked bead)
 	Action        string // "restarted", "escalated", "cleanup-wisp-created", "auto-nuked" (explicit nuke only)
 	BeadRecovered bool   // true if hooked bead was reset to open for re-dispatch
 	Error         error
@@ -1039,7 +1031,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 		doneIntent := extractDoneIntent(labels)
 
 		if sessionAlive {
-			if zombie, found := detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, sessionName, t, doneIntent, router); found {
+			if zombie, found := detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, sessionName, t, doneIntent); found {
 				result.Zombies = append(result.Zombies, zombie)
 			}
 
@@ -1056,6 +1048,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 					PolecatName: polecatName,
 					AgentState:  "agent-dead-in-session",
 					HookBead:    deadAgentHookBead,
+					WasActive:   true,
 					Action:      "restarted-agent-dead-session",
 				}
 				// gt-dsgp: Restart instead of nuke — preserve worktree and branch
@@ -1076,6 +1069,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 						PolecatName: polecatName,
 						AgentState:  "bead-closed-still-running",
 						HookBead:    hookBead,
+						WasActive:   true,
 						Action:      "restarted-bead-closed-polecat",
 					}
 					if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
@@ -1098,6 +1092,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 								PolecatName: polecatName,
 								AgentState:  "agent-hung",
 								HookBead:    hungHookBead,
+								WasActive:   true,
 								Action:      fmt.Sprintf("restarted-hung-session (inactive %dm)", inactiveMinutes),
 							}
 							if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
@@ -1125,7 +1120,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 //
 // gt-dsgp: Uses restart-first policy. Instead of nuking polecats, restarts their
 // sessions to preserve worktrees and branches.
-func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, sessionName string, t *tmux.Tmux, doneIntent *DoneIntent, router *mail.Router) (ZombieResult, bool) {
+func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, sessionName string, t *tmux.Tmux, doneIntent *DoneIntent) (ZombieResult, bool) {
 	// Check for done-intent stuck too long (polecat hung in gt done).
 	// gt-dsgp: Restart instead of nuke — the session is stuck trying to exit,
 	// a fresh start will let it retry or pick up its hook cleanly.
@@ -1135,6 +1130,7 @@ func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, session
 			PolecatName: polecatName,
 			AgentState:  "stuck-in-done",
 			HookBead:    stuckHookBead,
+			WasActive:   true,
 			Action:      fmt.Sprintf("restarted-stuck-session (done-intent age=%v)", time.Since(doneIntent.Timestamp).Round(time.Second)),
 		}
 		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
@@ -1152,6 +1148,7 @@ func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, session
 			PolecatName: polecatName,
 			AgentState:  "agent-dead-in-session",
 			HookBead:    deadAgentHookBead,
+			WasActive:   true,
 			Action:      "restarted-agent-dead-session",
 		}
 		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
@@ -1170,6 +1167,7 @@ func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, session
 			PolecatName: polecatName,
 			AgentState:  "bead-closed-still-running",
 			HookBead:    hookBead,
+			WasActive:   true,
 			Action:      "restarted-bead-closed-polecat",
 		}
 		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
@@ -1219,6 +1217,7 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 			PolecatName: polecatName,
 			AgentState:  "done-intent-dead",
 			HookBead:    diHookBead,
+			WasActive:   true,
 			Action:      fmt.Sprintf("restarted (done-intent age=%v, type=%s)", age.Round(time.Second), doneIntent.ExitType),
 		}
 		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
@@ -1251,6 +1250,7 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 		PolecatName: polecatName,
 		AgentState:  agentState,
 		HookBead:    hookBead,
+		WasActive:   hookBead != "" || beads.AgentState(agentState).IsActive(),
 	}
 
 	// gt-dsgp: Restart instead of nuking. For dirty state, escalate AND restart.
@@ -1264,7 +1264,7 @@ func isZombieState(agentState, hookBead string) bool {
 	if hookBead != "" {
 		return true
 	}
-	return agentState == "working" || agentState == "running" || agentState == "spawning"
+	return beads.AgentState(agentState).IsActive()
 }
 
 // handleZombieRestart determines the restart action for a confirmed zombie (gt-dsgp).
