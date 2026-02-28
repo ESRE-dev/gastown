@@ -1,11 +1,14 @@
 package polecat
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/steveyegge/gastown/internal/util"
@@ -88,7 +91,7 @@ type NamePool struct {
 	// RigName is the rig this pool belongs to.
 	RigName string `json:"rig_name"`
 
-	// Theme is the current theme name (e.g., "mad-max", "minerals").
+	// Theme is the current theme name (e.g., "mad-max", "minerals", or a custom theme).
 	Theme string `json:"theme"`
 
 	// CustomNames allows overriding the built-in theme names.
@@ -109,6 +112,9 @@ type NamePool struct {
 
 	// stateFile is the path to persist pool state.
 	stateFile string
+
+	// townRoot is the town root directory, used to resolve custom theme files.
+	townRoot string
 }
 
 // NewNamePool creates a new name pool for a rig.
@@ -143,6 +149,11 @@ func NewNamePoolWithConfig(rigPath, rigName, theme string, customNames []string,
 	}
 }
 
+// SetTownRoot sets the town root for custom theme resolution.
+func (p *NamePool) SetTownRoot(townRoot string) {
+	p.townRoot = townRoot
+}
+
 // getNames returns the list of names to use for the pool.
 // Reserved infrastructure agent names are filtered out.
 func (p *NamePool) getNames() []string {
@@ -154,6 +165,13 @@ func (p *NamePool) getNames() []string {
 	} else if themeNames, ok := BuiltinThemes[p.Theme]; ok {
 		// Look up built-in theme
 		names = themeNames
+	} else if p.townRoot != "" {
+		// Try resolving as a custom theme file
+		if resolved, err := ResolveThemeNames(p.townRoot, p.Theme); err == nil {
+			names = resolved
+		} else {
+			names = BuiltinThemes[DefaultTheme]
+		}
 	} else {
 		// Fall back to default theme
 		names = BuiltinThemes[DefaultTheme]
@@ -359,16 +377,25 @@ func (p *NamePool) GetTheme() string {
 
 // SetTheme sets the theme and resets the pool.
 // Existing in-use names are preserved if they exist in the new theme.
+// Supports both built-in themes and custom theme files in settings/themes/.
 func (p *NamePool) SetTheme(theme string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if _, ok := BuiltinThemes[theme]; !ok {
-		return fmt.Errorf("unknown theme: %s (available: mad-max, minerals, wasteland)", theme)
+	var newNames []string
+	if names, ok := BuiltinThemes[theme]; ok {
+		newNames = names
+	} else if p.townRoot != "" {
+		resolved, err := ResolveThemeNames(p.townRoot, theme)
+		if err != nil {
+			return err
+		}
+		newNames = resolved
+	} else {
+		return fmt.Errorf("unknown theme: %s (use 'gt namepool themes' to list available themes)", theme)
 	}
 
 	// Preserve names that exist in both themes
-	newNames := BuiltinThemes[theme]
 	newInUse := make(map[string]bool)
 	for name := range p.InUse {
 		for _, n := range newNames {
@@ -410,12 +437,172 @@ func ThemeForRig(rigName string) string {
 	return themes[hash%uint32(len(themes))] //nolint:gosec // len(themes) is small constant
 }
 
-// GetThemeNames returns the names in a specific theme.
+// GetThemeNames returns the names in a specific built-in theme.
+// For custom themes, use ResolveThemeNames instead.
 func GetThemeNames(theme string) ([]string, error) {
 	if names, ok := BuiltinThemes[theme]; ok {
 		return names, nil
 	}
 	return nil, fmt.Errorf("unknown theme: %s", theme)
+}
+
+// ThemeInfo describes a theme (built-in or custom).
+type ThemeInfo struct {
+	Name     string
+	IsCustom bool
+	Count    int
+}
+
+// ListAllThemes returns a sorted list of all built-in and custom themes.
+func ListAllThemes(townRoot string) []ThemeInfo {
+	var themes []ThemeInfo
+
+	// Add built-in themes
+	for name, names := range BuiltinThemes {
+		themes = append(themes, ThemeInfo{
+			Name:  name,
+			Count: len(filterReservedNames(names)),
+		})
+	}
+
+	// Add custom themes from settings/themes/
+	if townRoot != "" {
+		themesDir := filepath.Join(townRoot, "settings", "themes")
+		entries, err := os.ReadDir(themesDir)
+		if err == nil {
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+					continue
+				}
+				name := strings.TrimSuffix(e.Name(), ".txt")
+				// Skip if it collides with a built-in
+				if IsBuiltinTheme(name) {
+					continue
+				}
+				names, err := ParseThemeFile(filepath.Join(themesDir, e.Name()))
+				if err != nil {
+					continue
+				}
+				themes = append(themes, ThemeInfo{
+					Name:     name,
+					IsCustom: true,
+					Count:    len(names),
+				})
+			}
+		}
+	}
+
+	sort.Slice(themes, func(i, j int) bool {
+		return themes[i].Name < themes[j].Name
+	})
+	return themes
+}
+
+// IsBuiltinTheme returns true if the theme name matches a built-in theme.
+func IsBuiltinTheme(theme string) bool {
+	_, ok := BuiltinThemes[theme]
+	return ok
+}
+
+// validPoolNameRe matches lowercase alphanumeric names with hyphens.
+var validPoolNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// ValidatePoolName validates a polecat name for use in a theme.
+// Names must be >3 chars, lowercase alphanumeric with hyphens, and not reserved.
+func ValidatePoolName(name string) error {
+	if len(name) <= 3 {
+		return fmt.Errorf("name %q too short (must be >3 characters)", name)
+	}
+	if !validPoolNameRe.MatchString(name) {
+		return fmt.Errorf("name %q invalid (must be lowercase alphanumeric with hyphens, starting with a letter)", name)
+	}
+	if ReservedInfraAgentNames[name] {
+		return fmt.Errorf("name %q is reserved for infrastructure agents", name)
+	}
+	return nil
+}
+
+// ParseThemeFile reads a custom theme file (one name per line).
+// Lines starting with # are comments. Blank lines are skipped.
+// Names are lowercased and deduplicated. Names <=3 chars are rejected.
+// Reserved names are filtered with a stderr warning.
+func ParseThemeFile(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	seen := make(map[string]bool)
+	var names []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name := strings.ToLower(line)
+		if len(name) <= 3 {
+			fmt.Fprintf(os.Stderr, "warning: skipping name %q (must be >3 characters)\n", name)
+			continue
+		}
+		if ReservedInfraAgentNames[name] {
+			fmt.Fprintf(os.Stderr, "warning: skipping reserved name %q\n", name)
+			continue
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no valid names in theme file %s", filepath.Base(path))
+	}
+	return names, nil
+}
+
+// ResolveThemeNames resolves a theme name to its list of names.
+// Checks built-in themes first, then looks for a custom theme file
+// at <townRoot>/settings/themes/<theme>.txt.
+func ResolveThemeNames(townRoot, theme string) ([]string, error) {
+	if names, ok := BuiltinThemes[theme]; ok {
+		return names, nil
+	}
+	path := filepath.Join(townRoot, "settings", "themes", theme+".txt")
+	return ParseThemeFile(path)
+}
+
+// SaveCustomTheme writes a custom theme file to settings/themes/<name>.txt.
+func SaveCustomTheme(townRoot, name string, names []string) error {
+	if IsBuiltinTheme(name) {
+		return fmt.Errorf("cannot create custom theme %q: conflicts with built-in theme", name)
+	}
+	themesDir := filepath.Join(townRoot, "settings", "themes")
+	if err := os.MkdirAll(themesDir, 0755); err != nil {
+		return fmt.Errorf("creating themes directory: %w", err)
+	}
+	var sb strings.Builder
+	sb.WriteString("# Custom theme: " + name + "\n")
+	for _, n := range names {
+		sb.WriteString(n + "\n")
+	}
+	return os.WriteFile(filepath.Join(themesDir, name+".txt"), []byte(sb.String()), 0644)
+}
+
+// DeleteCustomTheme removes a custom theme file.
+func DeleteCustomTheme(townRoot, name string) error {
+	if IsBuiltinTheme(name) {
+		return fmt.Errorf("cannot delete built-in theme %q", name)
+	}
+	path := filepath.Join(townRoot, "settings", "themes", name+".txt")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return fmt.Errorf("custom theme %q not found", name)
+	}
+	return os.Remove(path)
 }
 
 // AddCustomName adds a custom name to the pool.
