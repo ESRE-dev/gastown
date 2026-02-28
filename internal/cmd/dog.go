@@ -1084,7 +1084,7 @@ func runDogDispatch(cmd *cobra.Command, args []string) error {
 	// Create and send mail message with plugin instructions
 	dogAddress := fmt.Sprintf("deacon/dogs/%s", targetDog.Name)
 	subject := fmt.Sprintf("Plugin: %s", p.Name)
-	body := formatPluginMailBody(p)
+	body := p.FormatMailBody()
 
 	router := mail.NewRouterWithTownRoot(townRoot, townRoot)
 	defer router.WaitPendingNotifications()
@@ -1148,26 +1148,3 @@ func ifStr(cond bool, ifTrue, ifFalse string) string {
 	return ifFalse
 }
 
-// formatPluginMailBody formats the plugin as instructions for the dog.
-func formatPluginMailBody(p *plugin.Plugin) string {
-	var sb strings.Builder
-
-	sb.WriteString("Execute the following plugin:\n\n")
-	sb.WriteString(fmt.Sprintf("**Plugin**: %s\n", p.Name))
-	sb.WriteString(fmt.Sprintf("**Description**: %s\n", p.Description))
-	if p.RigName != "" {
-		sb.WriteString(fmt.Sprintf("**Rig**: %s\n", p.RigName))
-	}
-	if p.Execution != nil && p.Execution.Timeout != "" {
-		sb.WriteString(fmt.Sprintf("**Timeout**: %s\n", p.Execution.Timeout))
-	}
-	sb.WriteString("\n---\n\n")
-	sb.WriteString("## Instructions\n\n")
-	sb.WriteString(p.Instructions)
-	sb.WriteString("\n\n---\n\n")
-	sb.WriteString("After completion:\n")
-	sb.WriteString("1. Create a wisp to record the result (success/failure)\n")
-	sb.WriteString("2. Run `gt dog done` — this clears your work and auto-terminates the session\n")
-
-	return sb.String()
-}

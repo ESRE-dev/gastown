@@ -258,7 +258,7 @@ func (d *Daemon) dispatchPlugins(mgr *dog.Manager, sm *dog.SessionManager, rigsC
 			"daemon",
 			fmt.Sprintf("deacon/dogs/%s", idleDog.Name),
 			fmt.Sprintf("Plugin: %s", p.Name),
-			p.Instructions,
+			p.FormatMailBody(),
 		)
 		msg.Type = mail.TypeTask
 		msg.Timestamp = time.Now()
