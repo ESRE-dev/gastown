@@ -9,9 +9,9 @@ import (
 	"github.com/steveyegge/gastown/internal/wisp"
 )
 
-// TestCheckParkedRigsForLaunch_NoParkedRigs verifies that checkBlockedRigsForLaunch
+// TestCheckBlockedRigsForLaunch_NoParkedRigs verifies that checkBlockedRigsForLaunch
 // returns nil when no rigs are parked.
-func TestCheckParkedRigsForLaunch_NoParkedRigs(t *testing.T) {
+func TestCheckBlockedRigsForLaunch_NoParkedRigs(t *testing.T) {
 	townRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0o755); err != nil {
 		t.Fatalf("failed to create .beads: %v", err)
@@ -28,9 +28,9 @@ func TestCheckParkedRigsForLaunch_NoParkedRigs(t *testing.T) {
 	}
 }
 
-// TestCheckParkedRigsForLaunch_ParkedRig_BlocksWithoutForce verifies that
+// TestCheckBlockedRigsForLaunch_ParkedRig_BlocksWithoutForce verifies that
 // checkBlockedRigsForLaunch returns an error when a rig is parked and force is false.
-func TestCheckParkedRigsForLaunch_ParkedRig_BlocksWithoutForce(t *testing.T) {
+func TestCheckBlockedRigsForLaunch_ParkedRig_BlocksWithoutForce(t *testing.T) {
 	townRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0o755); err != nil {
 		t.Fatalf("failed to create .beads: %v", err)
@@ -68,9 +68,9 @@ func TestCheckParkedRigsForLaunch_ParkedRig_BlocksWithoutForce(t *testing.T) {
 	}
 }
 
-// TestCheckParkedRigsForLaunch_ParkedRig_AllowedWithForce verifies that
+// TestCheckBlockedRigsForLaunch_ParkedRig_AllowedWithForce verifies that
 // checkBlockedRigsForLaunch allows proceeding when a rig is parked but force is true.
-func TestCheckParkedRigsForLaunch_ParkedRig_AllowedWithForce(t *testing.T) {
+func TestCheckBlockedRigsForLaunch_ParkedRig_AllowedWithForce(t *testing.T) {
 	townRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0o755); err != nil {
 		t.Fatalf("failed to create .beads: %v", err)
@@ -102,9 +102,9 @@ func TestCheckParkedRigsForLaunch_ParkedRig_AllowedWithForce(t *testing.T) {
 	}
 }
 
-// TestCollectParkedRigsInDAG verifies that collectBlockedRigsInDAG correctly
+// TestCollectBlockedRigsInDAG verifies that collectBlockedRigsInDAG correctly
 // identifies beads targeting parked rigs.
-func TestCollectParkedRigsInDAG(t *testing.T) {
+func TestCollectBlockedRigsInDAG(t *testing.T) {
 	townRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0o755); err != nil {
 		t.Fatalf("failed to create .beads: %v", err)

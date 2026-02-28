@@ -953,7 +953,7 @@ func buildConvoyDAG(beads []BeadInfo, deps []DepInfo) *ConvoyDAG {
 // StagingFinding represents an error or warning found during convoy staging analysis.
 type StagingFinding struct {
 	Severity     string   // "error" or "warning"
-	Category     string   // "cycle", "no-rig", "orphan", "parked-rig", "cross-rig", "capacity", "missing-branch"
+	Category     string   // "cycle", "no-rig", "orphan", "blocked-rig", "cross-rig", "capacity", "missing-branch"
 	BeadIDs      []string // affected bead IDs
 	Message      string   // human-readable description
 	SuggestedFix string   // actionable fix suggestion
@@ -1663,7 +1663,7 @@ func detectBlockedRigs(dag *ConvoyDAG) []StagingFinding {
 		}
 		findings = append(findings, StagingFinding{
 			Severity:     "warning",
-			Category:     "parked-rig",
+			Category:     "blocked-rig",
 			BeadIDs:      info.beadIDs,
 			Message:      fmt.Sprintf("%d bead(s) target %s rig %q: %s", len(info.beadIDs), info.reason, rigName, strings.Join(info.beadIDs, ", ")),
 			SuggestedFix: fmt.Sprintf("restore the rig: %s %s", undoCmd, rigName),

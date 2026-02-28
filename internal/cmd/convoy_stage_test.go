@@ -879,7 +879,7 @@ func TestChooseStatus_Ready(t *testing.T) {
 
 // U-26: Warnings only → staged_warnings
 func TestChooseStatus_Warnings(t *testing.T) {
-	warns := []StagingFinding{{Severity: "warning", Category: "parked-rig"}}
+	warns := []StagingFinding{{Severity: "warning", Category: "blocked-rig"}}
 	status := chooseStatus(nil, warns)
 	if status != "staged_warnings" {
 		t.Errorf("expected staged_warnings, got %q", status)
@@ -1215,12 +1215,12 @@ func TestDetectWarnings_ParkedRig(t *testing.T) {
 
 	var parkedFindings []StagingFinding
 	for _, f := range findings {
-		if f.Category == "parked-rig" {
+		if f.Category == "blocked-rig" {
 			parkedFindings = append(parkedFindings, f)
 		}
 	}
 	if len(parkedFindings) != 1 {
-		t.Fatalf("expected 1 parked-rig warning, got %d: %+v", len(parkedFindings), findings)
+		t.Fatalf("expected 1 blocked-rig warning, got %d: %+v", len(parkedFindings), findings)
 	}
 	f := parkedFindings[0]
 	if f.Severity != "warning" {
@@ -1262,12 +1262,12 @@ func TestDetectWarnings_DockedRig(t *testing.T) {
 
 	var blockedFindings []StagingFinding
 	for _, f := range findings {
-		if f.Category == "parked-rig" {
+		if f.Category == "blocked-rig" {
 			blockedFindings = append(blockedFindings, f)
 		}
 	}
 	if len(blockedFindings) != 1 {
-		t.Fatalf("expected 1 parked-rig warning for docked rig, got %d: %+v", len(blockedFindings), findings)
+		t.Fatalf("expected 1 blocked-rig warning for docked rig, got %d: %+v", len(blockedFindings), findings)
 	}
 	f := blockedFindings[0]
 	if f.Severity != "warning" {
@@ -1441,7 +1441,7 @@ func TestRenderWarnings_Format(t *testing.T) {
 	findings := []StagingFinding{
 		{
 			Severity:     "warning",
-			Category:     "parked-rig",
+			Category:     "blocked-rig",
 			BeadIDs:      []string{"gt-a"},
 			Message:      "task gt-a is assigned to parked rig \"gastown.parked\"",
 			SuggestedFix: "reassign gt-a to an active rig",
@@ -1469,7 +1469,7 @@ func TestRenderWarnings_Format(t *testing.T) {
 	}
 
 	// Must include categories
-	for _, cat := range []string{"parked-rig", "capacity", "cross-rig"} {
+	for _, cat := range []string{"blocked-rig", "capacity", "cross-rig"} {
 		if !strings.Contains(output, cat) {
 			t.Errorf("output should contain category %q, got:\n%s", cat, output)
 		}
