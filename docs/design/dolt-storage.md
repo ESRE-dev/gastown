@@ -184,7 +184,8 @@ CREATE → LIVE → CLOSE → DECAY → COMPACT → FLATTEN
 | COMPACT | Compactor Dog | Daily | `CALL DOLT_REBASE()` — squash old commits together |
 | FLATTEN | Mayor or manual | Monthly | Branch, soft-reset to initial commit, commit, swap main |
 
-The first three stages exist today. The last three are new work.
+All six stages are implemented. DECAY runs in the Reaper Dog (wisp_reaper.go),
+COMPACT/FLATTEN run in the Compactor Dog (compactor_dog.go).
 
 ### Two Data Streams
 
