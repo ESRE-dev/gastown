@@ -445,6 +445,9 @@ func TestVerifyStartupNudgeDelivery_IdleAgent(t *testing.T) {
 	// with tmux's async cleanup when running with -count=N. (Fixes gt-eo8d)
 	sessionName := fmt.Sprintf("gt-test-nudge-%d", testSessionCounter.Add(1))
 
+	// Clean up any stale session from a previous crashed test run
+	_ = tm.KillSession(sessionName)
+
 	// Create a tmux session with a shell
 	if err := tm.NewSession(sessionName, os.TempDir()); err != nil {
 		t.Fatalf("NewSession: %v", err)
