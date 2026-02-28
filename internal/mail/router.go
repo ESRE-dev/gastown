@@ -789,7 +789,7 @@ func (r *Router) shouldBeWisp(msg *Message) bool {
 	if msg.Wisp {
 		return true
 	}
-	// Auto-detect lifecycle messages by subject prefix
+	// Auto-detect protocol/lifecycle messages by subject prefix
 	subjectLower := strings.ToLower(msg.Subject)
 	wispPrefixes := []string{
 		"polecat_started",
@@ -797,6 +797,10 @@ func (r *Router) shouldBeWisp(msg *Message) bool {
 		"work_done",
 		"start_work",
 		"nudge",
+		"lifecycle:",
+		"merged",
+		"merge_ready",
+		"merge_failed",
 	}
 	for _, prefix := range wispPrefixes {
 		if strings.HasPrefix(subjectLower, prefix) {

@@ -222,6 +222,31 @@ func TestShouldBeWisp(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "LIFECYCLE:Shutdown subject",
+			msg:  &Message{Subject: "LIFECYCLE:Shutdown capable"},
+			want: true,
+		},
+		{
+			name: "LIFECYCLE: polecat requesting shutdown",
+			msg:  &Message{Subject: "LIFECYCLE: polecat-nux requesting shutdown"},
+			want: true,
+		},
+		{
+			name: "MERGED subject",
+			msg:  &Message{Subject: "MERGED nux"},
+			want: true,
+		},
+		{
+			name: "MERGE_READY subject",
+			msg:  &Message{Subject: "MERGE_READY nux"},
+			want: true,
+		},
+		{
+			name: "MERGE_FAILED subject",
+			msg:  &Message{Subject: "MERGE_FAILED nux"},
+			want: true,
+		},
+		{
 			name: "handoff message (not auto-wisp)",
 			msg:  &Message{Subject: "HANDOFF: context notes"},
 			want: false,
