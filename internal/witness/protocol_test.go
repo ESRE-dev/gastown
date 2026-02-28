@@ -459,3 +459,55 @@ func TestAssessHelpRequest_BuildIssues(t *testing.T) {
 		t.Error("Should be able to help with build issues")
 	}
 }
+
+// --- Agent state and exit type constants (gt-x7t9) ---
+
+func TestAgentStateConstants(t *testing.T) {
+	// Verify all expected agent states are defined
+	states := map[AgentState]string{
+		AgentStateRunning:  "running",
+		AgentStateIdle:     "idle",
+		AgentStateDone:     "done",
+		AgentStateStuck:    "stuck",
+		AgentStateEscalated: "escalated",
+		AgentStateSpawning: "spawning",
+		AgentStateWorking:  "working",
+		AgentStateNuked:    "nuked",
+	}
+	for state, expected := range states {
+		if string(state) != expected {
+			t.Errorf("AgentState %q = %q, want %q", expected, string(state), expected)
+		}
+	}
+}
+
+func TestExitTypeConstants(t *testing.T) {
+	// Verify all expected exit types are defined and match PolecatDonePayload.Exit values
+	types := map[ExitType]string{
+		ExitTypeCompleted:     "COMPLETED",
+		ExitTypeEscalated:     "ESCALATED",
+		ExitTypeDeferred:      "DEFERRED",
+		ExitTypePhaseComplete: "PHASE_COMPLETE",
+	}
+	for exitType, expected := range types {
+		if string(exitType) != expected {
+			t.Errorf("ExitType %q = %q, want %q", expected, string(exitType), expected)
+		}
+	}
+}
+
+func TestExitTypeMatchesPolecatDonePayload(t *testing.T) {
+	// The ExitType constants must match values parsed by ParsePolecatDone
+	subject := "POLECAT_DONE nux"
+
+	for _, exit := range []ExitType{ExitTypeCompleted, ExitTypeEscalated, ExitTypeDeferred, ExitTypePhaseComplete} {
+		body := "Exit: " + string(exit)
+		payload, err := ParsePolecatDone(subject, body)
+		if err != nil {
+			t.Fatalf("ParsePolecatDone() for exit %q: %v", exit, err)
+		}
+		if payload.Exit != string(exit) {
+			t.Errorf("ParsePolecatDone Exit = %q, want %q", payload.Exit, string(exit))
+		}
+	}
+}

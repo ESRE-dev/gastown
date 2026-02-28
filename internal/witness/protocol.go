@@ -50,6 +50,35 @@ const (
 	ProtoUnknown           ProtocolType = "unknown"
 )
 
+// AgentState constants define the lifecycle states for polecat agent beads.
+// These are written to the agent bead's agent_state field and read by the
+// witness survey-workers step to discover polecat status without mail.
+type AgentState string
+
+const (
+	AgentStateRunning   AgentState = "running"
+	AgentStateIdle      AgentState = "idle"
+	AgentStateDone      AgentState = "done"
+	AgentStateStuck     AgentState = "stuck"
+	AgentStateEscalated AgentState = "escalated"
+	AgentStateSpawning  AgentState = "spawning"
+	AgentStateWorking   AgentState = "working"
+	AgentStateNuked     AgentState = "nuked"
+)
+
+// ExitType constants define the completion outcome for polecat work.
+// These match the exit statuses used by `gt done` and are stored on the
+// agent bead's exit_type field so the witness can discover completion
+// outcomes from beads instead of POLECAT_DONE mail.
+type ExitType string
+
+const (
+	ExitTypeCompleted     ExitType = "COMPLETED"
+	ExitTypeEscalated     ExitType = "ESCALATED"
+	ExitTypeDeferred      ExitType = "DEFERRED"
+	ExitTypePhaseComplete ExitType = "PHASE_COMPLETE"
+)
+
 // PolecatDonePayload contains parsed data from a POLECAT_DONE message.
 type PolecatDonePayload struct {
 	PolecatName string
