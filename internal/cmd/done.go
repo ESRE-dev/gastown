@@ -853,73 +853,30 @@ notifyWitness:
 		nudgeRefinery(rigName, "MERGE_READY received - check inbox for pending work")
 	}
 
-	// Notify Witness about completion
-	// Use town-level beads for cross-agent mail
-	townRouter := mail.NewRouter(townRoot)
-	defer townRouter.WaitPendingNotifications()
-	witnessAddr := fmt.Sprintf("%s/witness", rigName)
-
-	// Build notification body
-	var bodyLines []string
-	bodyLines = append(bodyLines, fmt.Sprintf("Exit: %s", exitType))
-	if issueID != "" {
-		bodyLines = append(bodyLines, fmt.Sprintf("Issue: %s", issueID))
-	}
-	if mrID != "" {
-		bodyLines = append(bodyLines, fmt.Sprintf("MR: %s", mrID))
-	}
-	bodyLines = append(bodyLines, fmt.Sprintf("Branch: %s", branch))
-	// Include convoy ownership info so witness can skip merge flow registration
-	if convoyInfo != nil {
-		bodyLines = append(bodyLines, fmt.Sprintf("ConvoyID: %s", convoyInfo.ID))
-		if convoyInfo.Owned {
-			bodyLines = append(bodyLines, "ConvoyOwned: true")
-		}
-		if convoyInfo.MergeStrategy != "" {
-			bodyLines = append(bodyLines, fmt.Sprintf("MergeStrategy: %s", convoyInfo.MergeStrategy))
-		}
-	}
-	if pushFailed {
-		bodyLines = append(bodyLines, "PushFailed: true")
-	}
-	if mrFailed {
-		bodyLines = append(bodyLines, "MRFailed: true")
-	}
-	if len(doneErrors) > 0 {
-		bodyLines = append(bodyLines, fmt.Sprintf("Errors: %s", strings.Join(doneErrors, "; ")))
-	}
-
-	doneNotification := &mail.Message{
-		To:      witnessAddr,
-		From:    sender,
-		Subject: fmt.Sprintf("POLECAT_DONE %s", polecatName),
-		Body:    strings.Join(bodyLines, "\n"),
-	}
-
+	// Write completion metadata to agent bead (gt-a6gp: nudge-over-mail).
+	// The witness survey-workers step reads these fields from the agent bead
+	// instead of parsing POLECAT_DONE mail. This eliminates Dolt commits
+	// from mail sends — the highest-volume mail source.
 	fmt.Printf("\nNotifying Witness...\n")
-	if err := townRouter.Send(doneNotification); err != nil {
-		style.PrintWarning("could not notify witness: %v", err)
-	} else {
-		fmt.Printf("%s Witness notified of %s\n", style.Bold.Render("✓"), exitType)
+	if agentBeadID != "" {
+		completionBd := beads.New(beads.ResolveBeadsDir(cwd))
+		meta := &beads.CompletionMetadata{
+			ExitType:       exitType,
+			MRID:           mrID,
+			Branch:         branch,
+			HookBead:       issueID,
+			MRFailed:       mrFailed,
+			CompletionTime: time.Now().UTC().Format(time.RFC3339),
+		}
+		if err := completionBd.UpdateAgentCompletion(agentBeadID, meta); err != nil {
+			style.PrintWarning("could not write completion metadata to agent bead: %v", err)
+		}
 	}
 
-	// Notify witness of work completion (witness is the polecat's direct supervisor).
-	// Previously this went to the dispatcher (often mayor), flooding mayor's inbox
-	// with routine operational mail. The witness handles polecat lifecycle.
-	if issueID != "" {
-		workDoneNotification := &mail.Message{
-			To:      witnessAddr,
-			From:    sender,
-			Subject: fmt.Sprintf("WORK_DONE: %s", issueID),
-			Body:    strings.Join(bodyLines, "\n"),
-			Wisp:    true, // Operational notification — must not create permanent bead
-		}
-		if err := townRouter.Send(workDoneNotification); err != nil {
-			style.PrintWarning("could not notify witness of work done: %v", err)
-		} else {
-			fmt.Printf("%s Witness notified of WORK_DONE for %s\n", style.Bold.Render("✓"), issueID)
-		}
-	}
+	// Nudge witness via tmux instead of mail (gt-a6gp).
+	// Nudges are free (no Dolt commit) and wake the witness immediately.
+	nudgeWitness(rigName, fmt.Sprintf("POLECAT_DONE %s exit=%s", polecatName, exitType))
+	fmt.Printf("%s Witness notified of %s (via nudge)\n", style.Bold.Render("✓"), exitType)
 
 	// Write witness notification checkpoint for resume (gt-aufru)
 	if agentBeadID != "" {
@@ -1253,20 +1210,18 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		fmt.Fprintf(os.Stderr, "Warning: couldn't clear agent %s hook: %v\n", agentBeadID, err)
 	}
 
-	// Set agent state based on exit type.
-	// Persistent polecats (gt-4ac): set "idle" on completion so gt sling can find
-	// and reuse them. "stuck" for escalated exits (requesting help).
-	switch exitType {
-	case ExitCompleted, ExitDeferred:
-		// "idle" = work done, sandbox preserved, ready for reuse
-		if _, err := bd.Run("agent", "state", agentBeadID, "idle"); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to idle: %v\n", agentBeadID, err)
-		}
-	case ExitEscalated:
-		// "stuck" = agent is requesting help - not observable from tmux
-		if _, err := bd.Run("agent", "state", agentBeadID, "stuck"); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to stuck: %v\n", agentBeadID, err)
-		}
+	// Set agent state to "done" (gt-a6gp: nudge-over-mail).
+	// Completion metadata (exit_type, MR ID, branch) was already written to
+	// the agent bead by the notifyWitness section. Setting agent_state=done
+	// signals the witness survey-workers step to process completion from beads.
+	// The witness transitions the polecat to "idle" after processing.
+	// Exception: ESCALATED exits use "stuck" — the polecat needs help.
+	doneState := "done"
+	if exitType == ExitEscalated {
+		doneState = "stuck"
+	}
+	if _, err := bd.Run("agent", "state", agentBeadID, doneState); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to %s: %v\n", agentBeadID, doneState, err)
 	}
 
 	// ZFC #10: Self-report cleanup status

@@ -9,8 +9,63 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
+
+func TestHandlePolecatDoneFromBead_NilFields(t *testing.T) {
+	result := HandlePolecatDoneFromBead("/tmp", "testrig", "nux", nil, nil)
+	if result.Error == nil {
+		t.Error("expected error for nil fields")
+	}
+	if result.Handled {
+		t.Error("should not be handled with nil fields")
+	}
+}
+
+func TestHandlePolecatDoneFromBead_PhaseComplete(t *testing.T) {
+	fields := &beads.AgentFields{
+		ExitType: "PHASE_COMPLETE",
+		Branch:   "polecat/nux",
+	}
+	result := HandlePolecatDoneFromBead("/tmp", "testrig", "nux", fields, nil)
+	if !result.Handled {
+		t.Error("expected PHASE_COMPLETE to be handled")
+	}
+	if result.Error != nil {
+		t.Errorf("unexpected error: %v", result.Error)
+	}
+	if !strings.Contains(result.Action, "phase-complete") {
+		t.Errorf("action %q should contain 'phase-complete'", result.Action)
+	}
+}
+
+func TestHandlePolecatDoneFromBead_NoMR(t *testing.T) {
+	fields := &beads.AgentFields{
+		ExitType:       "COMPLETED",
+		Branch:         "polecat/nux",
+		HookBead:       "gt-test123",
+		CompletionTime: "2026-02-28T01:00:00Z",
+	}
+	result := HandlePolecatDoneFromBead("/tmp/nonexistent", "testrig", "nux", fields, nil)
+	if !result.Handled {
+		t.Error("expected completion with no MR to be handled")
+	}
+	if !strings.Contains(result.Action, "no MR") {
+		t.Errorf("action %q should contain 'no MR'", result.Action)
+	}
+}
+
+func TestHandlePolecatDoneFromBead_ProtocolType(t *testing.T) {
+	fields := &beads.AgentFields{
+		ExitType: "COMPLETED",
+		Branch:   "polecat/nux",
+	}
+	result := HandlePolecatDoneFromBead("/tmp/nonexistent", "testrig", "nux", fields, nil)
+	if result.ProtocolType != ProtoPolecatDone {
+		t.Errorf("ProtocolType = %q, want %q", result.ProtocolType, ProtoPolecatDone)
+	}
+}
 
 func TestZombieResult_Types(t *testing.T) {
 	// Verify the ZombieResult type has all expected fields

@@ -123,6 +123,67 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 	return handlePolecatDoneNoMR(workDir, rigName, payload, result)
 }
 
+// HandlePolecatDoneFromBead processes polecat completion detected from agent bead
+// state (gt-a6gp: nudge-over-mail). Instead of parsing a POLECAT_DONE mail message,
+// this reads completion metadata directly from the agent bead's description fields
+// (exit_type, mr_id, branch, mr_failed, completion_time).
+//
+// Called by the witness survey-workers step when it detects agent_state=done on a
+// polecat's agent bead. After processing, the witness should transition the polecat
+// to agent_state=idle.
+//
+// The processing logic is identical to HandlePolecatDone: pending MR triggers
+// cleanup wisp + MERGE_READY; no MR means simple acknowledgment.
+func HandlePolecatDoneFromBead(workDir, rigName, polecatName string, fields *beads.AgentFields, router *mail.Router) *HandlerResult {
+	result := &HandlerResult{
+		ProtocolType: ProtoPolecatDone,
+	}
+
+	if fields == nil {
+		result.Error = fmt.Errorf("nil agent fields for polecat %s", polecatName)
+		return result
+	}
+
+	// Map agent bead fields to the existing PolecatDonePayload for reuse
+	payload := &PolecatDonePayload{
+		PolecatName: polecatName,
+		Exit:        fields.ExitType,
+		IssueID:     fields.HookBead,
+		MRID:        fields.MRID,
+		Branch:      fields.Branch,
+		MRFailed:    fields.MRFailed,
+	}
+
+	if payload.Exit == "PHASE_COMPLETE" {
+		result.Handled = true
+		result.Action = fmt.Sprintf("phase-complete for %s - session recycled, awaiting gate", polecatName)
+		return result
+	}
+
+	hasPendingMR := payload.MRID != ""
+
+	// Same MR-discovery fallback as HandlePolecatDone
+	if !hasPendingMR && payload.Exit == "COMPLETED" && !payload.MRFailed && payload.Branch != "" {
+		if mrID := findMRBeadForBranch(workDir, payload.Branch); mrID != "" {
+			payload.MRID = mrID
+			hasPendingMR = true
+		}
+	}
+
+	if hasPendingMR {
+		return handlePolecatDonePendingMR(workDir, rigName, payload, router, result)
+	}
+	return handlePolecatDoneNoMR(workDir, rigName, payload, result)
+}
+
+// TransitionPolecatToIdle sets a polecat's agent_state to idle after the witness
+// has processed its completion (gt-a6gp). This completes the done→idle transition
+// that was previously handled by updateAgentStateOnDone in gt done.
+func TransitionPolecatToIdle(workDir, agentBeadID string) error {
+	bd := beads.New(beads.ResolveBeadsDir(workDir))
+	return bd.UpdateAgentState(agentBeadID, string(AgentStateIdle), nil)
+}
+
 // handlePolecatDonePendingMR handles a POLECAT_DONE when there's a pending MR.
 // Creates a cleanup wisp, sends MERGE_READY to the Refinery, and nudges it.
 func handlePolecatDonePendingMR(workDir, rigName string, payload *PolecatDonePayload, router *mail.Router, result *HandlerResult) *HandlerResult {
