@@ -401,6 +401,11 @@ The `bd` CLI retains an embedded Dolt option for standalone use (outside
 Gas Town). Server-only mode applies to Gas Town exclusively — standalone
 users may not have a Dolt server running.
 
+The Dolt team is working on improving embedded mode for single-process
+use cases like standalone Beads. This would give solo `bd` users a
+zero-config experience (no server to manage) while retaining Dolt's
+versioning capabilities.
+
 ## Remote Push (Git Protocol)
 
 Gas Town pushes Dolt databases to GitHub remotes via `gt dolt sync`. These
