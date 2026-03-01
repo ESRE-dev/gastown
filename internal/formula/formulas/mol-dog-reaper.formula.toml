@@ -1,23 +1,23 @@
 description = """
-Reap stale wisps across all Dolt databases.
+Reap stale wisps and close stale issues across all Dolt databases.
 
-The Reaper Dog closes wisps past their retention age and purges closed wisps
-older than the purge threshold. This keeps the wisp tables from growing unbounded.
+The Reaper Dog closes wisps past their retention age, purges closed wisps
+older than the purge threshold, and auto-closes stale issues. This keeps
+the wisp and issue tables from growing unbounded.
 
-Current behavior (from wisp_reaper.go):
-- Closes open/hooked/in_progress wisps older than max_age (default 24h)
-- Alerts if open wisp count exceeds threshold (500)
-
-This molecule adds a purge step: DELETE closed wisps older than 7 days.
+The Go daemon (wisp_reaper.go) runs this as a thin orchestrator that pours
+this molecule and delegates to step functions matching these formula steps.
+SQL operations remain in Go (batch DELETEs, multi-table cascades, DOLT_COMMIT
+wrapping require imperative control flow).
 
 ## Dog Contract
 
-This is infrastructure work. You:
+This is infrastructure work:
 1. Scan all production databases for stale wisps
 2. Reap (close) wisps past max_age
-3. Purge (delete) closed wisps past purge_age
-4. Report findings to Deacon
-5. Return to kennel
+3. Purge (delete) closed wisps past purge_age + old mail
+4. Auto-close stale issues (>30 days, not P0/P1, not epics, no active deps)
+5. Report findings and return to kennel
 
 ## Variables
 
@@ -25,11 +25,13 @@ This is infrastructure work. You:
 |----------|--------|-------------|
 | max_age | config | Max wisp age before reaping (default 24h) |
 | purge_age | config | Max closed wisp age before purging (default 7d) |
+| stale_issue_age | config | Max issue staleness before auto-close (default 30d) |
 
 ## Safety
 
 Reaping closes wisps — reversible (can reopen). Purging deletes rows — irreversible
-but only targets already-closed wisps past retention."""
+but only targets already-closed wisps past retention. Auto-close only targets
+issues that are not P0/P1, not epics, and have no active dependencies."""
 formula = "mol-dog-reaper"
 version = 1
 
