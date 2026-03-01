@@ -176,8 +176,7 @@ type Config struct {
 	MaxConnections int
 
 	// LogLevel is the Dolt server log level (trace, debug, info, warn, error, fatal).
-	// Default is "debug" to capture queries for diagnosing hangs (per Tim Sehn).
-	// Override with GT_DOLT_LOGLEVEL.
+	// Default is "info". Override with GT_DOLT_LOGLEVEL=debug for diagnostics.
 	LogLevel string
 }
 
@@ -198,7 +197,7 @@ func DefaultConfig(townRoot string) *Config {
 		LogFile:        filepath.Join(daemonDir, "dolt.log"),
 		PidFile:        filepath.Join(daemonDir, "dolt.pid"),
 		MaxConnections: DefaultMaxConnections,
-		LogLevel:       "debug",
+		LogLevel:       "info",
 	}
 
 	if h := os.Getenv("GT_DOLT_HOST"); h != "" {
@@ -219,11 +218,9 @@ func DefaultConfig(townRoot string) *Config {
 		config.LogLevel = ll
 	}
 
-	// Default to debug logging per Dolt team recommendation (Dustin Brown, 2026-02-24):
-	// "run the Dolt server with loglevel debug or trace until everything is stable
-	// so you can send us the server logs when you hit an issue"
+	// Default to info logging. Use GT_DOLT_LOGLEVEL=debug for diagnostics.
 	if config.LogLevel == "" {
-		config.LogLevel = "debug"
+		config.LogLevel = "info"
 	}
 
 	return config
