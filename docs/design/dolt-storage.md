@@ -295,8 +295,14 @@ so the merge succeeds.
 **Surgical compaction** via interactive rebase (squash old, keep recent):
 
 Unlike flatten (which squashes everything), interactive rebase lets you
-keep recent individual commits while squashing old history. Safe on a
-running server. Based on Jason Fulghum's rebase implementation.
+keep recent individual commits while squashing old history. Runs on a
+live server. Based on Jason Fulghum's rebase implementation.
+
+**Concurrent write hazard**: DOLT_REBASE is NOT safe with concurrent writes
+(Tim Sehn, 2026-02-28). If agents commit to the database during rebase, Dolt
+detects the graph change and errors. The Compactor Dog retries once on such
+errors. Flatten mode (DOLT_RESET --soft) is unaffected — concurrent writes
+are safe there because the merge base shifts but the diff is just the txn.
 
 ```sql
 -- 1. Create a branch at the initial commit (the rebase "upstream")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -21,6 +22,11 @@ const (
 	compactorGCTimeout = 5 * time.Minute
 	// compactorBranchName is the temporary branch used during compaction.
 	compactorBranchName = "gt-compaction"
+	// surgicalMaxRetries is the number of times to retry surgical rebase after
+	// a concurrent write error. DOLT_REBASE is NOT safe with concurrent writes —
+	// Dolt detects that the commit graph changed and returns an error. One retry
+	// is usually sufficient since the window for concurrent writes is small.
+	surgicalMaxRetries = 1
 )
 
 // CompactorDogConfig holds configuration for the compactor_dog patrol.
@@ -107,6 +113,9 @@ func (d *Daemon) runCompactorDog() {
 	threshold := compactorDogThreshold(d.patrolConfig)
 	mode := compactorDogMode(d.patrolConfig)
 	d.logger.Printf("compactor_dog: starting compaction cycle (threshold=%d, mode=%s)", threshold, mode)
+	if mode == "surgical" {
+		d.logger.Printf("compactor_dog: WARNING: surgical mode uses DOLT_REBASE which is not safe with concurrent writes — will retry on graph-change errors")
+	}
 
 	mol := d.pourDogMolecule("mol-dog-compactor", nil)
 	defer mol.close()
@@ -114,9 +123,11 @@ func (d *Daemon) runCompactorDog() {
 	databases := d.compactorDatabases()
 	if len(databases) == 0 {
 		d.logger.Printf("compactor_dog: no databases to compact")
-		mol.failStep("scan", "no databases found")
+		mol.failStep("inspect", "no databases found")
 		return
 	}
+
+	mol.closeStep("inspect")
 
 	compacted := 0
 	skipped := 0
@@ -166,6 +177,8 @@ func (d *Daemon) runCompactorDog() {
 	} else {
 		mol.closeStep("compact")
 	}
+
+	mol.closeStep("verify")
 
 	d.logger.Printf("compactor_dog: cycle complete — compacted=%d skipped=%d errors=%d",
 		compacted, skipped, errors)
@@ -287,7 +300,53 @@ func (d *Daemon) compactDatabase(dbName string) error {
 // surgicalRebase performs interactive rebase on a single database:
 // squashes old commits while keeping the most recent N as individual picks.
 // This is an alternative to the flatten algorithm that preserves recent history.
+//
+// CONCURRENT WRITE HAZARD: Unlike flatten mode (which uses DOLT_RESET --soft
+// and is safe with concurrent writes), surgical mode uses DOLT_REBASE which is
+// NOT safe with concurrent writes. If an agent commits to the database while a
+// rebase is in progress, Dolt detects the graph change and returns an error.
+// This function retries once on such errors, which is usually sufficient since
+// the collision window is small. If retries are exhausted, the error is returned
+// to the caller for escalation.
+// Ref: Tim Sehn (2026-02-28) confirmed DOLT_REBASE fails on concurrent writes.
 func (d *Daemon) surgicalRebase(dbName string, keepRecent int) error {
+	var lastErr error
+	for attempt := 0; attempt <= surgicalMaxRetries; attempt++ {
+		if attempt > 0 {
+			d.logger.Printf("compactor_dog: %s: surgical rebase retry %d/%d after concurrent write error",
+				dbName, attempt, surgicalMaxRetries)
+			// Brief pause before retry to let the concurrent write finish.
+			time.Sleep(2 * time.Second)
+		}
+		lastErr = d.surgicalRebaseOnce(dbName, keepRecent)
+		if lastErr == nil {
+			return nil
+		}
+		if !isConcurrentWriteError(lastErr) {
+			return lastErr
+		}
+		d.logger.Printf("compactor_dog: %s: concurrent write detected during surgical rebase: %v", dbName, lastErr)
+	}
+	return fmt.Errorf("surgical rebase failed after %d retries due to concurrent writes: %w", surgicalMaxRetries, lastErr)
+}
+
+// isConcurrentWriteError returns true if the error indicates Dolt detected a
+// concurrent write during rebase (commit graph changed underneath the operation).
+func isConcurrentWriteError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	// Dolt reports graph-change errors during rebase when concurrent writes occur.
+	// Also catch our own concurrency abort from HEAD movement detection.
+	return strings.Contains(msg, "rebase execution failed") ||
+		strings.Contains(msg, "concurrency abort") ||
+		strings.Contains(msg, "graph") ||
+		strings.Contains(msg, "cannot rebase")
+}
+
+// surgicalRebaseOnce performs a single attempt at surgical rebase.
+func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 	db, err := d.compactorOpenDB(dbName)
 	if err != nil {
 		return err
