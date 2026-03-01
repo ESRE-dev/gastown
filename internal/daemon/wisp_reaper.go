@@ -19,7 +19,7 @@ const (
 	// Alert threshold: if open wisp count exceeds this, escalate.
 	wispAlertThreshold = 500
 	// Closed mail (gt:message) older than this is permanently deleted.
-	defaultMailDeleteAge = 30 * 24 * time.Hour
+	defaultMailDeleteAge = 7 * 24 * time.Hour
 	// Batch size for DELETE operations to avoid long-running transactions.
 	deleteBatchSize = 100
 )
