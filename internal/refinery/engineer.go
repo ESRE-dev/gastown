@@ -134,6 +134,7 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		RunTests:                true,
 		TestCommand:             "",
 		DeleteMergedBranches:    true,
+		GatesParallel:           true, // gt-8b2i: run gates concurrently (~2x speedup)
 		RetryFlakyTests:         1,
 		PollInterval:            30 * time.Second,
 		MaxConcurrent:           1,

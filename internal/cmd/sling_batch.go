@@ -340,41 +340,17 @@ func getRepoGitForRig(rigPath string) *git.Git {
 	return git.NewGit(filepath.Join(rigPath, "mayor", "rig"))
 }
 
-// deletePolecatBranch deletes a git branch (local and remote) for a polecat.
-// If hasPendingMR is true, the remote branch is preserved for the refinery.
-// Also preserves remote branches with unmerged commits ahead of main.
+// deletePolecatBranch deletes a local git branch for a polecat.
+// Remote branch is never deleted during nuke — the refinery owns remote
+// branch cleanup after successful merge (gt mq post-merge). (gt-v5ku)
 func deletePolecatBranch(branchName string, repoGit *git.Git, hasPendingMR bool) {
+	_ = hasPendingMR // preserved for API compat, no longer consulted
 	if err := repoGit.DeleteBranch(branchName, true); err != nil {
 		fmt.Printf("  %s branch delete: %v\n", style.Dim.Render("○"), err)
 	} else {
 		fmt.Printf("  %s deleted local branch %s\n", style.Success.Render("✓"), branchName)
 	}
-	if hasPendingMR {
-		fmt.Printf("  %s skipped remote branch delete (MR pending in merge queue)\n", style.Dim.Render("○"))
-	} else {
-		// Check if remote branch has unmerged commits before deleting.
-		// Without this check, work is lost when polecats push branches but
-		// don't create MR beads (e.g., due to missing formula). The refinery
-		// needs the remote branch to merge the work.
-		// Fixes: gt-rm9f (nuke-before-merge data loss on bd-1lc, bd-019)
-		hasUnmerged := false
-		remoteBranch := "origin/" + branchName
-		if ahead, aheadErr := repoGit.CommitsAhead("origin/main", remoteBranch); aheadErr == nil && ahead > 0 {
-			hasUnmerged = true
-			fmt.Printf("  %s preserving remote branch %s (%d unmerged commit(s) ahead of main)\n",
-				style.Warning.Render("⚠"), branchName, ahead)
-		}
-		if hasUnmerged {
-			fmt.Printf("  %s skipped remote branch delete (unmerged commits — refinery or human should merge)\n", style.Dim.Render("○"))
-		} else {
-			// No pending MR and no unmerged commits — safe to delete remote branch
-			if err := repoGit.DeleteRemoteBranch("origin", branchName); err != nil {
-				fmt.Printf("  %s remote branch delete: %v\n", style.Dim.Render("○"), err)
-			} else {
-				fmt.Printf("  %s deleted remote branch %s\n", style.Success.Render("✓"), branchName)
-			}
-		}
-	}
+	fmt.Printf("  %s remote branch preserved for refinery merge\n", style.Dim.Render("○"))
 }
 
 // closeConvoy closes a convoy with the given reason.
