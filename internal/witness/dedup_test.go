@@ -56,7 +56,7 @@ func TestMessageDeduplicator_Size(t *testing.T) {
 	}
 }
 
-func TestMessageDeduplicator_MaxSize(t *testing.T) {
+func TestMessageDeduplicator_BeyondCapacity(t *testing.T) {
 	t.Parallel()
 	d := NewMessageDeduplicator(3)
 
@@ -64,12 +64,17 @@ func TestMessageDeduplicator_MaxSize(t *testing.T) {
 	d.AlreadyProcessed("msg-002")
 	d.AlreadyProcessed("msg-003")
 
-	// At capacity — new messages should still be allowed (not deduped)
+	// Beyond capacity — new messages should still be allowed and tracked
 	if d.AlreadyProcessed("msg-004") {
-		t.Error("at capacity, new messages should be allowed through")
+		t.Error("new message should be allowed through")
 	}
 
-	// But existing ones should still be detected
+	// The new message must be tracked so it's deduped on retry
+	if !d.AlreadyProcessed("msg-004") {
+		t.Error("msg-004 should be detected as duplicate after being processed")
+	}
+
+	// Original messages should still be detected
 	if !d.AlreadyProcessed("msg-001") {
 		t.Error("existing message should still be detected as duplicate")
 	}

@@ -14,9 +14,9 @@ type MessageDeduplicator struct {
 	maxSize   int
 }
 
-// NewMessageDeduplicator creates a deduplicator with the given max capacity.
-// When capacity is reached, the oldest entries are not evicted (simple set).
-// For witness sessions that process hundreds of messages at most, this is fine.
+// NewMessageDeduplicator creates a deduplicator with the given capacity hint.
+// The map may grow beyond this size — 10k string keys is negligible memory,
+// and correctness (no duplicate processing) matters more than a soft cap.
 func NewMessageDeduplicator(maxSize int) *MessageDeduplicator {
 	if maxSize <= 0 {
 		maxSize = 10000
@@ -39,11 +39,6 @@ func (d *MessageDeduplicator) AlreadyProcessed(messageID string) bool {
 
 	if d.processed[messageID] {
 		return true
-	}
-
-	// Don't grow unboundedly
-	if len(d.processed) >= d.maxSize {
-		return false // At capacity, allow processing (safe: worst case is a dup)
 	}
 
 	d.processed[messageID] = true
