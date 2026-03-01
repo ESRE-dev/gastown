@@ -244,11 +244,17 @@ func runSeanceTalk(sessionID, prompt string) error {
 	// Build the command
 	args := []string{"--fork-session", "--resume", sessionID}
 
+	// Clear CLAUDECODE env var so the subprocess doesn't trigger the nested
+	// session guard. Seance is intentionally spawning a new Claude Code
+	// instance to read a predecessor's context — not a true nested session.
+	env := clearClaudeCodeEnv(os.Environ())
+
 	if prompt != "" {
 		// One-shot mode with --print
 		args = append(args, "--print", prompt)
 
 		cmd := exec.Command(agentCmd, args...)
+		cmd.Env = env
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
@@ -260,6 +266,7 @@ func runSeanceTalk(sessionID, prompt string) error {
 
 	// Interactive mode
 	cmd := exec.Command(agentCmd, args...)
+	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -278,6 +285,19 @@ func runSeanceTalk(sessionID, prompt string) error {
 	}
 
 	return nil
+}
+
+// clearClaudeCodeEnv returns a copy of the environment with CLAUDECODE unset.
+// This prevents the nested-session guard from blocking seance subprocesses.
+func clearClaudeCodeEnv(environ []string) []string {
+	var filtered []string
+	for _, e := range environ {
+		if strings.HasPrefix(e, "CLAUDECODE=") {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	return filtered
 }
 
 // discoverSessions reads session_start events from our event stream.
