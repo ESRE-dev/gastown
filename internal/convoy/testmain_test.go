@@ -15,13 +15,13 @@ func TestMain(m *testing.M) {
 	// container (via BEADS_DOLT_PORT), the databases are destroyed when the
 	// container is terminated at cleanup — preventing orphan
 	// accumulation in the shared production Dolt data dir.
-	if err := testutil.EnsureDoltContainerForTestMain(); err != nil {
+	if err := testutil.EnsureDoltForTestMain(); err != nil {
 		fmt.Fprintf(os.Stderr, "convoy TestMain: skipping — %v\n", err)
 		os.Exit(0)
 	}
 
 	code := m.Run()
 
-	testutil.TerminateDoltContainer()
+	testutil.CleanupDoltServer()
 	os.Exit(code)
 }
