@@ -505,6 +505,7 @@ type RigsConfig struct {
 type RigEntry struct {
 	GitURL      string       `json:"git_url"`
 	PushURL     string       `json:"push_url,omitempty"`
+	UpstreamURL string       `json:"upstream_url,omitempty"` // optional upstream URL (for fork workflows)
 	LocalRepo   string       `json:"local_repo,omitempty"`
 	AddedAt     time.Time    `json:"added_at"`
 	BeadsConfig *BeadsConfig `json:"beads,omitempty"`
@@ -532,14 +533,15 @@ const CurrentRigSettingsVersion = 1
 // RigConfig represents per-rig identity (rig/config.json).
 // This contains only identity - behavioral config is in settings/config.json.
 type RigConfig struct {
-	Type      string       `json:"type"`    // "rig"
-	Version   int          `json:"version"` // schema version
-	Name      string       `json:"name"`    // rig name
-	GitURL    string       `json:"git_url"` // git repository URL
-	PushURL   string       `json:"push_url,omitempty"` // optional push URL (fork for read-only upstreams)
-	LocalRepo string       `json:"local_repo,omitempty"`
-	CreatedAt time.Time    `json:"created_at"` // when the rig was created
-	Beads     *BeadsConfig `json:"beads,omitempty"`
+	Type        string       `json:"type"`                   // "rig"
+	Version     int          `json:"version"`                // schema version
+	Name        string       `json:"name"`                   // rig name
+	GitURL      string       `json:"git_url"`                // git repository URL
+	PushURL     string       `json:"push_url,omitempty"`     // optional push URL (fork for read-only upstreams)
+	UpstreamURL string       `json:"upstream_url,omitempty"` // optional upstream URL (for fork workflows)
+	LocalRepo   string       `json:"local_repo,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"` // when the rig was created
+	Beads       *BeadsConfig `json:"beads,omitempty"`
 }
 
 // WorkflowConfig represents workflow settings for a rig.
