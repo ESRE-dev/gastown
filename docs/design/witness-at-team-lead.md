@@ -1,5 +1,10 @@
 # Witness AT Team Lead: Implementation Spec
 
+> **Status: Future architecture — NOT YET IMPLEMENTED**
+> The current system uses tmux-based session management. This document describes
+> a planned architectural change to use Claude Code Agent Teams (AT) as the
+> transport layer. No code for this exists yet.
+
 > **Bead:** gt-ky4jf
 > **Date:** 2026-02-08
 > **Author:** furiosa (gastown polecat)
