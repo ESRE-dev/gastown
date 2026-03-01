@@ -70,6 +70,7 @@ var beadsExemptCommands = map[string]bool{
 	"krc":           true, // KRC doesn't require beads
 	"run-migration":       true, // Migration orchestrator handles its own beads checks
 	"health":              true, // Health check doesn't require beads
+	"upgrade":             true, // Post-install migration orchestrator
 }
 
 // Commands exempt from the town root branch warning.
@@ -81,6 +82,7 @@ var branchCheckExemptCommands = map[string]bool{
 	"doctor":     true, // Used to fix the problem
 	"install":    true, // Initial setup
 	"git-init":   true, // Git setup
+	"upgrade":    true, // Post-install migration
 }
 
 // persistentPreRun runs before every command.
