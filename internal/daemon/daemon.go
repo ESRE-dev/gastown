@@ -18,6 +18,7 @@ import (
 
 	"github.com/gofrs/flock"
 	beadsdk "github.com/steveyegge/beads"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/config"
@@ -132,13 +133,16 @@ func New(config *Config) (*Daemon, error) {
 		return nil, fmt.Errorf("creating daemon directory: %w", err)
 	}
 
-	// Open log file
-	logFile, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		return nil, fmt.Errorf("opening log file: %w", err)
+	// Open log file with rotation (100MB max, 3 backups, 7 days, compressed)
+	logWriter := &lumberjack.Logger{
+		Filename:   config.LogFile,
+		MaxSize:    100, // megabytes
+		MaxBackups: 3,
+		MaxAge:     7, // days
+		Compress:   true,
 	}
 
-	logger := log.New(logFile, "", log.LstdFlags)
+	logger := log.New(logWriter, "", log.LstdFlags)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize session prefix and agent registries from town root.
@@ -668,6 +672,10 @@ func (d *Daemon) heartbeat(state *State) {
 	// Shells out to `gt scheduler run` to avoid circular import between daemon and cmd.
 	d.dispatchQueuedWork()
 
+	// 15. Rotate oversized Dolt logs (copytruncate for child process fds).
+	// daemon.log uses lumberjack for automatic rotation; this handles Dolt server logs.
+	d.rotateOversizedLogs()
+
 	// Update state
 	state.LastHeartbeat = time.Now()
 	state.HeartbeatCount++
@@ -676,6 +684,19 @@ func (d *Daemon) heartbeat(state *State) {
 	}
 
 	d.logger.Printf("Heartbeat complete (#%d)", state.HeartbeatCount)
+}
+
+// rotateOversizedLogs checks Dolt server log files and rotates any that exceed
+// the size threshold. Uses copytruncate which is safe for logs held open by
+// child processes. Runs every heartbeat but is cheap (just stat calls).
+func (d *Daemon) rotateOversizedLogs() {
+	result := RotateLogs(d.config.TownRoot)
+	for _, path := range result.Rotated {
+		d.logger.Printf("log_rotation: rotated %s", path)
+	}
+	for _, err := range result.Errors {
+		d.logger.Printf("log_rotation: error: %v", err)
+	}
 }
 
 // ensureDoltServerRunning ensures the Dolt SQL server is running if configured.
