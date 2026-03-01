@@ -90,6 +90,12 @@ type RigConfig struct {
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
 	Beads         *BeadsConfig `json:"beads,omitempty"`
+
+	// Persistent polecat pool configuration.
+	// PolecatPoolSize is the number of persistent polecats to create with pool init.
+	// PolecatNames optionally specifies fixed names (overrides theme-based naming).
+	PolecatPoolSize int      `json:"polecat_pool_size,omitempty"`
+	PolecatNames    []string `json:"polecat_names,omitempty"`
 }
 
 // BeadsConfig represents beads configuration for the rig.

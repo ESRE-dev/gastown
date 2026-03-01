@@ -163,6 +163,11 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	}
 }
 
+// GetNamePool returns the manager's name pool for external use (e.g., pool init).
+func (m *Manager) GetNamePool() *NamePool {
+	return m.namePool
+}
+
 // lockPolecat acquires an exclusive file lock for a specific polecat.
 // This prevents concurrent gt processes from racing on the same polecat's
 // filesystem operations (Add, Remove, RepairWorktree).
