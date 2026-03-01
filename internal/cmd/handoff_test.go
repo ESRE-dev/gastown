@@ -527,7 +527,7 @@ func TestWarnHandoffGitStatus(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("x"), 0644)
 		os.Chdir(dir)
 		t.Cleanup(func() { os.Chdir(origCwd) })
-		output := captureStdout(t, func() {
+		output := captureOutput(t, func() {
 			warnHandoffGitStatus()
 		})
 		if !strings.Contains(output, "uncommitted work") {
@@ -549,7 +549,7 @@ func TestWarnHandoffGitStatus(t *testing.T) {
 		os.WriteFile(fpath, []byte("modified"), 0644)
 		os.Chdir(dir)
 		t.Cleanup(func() { os.Chdir(origCwd) })
-		output := captureStdout(t, func() {
+		output := captureOutput(t, func() {
 			warnHandoffGitStatus()
 		})
 		if !strings.Contains(output, "uncommitted work") {

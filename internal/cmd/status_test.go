@@ -36,6 +36,47 @@ func captureStdout(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
+// captureOutput captures both stdout and stderr during fn execution.
+// Use this when the code under test writes to both streams (e.g. style.PrintWarning
+// writes to stderr while fmt.Println writes to stdout).
+func captureOutput(t *testing.T, fn func()) string {
+	t.Helper()
+
+	oldOut := os.Stdout
+	oldErr := os.Stderr
+
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	rErr, wErr, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+
+	os.Stdout = wOut
+	os.Stderr = wErr
+
+	fn()
+
+	_ = wOut.Close()
+	_ = wErr.Close()
+	os.Stdout = oldOut
+	os.Stderr = oldErr
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, rOut); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if _, err := io.Copy(&buf, rErr); err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	_ = rOut.Close()
+	_ = rErr.Close()
+
+	return buf.String()
+}
+
 func TestDiscoverRigAgents_UsesRigPrefix(t *testing.T) {
 	townRoot := t.TempDir()
 	writeTestRoutes(t, townRoot, []beads.Route{
