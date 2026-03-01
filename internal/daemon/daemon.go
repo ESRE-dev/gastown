@@ -114,10 +114,9 @@ const (
 
 	// hungSessionThreshold is how long a refinery/witness session can be
 	// inactive (no tmux output) before the daemon considers it hung and
-	// kills it for restart. This catches sessions where Claude is alive
-	// (process exists) but not making progress (infinite loop, stuck API
-	// call, etc.). Conservative: 30 minutes. See: gt-tr3d
-	hungSessionThreshold = 30 * time.Minute
+	// kills it for restart. Derived from constants.HungSessionThreshold
+	// (single source of truth). See: gt-tr3d
+	hungSessionThreshold = constants.HungSessionThreshold
 
 	// doctorMolCooldown is the minimum interval between mol-dog-doctor molecules.
 	// Option B throttling: health checks run every 30s, but we only pour a
@@ -156,7 +155,13 @@ func New(config *Config) (*Daemon, error) {
 		logger.Printf("Warning: failed to set GT_TOWN_ROOT in tmux global env: %v", err)
 	}
 
-	// Load patrol config from mayor/daemon.json (optional - nil if missing)
+	// Load patrol config from mayor/daemon.json, ensuring lifecycle defaults
+	// are populated for any missing data maintenance tickers. Without this,
+	// opt-in patrols (compactor, reaper, doctor, JSONL backup, dolt backup)
+	// remain disabled if the file was created before they were implemented.
+	if err := EnsureLifecycleConfigFile(config.TownRoot); err != nil {
+		logger.Printf("Warning: failed to ensure lifecycle config: %v", err)
+	}
 	patrolConfig := LoadPatrolConfig(config.TownRoot)
 	if patrolConfig != nil {
 		logger.Printf("Loaded patrol config from %s", PatrolConfigFile(config.TownRoot))
