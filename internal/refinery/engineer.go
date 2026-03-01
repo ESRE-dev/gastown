@@ -124,6 +124,10 @@ type MergeQueueConfig struct {
 	// MaxRetryCount is the maximum number of conflict resolution retries
 	// before escalation to Mayor.
 	MaxRetryCount int `json:"max_retry_count"`
+
+	// Batch holds configuration for the batch-then-bisect merge queue.
+	// When nil or MaxBatchSize <= 1, batching is disabled and MRs process sequentially.
+	Batch *BatchConfig `json:"batch,omitempty"`
 }
 
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
