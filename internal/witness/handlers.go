@@ -218,7 +218,13 @@ func handlePolecatDonePendingMR(workDir, rigName string, payload *PolecatDonePay
 		result.Error = fmt.Errorf("updating wisp state: %w", err)
 	}
 
+	// notifyRefineryMergeReady may set result.Error; only overwrite if no
+	// prior error was recorded, so the first failure is preserved.
+	prevErr := result.Error
 	notifyRefineryMergeReady(workDir, rigName, result)
+	if prevErr != nil && result.Error != prevErr {
+		result.Error = fmt.Errorf("%w; also: %v", prevErr, result.Error)
+	}
 
 	result.Handled = true
 	result.WispCreated = wispID
@@ -1134,6 +1140,7 @@ func isZombieState(agentState, hookBead string) bool {
 // Restarts the session regardless of cleanup state. For dirty state, creates a
 // cleanup wisp for tracking but does NOT escalate — the witness agent decides
 // whether to escalate based on the reported CleanupStatus (ZFC gt-5rne).
+// Error chaining (gt-v95d): multiple errors are preserved, not silently dropped.
 func handleZombieRestart(workDir, rigName, polecatName, hookBead, cleanupStatus string, zombie *ZombieResult) {
 	zombie.CleanupStatus = cleanupStatus
 
@@ -1150,7 +1157,7 @@ func handleZombieRestart(workDir, rigName, polecatName, hookBead, cleanupStatus 
 		} else {
 			wispID, wispErr := createCleanupWisp(workDir, polecatName, hookBead, "")
 			if wispErr != nil {
-				zombie.Error = wispErr
+				zombie.Error = fmt.Errorf("cleanup wisp: %w", wispErr)
 			}
 			zombie.Action = fmt.Sprintf("restarted-dirty (cleanup_status=%s, wisp=%s)", cleanupStatus, wispID)
 		}
@@ -1159,7 +1166,9 @@ func handleZombieRestart(workDir, rigName, polecatName, hookBead, cleanupStatus 
 	// Restart regardless of cleanup state — the worktree is preserved.
 	if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 		if zombie.Error == nil {
-			zombie.Error = err
+			zombie.Error = fmt.Errorf("restart: %w", err)
+		} else {
+			zombie.Error = fmt.Errorf("%w; also restart: %v", zombie.Error, err)
 		}
 		if zombie.Action == "restarted" {
 			zombie.Action = fmt.Sprintf("restart-failed: %v", err)
