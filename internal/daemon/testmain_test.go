@@ -18,7 +18,7 @@ func TestMain(m *testing.M) {
 	// those to an isolated container (via BEADS_DOLT_PORT), the databases are
 	// destroyed when the container is terminated at cleanup —
 	// preventing orphan accumulation in the shared production Dolt data dir.
-	if err := testutil.EnsureDoltForTestMain(); err != nil {
+	if err := testutil.EnsureDoltContainerForTestMain(); err != nil {
 		fmt.Fprintf(os.Stderr, "daemon TestMain: skipping — %v\n", err)
 		os.Exit(0)
 	}
@@ -41,6 +41,6 @@ func TestMain(m *testing.M) {
 		socketPath := filepath.Join(tmux.SocketDir(), tmuxSocket)
 		_ = os.Remove(socketPath)
 	}
-	testutil.CleanupDoltServer()
+	testutil.TerminateDoltContainer()
 	os.Exit(code)
 }
