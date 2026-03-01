@@ -27,6 +27,47 @@ and syncs completions to beads at task boundaries.
 
 ---
 
+## AT Spike Findings Summary
+
+> Condensed from the AT spike report (gt-3nqoz, 2026-02-08, author: nux).
+
+**Recommendation: CONDITIONAL GO for Phase 1 experiment.**
+
+### Go/No-Go Decision Matrix
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Teammate working directories | WORKAROUND | PreToolUse hook for enforcement |
+| Hooks fire for teammates | GO | All relevant hooks confirmed |
+| Custom agent definitions | GO | `.claude/agents/*.md` works |
+| Delegate mode enforcement | GO | Structural, not behavioral |
+| Teammate cycling | WORKAROUND | Handoff + respawn pattern |
+| Token cost acceptable | CONDITIONAL | Sonnet teammates reduce cost |
+| gt/bd command access | GO | PATH via SessionStart hook |
+| Task list with dependencies | GO | Native match to Gas Town workflow |
+
+5/8 clear GO. 2 require workarounds (viable mitigations). 1 conditional on Phase 1 cost validation.
+
+### Critical Blockers
+
+1. **No per-teammate working directory** — AT teammates inherit lead's cwd. Workaround: `cd` in spawn prompt + PreToolUse hook (`gt validate-worktree-scope`) for structural enforcement.
+2. **No session resumption for teammates** — Crashed teammates cannot resume. Workaround: PreCompact handoff + beads state recovery + Witness respawn.
+3. **Token cost ~7x per teammate** — Mitigated by using Sonnet for polecat teammates, Opus for Witness lead only.
+
+### Risk Register Summary
+
+| Risk Level | Key Risks |
+|------------|-----------|
+| **High** | No per-teammate cwd, no session resumption, experimental feature |
+| **Medium** | 7x token cost, hook compatibility gaps, AT API changes |
+| **Low** | PATH/env setup, task list mapping, delegate mode gaps |
+
+### Key Advantage
+
+AT's file-locked task claiming eliminates Dolt write contention (estimated 80-90% reduction). This is the strongest argument for adoption.
+
+---
+
 ## 1. Witness in Delegate Mode
 
 ### What Tools the Witness Keeps

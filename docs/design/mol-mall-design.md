@@ -1,5 +1,7 @@
 # Mol Mall Design
 
+> **Status: Vision document** — Phase 1 (local formulas) exists. Phases 2-5 (registry, publishing, federation) are not implemented.
+
 > A marketplace for Gas Town formulas
 
 ## Vision
@@ -437,9 +439,7 @@ gt formula install hop://molmall.acme.corp/formulas/@acme/mol-deploy@2.1.0
 
 ### Phase 1: Local Commands (Now)
 
-- `gt formula list` with tier display
-- `gt formula show --resolve`
-- Formula resolution order (project → town → system)
+See [Formula Resolution](formula-resolution.md) for the implemented three-tier resolution system.
 
 ### Phase 2: Manual Sharing
 
@@ -472,5 +472,4 @@ gt formula install hop://molmall.acme.corp/formulas/@acme/mol-deploy@2.1.0
 ## Related Documents
 
 - [Formula Resolution](formula-resolution.md) - Local resolution order
-- [molecules.md](molecules.md) - Formula lifecycle (cook, pour, squash)
-- [understanding-gas-town.md](../../../docs/understanding-gas-town.md) - Gas Town architecture
+- [Molecules](../concepts/molecules.md) - Formula lifecycle (cook, pour, squash)

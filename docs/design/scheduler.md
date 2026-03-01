@@ -456,4 +456,4 @@ Convoys and the scheduler are complementary but distinct mechanisms. Convoys tra
 
 - [Watchdog Chain](watchdog-chain.md) — Daemon heartbeat, where scheduler dispatch runs as step 14
 - [Convoys](../concepts/convoy.md) — Convoy tracking, auto-convoy on schedule
-- [Operational State](operational-state.md) — Labels-as-state pattern used by scheduler labels
+- [Property Layers](property-layers.md) — Labels-as-state pattern used by scheduler labels (see Operational State Events section)

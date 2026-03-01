@@ -1,5 +1,7 @@
 # Formula Resolution Architecture
 
+> **Status: Partially implemented** — Basic formula resolution works. Tier enforcement, Mol Mall integration, and HOP federation are planned.
+
 > Where formulas live, how they're found, and how they'll scale to Mol Mall
 
 ## The Problem
@@ -244,5 +246,4 @@ gt formula uninstall mol-code-review-strict
 ## Related Documents
 
 - [Mol Mall Design](mol-mall-design.md) - Registry architecture
-- [molecules.md](molecules.md) - Formula → Proto → Mol lifecycle
-- [understanding-gas-town.md](../../../docs/understanding-gas-town.md) - Gas Town architecture
+- [Molecules](../concepts/molecules.md) - Formula → Proto → Mol lifecycle
