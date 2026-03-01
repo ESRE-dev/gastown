@@ -267,10 +267,10 @@ func (m *Message) Validate() error {
 	return nil
 }
 
-// GenerateID creates a random message ID.
+// GenerateID creates a random message ID for in-memory tracking (notifications, logging).
 // Falls back to time-based ID if crypto/rand fails (extremely rare).
-// Exported so callers that bypass the mail router (e.g., handoff) can
-// pass an explicit --id to bd create, avoiding the ephemeral empty-ID bug.
+// NOTE: This ID is NOT passed to bd create — bd auto-generates IDs with the correct
+// database prefix. This is only used for msg.ID in the Message struct.
 func GenerateID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {

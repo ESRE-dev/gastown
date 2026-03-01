@@ -1206,14 +1206,14 @@ func sendHandoffMail(subject, message string) (string, error) {
 	// This prevents subjects like "--help" from being parsed as flags.
 	args := []string{
 		"create",
-		"--id", mail.GenerateID(), // explicit ID: ephemeral path may not read prefix from config
 		"--assignee", agentID,
 		"-d", message,
 		"--priority", "1", // high — handoffs should float above normal mail
 		"--labels", labels + ",gt:message",
 		"--actor", agentID,
-		"--ephemeral", // Handoff mail is ephemeral
-		"--silent",    // Output only the bead ID
+		// NOT ephemeral: handoff mail must be in issues table so gt hook can find it.
+		// Ephemeral wisps are invisible to hook queries and may be reaped before successor reads.
+		"--silent", // Output only the bead ID
 		"--", subject,
 	}
 
