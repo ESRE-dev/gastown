@@ -25,9 +25,13 @@ const (
 )
 
 // WispReaperConfig holds configuration for the wisp_reaper patrol.
+// The reaper is restricted to the wisps table only — it never touches issues.
 type WispReaperConfig struct {
 	// Enabled controls whether the reaper runs.
 	Enabled bool `json:"enabled"`
+
+	// DryRun, when true, reports what would be reaped/purged without acting.
+	DryRun bool `json:"dry_run,omitempty"`
 
 	// IntervalStr is how often to run, as a string (e.g., "30m").
 	IntervalStr string `json:"interval,omitempty"`
@@ -90,6 +94,7 @@ func (d *Daemon) reapWisps() {
 	config := d.patrolConfig.Patrols.WispReaper
 	maxAge := wispReaperMaxAge(d.patrolConfig)
 	deleteAge := wispDeleteAge(d.patrolConfig)
+	dryRun := config.DryRun
 
 	// Pour molecule to track this patrol cycle.
 	mol := d.pourDogMolecule("mol-dog-reaper", map[string]string{
@@ -97,6 +102,10 @@ func (d *Daemon) reapWisps() {
 		"purge_age": deleteAge.String(),
 	})
 	defer mol.close()
+
+	if dryRun {
+		d.logger.Printf("wisp_reaper: DRY RUN — reporting only, no changes will be made")
+	}
 
 	// --- SCAN STEP: discover databases and count candidates ---
 
@@ -116,7 +125,10 @@ func (d *Daemon) reapWisps() {
 	d.logger.Printf("wisp_reaper: scanning %d databases", len(databases))
 	mol.closeStep("scan")
 
-	// --- REAP STEP: close stale wisps ---
+	// --- REAP STEP: close stale wisps whose parent molecule is closed ---
+	// Only wisps (ephemeral step tracking) are reaped — never issues.
+	// A wisp is only eligible for reaping if its parent molecule is already
+	// closed, proving the work completed.
 
 	totalReaped := 0
 	totalOpen := 0
@@ -128,7 +140,7 @@ func (d *Daemon) reapWisps() {
 			continue
 		}
 
-		reaped, open, err := d.reapWispsInDB(dbName, cutoff)
+		reaped, open, err := d.reapWispsInDB(dbName, cutoff, dryRun)
 		if err != nil {
 			d.logger.Printf("wisp_reaper: %s: close error: %v", dbName, err)
 			reapErrors++
@@ -136,15 +148,23 @@ func (d *Daemon) reapWisps() {
 			totalReaped += reaped
 			totalOpen += open
 			if reaped > 0 {
-				d.logger.Printf("wisp_reaper: %s: closed %d stale wisps (older than %v), %d open remain",
-					dbName, reaped, maxAge, open)
+				prefix := ""
+				if dryRun {
+					prefix = "[DRY RUN] would have "
+				}
+				d.logger.Printf("wisp_reaper: %s: %sclosed %d stale wisps (older than %v), %d open remain",
+					dbName, prefix, reaped, maxAge, open)
 			}
 		}
 	}
 
 	if totalReaped > 0 {
-		d.logger.Printf("wisp_reaper: total closed %d stale wisps across %d databases, %d open remain",
-			totalReaped, len(databases), totalOpen)
+		prefix := ""
+		if dryRun {
+			prefix = "[DRY RUN] would have "
+		}
+		d.logger.Printf("wisp_reaper: total %sclosed %d stale wisps across %d databases, %d open remain",
+			prefix, totalReaped, len(databases), totalOpen)
 	}
 
 	if reapErrors > 0 {
@@ -163,7 +183,7 @@ func (d *Daemon) reapWisps() {
 			continue
 		}
 
-		purged, err := d.purgeClosedWispsInDB(dbName, deleteCutoff)
+		purged, err := d.purgeClosedWispsInDB(dbName, deleteCutoff, dryRun)
 		if err != nil {
 			d.logger.Printf("wisp_reaper: %s: purge error: %v", dbName, err)
 			purgeErrors++
@@ -173,8 +193,12 @@ func (d *Daemon) reapWisps() {
 	}
 
 	if totalPurged > 0 {
-		d.logger.Printf("wisp_reaper: total purged %d closed wisp rows across %d databases",
-			totalPurged, len(databases))
+		prefix := ""
+		if dryRun {
+			prefix = "[DRY RUN] would have "
+		}
+		d.logger.Printf("wisp_reaper: total %spurged %d closed wisp rows across %d databases",
+			prefix, totalPurged, len(databases))
 	}
 
 	if purgeErrors > 0 {
@@ -212,15 +236,18 @@ func (d *Daemon) reapWisps() {
 			totalOpen, wispAlertThreshold)
 	}
 
-	d.logger.Printf("wisp_reaper: cycle complete — reaped=%d purged=%d open=%d databases=%d",
-		totalReaped, totalPurged, totalOpen, len(databases))
+	d.logger.Printf("wisp_reaper: cycle complete — reaped=%d purged=%d mail_purged=%d open=%d databases=%d dryRun=%v",
+		totalReaped, totalPurged, totalMailPurged, totalOpen, len(databases), dryRun)
 
 	mol.closeStep("report")
 }
 
 // reapWispsInDB closes stale wisps in a single database.
+// Only closes wisps whose parent molecule is already closed (proof the work completed).
+// Wisps without a parent molecule (orphans) are also eligible after the age cutoff.
+// Never touches the issues table.
 // Returns (reaped count, remaining open count, error).
-func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error) {
+func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time, dryRun bool) (int, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), wispReaperQueryTimeout)
 	defer cancel()
 
@@ -233,6 +260,47 @@ func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error
 	}
 	defer db.Close()
 
+	// Close stale open wisps whose parent molecule is already closed,
+	// OR that have no parent molecule (orphan wisps).
+	// A wisp is a child if wisp_dependencies has a row with
+	// issue_id=<wisp> and type='parent-child'. The depends_on_id is the parent.
+	//
+	// Eligible wisps: stale AND (parent is closed OR no parent exists).
+	parentCheckSQL := fmt.Sprintf(`
+		w.status IN ('open', 'hooked', 'in_progress')
+		AND w.created_at < ?
+		AND (
+			NOT EXISTS (
+				SELECT 1 FROM `+"`%s`"+`.wisp_dependencies wd
+				WHERE wd.issue_id = w.id AND wd.type = 'parent-child'
+			)
+			OR
+			EXISTS (
+				SELECT 1 FROM `+"`%s`"+`.wisp_dependencies wd
+				JOIN `+"`%s`"+`.wisps parent ON parent.id = wd.depends_on_id
+				WHERE wd.issue_id = w.id AND wd.type = 'parent-child'
+				AND parent.status = 'closed'
+			)
+		)`, dbName, dbName, dbName)
+
+	if dryRun {
+		// In dry-run mode, count what would be reaped instead of updating.
+		countEligible := fmt.Sprintf(
+			"SELECT COUNT(*) FROM `%s`.wisps w WHERE %s",
+			dbName, parentCheckSQL)
+		var wouldReap int
+		if err := db.QueryRowContext(ctx, countEligible, cutoff).Scan(&wouldReap); err != nil {
+			return 0, 0, fmt.Errorf("dry-run count stale wisps: %w", err)
+		}
+
+		var openCount int
+		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps WHERE status IN ('open', 'hooked', 'in_progress')", dbName) //nolint:gosec // G201: dbName is an internal Dolt database name
+		if err := db.QueryRowContext(ctx, countQuery).Scan(&openCount); err != nil {
+			return wouldReap, 0, fmt.Errorf("count open wisps: %w", err)
+		}
+		return wouldReap, openCount, nil
+	}
+
 	// Disable auto-commit so the close operation produces a single Dolt commit.
 	if _, err := db.ExecContext(ctx, "SET @@autocommit = 0"); err != nil {
 		return 0, 0, fmt.Errorf("disable autocommit: %w", err)
@@ -241,11 +309,10 @@ func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error
 		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
 	}()
 
-	// Close stale open wisps (status=open, created before cutoff).
-	// Also close stale hooked/in_progress wisps — these are abandoned molecule steps.
-	closeQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
-		"UPDATE `%s`.wisps SET status='closed', closed_at=NOW() WHERE status IN ('open', 'hooked', 'in_progress') AND created_at < ?",
-		dbName)
+	closeQuery := fmt.Sprintf(
+		"UPDATE `%s`.wisps w SET w.status='closed', w.closed_at=NOW() WHERE %s",
+		dbName, parentCheckSQL)
+
 	result, err := db.ExecContext(ctx, closeQuery, cutoff)
 	if err != nil {
 		return 0, 0, fmt.Errorf("close stale wisps: %w", err)
@@ -263,7 +330,7 @@ func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error
 
 	// Count remaining open wisps.
 	var openCount int
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps WHERE status IN ('open', 'hooked', 'in_progress')", dbName) //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps WHERE status IN ('open', 'hooked', 'in_progress')", dbName) //nolint:gosec // G201: dbName is an internal Dolt database name
 	if err := db.QueryRowContext(ctx, countQuery).Scan(&openCount); err != nil {
 		return int(reaped), 0, fmt.Errorf("count open wisps: %w", err)
 	}
@@ -272,10 +339,11 @@ func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error
 }
 
 // purgeClosedWispsInDB deletes closed wisp rows (and their auxiliary data) older than
-// the delete cutoff. Deletes in batches to avoid long-running transactions.
+// the delete cutoff. Only purges wisps whose parent molecule is closed or that have
+// no parent (orphans). Deletes in batches to avoid long-running transactions.
 // All deletes are wrapped in a single Dolt commit to minimize commit graph growth.
 // Returns the number of wisp rows deleted.
-func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (int, error) {
+func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time, dryRun bool) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -288,10 +356,26 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 	}
 	defer db.Close()
 
+	// Parent molecule check SQL fragment: only target wisps whose parent
+	// molecule is closed or that have no parent (orphans).
+	parentCheckSQL := fmt.Sprintf(`
+		AND (
+			NOT EXISTS (
+				SELECT 1 FROM `+"`%s`"+`.wisp_dependencies wd
+				WHERE wd.issue_id = w.id AND wd.type = 'parent-child'
+			)
+			OR EXISTS (
+				SELECT 1 FROM `+"`%s`"+`.wisp_dependencies wd
+				JOIN `+"`%s`"+`.wisps parent ON parent.id = wd.depends_on_id
+				WHERE wd.issue_id = w.id AND wd.type = 'parent-child'
+				AND parent.status = 'closed'
+			)
+		)`, dbName, dbName, dbName)
+
 	// Digest: count closed wisps eligible for deletion, grouped by wisp_type.
-	digestQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
-		"SELECT COALESCE(wisp_type, 'unknown') AS wtype, COUNT(*) AS cnt FROM `%s`.wisps WHERE status = 'closed' AND closed_at < ? GROUP BY wtype",
-		dbName)
+	digestQuery := fmt.Sprintf(
+		"SELECT COALESCE(w.wisp_type, 'unknown') AS wtype, COUNT(*) AS cnt FROM `%s`.wisps w WHERE w.status = 'closed' AND w.closed_at < ? %s GROUP BY wtype",
+		dbName, parentCheckSQL)
 	rows, err := db.QueryContext(ctx, digestQuery, deleteCutoff)
 	if err != nil {
 		return 0, fmt.Errorf("digest query: %w", err)
@@ -305,7 +389,11 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 			return 0, fmt.Errorf("digest scan: %w", err)
 		}
 		if cnt > 0 {
-			d.logger.Printf("wisp_reaper: %s: delete digest: type=%s count=%d", dbName, wtype, cnt)
+			prefix := ""
+			if dryRun {
+				prefix = "[DRY RUN] "
+			}
+			d.logger.Printf("wisp_reaper: %s: %sdelete digest: type=%s count=%d", dbName, prefix, wtype, cnt)
 		}
 		digestTotal += cnt
 	}
@@ -313,6 +401,12 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 
 	if digestTotal == 0 {
 		return 0, nil
+	}
+
+	if dryRun {
+		d.logger.Printf("wisp_reaper: %s: [DRY RUN] would delete %d closed wisp rows (closed before %v)",
+			dbName, digestTotal, deleteCutoff.Format(time.RFC3339))
+		return digestTotal, nil
 	}
 
 	d.logger.Printf("wisp_reaper: %s: deleting %d closed wisp rows (closed before %v)",
@@ -330,12 +424,12 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 	}()
 
 	// Batch delete: select IDs, delete aux tables first, then wisps.
+	// Only select wisps whose parent molecule is closed or that have no parent.
 	totalDeleted := 0
 	for {
-		// Get a batch of IDs to delete.
-		idQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
-			"SELECT id FROM `%s`.wisps WHERE status = 'closed' AND closed_at < ? LIMIT %d",
-			dbName, deleteBatchSize)
+		idQuery := fmt.Sprintf(
+			"SELECT w.id FROM `%s`.wisps w WHERE w.status = 'closed' AND w.closed_at < ? %s LIMIT %d",
+			dbName, parentCheckSQL, deleteBatchSize)
 		idRows, err := db.QueryContext(ctx, idQuery, deleteCutoff)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("select batch: %w", err)

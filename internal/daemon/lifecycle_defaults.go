@@ -18,10 +18,10 @@ func DefaultLifecycleConfig() *DaemonPatrolConfig {
 		Version: 1,
 		Patrols: &PatrolsConfig{
 			WispReaper: &WispReaperConfig{
-				Enabled:          true,
-				IntervalStr:      "30m",
-				MaxAgeStr:        "24h",
-				DeleteAgeStr:     "168h", // 7 days
+				Enabled:      true,
+				IntervalStr:  "30m",
+				MaxAgeStr:    "24h",
+				DeleteAgeStr: "168h", // 7 days
 			},
 			CompactorDog: &CompactorDogConfig{
 				Enabled:     true,
