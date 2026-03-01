@@ -996,7 +996,7 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 //
 //	Title: Resolve merge conflicts: <original-issue-title>
 //	Type: task
-//	Priority: inherit from original (ZFC: agent decides boost strategy)
+//	Priority: inherit from original + boost (P2 -> P1)
 //	Parent: original MR bead
 //	Description: metadata including branch, conflict SHA, etc.
 //
@@ -1055,8 +1055,12 @@ func (e *Engineer) createConflictResolutionTaskForMR(mr *MRInfo, _ ProcessResult
 		}
 	}
 
-	// ZFC: pass through original priority — boost strategy is a policy
-	// judgment that agents should make based on retry count and context.
+	// Priority boost: decrease priority number (lower = higher priority)
+	// P2 -> P1, P1 -> P0, P0 stays P0
+	boostedPriority := mr.Priority - 1
+	if boostedPriority < 0 {
+		boostedPriority = 0
+	}
 
 	// Increment retry count for tracking
 	retryCount := mr.RetryCount + 1
@@ -1095,7 +1099,7 @@ The Refinery will automatically retry the merge after you force-push.`,
 	task, err := e.beads.Create(beads.CreateOptions{
 		Title:       taskTitle,
 		Type:        "task",
-		Priority:    mr.Priority,
+		Priority:    boostedPriority,
 		Description: description,
 		Actor:       e.rig.Name + "/refinery",
 	})
@@ -1396,12 +1400,12 @@ func detectQueueAnomalies(
 		// 2) Orphaned branch detection.
 		localExists, remoteTrackingExists, err := branchExistsFn(fields.Branch)
 		if err == nil && !localExists && !remoteTrackingExists {
-			// ZFC: Go transports data, agent decides severity
-		anomalies = append(anomalies, &MRAnomaly{
-				ID:     issue.ID,
-				Branch: fields.Branch,
-				Type:   "orphaned-branch",
-				Detail: "MR branch is missing locally and in origin/* tracking refs",
+			anomalies = append(anomalies, &MRAnomaly{
+				ID:       issue.ID,
+				Branch:   fields.Branch,
+				Type:     "orphaned-branch",
+				Severity: "critical",
+				Detail:   "MR branch is missing locally and in origin/* tracking refs",
 			})
 		}
 	}
@@ -1616,25 +1620,15 @@ func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []c
 
 // notifyConvoyCompletion sends notifications to convoy owner and notify addresses.
 func (e *Engineer) notifyConvoyCompletion(townRoot, convoyID, title, description string) {
-	notified := make(map[string]bool)
-
-	for _, line := range strings.Split(description, "\n") {
-		var addr string
-		if strings.HasPrefix(line, "Owner: ") {
-			addr = strings.TrimPrefix(line, "Owner: ")
-		} else if strings.HasPrefix(line, "Notify: ") {
-			addr = strings.TrimPrefix(line, "Notify: ")
-		}
-
-		if addr != "" && !notified[addr] {
-			mailCmd := exec.Command("gt", "mail", "send", addr,
-				"-s", fmt.Sprintf("🚚 Convoy landed: %s", title),
-				"-m", fmt.Sprintf("Convoy %s has completed.\n\nAll tracked issues are now closed.\n\nClosed by: %s/refinery", convoyID, e.rig.Name))
-			mailCmd.Dir = townRoot
-			if err := mailCmd.Run(); err != nil {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not notify %s: %v\n", addr, err)
-			}
-			notified[addr] = true
+	// ZFC: Use typed accessor instead of parsing description text
+	fields := beads.ParseConvoyFields(&beads.Issue{Description: description})
+	for _, addr := range fields.NotificationAddresses() {
+		mailCmd := exec.Command("gt", "mail", "send", addr,
+			"-s", fmt.Sprintf("🚚 Convoy landed: %s", title),
+			"-m", fmt.Sprintf("Convoy %s has completed.\n\nAll tracked issues are now closed.\n\nClosed by: %s/refinery", convoyID, e.rig.Name))
+		mailCmd.Dir = townRoot
+		if err := mailCmd.Run(); err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not notify %s: %v\n", addr, err)
 		}
 	}
 }
@@ -1642,13 +1636,11 @@ func (e *Engineer) notifyConvoyCompletion(townRoot, convoyID, title, description
 // landConvoySwarm checks if a completed convoy has an associated swarm with an
 // integration branch, and triggers landing if so.
 func (e *Engineer) landConvoySwarm(townRoot string, convoy convoyInfo) {
-	// Check if convoy description mentions a molecule/swarm
+	// ZFC: Use typed accessor instead of parsing description text
+	fields := beads.ParseConvoyFields(&beads.Issue{Description: convoy.Description})
 	var moleculeID string
-	for _, line := range strings.Split(convoy.Description, "\n") {
-		if strings.HasPrefix(line, "Molecule: ") {
-			moleculeID = strings.TrimPrefix(line, "Molecule: ")
-			break
-		}
+	if fields != nil {
+		moleculeID = fields.Molecule
 	}
 
 	if moleculeID == "" {
