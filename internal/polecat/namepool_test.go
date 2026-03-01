@@ -1039,6 +1039,69 @@ func TestDeleteCustomTheme_NotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteCustomTheme_PathTraversal(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "namepool-delete-traversal-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// ValidatePoolName should reject path traversal attempts
+	err = ValidatePoolName("../../etc/passwd")
+	if err == nil {
+		t.Error("expected ValidatePoolName to reject path traversal")
+	}
+
+	err = ValidatePoolName("../secret")
+	if err == nil {
+		t.Error("expected ValidatePoolName to reject path with dots")
+	}
+}
+
+func TestAppendToCustomTheme(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "namepool-append-atomic-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Create initial theme
+	initial := []string{"aragorn", "legolas", "gimli-son"}
+	if err := SaveCustomTheme(tmpDir, "tolkien", initial); err != nil {
+		t.Fatalf("SaveCustomTheme error: %v", err)
+	}
+
+	// Append a new name
+	alreadyExists, err := AppendToCustomTheme(tmpDir, "tolkien", "gandalf")
+	if err != nil {
+		t.Fatalf("AppendToCustomTheme error: %v", err)
+	}
+	if alreadyExists {
+		t.Error("expected alreadyExists=false for new name")
+	}
+
+	// Append a duplicate
+	alreadyExists, err = AppendToCustomTheme(tmpDir, "tolkien", "aragorn")
+	if err != nil {
+		t.Fatalf("AppendToCustomTheme error: %v", err)
+	}
+	if !alreadyExists {
+		t.Error("expected alreadyExists=true for duplicate name")
+	}
+
+	// Verify final state
+	names, err := ResolveThemeNames(tmpDir, "tolkien")
+	if err != nil {
+		t.Fatalf("ResolveThemeNames error: %v", err)
+	}
+	if len(names) != 4 {
+		t.Fatalf("expected 4 names, got %d: %v", len(names), names)
+	}
+	if names[3] != "gandalf" {
+		t.Errorf("expected gandalf at index 3, got %s", names[3])
+	}
+}
+
 func TestParseThemeFile_MaxSize(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "namepool-maxsize-*")
 	if err != nil {

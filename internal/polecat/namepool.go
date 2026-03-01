@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -561,11 +562,11 @@ func ParseThemeFile(path string) ([]string, error) {
 		if seen[name] {
 			continue
 		}
-		seen[name] = true
-		names = append(names, name)
-		if len(names) > MaxThemeNames {
+		if len(names) >= MaxThemeNames {
 			return nil, fmt.Errorf("theme file %s exceeds maximum of %d names", filepath.Base(path), MaxThemeNames)
 		}
+		seen[name] = true
+		names = append(names, name)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -588,6 +589,7 @@ func ResolveThemeNames(townRoot, theme string) ([]string, error) {
 }
 
 // SaveCustomTheme writes a custom theme file to settings/themes/<name>.txt.
+// Uses file locking (flock) to prevent concurrent writes from losing data.
 func SaveCustomTheme(townRoot, name string, names []string) error {
 	if IsBuiltinTheme(name) {
 		return fmt.Errorf("cannot create custom theme %q: conflicts with built-in theme", name)
@@ -596,12 +598,80 @@ func SaveCustomTheme(townRoot, name string, names []string) error {
 	if err := os.MkdirAll(themesDir, 0755); err != nil {
 		return fmt.Errorf("creating themes directory: %w", err)
 	}
+
+	themePath := filepath.Join(themesDir, name+".txt")
+	lockPath := themePath + ".lock"
+
+	// Acquire advisory file lock to prevent concurrent writes
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("creating lock file: %w", err)
+	}
+	defer func() {
+		lockFile.Close()
+		os.Remove(lockPath) // best-effort cleanup
+	}()
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("acquiring theme file lock: %w", err)
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) //nolint:errcheck
+
 	var sb strings.Builder
 	sb.WriteString("# Custom theme: " + name + "\n")
 	for _, n := range names {
 		sb.WriteString(n + "\n")
 	}
-	return os.WriteFile(filepath.Join(themesDir, name+".txt"), []byte(sb.String()), 0644)
+	return os.WriteFile(themePath, []byte(sb.String()), 0644)
+}
+
+// AppendToCustomTheme atomically adds a name to a custom theme file.
+// Holds a file lock across the read-check-write cycle to prevent TOCTOU races.
+// Returns (alreadyExists, error).
+func AppendToCustomTheme(townRoot, theme, name string) (bool, error) {
+	themesDir := filepath.Join(townRoot, "settings", "themes")
+	themePath := filepath.Join(themesDir, theme+".txt")
+	lockPath := themePath + ".lock"
+
+	// Acquire lock for the entire read-modify-write
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return false, fmt.Errorf("creating lock file: %w", err)
+	}
+	defer func() {
+		lockFile.Close()
+		os.Remove(lockPath)
+	}()
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return false, fmt.Errorf("acquiring theme file lock: %w", err)
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) //nolint:errcheck
+
+	// Read current names
+	existing, err := ParseThemeFile(themePath)
+	if err != nil {
+		return false, fmt.Errorf("reading theme %q: %w", theme, err)
+	}
+
+	// Check for duplicate
+	for _, n := range existing {
+		if n == name {
+			return true, nil
+		}
+	}
+
+	// Append and write
+	existing = append(existing, name)
+	var sb strings.Builder
+	sb.WriteString("# Custom theme: " + theme + "\n")
+	for _, n := range existing {
+		sb.WriteString(n + "\n")
+	}
+	if err := os.WriteFile(themePath, []byte(sb.String()), 0644); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // DeleteCustomTheme removes a custom theme file.

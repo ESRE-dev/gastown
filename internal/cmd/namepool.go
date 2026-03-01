@@ -332,22 +332,15 @@ func runNamepoolAdd(cmd *cobra.Command, args []string) error {
 	if style != "" && !polecat.IsBuiltinTheme(style) && len(settings.Namepool.Names) == 0 {
 		townRoot, _ := workspace.FindFromCwd()
 		if townRoot != "" {
-			// Read existing theme names, check for duplicate, append
-			existing, err := polecat.ResolveThemeNames(townRoot, style)
+			alreadyExists, err := polecat.AppendToCustomTheme(townRoot, style, name)
 			if err != nil {
-				return fmt.Errorf("resolving custom theme %q: %w", style, err)
+				return fmt.Errorf("appending to custom theme %q: %w", style, err)
 			}
-			for _, n := range existing {
-				if n == name {
-					fmt.Printf("Name '%s' already in theme '%s'\n", name, style)
-					return nil
-				}
+			if alreadyExists {
+				fmt.Printf("Name '%s' already in theme '%s'\n", name, style)
+			} else {
+				fmt.Printf("Added '%s' to custom theme '%s'\n", name, style)
 			}
-			updated := append(existing, name)
-			if err := polecat.SaveCustomTheme(townRoot, style, updated); err != nil {
-				return fmt.Errorf("saving theme file: %w", err)
-			}
-			fmt.Printf("Added '%s' to custom theme '%s'\n", name, style)
 			return nil
 		}
 	}
@@ -470,6 +463,11 @@ func runNamepoolCreate(cmd *cobra.Command, args []string) error {
 
 func runNamepoolDelete(cmd *cobra.Command, args []string) error {
 	themeName := args[0]
+
+	// Validate theme name to prevent path traversal (e.g., "../../etc/foo")
+	if err := polecat.ValidatePoolName(themeName); err != nil {
+		return fmt.Errorf("invalid theme name: %w", err)
+	}
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
