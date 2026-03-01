@@ -5,24 +5,20 @@ package constants
 import "time"
 
 // Timing constants for session management and tmux operations.
-//
-// DEPRECATED as single source of truth: These constants are retained for
-// backward compatibility. New code should use config.OperationalConfig
-// accessors which support per-town overrides via settings/config.json.
-// The compiled-in defaults in config/operational.go match these values.
 const (
 	// ShutdownNotifyDelay is the pause after sending shutdown notification.
 	ShutdownNotifyDelay = 500 * time.Millisecond
 
 	// ClaudeStartTimeout is how long to wait for Claude to start in a session.
-	// Configurable via operational.session.claude_start_timeout.
+	// Increased to 60s because Claude can take 30s+ on slower machines.
 	ClaudeStartTimeout = 60 * time.Second
 
 	// ShellReadyTimeout is how long to wait for shell prompt after command.
-	// Configurable via operational.session.shell_ready_timeout.
 	ShellReadyTimeout = 5 * time.Second
 
 	// DefaultDebounceMs is the default debounce for SendKeys operations.
+	// 500ms is required for Claude Code to reliably process paste before Enter.
+	// See NudgeSession comment: "Wait 500ms for paste to complete (tested, required)"
 	DefaultDebounceMs = 500
 
 	// DefaultDisplayMs is the default duration for tmux display-message.
@@ -32,45 +28,47 @@ const (
 	PollInterval = 100 * time.Millisecond
 
 	// GracefulShutdownTimeout is how long to wait after sending Ctrl-C before
-	// forcefully killing a session.
-	// Configurable via operational.session.graceful_shutdown_timeout.
+	// forcefully killing a session. 3 seconds gives processes time to perform
+	// meaningful graceful shutdown (saving files, committing, closing connections).
+	// The previous 100ms was effectively identical to a force-kill.
 	GracefulShutdownTimeout = 3 * time.Second
 
 	// NudgeReadyTimeout is how long NudgeSession waits for the target pane to
-	// accept input before giving up.
-	// Configurable via operational.nudge.ready_timeout.
+	// accept input before giving up. Covers cold startup where Claude's TUI
+	// hasn't initialized yet (tmux returns "not in a mode").
+	// Kept well under nudgeLockTimeout (30s) so concurrent nudges don't
+	// starve waiting for the lock while a retry loop holds it.
 	NudgeReadyTimeout = 10 * time.Second
 
-	// NudgeRetryInterval is the base interval between send-keys retry attempts.
-	// Configurable via operational.nudge.retry_interval.
+	// NudgeRetryInterval is the base interval between send-keys retry attempts
+	// when a transient tmux error is encountered during nudge delivery.
 	NudgeRetryInterval = 500 * time.Millisecond
 
-	// BdCommandTimeout is the default timeout for bd (beads CLI) command execution.
-	// Configurable via operational.session.bd_command_timeout.
+	// BdCommandTimeout is the default timeout for bd (beads CLI) command
+	// execution. Used across polecat session management and plugin recording.
 	BdCommandTimeout = 30 * time.Second
 
 	// BdSubprocessTimeout is the timeout for bd subprocess calls in TUI panels.
-	// Configurable via operational.session.bd_subprocess_timeout.
+	// Prevents the TUI from freezing if these commands hang.
 	BdSubprocessTimeout = 5 * time.Second
 
 	// StartupNudgeVerifyDelay is how long to wait after sending a startup nudge
-	// before checking if the agent started working.
-	// Configurable via operational.session.startup_nudge_verify_delay.
+	// before checking if the agent started working. Must be long enough for the
+	// agent to begin processing the nudge (receive text, parse, start first tool).
 	StartupNudgeVerifyDelay = 5 * time.Second
 
-	// StartupNudgeMaxRetries is the maximum number of times to retry a startup nudge.
-	// Configurable via operational.session.startup_nudge_max_retries.
+	// StartupNudgeMaxRetries is the maximum number of times to retry a startup
+	// nudge if the agent appears idle after delivery. Each retry re-sends the
+	// nudge content and waits StartupNudgeVerifyDelay before checking again.
 	StartupNudgeMaxRetries = 3
 
 	// GUPPViolationTimeout is how long an agent can have work on hook without
-	// progressing before it's considered a GUPP violation.
-	// Configurable via operational.session.gupp_violation_timeout.
+	// progressing before it's considered a GUPP (Gas Town Universal Propulsion
+	// Principle) violation. GUPP states: if you have work on your hook, you run it.
+	//
+	// Single source of truth — referenced by daemon lifecycle patrol,
+	// TUI feed stuck detection, and web fetcher worker status.
 	GUPPViolationTimeout = 30 * time.Minute
-
-	// HungSessionThreshold is how long a tmux session can be inactive before
-	// it's considered hung. Overridable per-role via RoleHealthConfig.
-	// Configurable via operational.session.hung_session_threshold.
-	HungSessionThreshold = 30 * time.Minute
 )
 
 // Directory names within a Gas Town workspace.
