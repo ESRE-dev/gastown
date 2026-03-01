@@ -250,8 +250,9 @@ func runSeanceTalk(sessionID, prompt string) error {
 	env := clearClaudeCodeEnv(os.Environ())
 
 	if prompt != "" {
-		// One-shot mode with --print
-		args = append(args, "--print", prompt)
+		// One-shot mode: -p flag (boolean) makes claude print and exit,
+		// prompt is a positional argument at the end.
+		args = append(args, "-p", prompt)
 
 		cmd := exec.Command(agentCmd, args...)
 		cmd.Env = env
@@ -287,12 +288,14 @@ func runSeanceTalk(sessionID, prompt string) error {
 	return nil
 }
 
-// clearClaudeCodeEnv returns a copy of the environment with CLAUDECODE unset.
-// This prevents the nested-session guard from blocking seance subprocesses.
+// clearClaudeCodeEnv returns a copy of the environment with Claude Code
+// nesting-detection variables removed. This prevents the nested-session
+// guard from blocking seance subprocesses.
 func clearClaudeCodeEnv(environ []string) []string {
 	var filtered []string
 	for _, e := range environ {
-		if strings.HasPrefix(e, "CLAUDECODE=") {
+		if strings.HasPrefix(e, "CLAUDECODE=") ||
+			strings.HasPrefix(e, "CLAUDE_CODE_ENTRYPOINT=") {
 			continue
 		}
 		filtered = append(filtered, e)
