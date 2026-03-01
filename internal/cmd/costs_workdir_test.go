@@ -13,10 +13,16 @@ import (
 
 // filterGTEnv removes GT_* and BD_* environment variables to isolate test subprocess.
 // This prevents tests from inheriting the parent workspace's Gas Town configuration.
+// GT_DOLT_PORT is preserved so that shelled-out bd/gt commands connect to the
+// ephemeral test Dolt server instead of production on port 3307.
+// BEADS_DOLT_PORT (prefix BEADS_, not BD_) passes through implicitly.
 func filterGTEnv(env []string) []string {
 	filtered := make([]string, 0, len(env))
 	for _, e := range env {
-		if strings.HasPrefix(e, "GT_") || strings.HasPrefix(e, "BD_") {
+		if strings.HasPrefix(e, "GT_") && !strings.HasPrefix(e, "GT_DOLT_PORT=") {
+			continue
+		}
+		if strings.HasPrefix(e, "BD_") {
 			continue
 		}
 		filtered = append(filtered, e)
