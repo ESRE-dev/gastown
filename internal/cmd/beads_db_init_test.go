@@ -99,17 +99,22 @@ func createTrackedBeadsRepoWithIssues(t *testing.T, path, prefix string, numIssu
 		}
 	}
 
-	// Add .beads to git (simulating tracked beads)
+	// Ensure .beads is committed (bd init may auto-commit in newer versions).
 	cmd = exec.Command("git", "add", ".beads")
 	cmd.Dir = path
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git add .beads: %v\n%s", err, out)
 	}
 
-	cmd = exec.Command("git", "commit", "-m", "Add beads with issues")
+	// Only commit if there are staged changes (bd v0.56.1+ auto-commits).
+	cmd = exec.Command("git", "diff", "--cached", "--quiet")
 	cmd.Dir = path
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git commit beads: %v\n%s", err, out)
+	if err := cmd.Run(); err != nil {
+		cmd = exec.Command("git", "commit", "-m", "Add beads with issues")
+		cmd.Dir = path
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit beads: %v\n%s", err, out)
+		}
 	}
 
 	// Remove database files to simulate what a clone would look like
@@ -256,12 +261,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 	t.Run("TrackedRepoWithPrefixMismatchErrors", func(t *testing.T) {
 		// Test that when --prefix is explicitly provided but doesn't match
 		// the prefix detected from the database, gt rig add fails with an error.
-		//
-		// SKIP: bd v0.56.1 gitignores metadata.json, so after a simulated clone
-		// metadata.json is absent. gt rig add --adopt's prefix mismatch detection
-		// relied on metadata.json and doesn't yet fall back to config.yaml.
-		// Re-enable once rig.go detects prefix from config.yaml.
-		t.Skip("prefix mismatch detection broken: metadata.json now gitignored by bd v0.56.1")
+		// Prefix detection uses config.yaml (not metadata.json), which survives
+		// clones since it is tracked by git.
 
 		townRoot := filepath.Join(tmpDir, "town-mismatch")
 
@@ -479,17 +480,22 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 		t.Fatalf("bd init failed: %v\nOutput: %s", err, output)
 	}
 
-	// Add .beads to git (simulating tracked beads)
+	// Ensure .beads is committed (bd init may auto-commit in newer versions).
 	cmd = exec.Command("git", "add", ".beads")
 	cmd.Dir = path
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git add .beads: %v\n%s", err, out)
 	}
 
-	cmd = exec.Command("git", "commit", "-m", "Add beads (no issues)")
+	// Only commit if there are staged changes (bd v0.56.1+ auto-commits).
+	cmd = exec.Command("git", "diff", "--cached", "--quiet")
 	cmd.Dir = path
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git commit beads: %v\n%s", err, out)
+	if err := cmd.Run(); err != nil {
+		cmd = exec.Command("git", "commit", "-m", "Add beads (no issues)")
+		cmd.Dir = path
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit beads: %v\n%s", err, out)
+		}
 	}
 
 	// Remove database files to simulate what a clone would look like
@@ -498,11 +504,11 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 
 // removeDBFiles removes gitignored database files from a beads directory to simulate a clone.
 // Only removes files that match patterns in .beads/.gitignore. Files NOT in .gitignore
-// (config.yaml, issues.jsonl, etc.) are tracked by git and survive clones.
+// (metadata.json, config.yaml, issues.jsonl, etc.) are tracked by git and survive clones.
 //
 // Anchored to .beads/.gitignore patterns as of bd v0.56.1: *.db, *.db-*, daemon.*, bd.sock,
 // sync-state.json, redirect, db.sqlite, bd.db, export-state/, dolt/, dolt-access.lock,
-// metadata.json, interactions.jsonl.
+// interactions.jsonl. Note: metadata.json is tracked (not gitignored).
 func removeDBFiles(t *testing.T, beadsDir string) {
 	t.Helper()
 
@@ -514,8 +520,8 @@ func removeDBFiles(t *testing.T, beadsDir string) {
 			os.Remove(m)
 		}
 	}
-	// Remove gitignored runtime state files
-	for _, name := range []string{"sync-state.json", "redirect", ".local_version", "dolt-access.lock", "metadata.json", "interactions.jsonl"} {
+	// Remove gitignored runtime state files (metadata.json is tracked, not removed)
+	for _, name := range []string{"sync-state.json", "redirect", ".local_version", "dolt-access.lock", "interactions.jsonl"} {
 		os.Remove(filepath.Join(beadsDir, name))
 	}
 	os.RemoveAll(filepath.Join(beadsDir, "export-state"))

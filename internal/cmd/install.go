@@ -160,6 +160,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			if installDoltPort != 0 {
 				port = installDoltPort
 				os.Setenv("GT_DOLT_PORT", strconv.Itoa(port))
+			} else if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+				if envPort, err := strconv.Atoi(p); err == nil {
+					port = envPort
+				}
 			}
 			if err := doltserver.CheckPortAvailable(port); err != nil {
 				pid, dataDir := doltserver.PortHolder(port)
