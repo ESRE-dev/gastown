@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -309,60 +308,64 @@ func TestFindAnyCleanupWisp_NoBdAvailable(t *testing.T) {
 	}
 }
 
-// installFakeBd creates a fake bd script that logs all invocations to a file.
-// Sets bdCommand to the full path of the mock script (no PATH modification needed).
-// Returns the path to the args log file.
-// These tests remain non-parallel since they share the bdCommand global.
-func installFakeBd(t *testing.T) string {
+// mockBdCalls captures bd invocations and returns canned responses.
+// Returns a slice that accumulates "arg0 arg1 ..." strings for each call.
+type mockBdCalls struct {
+	calls []string
+}
+
+// installMockBd replaces bdExec and bdRun with Go-level mocks that avoid
+// subprocess overhead. Returns a pointer to the captured call log.
+// The execFn receives args and returns (stdout, error).
+// The runFn receives args and returns error.
+func installMockBd(t *testing.T, execFn func(args []string) (string, error), runFn func(args []string) error) *mockBdCalls {
 	t.Helper()
-	binDir := t.TempDir()
-	argsLog := filepath.Join(binDir, "bd_args.log")
+	mock := &mockBdCalls{}
 
-	var scriptPath string
-	if runtime.GOOS == "windows" {
-		// Windows: create a .bat file since shell scripts don't work
-		script := fmt.Sprintf("@echo off\r\necho %%* >> %q\r\nif \"%%1\"==\"list\" (\r\n  echo []\r\n) else if \"%%1\"==\"update\" (\r\n  exit /b 0\r\n) else if \"%%1\"==\"show\" (\r\n  echo [{\"labels\":[\"cleanup\",\"polecat:testpol\",\"state:pending\"]}]\r\n) else (\r\n  echo {}\r\n)\r\n", argsLog)
-		scriptPath = filepath.Join(binDir, "bd.bat")
-		if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
-			t.Fatalf("write fake bd.bat: %v", err)
-		}
-	} else {
-		// Unix: create a shell script
-		script := fmt.Sprintf(`#!/bin/sh
-echo "$@" >> %q
-case "$1" in
-  list) echo "[]" ;;
-  update) exit 0 ;;
-  show) echo '[{"labels":["cleanup","polecat:testpol","state:pending"]}]' ;;
-  *) echo "{}" ;;
-esac
-`, argsLog)
-		scriptPath = filepath.Join(binDir, "bd")
-		if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
-			t.Fatalf("write fake bd: %v", err)
-		}
+	oldExec := bdExec
+	oldRun := bdRun
+	bdExec = func(workDir string, args ...string) (string, error) {
+		mock.calls = append(mock.calls, strings.Join(args, " "))
+		return execFn(args)
 	}
-
-	// Set bdCommand to full path — no PATH manipulation needed
-	old := bdCommand
-	bdCommand = scriptPath
+	bdRun = func(workDir string, args ...string) error {
+		mock.calls = append(mock.calls, strings.Join(args, " "))
+		return runFn(args)
+	}
 	t.Cleanup(func() {
-		bdCommand = old
+		bdExec = oldExec
+		bdRun = oldRun
 	})
-	return argsLog
+	return mock
+}
+
+// installFakeBd creates Go-level mocks matching the old shell script behavior:
+// list→"[]", update→ok, show→cleanup wisp JSON. Returns captured call log.
+func installFakeBd(t *testing.T) *mockBdCalls {
+	t.Helper()
+	return installMockBd(t,
+		func(args []string) (string, error) {
+			if len(args) > 0 {
+				switch args[0] {
+				case "list":
+					return "[]", nil
+				case "show":
+					return `[{"labels":["cleanup","polecat:testpol","state:pending"]}]`, nil
+				}
+			}
+			return "{}", nil
+		},
+		func(args []string) error { return nil },
+	)
 }
 
 func TestFindCleanupWisp_UsesCorrectBdListFlags(t *testing.T) {
-	argsLog := installFakeBd(t)
+	mock := installFakeBd(t)
 	workDir := t.TempDir()
 
 	_, _ = findCleanupWisp(workDir, "nux")
 
-	args, err := os.ReadFile(argsLog)
-	if err != nil {
-		t.Fatalf("read args log: %v", err)
-	}
-	got := string(args)
+	got := strings.Join(mock.calls, "\n")
 
 	// Must use --label (singular), NOT --labels (plural)
 	if !strings.Contains(got, "--label") {
@@ -384,16 +387,12 @@ func TestFindCleanupWisp_UsesCorrectBdListFlags(t *testing.T) {
 }
 
 func TestFindAnyCleanupWisp_UsesCorrectBdListFlags(t *testing.T) {
-	argsLog := installFakeBd(t)
+	mock := installFakeBd(t)
 	workDir := t.TempDir()
 
 	_ = findAnyCleanupWisp(workDir, "bravo")
 
-	args, err := os.ReadFile(argsLog)
-	if err != nil {
-		t.Fatalf("read args log: %v", err)
-	}
-	got := string(args)
+	got := strings.Join(mock.calls, "\n")
 
 	// Must use --label (singular), NOT --labels (plural)
 	if !strings.Contains(got, "--label") {
@@ -415,19 +414,15 @@ func TestFindAnyCleanupWisp_UsesCorrectBdListFlags(t *testing.T) {
 }
 
 func TestUpdateCleanupWispState_UsesCorrectBdUpdateFlags(t *testing.T) {
-	argsLog := installFakeBd(t)
+	mock := installFakeBd(t)
 	workDir := t.TempDir()
 
 	// UpdateCleanupWispState first calls "bd show <id> --json", then "bd update".
-	// Our fake bd returns valid JSON for show with polecat:testpol label,
+	// Our mock returns valid JSON for show with polecat:testpol label,
 	// so polecatName will be "testpol". Then it calls bd update with new labels.
 	_ = UpdateCleanupWispState(workDir, "gt-wisp-abc", "merged")
 
-	args, err := os.ReadFile(argsLog)
-	if err != nil {
-		t.Fatalf("read args log: %v", err)
-	}
-	got := string(args)
+	got := strings.Join(mock.calls, "\n")
 
 	// Must use --set-labels=<label> per label (not --labels)
 	if !strings.Contains(got, "--set-labels=") {
@@ -940,10 +935,6 @@ func TestDetectOrphanedBeads_ResultTypes(t *testing.T) {
 }
 
 func TestDetectOrphanedBeads_WithMockBd(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping mock bd test on Windows")
-	}
-
 	// Set up town directory structure
 	townRoot := t.TempDir()
 	rigName := "testrig"
@@ -963,78 +954,39 @@ func TestDetectOrphanedBeads_WithMockBd(t *testing.T) {
 	// "charlie" is hooked, no dir, no session — also an orphan
 	// "delta" is assigned to a different rig — skipped by rigName filter
 
-	binDir := t.TempDir()
-	bdPath := filepath.Join(binDir, "bd")
-
-	// Create mock bd that returns beads for both in_progress and hooked statuses
-	bdListLog := filepath.Join(binDir, "bd-list.log")
-	script := `#!/bin/sh
-# Log all invocations for assertion
-echo "$@" >> "` + bdListLog + `"
-
-cmd=""
-for arg in "$@"; do
-  case "$arg" in
-    --*) ;; # skip flags
-    *) cmd="$arg"; break ;;
-  esac
-done
-
-case "$cmd" in
-  list)
-    # Check which status is being queried
-    case "$*" in
-      *--status=in_progress*)
-        cat <<'JSONEOF'
-[
+	mock := installMockBd(t,
+		func(args []string) (string, error) {
+			if len(args) == 0 {
+				return "{}", nil
+			}
+			switch args[0] {
+			case "list":
+				joined := strings.Join(args, " ")
+				if strings.Contains(joined, "--status=in_progress") {
+					return `[
   {"id":"gt-orphan1","assignee":"testrig/polecats/alpha"},
   {"id":"gt-alive1","assignee":"testrig/polecats/bravo"},
   {"id":"gt-nocrew","assignee":"testrig/crew/sean"},
   {"id":"gt-noassign","assignee":""},
   {"id":"gt-otherrig","assignee":"otherrig/polecats/delta"}
-]
-JSONEOF
-        ;;
-      *--status=hooked*)
-        cat <<'JSONEOF'
-[
-  {"id":"gt-hooked1","assignee":"testrig/polecats/charlie"}
-]
-JSONEOF
-        ;;
-    esac
-    exit 0
-    ;;
-  update)
-    # Log update calls for verification
-    echo "$@" >> "` + filepath.Join(binDir, "bd-update.log") + `"
-    exit 0
-    ;;
-  show)
-    # Return in_progress status for any bead query
-    echo '[{"status":"in_progress"}]'
-    exit 0
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-`
-	if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	old := bdCommand
-	bdCommand = bdPath
-	defer func() { bdCommand = old }()
+]`, nil
+				}
+				if strings.Contains(joined, "--status=hooked") {
+					return `[{"id":"gt-hooked1","assignee":"testrig/polecats/charlie"}]`, nil
+				}
+				return "[]", nil
+			case "show":
+				return `[{"status":"in_progress"}]`, nil
+			}
+			return "{}", nil
+		},
+		func(args []string) error { return nil },
+	)
 
 	result := DetectOrphanedBeads(townRoot, rigName, nil)
 
 	// Verify --limit=0 was passed in bd list invocations
-	logContent, err := os.ReadFile(bdListLog)
-	if err != nil {
-		t.Fatalf("Failed to read bd-list.log: %v", err)
-	}
-	logStr := string(logContent)
+	logStr := strings.Join(mock.calls, "\n")
 	if !strings.Contains(logStr, "--limit=0") {
 		t.Errorf("bd list was not called with --limit=0; log:\n%s", logStr)
 	}
@@ -1093,23 +1045,11 @@ esac
 }
 
 func TestDetectOrphanedBeads_ErrorPath(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping mock bd test on Windows")
-	}
-
-	// Set up with a mock bd that fails on list
-	binDir := t.TempDir()
-	bdPath := filepath.Join(binDir, "bd")
-	script := `#!/bin/sh
-echo "bd: connection refused" >&2
-exit 1
-`
-	if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	old := bdCommand
-	bdCommand = bdPath
-	defer func() { bdCommand = old }()
+	bdErr := fmt.Errorf("bd: connection refused")
+	installMockBd(t,
+		func(args []string) (string, error) { return "", bdErr },
+		func(args []string) error { return bdErr },
+	)
 
 	result := DetectOrphanedBeads(t.TempDir(), "testrig", nil)
 
@@ -1173,9 +1113,11 @@ func TestOrphanedMoleculeResult_Types(t *testing.T) {
 
 func TestDetectOrphanedMolecules_NoBdAvailable(t *testing.T) {
 	// When bd is not available, should return empty result with errors.
-	old := bdCommand
-	bdCommand = "/nonexistent/bd"
-	defer func() { bdCommand = old }()
+	bdErr := fmt.Errorf("bd: not found")
+	installMockBd(t,
+		func(args []string) (string, error) { return "", bdErr },
+		func(args []string) error { return bdErr },
+	)
 	result := DetectOrphanedMolecules("/tmp/nonexistent", "testrig", nil)
 	if result == nil {
 		t.Fatal("result should not be nil")
@@ -1190,20 +1132,13 @@ func TestDetectOrphanedMolecules_NoBdAvailable(t *testing.T) {
 }
 
 func TestDetectOrphanedMolecules_EmptyResult(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test uses Unix shell script mock for bd")
-	}
 	// With a mock bd that returns empty lists, should get empty result.
-	tmpDir := t.TempDir()
-	mockBd := filepath.Join(tmpDir, "bd")
-	if err := os.WriteFile(mockBd, []byte("#!/bin/sh\necho '[]'\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	old := bdCommand
-	bdCommand = mockBd
-	defer func() { bdCommand = old }()
+	installMockBd(t,
+		func(args []string) (string, error) { return "[]", nil },
+		func(args []string) error { return nil },
+	)
 
-	result := DetectOrphanedMolecules(tmpDir, "testrig", nil)
+	result := DetectOrphanedMolecules(t.TempDir(), "testrig", nil)
 	if result == nil {
 		t.Fatal("result should not be nil")
 	}
@@ -1216,10 +1151,11 @@ func TestDetectOrphanedMolecules_EmptyResult(t *testing.T) {
 }
 
 func TestGetAttachedMoleculeID_EmptyOutput(t *testing.T) {
-	// When bd show returns empty, should return empty string.
-	old := bdCommand
-	bdCommand = "/nonexistent/bd"
-	defer func() { bdCommand = old }()
+	// When bd returns error, should return empty string.
+	installMockBd(t,
+		func(args []string) (string, error) { return "", fmt.Errorf("bd: not found") },
+		func(args []string) error { return fmt.Errorf("bd: not found") },
+	)
 	result := getAttachedMoleculeID("/tmp", "gt-fake-123")
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
@@ -1278,9 +1214,6 @@ func TestFindMRBeadForBranch_NoBdAvailable(t *testing.T) {
 }
 
 func TestDetectOrphanedMolecules_WithMockBd(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test uses Unix shell script mock for bd")
-	}
 	// Full test with mock bd returning beads assigned to dead polecats.
 	//
 	// Setup:
@@ -1308,74 +1241,48 @@ func TestDetectOrphanedMolecules_WithMockBd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create mock bd that handles list and show commands
-	logFile := filepath.Join(tmpDir, "bd.log")
-	mockBd := filepath.Join(tmpDir, "bd")
-	mockScript := fmt.Sprintf(`#!/bin/sh
-echo "$@" >> %s
-case "$1" in
-  list)
-    case "$*" in
-      *--status=hooked*)
-        cat <<'EOJSON'
-[
+	mock := installMockBd(t,
+		func(args []string) (string, error) {
+			if len(args) == 0 {
+				return "[]", nil
+			}
+			joined := strings.Join(args, " ")
+			switch args[0] {
+			case "list":
+				if strings.Contains(joined, "--status=hooked") {
+					return `[
   {"id":"gt-work-001","assignee":"testrig/polecats/alpha"},
   {"id":"gt-work-002","assignee":"testrig/polecats/bravo"},
   {"id":"gt-work-003","assignee":"testrig/crew/sean"},
   {"id":"gt-work-004","assignee":""}
-]
-EOJSON
-        ;;
-      *--status=in_progress*)
-        echo '[]'
-        ;;
-      *--parent=gt-mol-orphan*)
-        cat <<'EOJSON'
-[
+]`, nil
+				}
+				if strings.Contains(joined, "--status=in_progress") {
+					return "[]", nil
+				}
+				if strings.Contains(joined, "--parent=gt-mol-orphan") {
+					return `[
   {"id":"gt-step-001","status":"open"},
   {"id":"gt-step-002","status":"open"},
   {"id":"gt-step-003","status":"closed"}
-]
-EOJSON
-        ;;
-      *--parent=*)
-        echo '[]'
-        ;;
-      *)
-        echo '[]'
-        ;;
-    esac
-    ;;
-  show)
-    case "$2" in
-      gt-work-001)
-        echo '[{"status":"hooked","description":"attached_molecule: gt-mol-orphan\\nattached_at: 2026-01-15T10:00:00Z\\ndispatched_by: mayor"}]'
-        ;;
-      gt-mol-orphan)
-        echo '[{"status":"open"}]'
-        ;;
-      *)
-        echo '[{"status":"open","description":""}]'
-        ;;
-    esac
-    ;;
-  close)
-    # Accept close commands silently
-    ;;
-  update)
-    # Accept update commands (used by resetAbandonedBead)
-    ;;
-  *)
-    ;;
-esac
-`, logFile)
-
-	if err := os.WriteFile(mockBd, []byte(mockScript), 0755); err != nil {
-		t.Fatal(err)
-	}
-	oldBd := bdCommand
-	bdCommand = mockBd
-	defer func() { bdCommand = oldBd }()
+]`, nil
+				}
+				return "[]", nil
+			case "show":
+				if len(args) > 1 {
+					switch args[1] {
+					case "gt-work-001":
+						return `[{"status":"hooked","description":"attached_molecule: gt-mol-orphan\nattached_at: 2026-01-15T10:00:00Z\ndispatched_by: mayor"}]`, nil
+					case "gt-mol-orphan":
+						return `[{"status":"open"}]`, nil
+					}
+				}
+				return `[{"status":"open","description":""}]`, nil
+			}
+			return "{}", nil
+		},
+		func(args []string) error { return nil },
+	)
 
 	result := DetectOrphanedMolecules(tmpDir, rigName, nil)
 	if result == nil {
@@ -1410,12 +1317,8 @@ esac
 		t.Errorf("orphan.Error = %v, want nil", orphan.Error)
 	}
 
-	// Verify bd close was called by checking the log
-	logBytes, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("reading bd log: %v", err)
-	}
-	logContent := string(logBytes)
+	// Verify bd close was called by checking the mock log
+	logContent := strings.Join(mock.calls, "\n")
 	if !strings.Contains(logContent, "close gt-step-001 gt-step-002") {
 		t.Errorf("expected bd close for step children, got log:\n%s", logContent)
 	}
@@ -1502,9 +1405,6 @@ func TestDiscoverCompletions_EmptyPolecatsDir(t *testing.T) {
 }
 
 func TestDiscoverCompletions_NoCompletionMetadata(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test uses Unix shell script mock for bd")
-	}
 	// Polecat exists but agent bead has no completion metadata — should be skipped
 	tmpDir := t.TempDir()
 	rigName := "testrig"
@@ -1517,22 +1417,15 @@ func TestDiscoverCompletions_NoCompletionMetadata(t *testing.T) {
 	}
 
 	// Mock bd that returns agent bead with no completion fields
-	mockBd := filepath.Join(tmpDir, "bd")
-	mockScript := `#!/bin/sh
-case "$1" in
-  show)
-    cat <<'EOJSON'
-[{"id":"gt-testrig-polecat-nux","description":"Agent: testrig/polecats/nux\n\nrole_type: polecat\nrig: testrig\nagent_state: working\nhook_bead: gt-work-001","agent_state":"working","hook_bead":"gt-work-001"}]
-EOJSON
-    ;;
-esac
-`
-	if err := os.WriteFile(mockBd, []byte(mockScript), 0755); err != nil {
-		t.Fatal(err)
-	}
-	oldBd := bdCommand
-	bdCommand = mockBd
-	defer func() { bdCommand = oldBd }()
+	installMockBd(t,
+		func(args []string) (string, error) {
+			if len(args) > 0 && args[0] == "show" {
+				return `[{"id":"gt-testrig-polecat-nux","description":"Agent: testrig/polecats/nux\n\nrole_type: polecat\nrig: testrig\nagent_state: working\nhook_bead: gt-work-001","agent_state":"working","hook_bead":"gt-work-001"}]`, nil
+			}
+			return "[]", nil
+		},
+		func(args []string) error { return nil },
+	)
 
 	result := DiscoverCompletions(tmpDir, rigName, nil)
 	if result.Checked != 1 {
@@ -1584,10 +1477,11 @@ func TestProcessDiscoveredCompletion_EscalatedNoMR(t *testing.T) {
 }
 
 func TestGetAgentBeadFields_NoAgentBead(t *testing.T) {
-	// When bd is not available, should return nil
-	old := bdCommand
-	bdCommand = "/nonexistent/bd"
-	defer func() { bdCommand = old }()
+	// When bd fails, should return nil
+	installMockBd(t,
+		func(args []string) (string, error) { return "", fmt.Errorf("bd: not found") },
+		func(args []string) error { return fmt.Errorf("bd: not found") },
+	)
 	fields := getAgentBeadFields("/tmp", "gt-fake-agent")
 	if fields != nil {
 		t.Error("expected nil fields when bd unavailable")
@@ -1595,10 +1489,11 @@ func TestGetAgentBeadFields_NoAgentBead(t *testing.T) {
 }
 
 func TestClearCompletionMetadata_NoBd(t *testing.T) {
-	// When bd is not available, should return error
-	old := bdCommand
-	bdCommand = "/nonexistent/bd"
-	defer func() { bdCommand = old }()
+	// When bd fails, should return error
+	installMockBd(t,
+		func(args []string) (string, error) { return "", fmt.Errorf("bd: not found") },
+		func(args []string) error { return fmt.Errorf("bd: not found") },
+	)
 	err := clearCompletionMetadata("/tmp", "gt-fake-agent")
 	if err == nil {
 		t.Error("expected error when bd unavailable")
