@@ -2604,7 +2604,7 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // Used to skip redundant re-binding on repeated ConfigureGasTownSession /
 // EnsureBindingsOnSocket calls, preserving the user's original fallback.
 //
-// Two forms are recognised:
+// Two forms are recognized:
 //  1. Guarded form (set by SetAgentsBinding/SetFeedBinding): uses if-shell
 //     with a "gt " command — detects both old and new guarded bindings.
 //  2. Unguarded form (set by EnsureBindingsOnSocket): direct run-shell
@@ -2739,7 +2739,6 @@ func sessionPrefixPattern() string {
 // within the appropriate group:
 // - Town sessions: Mayor ↔ Deacon
 // - Crew sessions: All crew members in the same rig
-// - Rig ops sessions: Witness + Refinery + Polecats in the same rig
 //
 // IMPORTANT: These bindings are conditional - they only run gt cycle for
 // Gas Town sessions (those matching a registered rig prefix or "hq-").
