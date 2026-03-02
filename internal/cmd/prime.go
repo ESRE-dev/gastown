@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -351,15 +352,17 @@ func outputRoleContext(ctx RoleContext) (string, error) {
 	return formula, nil
 }
 
-// runPrimeExternalTools runs bd prime and gt mail check --inject.
+// runPrimeExternalTools runs bd prime, memory injection, and gt mail check --inject.
 // Skipped in dry-run mode with explain output.
 func runPrimeExternalTools(cwd string) {
 	if primeDryRun {
 		explain(true, "bd prime: skipped in dry-run mode")
+		explain(true, "memory injection: skipped in dry-run mode")
 		explain(true, "gt mail check --inject: skipped in dry-run mode")
 		return
 	}
 	runBdPrime(cwd)
+	runMemoryInject()
 	runMailCheckInject(cwd)
 }
 
@@ -387,6 +390,37 @@ func runBdPrime(workDir string) {
 	if output != "" {
 		fmt.Println()
 		fmt.Println(output)
+	}
+}
+
+// runMemoryInject loads memories from beads kv and outputs them during prime.
+// This replaces MEMORY.md injection with bead-backed agent memory.
+func runMemoryInject() {
+	kvs, err := bdKvListJSON()
+	if err != nil {
+		return // Silently skip if kv list fails
+	}
+
+	var memories []string
+	for k, v := range kvs {
+		if !strings.HasPrefix(k, memoryKeyPrefix) {
+			continue
+		}
+		shortKey := strings.TrimPrefix(k, memoryKeyPrefix)
+		memories = append(memories, fmt.Sprintf("- **%s**: %s", shortKey, v))
+	}
+
+	if len(memories) == 0 {
+		return
+	}
+
+	sort.Strings(memories)
+
+	fmt.Println()
+	fmt.Println("# Agent Memories")
+	fmt.Println()
+	for _, m := range memories {
+		fmt.Println(m)
 	}
 }
 
