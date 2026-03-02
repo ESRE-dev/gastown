@@ -2054,6 +2054,88 @@ func collectReferencedDatabases(townRoot string) map[string]bool {
 	return referenced
 }
 
+// CollectDatabaseOwners returns a map from database name to a human-readable
+// owner description (e.g., "gastown rig beads", "town beads"). This is used by
+// gt dolt status to annotate each database with its rig owner, preventing
+// accidental drops of production databases. (GH#2252)
+func CollectDatabaseOwners(townRoot string) map[string]string {
+	owners := make(map[string]string)
+
+	// Check town-level beads (hq)
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if db := readExistingDoltDatabase(townBeadsDir); db != "" {
+		owners[db] = "town beads"
+	}
+
+	// Check all rigs from rigs.json
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	data, err := os.ReadFile(rigsPath)
+	if err == nil {
+		var config struct {
+			Rigs map[string]interface{} `json:"rigs"`
+		}
+		if err := json.Unmarshal(data, &config); err == nil {
+			for rigName := range config.Rigs {
+				beadsDir := FindRigBeadsDir(townRoot, rigName)
+				if beadsDir == "" {
+					continue
+				}
+				if db := readExistingDoltDatabase(beadsDir); db != "" {
+					owners[db] = rigName + " rig beads"
+				}
+			}
+		}
+	}
+
+	// Also check routes.jsonl
+	routesPath := filepath.Join(townRoot, ".beads", "routes.jsonl")
+	if routesData, readErr := os.ReadFile(routesPath); readErr == nil {
+		for _, line := range strings.Split(string(routesData), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			var route struct {
+				Prefix string `json:"prefix"`
+				Path   string `json:"path"`
+			}
+			if json.Unmarshal([]byte(line), &route) != nil || route.Path == "" {
+				continue
+			}
+			beadsDir := filepath.Join(townRoot, route.Path, ".beads")
+			if db := readExistingDoltDatabase(beadsDir); db != "" {
+				if _, already := owners[db]; !already {
+					// Derive a name from the route path
+					parts := strings.Split(route.Path, "/")
+					owners[db] = parts[0] + " rig beads"
+				}
+			}
+		}
+	}
+
+	// Scan top-level directories for any .beads/metadata.json
+	if entries, readErr := os.ReadDir(townRoot); readErr == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || entry.Name() == ".beads" || entry.Name() == "mayor" {
+				continue
+			}
+			dirName := entry.Name()
+			if db := readExistingDoltDatabase(filepath.Join(townRoot, dirName, ".beads")); db != "" {
+				if _, already := owners[db]; !already {
+					owners[db] = dirName + " rig beads"
+				}
+			}
+			if db := readExistingDoltDatabase(filepath.Join(townRoot, dirName, "mayor", "rig", ".beads")); db != "" {
+				if _, already := owners[db]; !already {
+					owners[db] = dirName + " rig beads"
+				}
+			}
+		}
+	}
+
+	return owners
+}
+
 // RemoveDatabase removes an orphaned database directory from .dolt-data/.
 // The caller should verify the database is actually orphaned before calling this.
 // If the Dolt server is running, it will DROP the database first.
