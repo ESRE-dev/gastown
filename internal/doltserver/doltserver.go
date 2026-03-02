@@ -219,6 +219,29 @@ func DefaultConfig(townRoot string) *Config {
 		config.LogLevel = ll
 	}
 
+	// Fallback: if GT_DOLT_PORT is not in the shell env, read it from
+	// mayor/daemon.json. Commands like gt dolt status, gt dolt stop, etc.
+	// are typically run without the daemon.json env vars exported to the
+	// shell, so DefaultConfig would otherwise return the wrong port (3307)
+	// when the town uses a custom port (e.g. GT_DOLT_PORT=3308).
+	// We cannot import the daemon package here (circular: daemon→doltserver),
+	// so we parse the minimal JSON structure directly.
+	if os.Getenv("GT_DOLT_PORT") == "" && townRoot != "" {
+		daemonJSONPath := filepath.Join(townRoot, "mayor", "daemon.json")
+		if data, err := os.ReadFile(daemonJSONPath); err == nil {
+			var daemonEnv struct {
+				Env map[string]string `json:"env"`
+			}
+			if err := json.Unmarshal(data, &daemonEnv); err == nil {
+				if v, ok := daemonEnv.Env["GT_DOLT_PORT"]; ok {
+					if port, err := strconv.Atoi(v); err == nil {
+						config.Port = port
+					}
+				}
+			}
+		}
+	}
+
 	// Default to warning logging. Use GT_DOLT_LOGLEVEL=info or =debug for diagnostics.
 	if config.LogLevel == "" {
 		config.LogLevel = "warning"
@@ -384,7 +407,23 @@ func IsRunning(townRoot string) (bool, int, error) {
 					// Verify it's actually serving on the expected port.
 					// More reliable than ps string matching (ZFC fix: gt-utuk).
 					if isDoltServerOnPort(config.Port) {
-						return true, pid, nil
+						// Verify data-dir to avoid claiming another town's Dolt.
+						serverDataDir := getServerDataDir(townRoot, pid)
+						ours := serverDataDir == "" || serverDataDir == config.DataDir
+						if ours {
+							// Cross-check process args as tiebreaker against PID reuse:
+							// if the OS recycled this PID for a different town's dolt
+							// after the original stopped, its --data-dir flag will differ.
+							if actualDir := getDoltDataDirFromProcess(pid); actualDir != "" {
+								expected, _ := filepath.Abs(config.DataDir)
+								actual, _ := filepath.Abs(actualDir)
+								ours = actual == expected
+							}
+						}
+						if ours {
+							return true, pid, nil
+						}
+						// Port served by a different town's Dolt — fall through to stale cleanup
 					}
 				}
 			}
@@ -400,7 +439,16 @@ func IsRunning(townRoot string) (bool, int, error) {
 	if pid > 0 {
 		serverDataDir := getServerDataDir(townRoot, pid)
 		if serverDataDir == "" || serverDataDir == config.DataDir {
-			return true, pid, nil
+			// Cross-check process args to guard against PID reuse.
+			actualDir := getDoltDataDirFromProcess(pid)
+			if actualDir == "" {
+				return true, pid, nil
+			}
+			expected, _ := filepath.Abs(config.DataDir)
+			actual, _ := filepath.Abs(actualDir)
+			if actual == expected {
+				return true, pid, nil
+			}
 		}
 		// Port is used by a different town's Dolt — not ours
 	}
@@ -680,6 +728,35 @@ func getServerDataDir(townRoot string, pid int) string {
 		return state.DataDir
 	}
 	// PID mismatch — state is stale or belongs to a different server
+	return ""
+}
+
+// getDoltDataDirFromProcess reads the --data-dir flag value from the running
+// process's command-line arguments. This is structural (reading a well-defined
+// CLI flag), not heuristic string matching. Used as a tiebreaker when the
+// state-file based check is inconclusive (e.g. PID reuse across towns).
+//
+// Supported on macOS and Linux via POSIX ps. Returns empty string on Windows
+// (not supported) or on any error.
+func getDoltDataDirFromProcess(pid int) string {
+	if runtime.GOOS == "windows" {
+		return "" // ps not available; caller falls back to trusting state file
+	}
+	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	args := strings.Fields(strings.TrimSpace(string(out)))
+	for i, arg := range args {
+		if arg == "--data-dir" && i+1 < len(args) {
+			return args[i+1]
+		}
+		// Handle --data-dir=value form
+		if strings.HasPrefix(arg, "--data-dir=") {
+			return strings.TrimPrefix(arg, "--data-dir=")
+		}
+	}
 	return ""
 }
 
@@ -1023,8 +1100,11 @@ func Start(townRoot string) error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
-	// Detach from terminal
+	// Detach from terminal and put dolt in its own process group so that
+	// signals sent to the parent process group (e.g. SIGHUP when the caller
+	// calls syscall.Exec to become tmux) don't reach the dolt server.
 	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
 		if closeErr := logFile.Close(); closeErr != nil {
