@@ -1588,7 +1588,18 @@ func cleanupMoleculeOnHandoff() {
 // file in the .runtime directory. If the file exists and was written
 // less than MinHandoffCooldown ago, the function sleeps for the remaining
 // time. This ensures at least MinHandoffCooldown passes between handoffs.
+//
+// Crew and mayor roles are exempt — they hand off on human request,
+// not on patrol loops, so the cooldown just gets in the way.
 func enforceHandoffCooldown() {
+	if role := os.Getenv("GT_ROLE"); role != "" {
+		parsed, _, _ := parseRoleString(role)
+		switch parsed {
+		case RoleMayor, RoleCrew:
+			return
+		}
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return
