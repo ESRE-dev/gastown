@@ -282,6 +282,14 @@ func (c *Config) userDSN() string {
 	return c.User
 }
 
+// EffectiveHost returns the configured host, defaulting to "127.0.0.1" when empty.
+func (c *Config) EffectiveHost() string {
+	if c.Host == "" {
+		return "127.0.0.1"
+	}
+	return c.Host
+}
+
 // HostPort returns "host:port", defaulting host to "127.0.0.1" when empty.
 func (c *Config) HostPort() string {
 	host := c.Host
@@ -2520,7 +2528,7 @@ func GetActiveConnectionCount(townRoot string) (int, error) {
 	// Note: --host, --port, --user, --no-tls are dolt GLOBAL args and must come
 	// BEFORE the "sql" subcommand.
 	fullArgs := []string{
-		"--host", "127.0.0.1",
+		"--host", config.EffectiveHost(),
 		"--port", strconv.Itoa(config.Port),
 		"--user", config.User,
 		"--no-tls",
