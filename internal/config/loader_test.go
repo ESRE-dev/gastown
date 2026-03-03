@@ -1164,6 +1164,30 @@ func TestResolveAgentConfigWithOverride(t *testing.T) {
 			t.Fatal("expected error for unknown agent override")
 		}
 	})
+
+	t.Run("override with subcommand", func(t *testing.T) {
+		rc, name, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "opencode acp")
+		if err != nil {
+			t.Fatalf("ResolveAgentConfigWithOverride: %v", err)
+		}
+		if name != "opencode" {
+			t.Fatalf("name = %q, want %q", name, "opencode")
+		}
+		if rc.Command != "opencode" {
+			t.Fatalf("rc.Command = %q, want %q", rc.Command, "opencode")
+		}
+		// Verify "acp" was appended to Args
+		found := false
+		for _, arg := range rc.Args {
+			if arg == "acp" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("rc.Args = %v, want it to contain %q", rc.Args, "acp")
+		}
+	})
 }
 
 func TestBuildPolecatStartupCommandWithAgentOverride(t *testing.T) {

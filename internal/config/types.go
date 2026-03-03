@@ -711,6 +711,11 @@ type RuntimeConfig struct {
 	// Instructions controls the per-workspace instruction file name.
 	Instructions *RuntimeInstructionsConfig `json:"instructions,omitempty"`
 
+	// ACP configures ACP (Agent Communication Protocol) support.
+	// When set, the agent can run in ACP mode. If nil, ACP support is
+	// determined by matching the Command to a known preset with ACP config.
+	ACP *ACPConfig `json:"acp,omitempty"`
+
 	// ResolvedAgent is the agent name that was resolved during config lookup.
 	// Set by ResolveRoleAgentConfig / resolveAgentConfigInternal so that
 	// BuildStartupCommand can export GT_AGENT for process detection.
