@@ -253,8 +253,10 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 }
 
 // Reap closes stale wisps in a database whose parent molecule is already closed.
+// UPDATEs are batched to avoid holding a write lock for extended periods on large tables.
 func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
+	// Use a longer timeout to accommodate batched processing across large tables.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	cutoff := time.Now().UTC().Add(-maxAge)
@@ -284,18 +286,58 @@ func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapRe
 		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
 	}()
 
-	closeQuery := fmt.Sprintf(
-		"UPDATE `%s`.wisps w SET w.status='closed', w.closed_at=NOW() WHERE %s", dbName, whereClause)
-	sqlResult, err := db.ExecContext(ctx, closeQuery, cutoff)
-	if err != nil {
-		return nil, fmt.Errorf("close stale wisps: %w", err)
+	// Batch UPDATE: select IDs in chunks, update each chunk.
+	// This avoids holding a write lock on the entire table for minutes.
+	idQuery := fmt.Sprintf(
+		"SELECT w.id FROM `%s`.wisps w WHERE %s LIMIT %d",
+		dbName, whereClause, DefaultBatchSize)
+
+	totalReaped := 0
+	for {
+		rows, err := db.QueryContext(ctx, idQuery, cutoff)
+		if err != nil {
+			return nil, fmt.Errorf("select reap batch: %w", err)
+		}
+
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan wisp id: %w", err)
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+
+		if len(ids) == 0 {
+			break
+		}
+
+		placeholders := make([]string, len(ids))
+		args := make([]interface{}, len(ids))
+		for i, id := range ids {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		inClause := strings.Join(placeholders, ",")
+
+		updateQuery := fmt.Sprintf(
+			"UPDATE `%s`.wisps SET status='closed', closed_at=NOW() WHERE id IN (%s)",
+			dbName, inClause) //nolint:gosec // G201: dbName validated, inClause is parameterized
+		sqlResult, err := db.ExecContext(ctx, updateQuery, args...)
+		if err != nil {
+			return nil, fmt.Errorf("close stale wisps batch: %w", err)
+		}
+
+		affected, _ := sqlResult.RowsAffected()
+		totalReaped += int(affected)
 	}
 
-	reaped, _ := sqlResult.RowsAffected()
-	result.Reaped = int(reaped)
+	result.Reaped = totalReaped
 
-	if reaped > 0 {
-		commitMsg := fmt.Sprintf("reaper: close %d stale wisps in %s", reaped, dbName)
+	if totalReaped > 0 {
+		commitMsg := fmt.Sprintf("reaper: close %d stale wisps in %s", totalReaped, dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
 			return result, fmt.Errorf("dolt commit: %w", err)
 		}
