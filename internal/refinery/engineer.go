@@ -392,14 +392,6 @@ type ProcessResult struct {
 }
 
 // doMerge performs the actual git merge operation.
-// minInt returns the smaller of two ints.
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue string, skipGates ...bool) ProcessResult {
 	// Step 1: Verify source branch exists locally (shared .repo.git with polecats)
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking local branch %s...\n", branch)
@@ -888,7 +880,7 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 	// hasn't moved since, we can skip running gates entirely (~5s merge).
 	skipGates := false
 	if mr.PreVerified && mr.PreVerifiedBase != "" {
-		_, _ = fmt.Fprintf(e.output, "  Pre-verified: yes (base=%s)\n", mr.PreVerifiedBase[:minInt(8, len(mr.PreVerifiedBase))])
+		_, _ = fmt.Fprintf(e.output, "  Pre-verified: yes (base=%s)\n", mr.PreVerifiedBase[:min(8, len(mr.PreVerifiedBase))])
 		// Check if target HEAD still matches the verified base
 		targetHead, err := e.git.Rev("origin/" + mr.Target)
 		if err != nil {
@@ -898,7 +890,7 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 			skipGates = true
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Pre-verification stale — target moved (%s → %s), running gates normally\n",
-				mr.PreVerifiedBase[:minInt(8, len(mr.PreVerifiedBase))], targetHead[:minInt(8, len(targetHead))])
+				mr.PreVerifiedBase[:min(8, len(mr.PreVerifiedBase))], targetHead[:min(8, len(targetHead))])
 		}
 	}
 
