@@ -21,8 +21,60 @@ import (
 // validDBName matches safe database names (alphanumeric + underscore only).
 var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
-// DefaultDatabases returns the list of known production databases.
-var DefaultDatabases = []string{"hq", "beads", "gastown"}
+// DefaultDatabases is the static fallback list of known production databases.
+var DefaultDatabases = []string{"hq", "beads", "gt"}
+
+// testPollutionPrefixes are database name prefixes created by tests.
+var testPollutionPrefixes = []string{"testdb_", "beads_t", "beads_pt", "doctest_"}
+
+// DiscoverDatabases queries SHOW DATABASES on the Dolt server and returns
+// all production databases, filtering out system databases and test pollution.
+// Falls back to DefaultDatabases on any error.
+func DiscoverDatabases(host string, port int) []string {
+	dsn := fmt.Sprintf("root@tcp(%s:%d)/?parseTime=true&timeout=5s", host, port)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return DefaultDatabases
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := db.QueryContext(ctx, "SHOW DATABASES")
+	if err != nil {
+		return DefaultDatabases
+	}
+	defer rows.Close()
+
+	var databases []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+		if name == "information_schema" || name == "mysql" {
+			continue
+		}
+		lower := strings.ToLower(name)
+		skip := false
+		for _, prefix := range testPollutionPrefixes {
+			if strings.HasPrefix(lower, prefix) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+		databases = append(databases, name)
+	}
+
+	if len(databases) == 0 {
+		return DefaultDatabases
+	}
+	return databases
+}
 
 // ScanResult holds the results of scanning a database for reaper candidates.
 type ScanResult struct {
@@ -140,9 +192,12 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 	}
 
 	// Count purge candidates: closed wisps past purge_age.
+	// No parent check needed — closed wisps past the delete age are unconditionally purgeable.
+	// The parent check (correlated subqueries on wisp_dependencies) was causing O(n*m) query
+	// cost with 1800+ closed wisps, leading to CPU spikes and connection timeouts (gt-wvd2).
 	purgeQuery := fmt.Sprintf(
-		"SELECT COUNT(*) FROM `%s`.wisps w WHERE w.status = 'closed' AND w.closed_at < ? AND %s",
-		dbName, parentCheck)
+		"SELECT COUNT(*) FROM `%s`.wisps w WHERE w.status = 'closed' AND w.closed_at < ?",
+		dbName)
 	if err := db.QueryRowContext(ctx, purgeQuery, now.Add(-purgeAge)).Scan(&result.PurgeCandidates); err != nil {
 		return nil, fmt.Errorf("count purge candidates: %w", err)
 	}
@@ -201,8 +256,10 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 }
 
 // Reap closes stale wisps in a database whose parent molecule is already closed.
+// UPDATEs are batched to avoid holding a write lock for extended periods on large tables.
 func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
+	// Use a longer timeout to accommodate batched processing across large tables.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	cutoff := time.Now().UTC().Add(-maxAge)
@@ -232,18 +289,58 @@ func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapRe
 		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
 	}()
 
-	closeQuery := fmt.Sprintf(
-		"UPDATE `%s`.wisps w SET w.status='closed', w.closed_at=NOW() WHERE %s", dbName, whereClause)
-	sqlResult, err := db.ExecContext(ctx, closeQuery, cutoff)
-	if err != nil {
-		return nil, fmt.Errorf("close stale wisps: %w", err)
+	// Batch UPDATE: select IDs in chunks, update each chunk.
+	// This avoids holding a write lock on the entire table for minutes.
+	idQuery := fmt.Sprintf(
+		"SELECT w.id FROM `%s`.wisps w WHERE %s LIMIT %d",
+		dbName, whereClause, DefaultBatchSize)
+
+	totalReaped := 0
+	for {
+		rows, err := db.QueryContext(ctx, idQuery, cutoff)
+		if err != nil {
+			return nil, fmt.Errorf("select reap batch: %w", err)
+		}
+
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan wisp id: %w", err)
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+
+		if len(ids) == 0 {
+			break
+		}
+
+		placeholders := make([]string, len(ids))
+		args := make([]interface{}, len(ids))
+		for i, id := range ids {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		inClause := strings.Join(placeholders, ",")
+
+		updateQuery := fmt.Sprintf(
+			"UPDATE `%s`.wisps SET status='closed', closed_at=NOW() WHERE id IN (%s)",
+			dbName, inClause) //nolint:gosec // G201: dbName validated, inClause is parameterized
+		sqlResult, err := db.ExecContext(ctx, updateQuery, args...)
+		if err != nil {
+			return nil, fmt.Errorf("close stale wisps batch: %w", err)
+		}
+
+		affected, _ := sqlResult.RowsAffected()
+		totalReaped += int(affected)
 	}
 
-	reaped, _ := sqlResult.RowsAffected()
-	result.Reaped = int(reaped)
+	result.Reaped = totalReaped
 
-	if reaped > 0 {
-		commitMsg := fmt.Sprintf("reaper: close %d stale wisps in %s", reaped, dbName)
+	if totalReaped > 0 {
+		commitMsg := fmt.Sprintf("reaper: close %d stale wisps in %s", totalReaped, dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
 			return result, fmt.Errorf("dolt commit: %w", err)
 		}
@@ -285,13 +382,15 @@ func purgeClosedWisps(db *sql.DB, dbName string, purgeAge time.Duration, dryRun 
 	defer cancel()
 
 	deleteCutoff := time.Now().UTC().Add(-purgeAge)
-	parentCheck := parentCheckWhere(dbName)
 	var anomalies []Anomaly
 
 	// Digest: count by wisp_type.
+	// No parent check — closed wisps past the delete age are unconditionally purgeable.
+	// The parent check (correlated subqueries on wisp_dependencies) was causing O(n*m)
+	// query cost with 1800+ closed wisps, leading to CPU spikes and timeouts (gt-wvd2).
 	digestQuery := fmt.Sprintf(
-		"SELECT COALESCE(w.wisp_type, 'unknown') AS wtype, COUNT(*) AS cnt FROM `%s`.wisps w WHERE w.status = 'closed' AND w.closed_at < ? AND %s GROUP BY wtype",
-		dbName, parentCheck)
+		"SELECT COALESCE(w.wisp_type, 'unknown') AS wtype, COUNT(*) AS cnt FROM `%s`.wisps w WHERE w.status = 'closed' AND w.closed_at < ? GROUP BY wtype",
+		dbName)
 	rows, err := db.QueryContext(ctx, digestQuery, deleteCutoff)
 	if err != nil {
 		return 0, nil, fmt.Errorf("digest query: %w", err)
@@ -323,10 +422,10 @@ func purgeClosedWisps(db *sql.DB, dbName string, purgeAge time.Duration, dryRun 
 		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
 	}()
 
-	// Batch delete.
+	// Batch delete — simple status+age filter, no parent check needed for purge.
 	idQuery := fmt.Sprintf(
-		"SELECT w.id FROM `%s`.wisps w WHERE w.status = 'closed' AND w.closed_at < ? AND %s LIMIT %d",
-		dbName, parentCheck, DefaultBatchSize)
+		"SELECT w.id FROM `%s`.wisps w WHERE w.status = 'closed' AND w.closed_at < ? LIMIT %d",
+		dbName, DefaultBatchSize)
 	auxTables := []string{"wisp_labels", "wisp_comments", "wisp_events", "wisp_dependencies"}
 
 	totalDeleted, err := batchDeleteRows(ctx, db, dbName, idQuery, deleteCutoff, "wisps", auxTables)
