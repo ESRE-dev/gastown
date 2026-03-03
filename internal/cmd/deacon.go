@@ -548,6 +548,11 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		_ = t.SetEnvironment(sessionName, k, v)
 	}
 
+	// Record agent's pane_id for ZFC-compliant liveness checks (gt-qmsx).
+	if paneID, err := t.GetPaneID(sessionName); err == nil {
+		_ = t.SetEnvironment(sessionName, "GT_PANE_ID", paneID)
+	}
+
 	// Apply Deacon theme (non-fatal: theming failure doesn't affect operation)
 	// Note: ConfigureGasTownSession includes cycle bindings
 	theme := tmux.DeaconTheme()
