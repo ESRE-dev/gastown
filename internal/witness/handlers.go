@@ -811,7 +811,11 @@ func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
 //   - true, nil: commit is verified on default branch
 //   - false, nil: commit is NOT on default branch (don't nuke!)
 //   - false, error: couldn't verify (treat as unsafe)
-func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
+//
+// This is a package-level var so tests can override it.
+var verifyCommitOnMain = _verifyCommitOnMain
+
+func _verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 	// Find town root from workDir
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
@@ -1719,6 +1723,8 @@ func getBeadStatus(bd *BdCli, workDir, beadID string) string {
 
 // resetAbandonedBead resets a dead polecat's hooked bead so it can be re-dispatched.
 // If the bead is in "hooked" or "in_progress" status, it:
+// 0. Checks if the polecat's work is already on main — if so, closes
+//    the bead instead of resetting (prevents re-dispatch of completed work)
 // 1. Records the respawn in the witness spawn-count ledger
 // 2. Resets status to open
 // 3. Clears assignee
@@ -1737,6 +1743,17 @@ func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName strin
 	// Dedup guard (GH#2203): if another live polecat already has this bead,
 	// don't reset it — the bead is actively being worked on.
 	if IsBeadActivelyWorked(workDir, rigName, hookBead, polecatName) {
+		return false
+	}
+
+	// Guard: if the polecat's commit is already on the default branch,
+	// the work is done — close the bead instead of resetting for re-dispatch.
+	// This prevents the spawn-storm / duplicate-work loop described in #2036.
+	if onMain, err := verifyCommitOnMain(workDir, rigName, polecatName); err == nil && onMain {
+		reason := fmt.Sprintf("Work already on main (verified by witness, polecat %s)", polecatName)
+		if err := bd.Run(workDir, "close", hookBead, "-r", reason); err != nil {
+			fmt.Fprintf(os.Stderr, "witness: failed to close bead %s (work already on main): %v\n", hookBead, err)
+		}
 		return false
 	}
 
