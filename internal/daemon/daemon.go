@@ -1069,6 +1069,23 @@ func (d *Daemon) ensureWitnessesRunning() {
 	}
 }
 
+// hasPendingEvents checks if there are pending .event files in the given channel directory.
+// Used to gate agent spawning: don't burn API credits starting a Claude session when
+// there's nothing to process. The agent's await-event handles the actual consumption.
+func (d *Daemon) hasPendingEvents(channel string) bool {
+	eventDir := filepath.Join(d.config.TownRoot, "events", channel)
+	entries, err := os.ReadDir(eventDir)
+	if err != nil {
+		return false // Directory doesn't exist or unreadable = no pending events
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".event") {
+			return true
+		}
+	}
+	return false
+}
+
 // ensureWitnessRunning ensures the witness for a specific rig is running.
 // Discover, don't track: uses Manager.Start() which checks tmux directly (gt-zecmc).
 func (d *Daemon) ensureWitnessRunning(rigName string) {
@@ -1128,6 +1145,23 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	if operational, reason := d.isRigOperational(rigName); !operational {
 		d.logger.Printf("Skipping refinery auto-start for %s: %s", rigName, reason)
 		return
+	}
+
+	// Event gate: don't spawn a new Claude session when there's nothing to process.
+	// If a refinery session is already running, Start() returns ErrAlreadyRunning (cheap).
+	// But spawning a NEW session with an empty queue burns API credits for nothing.
+	// The refinery formula uses await-event internally, so it will wake when events appear.
+	if !d.hasPendingEvents("refinery") {
+		// Check if session already exists before skipping — let running sessions continue
+		r := &rig.Rig{
+			Name: rigName,
+			Path: filepath.Join(d.config.TownRoot, rigName),
+		}
+		mgr := refinery.NewManager(r)
+		if running, _ := mgr.IsRunning(); !running {
+			d.logger.Printf("No pending refinery events and no session running for %s, skipping spawn", rigName)
+			return
+		}
 	}
 
 	// Manager.Start() handles: zombie detection, session creation, env vars, theming,
