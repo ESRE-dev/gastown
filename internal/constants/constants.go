@@ -79,6 +79,13 @@ const (
 	// Configurable via operational.session.startup_nudge_max_retries.
 	StartupNudgeMaxRetries = 3
 
+	// MinHandoffCooldown is the minimum time between handoffs for the same
+	// component. Prevents tight restart loops when a patrol agent (e.g.,
+	// witness) completes quickly on idle rigs and immediately hands off.
+	// (gt-058d)
+	// Configurable via operational.session.min_handoff_cooldown.
+	MinHandoffCooldown = 2 * time.Minute
+
 	// GUPPViolationTimeout is how long an agent can have work on hook without
 	// progressing before it's considered a GUPP violation.
 	// Configurable via operational.session.gupp_violation_timeout.
@@ -138,6 +145,11 @@ const (
 	// Written by gt handoff before respawn, cleared by gt prime after detection.
 	// This prevents the handoff loop bug where agents re-run /handoff from context.
 	FileHandoffMarker = "handoff_to_successor"
+
+	// FileLastHandoffTS records the timestamp of the last handoff.
+	// Used to enforce MinHandoffCooldown and prevent tight restart loops.
+	// (gt-058d)
+	FileLastHandoffTS = "last_handoff_ts"
 
 	// FileQuotaJSON is the quota state file in mayor/.
 	FileQuotaJSON = "quota.json"
