@@ -456,6 +456,23 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			goto notifyWitness
 		}
 
+		// Branch contamination preflight: check if branch is significantly behind
+		// origin/main, which indicates the branch may contain stale merge-base
+		// artifacts that will pollute the PR diff. (GH#2220)
+		contam, err := g.CheckBranchContamination(originDefault)
+		if err == nil && contam.Behind > 0 {
+			const warnThreshold = 50
+			const blockThreshold = 200
+			if contam.Behind >= blockThreshold {
+				return fmt.Errorf("branch contamination: %d commits behind %s (threshold: %d)\n"+
+					"The branch is severely stale and will include unrelated changes in the PR.\n"+
+					"Fix: git fetch origin && git rebase origin/%s",
+					contam.Behind, originDefault, blockThreshold, defaultBranch)
+			} else if contam.Behind >= warnThreshold {
+				style.PrintWarning("branch is %d commits behind %s — consider rebasing to avoid PR contamination", contam.Behind, originDefault)
+			}
+		}
+
 		// Determine merge strategy from convoy (gt-myofa.3)
 		// Convoys can override the default MR-based workflow:
 		//   direct: push commits straight to target branch, bypass refinery
