@@ -147,7 +147,6 @@ type IssueDep struct {
 // ListOptions specifies filters for listing issues.
 type ListOptions struct {
 	Status     string // "open", "closed", "all"
-	Type       string // Deprecated: use Label instead. "task", "bug", "feature", "epic"
 	Label      string // Label filter (e.g., "gt:agent", "gt:merge-request")
 	Priority   int    // 0-4, -1 for no filter
 	Parent     string // filter by parent ID
@@ -159,7 +158,7 @@ type ListOptions struct {
 // CreateOptions specifies options for creating an issue.
 type CreateOptions struct {
 	Title       string
-	Type        string // "task", "bug", "feature", "epic"
+	Label       string // Label to set (e.g., "gt:task", "gt:merge-request")
 	Priority    int    // 0-4
 	Description string
 	Parent      string
@@ -520,12 +519,8 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 	if opts.Status != "" {
 		args = append(args, "--status="+opts.Status)
 	}
-	// Prefer Label over Type (Type is deprecated)
 	if opts.Label != "" {
 		args = append(args, "--label="+opts.Label)
-	} else if opts.Type != "" {
-		// Deprecated: convert type to label for backward compatibility
-		args = append(args, "--label=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {
 		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
@@ -726,9 +721,8 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
 	}
-	// Type is deprecated: convert to gt:<type> label
-	if opts.Type != "" {
-		args = append(args, "--labels=gt:"+opts.Type)
+	if opts.Label != "" {
+		args = append(args, "--labels="+opts.Label)
 	}
 	if opts.Priority >= 0 {
 		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
@@ -782,9 +776,8 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
 	}
-	// Type is deprecated: convert to gt:<type> label
-	if opts.Type != "" {
-		args = append(args, "--labels=gt:"+opts.Type)
+	if opts.Label != "" {
+		args = append(args, "--labels="+opts.Label)
 	}
 	if opts.Priority >= 0 {
 		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))

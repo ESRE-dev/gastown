@@ -255,15 +255,14 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	return nil
 }
 
-func (m *Manager) roleConfig() (*beads.RoleConfig, error) {
-	// Role beads use hq- prefix and live in town-level beads, not rig beads
+func (m *Manager) roleConfig() (*config.RoleDefinition, error) {
 	townRoot := m.townRoot()
-	bd := beads.NewWithBeadsDir(townRoot, beads.ResolveBeadsDir(townRoot))
-	roleConfig, err := bd.GetRoleConfig(beads.RoleBeadIDTown("witness"))
+	rigPath := m.rig.Path
+	roleDef, err := config.LoadRoleDefinition(townRoot, rigPath, "witness")
 	if err != nil {
 		return nil, fmt.Errorf("loading witness role config: %w", err)
 	}
-	return roleConfig, nil
+	return roleDef, nil
 }
 
 func (m *Manager) townRoot() string {
@@ -274,23 +273,23 @@ func (m *Manager) townRoot() string {
 	return townRoot
 }
 
-func roleConfigEnvVars(roleConfig *beads.RoleConfig, townRoot, rigName string) map[string]string {
-	if roleConfig == nil || len(roleConfig.EnvVars) == 0 {
+func roleConfigEnvVars(roleDef *config.RoleDefinition, townRoot, rigName string) map[string]string {
+	if roleDef == nil || len(roleDef.Env) == 0 {
 		return nil
 	}
-	expanded := make(map[string]string, len(roleConfig.EnvVars))
-	for key, value := range roleConfig.EnvVars {
+	expanded := make(map[string]string, len(roleDef.Env))
+	for key, value := range roleDef.Env {
 		expanded[key] = beads.ExpandRolePattern(value, townRoot, rigName, "", "witness", session.PrefixFor(rigName))
 	}
 	return expanded
 }
 
-func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOverride string, roleConfig *beads.RoleConfig) (string, error) {
+func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOverride string, roleDef *config.RoleDefinition) (string, error) {
 	if agentOverride != "" {
-		roleConfig = nil
+		roleDef = nil
 	}
-	if roleConfig != nil && roleConfig.StartCommand != "" {
-		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName)), nil
+	if roleDef != nil && roleDef.Session.StartCommand != "" {
+		return beads.ExpandRolePattern(roleDef.Session.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName)), nil
 	}
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: session.BeaconRecipient("witness", "", rigName),
