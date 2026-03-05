@@ -627,8 +627,13 @@ func (d *Daemon) heartbeat(state *State) {
 
 	// 5. Ensure Refineries are running for all rigs (restart if dead)
 	// Check patrol config - can be disabled in mayor/daemon.json
+	// Pressure-gated: refineries consume API credits, defer when system is loaded.
 	if IsPatrolEnabled(d.patrolConfig, "refinery") {
-		d.ensureRefineriesRunning()
+		if p := d.checkPressure("refinery"); !p.OK {
+			d.logger.Printf("Deferring refinery spawn: %s", p.Reason)
+		} else {
+			d.ensureRefineriesRunning()
+		}
 	} else {
 		d.logger.Printf("Refinery patrol disabled in config, skipping")
 		// Kill leftover refinery sessions from before patrol was disabled. (hq-2mstj)
@@ -639,8 +644,15 @@ func (d *Daemon) heartbeat(state *State) {
 	d.ensureMayorRunning()
 
 	// 6.5. Handle Dog lifecycle: cleanup stuck dogs and dispatch plugins
+	// Pressure-gated: dog dispatch spawns new agent sessions.
 	if IsPatrolEnabled(d.patrolConfig, "handler") {
-		d.handleDogs()
+		if p := d.checkPressure("dog"); !p.OK {
+			d.logger.Printf("Deferring dog dispatch: %s", p.Reason)
+			// Still run cleanup phases (stuck/stale/idle) — only skip dispatch
+			d.handleDogsCleanupOnly()
+		} else {
+			d.handleDogs()
+		}
 	} else {
 		d.logger.Printf("Handler patrol disabled in config, skipping")
 	}
@@ -673,7 +685,12 @@ func (d *Daemon) heartbeat(state *State) {
 
 	// 14. Dispatch scheduled work (capacity-controlled polecat dispatch).
 	// Shells out to `gt scheduler run` to avoid circular import between daemon and cmd.
-	d.dispatchQueuedWork()
+	// Pressure-gated: polecats are the primary resource consumers.
+	if p := d.checkPressure("polecat"); !p.OK {
+		d.logger.Printf("Deferring polecat dispatch: %s", p.Reason)
+	} else {
+		d.dispatchQueuedWork()
+	}
 
 	// 15. Rotate oversized Dolt logs (copytruncate for child process fds).
 	// daemon.log uses lumberjack for automatic rotation; this handles Dolt server logs.
@@ -2006,6 +2023,11 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.
 	processNames := config.ResolveProcessNames(rc.ResolvedAgent, rc.Command)
 	_ = d.tmux.SetEnvironment(sessionName, "GT_PROCESS_NAMES", strings.Join(processNames, ","))
+
+	// Record agent's pane_id for ZFC-compliant liveness checks (gt-qmsx).
+	if paneID, err := d.tmux.GetPaneID(sessionName); err == nil {
+		_ = d.tmux.SetEnvironment(sessionName, "GT_PANE_ID", paneID)
+	}
 
 	// Apply theme
 	theme := tmux.AssignTheme(rigName)
