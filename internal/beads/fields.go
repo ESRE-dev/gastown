@@ -228,6 +228,7 @@ type ConvoyFields struct {
 	Notify     string // Additional notification address
 	Molecule   string // Associated molecule/swarm ID
 	Merge      string // Merge strategy
+	BaseBranch string // Target branch for polecats (e.g., "feat/extraction-review")
 }
 
 // ParseConvoyFields extracts convoy fields from an issue's description.
@@ -269,6 +270,9 @@ func ParseConvoyFields(issue *Issue) *ConvoyFields {
 			hasFields = true
 		case "merge":
 			fields.Merge = value
+			hasFields = true
+		case "base_branch", "base-branch", "basebranch":
+			fields.BaseBranch = value
 			hasFields = true
 		}
 	}
@@ -315,6 +319,9 @@ func FormatConvoyFields(fields *ConvoyFields) string {
 	if fields.Molecule != "" {
 		lines = append(lines, "Molecule: "+fields.Molecule)
 	}
+	if fields.BaseBranch != "" {
+		lines = append(lines, "base_branch: "+fields.BaseBranch)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -329,10 +336,13 @@ func SetConvoyFields(issue *Issue, fields *ConvoyFields) string {
 
 	// Known convoy field keys (lowercase)
 	convoyKeys := map[string]bool{
-		"owner":    true,
-		"notify":   true,
-		"merge":    true,
-		"molecule": true,
+		"owner":       true,
+		"notify":      true,
+		"merge":       true,
+		"molecule":    true,
+		"base_branch": true,
+		"base-branch": true,
+		"basebranch":  true,
 	}
 
 	// Collect non-convoy lines from existing description
@@ -400,6 +410,13 @@ type MRFields struct {
 	// Convoy tracking (for priority scoring - convoy starvation prevention)
 	ConvoyID        string // Parent convoy ID if part of a convoy
 	ConvoyCreatedAt string // Convoy creation time (ISO 8601) for starvation prevention
+
+	// Pre-verification fields (Phase 3: polecat-owned rebasing)
+	// When a polecat rebases onto the target and runs gates before submission,
+	// these fields allow the refinery to fast-path merge without re-running gates.
+	PreVerified     bool   // Polecat ran full gates after rebasing onto target
+	PreVerifiedAt   string // ISO 8601 timestamp when verification completed
+	PreVerifiedBase string // Target branch SHA at verification time
 }
 
 // ParseMRFields extracts structured merge-request fields from an issue's description.
@@ -474,6 +491,15 @@ func ParseMRFields(issue *Issue) *MRFields {
 		case "convoy_created_at", "convoy-created-at", "convoycreatedat":
 			fields.ConvoyCreatedAt = value
 			hasFields = true
+		case "pre_verified", "pre-verified", "preverified":
+			fields.PreVerified = strings.ToLower(value) == "true"
+			hasFields = true
+		case "pre_verified_at", "pre-verified-at", "preverifiedat":
+			fields.PreVerifiedAt = value
+			hasFields = true
+		case "pre_verified_base", "pre-verified-base", "preverifiedbase":
+			fields.PreVerifiedBase = value
+			hasFields = true
 		}
 	}
 
@@ -538,6 +564,15 @@ func FormatMRFields(fields *MRFields) string {
 	if fields.ConvoyCreatedAt != "" {
 		lines = append(lines, "convoy_created_at: "+fields.ConvoyCreatedAt)
 	}
+	if fields.PreVerified {
+		lines = append(lines, "pre_verified: true")
+	}
+	if fields.PreVerifiedAt != "" {
+		lines = append(lines, "pre_verified_at: "+fields.PreVerifiedAt)
+	}
+	if fields.PreVerifiedBase != "" {
+		lines = append(lines, "pre_verified_base: "+fields.PreVerifiedBase)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -584,6 +619,15 @@ func SetMRFields(issue *Issue, fields *MRFields) string {
 		"convoy_created_at":  true,
 		"convoy-created-at":  true,
 		"convoycreatedat":    true,
+		"pre_verified":       true,
+		"pre-verified":       true,
+		"preverified":        true,
+		"pre_verified_at":    true,
+		"pre-verified-at":    true,
+		"preverifiedat":      true,
+		"pre_verified_base":  true,
+		"pre-verified-base":  true,
+		"preverifiedbase":    true,
 	}
 
 	// Collect non-MR lines from existing description
