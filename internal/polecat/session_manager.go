@@ -183,6 +183,28 @@ func (m *SessionManager) hasPolecat(polecat string) bool {
 	return info.IsDir()
 }
 
+// polecatSlot returns a unique integer slot index for this polecat based on its
+// position among existing polecat directories. This enables port offsetting and
+// resource isolation when multiple polecats run in parallel (GH#954).
+func (m *SessionManager) polecatSlot(polecat string) int {
+	polecatsDir := filepath.Join(m.rig.Path, "polecats")
+	entries, err := os.ReadDir(polecatsDir)
+	if err != nil {
+		return 0
+	}
+	slot := 0
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if e.Name() == polecat {
+			return slot
+		}
+		slot++
+	}
+	return slot
+}
+
 // Start creates and starts a new session for a polecat.
 func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if !m.hasPolecat(polecat) {
@@ -315,6 +337,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		"GT_POLECAT_PATH": workDir,
 		"GT_TOWN_ROOT":    townRoot,
 		"GT_RUN":          runID,
+		"POLECAT_SLOT":    fmt.Sprintf("%d", m.polecatSlot(polecat)),
 	}
 	if polecatGitBranch != "" {
 		envVarsToInject["GT_BRANCH"] = polecatGitBranch
@@ -373,6 +396,14 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// so we resolve process names from both agent name and actual command.
 	processNames := config.ResolveProcessNames(runtimeConfig.ResolvedAgent, runtimeConfig.Command)
 	debugSession("SetEnvironment GT_PROCESS_NAMES", m.tmux.SetEnvironment(sessionID, "GT_PROCESS_NAMES", strings.Join(processNames, ",")))
+
+	// Record agent's pane_id for ZFC-compliant liveness checks (gt-qmsx).
+	// Declared pane identity replaces process-tree inference in IsRuntimeRunning
+	// and FindAgentPane. Legacy sessions without GT_PANE_ID fall back to scanning.
+	if paneID, err := m.tmux.GetPaneID(sessionID); err == nil {
+		debugSession("SetEnvironment GT_PANE_ID", m.tmux.SetEnvironment(sessionID, "GT_PANE_ID", paneID))
+	}
+
 	// Hook the issue to the polecat if provided via --issue flag
 	if opts.Issue != "" {
 		agentID := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
