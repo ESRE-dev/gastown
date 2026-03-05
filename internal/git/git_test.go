@@ -1689,5 +1689,71 @@ func TestCleanExcludingRuntime(t *testing.T) {
 				t.Errorf("CleanExcludingRuntime() = %v, want %v", got, tt.want)
 			}
 		})
+}
+
+func TestCheckBranchContamination(t *testing.T) {
+	// Create a repo with main and a feature branch that diverges.
+	dir := initTestRepo(t) // has initial commit on default branch
+	g := NewGit(dir)
+
+	// Create a "main" branch explicitly and add commits to it.
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	// Rename default branch to main for consistency.
+	run("branch", "-M", "main")
+
+	// Create feature branch from current state.
+	run("checkout", "-b", "feature")
+
+	// Add a commit on feature.
+	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feature work"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "feature commit")
+
+	// Switch back to main and add several commits (simulating upstream progress).
+	run("checkout", "main")
+	for i := 0; i < 5; i++ {
+		fname := filepath.Join(dir, "main_"+strings.Repeat("x", i+1)+".txt")
+		if err := os.WriteFile(fname, []byte("main work"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		run("add", ".")
+		run("commit", "-m", "main commit")
+	}
+
+	// Check contamination from the feature branch's perspective.
+	run("checkout", "feature")
+	contam, err := g.CheckBranchContamination("main")
+	if err != nil {
+		t.Fatalf("CheckBranchContamination: %v", err)
+	}
+
+	if contam.Behind != 5 {
+		t.Errorf("Behind = %d, want 5", contam.Behind)
+	}
+	if contam.Ahead != 1 {
+		t.Errorf("Ahead = %d, want 1", contam.Ahead)
+	}
+
+	// From main's perspective: 0 behind, 5 ahead of feature's merge-base.
+	run("checkout", "main")
+	contam, err = g.CheckBranchContamination("feature")
+	if err != nil {
+		t.Fatalf("CheckBranchContamination from main: %v", err)
+	}
+	if contam.Behind != 1 {
+		t.Errorf("Behind (from main) = %d, want 1", contam.Behind)
+	}
+	if contam.Ahead != 5 {
+		t.Errorf("Ahead (from main) = %d, want 5", contam.Ahead)
 	}
 }

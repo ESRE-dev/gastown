@@ -1254,6 +1254,34 @@ func (g *Git) CountCommitsBehind(ref string) (int, error) {
 	return count, nil
 }
 
+// BranchContamination holds the result of a branch contamination check.
+type BranchContamination struct {
+	Behind int // commits HEAD is behind base (e.g., origin/main)
+	Ahead  int // commits HEAD is ahead of base
+}
+
+// CheckBranchContamination checks whether the current branch has diverged
+// significantly from a base ref (typically origin/main). Returns the number
+// of commits behind and ahead, letting callers decide severity thresholds.
+// (GH#2220)
+func (g *Git) CheckBranchContamination(baseRef string) (BranchContamination, error) {
+	var result BranchContamination
+
+	behind, err := g.CountCommitsBehind(baseRef)
+	if err != nil {
+		return result, fmt.Errorf("counting commits behind %s: %w", baseRef, err)
+	}
+	result.Behind = behind
+
+	ahead, err := g.CommitsAhead(baseRef, "HEAD")
+	if err != nil {
+		return result, fmt.Errorf("counting commits ahead of %s: %w", baseRef, err)
+	}
+	result.Ahead = ahead
+
+	return result, nil
+}
+
 // StashCount returns the number of stashes belonging to the current branch.
 // Git stashes are stored in the main repo (.git/refs/stash) and shared across
 // all worktrees. Counting all stashes is incorrect for worktree-based polecats:
