@@ -128,9 +128,32 @@ func PushDatabase(dbDir, remote string, force bool) error {
 	return nil
 }
 
+// validSQLName checks that a database or remote name contains only safe characters
+// (alphanumeric, underscore, hyphen, dot). This is a defense-in-depth measure since
+// these values come from internal sources (filesystem scan, SQL query output), but
+// prevents SQL breakage or injection if a name ever contains backticks or quotes.
+func validSQLName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
 // PushDatabaseSQL pushes a database to its remote via SQL (CALL DOLT_PUSH) through
 // the running Dolt server. This avoids stopping the server and crashing all agents.
 func PushDatabaseSQL(townRoot, db, remote string, force bool) error {
+	if !validSQLName(db) {
+		return fmt.Errorf("invalid database name %q: must match [a-zA-Z0-9_.-]+", db)
+	}
+	if !validSQLName(remote) {
+		return fmt.Errorf("invalid remote name %q: must match [a-zA-Z0-9_.-]+", remote)
+	}
+
 	// Stage any unstaged changes
 	addQuery := fmt.Sprintf("USE `%s`; CALL DOLT_ADD('-A')", db)
 	if err := serverExecSQL(townRoot, addQuery); err != nil {
@@ -176,6 +199,9 @@ func PushDatabaseSQL(townRoot, db, remote string, force bool) error {
 // FindRemoteSQL returns the name and URL of the first remote for a database
 // via SQL query through the running server.
 func FindRemoteSQL(townRoot, db string) (name, url string, err error) {
+	if !validSQLName(db) {
+		return "", "", fmt.Errorf("invalid database name %q: must match [a-zA-Z0-9_.-]+", db)
+	}
 	config := DefaultConfig(townRoot)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

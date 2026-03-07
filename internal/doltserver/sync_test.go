@@ -109,6 +109,23 @@ func TestSyncDatabasesSQL_FilterSkipsOthers(t *testing.T) {
 	}
 }
 
+// TestValidSQLName verifies the defense-in-depth name validation.
+func TestValidSQLName(t *testing.T) {
+	valid := []string{"mydb", "beads_gastown", "my-db", "db.v2", "ABC123"}
+	for _, name := range valid {
+		if !validSQLName(name) {
+			t.Errorf("validSQLName(%q) = false, want true", name)
+		}
+	}
+
+	invalid := []string{"", "my`db", "db; DROP TABLE", "name'quote", "has space", "db\nline"}
+	for _, name := range invalid {
+		if validSQLName(name) {
+			t.Errorf("validSQLName(%q) = true, want false", name)
+		}
+	}
+}
+
 // initDoltDB runs "dolt init" in a directory. Returns error if dolt isn't available.
 func initDoltDB(dir string) error {
 	cmd := exec.Command("dolt", "init", "--name", "test", "--email", "test@test.com")
