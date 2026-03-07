@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -119,12 +120,17 @@ func DirHash(dir string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-// copyDir recursively copies a directory, replacing the destination.
+// copyDir recursively copies a directory, replacing the destination atomically.
+// It copies to a temp directory in the same parent, then swaps via rename.
 func copyDir(src, dst string) error {
-	if err := os.RemoveAll(dst); err != nil {
-		return err
+	tmpDir, err := os.MkdirTemp(filepath.Dir(dst), ".plugin-sync-*")
+	if err != nil {
+		return fmt.Errorf("creating temp dir: %w", err)
 	}
-	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+	// Clean up temp dir on failure; on success it's been renamed away.
+	defer os.RemoveAll(tmpDir)
+
+	if err := filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -132,12 +138,20 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		dstPath := filepath.Join(dst, rel)
+		tmpPath := filepath.Join(tmpDir, rel)
 		if d.IsDir() {
-			return os.MkdirAll(dstPath, 0755)
+			return os.MkdirAll(tmpPath, 0755)
 		}
-		return copyFile(path, dstPath)
-	})
+		return copyFile(path, tmpPath)
+	}); err != nil {
+		return err
+	}
+
+	// Atomic swap: remove old dst, rename temp into place.
+	if err := os.RemoveAll(dst); err != nil {
+		return fmt.Errorf("removing old destination: %w", err)
+	}
+	return os.Rename(tmpDir, dst)
 }
 
 func copyFile(src, dst string) error {
@@ -193,10 +207,8 @@ func findSourceFromDir(dir string) string {
 		pluginsDir := filepath.Join(current, "plugins")
 		goMod := filepath.Join(current, "go.mod")
 		if hasPlugins(pluginsDir) {
-			if data, err := os.ReadFile(goMod); err == nil { //nolint:gosec // G304: path from traversal
-				if strings.Contains(string(data), "gastown") {
-					return pluginsDir
-				}
+			if isGastownModule(goMod) {
+				return pluginsDir
 			}
 		}
 		parent := filepath.Dir(current)
@@ -206,6 +218,25 @@ func findSourceFromDir(dir string) string {
 		current = parent
 	}
 	return ""
+}
+
+// isGastownModule checks if a go.mod file declares a gastown module path.
+// Matches "module .../gastown" on the module directive line to avoid
+// false-positives from comments or dependency names.
+func isGastownModule(goModPath string) bool {
+	f, err := os.Open(goModPath) //nolint:gosec // G304: path from traversal
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "module ") {
+			return strings.HasSuffix(line, "/gastown") || line == "module gastown"
+		}
+	}
+	return false
 }
 
 func hasPlugins(dir string) bool {
