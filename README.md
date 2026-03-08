@@ -131,6 +131,7 @@ gt mayor attach
 export GIT_USER="<your name>"
 export GIT_EMAIL="<your email>"
 export FOLDER="/Users/you/code"
+export DASHBOARD_PORT=8080  # optional, host port for the web dashboard
 
 docker compose up --build -d
 
