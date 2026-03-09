@@ -438,6 +438,81 @@ func runBdJSON(dir string, args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
+// bdDepListRawIDs queries the raw dependencies table via bd sql to get
+// dependency target IDs. Unlike bd dep list, this does NOT join with the
+// issues table, so it works for cross-database dependencies where the
+// target issues live in a different Dolt database. See GH #2624.
+//
+// dir should be the town beads directory (.beads) for HQ queries.
+// direction is "down" (issue_id → depends_on_id) or "up" (depends_on_id → issue_id).
+// depType filters by dependency type (e.g., "tracks", "blocks"); empty means all types.
+//
+// Returns deduplicated, unwrapped issue IDs (external:prefix:id → id).
+func bdDepListRawIDs(dir, issueID, direction, depType string) ([]string, error) {
+	// Determine query columns based on direction.
+	// "down": issueID depends on targets → SELECT depends_on_id WHERE issue_id = ?
+	// "up":   issueID is depended on → SELECT issue_id WHERE depends_on_id = ?
+	var selectCol, whereCol string
+	if direction == "up" {
+		selectCol = "issue_id"
+		whereCol = "depends_on_id"
+	} else {
+		selectCol = "depends_on_id"
+		whereCol = "issue_id"
+	}
+
+	// Build SQL query. Bead IDs are system-generated alphanumeric strings
+	// with hyphens and dots — validate to prevent injection.
+	if !isValidBeadID(issueID) {
+		return nil, fmt.Errorf("invalid bead ID: %q", issueID)
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM dependencies WHERE %s = '%s'", selectCol, whereCol, issueID)
+	if depType != "" {
+		if !isValidBeadID(depType) {
+			return nil, fmt.Errorf("invalid dep type: %q", depType)
+		}
+		query += fmt.Sprintf(" AND type = '%s'", depType)
+	}
+
+	out, err := runBdJSON(dir, "sql", query, "--json")
+	if err != nil {
+		return nil, fmt.Errorf("bd sql for deps of %s: %w", issueID, err)
+	}
+
+	// Parse JSON array of single-column rows
+	var rows []map[string]string
+	if err := json.Unmarshal(out, &rows); err != nil {
+		return nil, fmt.Errorf("parsing dep sql for %s: %w", issueID, err)
+	}
+
+	seen := make(map[string]bool, len(rows))
+	var ids []string
+	for _, row := range rows {
+		rawID := row[selectCol]
+		id := beads.ExtractIssueID(rawID)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// isValidBeadID checks that a string is safe for SQL interpolation in dep queries.
+// Bead IDs contain only alphanumeric chars, hyphens, dots, and underscores.
+func isValidBeadID(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	trackedIssues := args[1:]
@@ -2030,40 +2105,39 @@ func applyFreshIssueDetails(dep *trackedDependency, details *issueDetails) {
 	dep.Labels = details.Labels
 }
 
-// getTrackedIssues uses bd dep list to get issues tracked by a convoy.
+// getTrackedIssues gets issues tracked by a convoy with fresh cross-rig details.
 // Returns issue details including status, type, and worker info.
+//
+// Uses bdDepListRawIDs to query the raw dependencies table (bypasses the JOIN
+// that bd dep list does, which fails for cross-database deps — see GH #2624).
+// Then fetches fresh issue details via bd show with prefix routing.
 func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
-	// Use bd dep list to get tracked dependencies
-	// Run from town root (parent of .beads) so bd routes correctly
-	townRoot := filepath.Dir(townBeads)
-	out, err := runBdJSON(townRoot, "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	// Query raw dependency IDs from the dependencies table. This works for
+	// cross-database deps because it only reads the dependency records (which
+	// live in HQ) without trying to JOIN with the issues table.
+	trackedIDs, err := bdDepListRawIDs(townBeads, convoyID, "down", "tracks")
 	if err != nil {
 		return nil, fmt.Errorf("querying tracked issues for %s: %w", convoyID, err)
 	}
 
-	// Parse the JSON output - bd dep list returns full issue details
+	if len(trackedIDs) == 0 {
+		return nil, nil
+	}
+
+	// Fetch fresh issue details via bd show (uses prefix routing for cross-rig).
+	freshDetails := getIssueDetailsBatch(trackedIDs)
+
+	// Build tracked dependency structs from fresh details
 	var deps []trackedDependency
-	if err := json.Unmarshal(out, &deps); err != nil {
-		return nil, fmt.Errorf("parsing tracked issues for %s: %w", convoyID, err)
-	}
-
-	// Unwrap external:prefix:id format from dep IDs before use
-	for i := range deps {
-		deps[i].ID = beads.ExtractIssueID(deps[i].ID)
-	}
-
-	// Refresh status via cross-rig lookup. bd dep list returns status from
-	// the dependency record in HQ beads which is never updated when cross-rig
-	// issues (e.g., gt-* tracked by hq-* convoys) are closed in their home rig.
-	issueIDs := make([]string, len(deps))
-	for i, dep := range deps {
-		issueIDs[i] = dep.ID
-	}
-	freshDetails := getIssueDetailsBatch(issueIDs)
-	for i, dep := range deps {
-		if details, ok := freshDetails[dep.ID]; ok {
-			applyFreshIssueDetails(&deps[i], details)
+	for _, id := range trackedIDs {
+		dep := trackedDependency{
+			ID:             id,
+			DependencyType: "tracks",
 		}
+		if details, ok := freshDetails[id]; ok {
+			applyFreshIssueDetails(&dep, details)
+		}
+		deps = append(deps, dep)
 	}
 
 	// Collect non-closed issue IDs for worker lookup

@@ -25,29 +25,31 @@ func slingGenerateShortID() string {
 
 // isTrackedByConvoy checks if an issue is already being tracked by a convoy.
 // Returns the convoy ID if tracked, empty string otherwise.
+//
+// Uses bdDepListRawIDs for cross-database dep resolution (GH #2624).
+// For direction=up queries, the raw SQL approach queries the same table but
+// looks for rows where depends_on_id matches the beadID, returning the
+// issue_id (which is the convoy). Since this only returns IDs (no issue_type
+// or status), we verify each candidate via bd show.
 func isTrackedByConvoy(beadID string) string {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return ""
 	}
+	townBeads := filepath.Join(townRoot, ".beads")
 
-	// Primary: Use bd dep list to find what tracks this issue (direction=up)
-	// This is authoritative when cross-rig routing works
-	depCmd := exec.Command("bd", "dep", "list", beadID, "--direction=up", "--type=tracks", "--json")
-	depCmd.Dir = townRoot
-
-	out, err := depCmd.Output()
-	if err == nil {
-		var trackers []struct {
-			ID        string `json:"id"`
-			IssueType string `json:"issue_type"`
-			Status    string `json:"status"`
-		}
-		if err := json.Unmarshal(out, &trackers); err == nil {
-			for _, tracker := range trackers {
-				if tracker.IssueType == "convoy" && tracker.Status == "open" {
-					return tracker.ID
-				}
+	// Primary: Use raw dep query to find what tracks this issue (direction=up).
+	// This returns convoy IDs that have a "tracks" dep on beadID.
+	trackerIDs, err := bdDepListRawIDs(townBeads, beadID, "up", "tracks")
+	if err == nil && len(trackerIDs) > 0 {
+		// Check each tracker to find an open convoy
+		for _, trackerID := range trackerIDs {
+			result, err := bdShow(trackerID)
+			if err != nil {
+				continue
+			}
+			if result.IssueType == "convoy" && result.Status == "open" {
+				return trackerID
 			}
 		}
 	}
@@ -104,37 +106,18 @@ func findConvoyByDescription(townRoot, beadID string) string {
 }
 
 // convoyTracksBead checks if a convoy has a tracks dependency on the given beadID.
-// Handles both raw bead IDs and external-formatted references (e.g., "external:gt-mol:gt-mol-xyz").
+// Uses bdDepListRawIDs for cross-database dep resolution (GH #2624).
 func convoyTracksBead(beadsDir, convoyID, beadID string) bool {
-	depCmd := exec.Command("bd", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
-	depCmd.Dir = beadsDir
-
-	out, err := depCmd.Output()
+	trackedIDs, err := bdDepListRawIDs(beadsDir, convoyID, "down", "tracks")
 	if err != nil {
 		return false
 	}
 
-	var tracked []struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(out, &tracked); err != nil {
-		return false
-	}
-
-	for _, t := range tracked {
-		// Exact match (raw beadID stored as-is)
-		if t.ID == beadID {
+	for _, id := range trackedIDs {
+		if id == beadID {
 			return true
 		}
-		// External reference match: unwrap "external:prefix:beadID" format
-		if strings.HasPrefix(t.ID, "external:") {
-			parts := strings.SplitN(t.ID, ":", 3)
-			if len(parts) == 3 && parts[2] == beadID {
-				return true
-			}
-		}
 	}
-
 	return false
 }
 
