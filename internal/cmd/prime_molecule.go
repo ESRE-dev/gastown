@@ -109,7 +109,9 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 // showFormulaSteps renders the formula steps inline in the prime output.
 // Agents read these steps instead of materializing them as wisp rows.
 // The label parameter customizes the section header (e.g., "Patrol Steps", "Work Steps").
-func showFormulaSteps(formulaName, label string) {
+// extraVars is an optional list of "key=value" overrides that are substituted into
+// step descriptions before rendering, taking precedence over formula defaults.
+func showFormulaSteps(formulaName, label string, extraVars ...[]string) {
 	content, err := formula.GetEmbeddedFormulaContent(formulaName)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
@@ -126,17 +128,25 @@ func showFormulaSteps(formulaName, label string) {
 		return
 	}
 
+	var vars []string
+	if len(extraVars) > 0 {
+		vars = extraVars[0]
+	}
+	varMap := buildFormulaVarMap(f, vars)
+
 	fmt.Println()
 	fmt.Printf("**%s** (%d steps from %s):\n", label, len(f.Steps), formulaName)
 	for i, step := range f.Steps {
-		fmt.Printf("  %d. **%s** — %s\n", i+1, step.Title, truncateDescription(step.Description, 120))
+		desc := applyFormulaVars(step.Description, varMap)
+		fmt.Printf("  %d. **%s** — %s\n", i+1, step.Title, truncateDescription(desc, 120))
 	}
 	fmt.Println()
 }
 
 // showFormulaStepsFull renders formula steps with full descriptions.
 // Used for polecat work formulas where step details are the primary instructions.
-func showFormulaStepsFull(formulaName string) {
+// extraVars is an optional list of "key=value" overrides substituted into step descriptions.
+func showFormulaStepsFull(formulaName string, extraVars ...[]string) {
 	content, err := formula.GetEmbeddedFormulaContent(formulaName)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
@@ -153,15 +163,46 @@ func showFormulaStepsFull(formulaName string) {
 		return
 	}
 
+	var vars []string
+	if len(extraVars) > 0 {
+		vars = extraVars[0]
+	}
+	varMap := buildFormulaVarMap(f, vars)
+
 	fmt.Println()
 	fmt.Printf("**Formula Checklist** (%d steps from %s):\n\n", len(f.Steps), formulaName)
 	for i, step := range f.Steps {
 		fmt.Printf("### Step %d: %s\n\n", i+1, step.Title)
 		if step.Description != "" {
-			fmt.Println(step.Description)
+			fmt.Println(applyFormulaVars(step.Description, varMap))
 			fmt.Println()
 		}
 	}
+}
+
+// buildFormulaVarMap builds a map of variable name → value for substitution.
+// Formula defaults are applied first; extraVars (key=value strings) override them.
+func buildFormulaVarMap(f *formula.Formula, extraVars []string) map[string]string {
+	m := make(map[string]string, len(f.Vars))
+	for k, v := range f.Vars {
+		if v.Default != "" {
+			m[k] = v.Default
+		}
+	}
+	for _, kv := range extraVars {
+		if idx := strings.IndexByte(kv, '='); idx > 0 {
+			m[kv[:idx]] = kv[idx+1:]
+		}
+	}
+	return m
+}
+
+// applyFormulaVars replaces {{key}} placeholders in text with values from varMap.
+func applyFormulaVars(text string, varMap map[string]string) string {
+	for k, v := range varMap {
+		text = strings.ReplaceAll(text, "{{"+k+"}}", v)
+	}
+	return text
 }
 
 // truncateDescription truncates a multi-line description to a single line summary.
@@ -282,7 +323,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
-	showFormulaSteps(constants.MolRefineryPatrol, "Patrol Steps")
+	showFormulaStepsFull(constants.MolRefineryPatrol, cfg.ExtraVars)
 }
 
 // buildRefineryPatrolVars loads rig MQ settings and returns --var key=value
