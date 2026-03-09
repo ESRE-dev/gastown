@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -333,17 +334,25 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 		return vars
 	}
 
-	// Fallback: read command vars from layered rig config (bead labels / wisp).
-	// This is the path for rigs that use gt rig config set instead of settings/config.json.
-	// r.Config must carry the BeadsConfig (prefix) so getBeadLabel resolves the correct bead.
-	var beadsCfg *config.BeadsConfig
-	if rigCfg != nil && rigCfg.Beads != nil {
-		beadsCfg = &config.BeadsConfig{Prefix: rigCfg.Beads.Prefix}
-	}
-	r := &rig.Rig{Name: ctx.Rig, Path: rigPath, Config: beadsCfg}
-	for _, key := range []string{"setup_command", "typecheck_command", "lint_command", "test_command", "build_command"} {
-		if val, ok := r.GetConfig(key).(string); ok && val != "" {
-			vars = append(vars, fmt.Sprintf("%s=%s", key, val))
+	// Fallback: read command vars from rig identity bead labels.
+	// This is the path for rigs using `gt rig config set --global` (bead layer).
+	// We use native bd routing (no explicit BEADS_DIR) to avoid dolt database
+	// name mismatches that occur when bypassing the routing system.
+	if rigCfg != nil && rigCfg.Beads != nil && rigCfg.Beads.Prefix != "" {
+		rigBeadID := beads.RigBeadIDWithPrefix(rigCfg.Beads.Prefix, ctx.Rig)
+		bd := beads.New(ctx.TownRoot)
+		if issue, err := bd.Show(rigBeadID); err == nil {
+			labelMap := make(map[string]string, len(issue.Labels))
+			for _, label := range issue.Labels {
+				if idx := strings.IndexByte(label, ':'); idx > 0 {
+					labelMap[label[:idx]] = label[idx+1:]
+				}
+			}
+			for _, key := range []string{"setup_command", "typecheck_command", "lint_command", "test_command", "build_command"} {
+				if val := labelMap[key]; val != "" {
+					vars = append(vars, fmt.Sprintf("%s=%s", key, val))
+				}
+			}
 		}
 	}
 	return vars
