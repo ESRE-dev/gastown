@@ -529,8 +529,12 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 	// Dolt connections by the time gt prime runs on session startup.
 	// Uses exponential backoff: 500ms, 1s, 2s, 4s, 8s (total ~15.5s max).
 	// See: https://github.com/steveyegge/gastown/issues/2389
+	//
+	// On compact/resume, the agent already has work context in memory.
+	// A single attempt suffices — retries would add ~15s of latency to
+	// compaction hooks, causing non-Claude runtimes to report hook failure.
 	maxAttempts := 1
-	if ctx.Role == RolePolecat || ctx.Role == RoleCrew {
+	if (ctx.Role == RolePolecat || ctx.Role == RoleCrew) && !isCompactResume() {
 		maxAttempts = 5
 	}
 
