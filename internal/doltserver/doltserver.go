@@ -1345,7 +1345,38 @@ func SyncPortFiles(townRoot string, port int) error {
 		writePortFileIfChanged(filepath.Join(beadsDir, "dolt-server.port"), portStr)
 	}
 
+	// Deacon and dog .beads/ dirs — not in rigs.json but run bd commands
+	// during patrol and need the shared server port (gt-9t6y).
+	syncDeaconPortFiles(townRoot, portStr)
+
 	return nil
+}
+
+// syncDeaconPortFiles writes port files to deacon/.beads/ and all dog .beads/ dirs.
+// Dogs run bd commands during patrol; without these port files they auto-spawn
+// orphan embedded Dolt servers on random ports (gt-9t6y).
+func syncDeaconPortFiles(townRoot string, portStr []byte) {
+	deaconRoot := filepath.Join(townRoot, "deacon")
+	if _, err := os.Stat(deaconRoot); err != nil {
+		return
+	}
+
+	// Deacon-level .beads/
+	deaconBeads := filepath.Join(deaconRoot, ".beads")
+	if _, err := os.Stat(deaconBeads); err == nil {
+		writePortFileIfChanged(filepath.Join(deaconBeads, "dolt-server.port"), portStr)
+	}
+
+	// Dog-level: deacon/dogs/*/.beads and deacon/dogs/*/*/.beads (worktrees)
+	for _, pattern := range []string{
+		filepath.Join(deaconRoot, "dogs", "*", ".beads"),
+		filepath.Join(deaconRoot, "dogs", "*", "*", ".beads"),
+	} {
+		matches, _ := filepath.Glob(pattern)
+		for _, beadsDir := range matches {
+			writePortFileIfChanged(filepath.Join(beadsDir, "dolt-server.port"), portStr)
+		}
+	}
 }
 
 // writePortFileIfChanged writes the port file only if the content differs,
@@ -1393,7 +1424,35 @@ func CheckPortFiles(townRoot string, expectedPort int) []PortFileDrift {
 		checkPortFile(beadsDir, expectedPort, &drifted)
 	}
 
+	// Deacon and dog .beads/ dirs (gt-9t6y).
+	checkDeaconPortFiles(townRoot, expectedPort, &drifted)
+
 	return drifted
+}
+
+// checkDeaconPortFiles checks port files in deacon/.beads/ and all dog .beads/ dirs.
+func checkDeaconPortFiles(townRoot string, expected int, drifted *[]PortFileDrift) {
+	deaconRoot := filepath.Join(townRoot, "deacon")
+	if _, err := os.Stat(deaconRoot); err != nil {
+		return
+	}
+
+	// Deacon-level .beads/
+	deaconBeads := filepath.Join(deaconRoot, ".beads")
+	if _, err := os.Stat(deaconBeads); err == nil {
+		checkPortFile(deaconBeads, expected, drifted)
+	}
+
+	// Dog-level: deacon/dogs/*/.beads and deacon/dogs/*/*/.beads (worktrees)
+	for _, pattern := range []string{
+		filepath.Join(deaconRoot, "dogs", "*", ".beads"),
+		filepath.Join(deaconRoot, "dogs", "*", "*", ".beads"),
+	} {
+		matches, _ := filepath.Glob(pattern)
+		for _, beadsDir := range matches {
+			checkPortFile(beadsDir, expected, drifted)
+		}
+	}
 }
 
 // PortFileDrift describes a dolt-server.port file that doesn't match the shared server port.

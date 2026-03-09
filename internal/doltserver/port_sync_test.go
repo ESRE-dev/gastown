@@ -200,3 +200,104 @@ func TestSyncPortFiles_OverwritesStalePort(t *testing.T) {
 		t.Errorf("port file = %q, want %q", string(data), "3307")
 	}
 }
+
+func TestSyncPortFiles_SyncsDeaconAndDogDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create minimal rigs.json (required for SyncPortFiles to proceed)
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte(`{"version":1,"rigs":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create deacon .beads dirs: deacon-level, dog-level, and dog worktree-level
+	deaconDirs := []string{
+		filepath.Join(tmpDir, "deacon", ".beads"),
+		filepath.Join(tmpDir, "deacon", "dogs", "alpha", ".beads"),
+		filepath.Join(tmpDir, "deacon", "dogs", "bravo", ".beads"),
+		filepath.Join(tmpDir, "deacon", "dogs", "charlie", "gastown", ".beads"), // worktree
+	}
+	for _, d := range deaconDirs {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := SyncPortFiles(tmpDir, 3307); err != nil {
+		t.Fatalf("SyncPortFiles: %v", err)
+	}
+
+	for _, d := range deaconDirs {
+		portFile := filepath.Join(d, "dolt-server.port")
+		data, err := os.ReadFile(portFile)
+		if err != nil {
+			t.Errorf("missing port file in %s: %v", d, err)
+			continue
+		}
+		if string(data) != "3307" {
+			t.Errorf("port file in %s = %q, want %q", d, string(data), "3307")
+		}
+	}
+}
+
+func TestCheckPortFiles_DetectsDeaconDrift(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create minimal rigs.json
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte(`{"version":1,"rigs":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create deacon .beads with stale port, dog .beads with missing port
+	deaconBeads := filepath.Join(tmpDir, "deacon", ".beads")
+	dogBeads := filepath.Join(tmpDir, "deacon", "dogs", "alpha", ".beads")
+	for _, d := range []string{deaconBeads, dogBeads} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Stale port on deacon
+	if err := os.WriteFile(filepath.Join(deaconBeads, "dolt-server.port"), []byte("13954"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	drifted := CheckPortFiles(tmpDir, 3307)
+	if len(drifted) != 2 {
+		t.Fatalf("expected 2 drifted (deacon stale + dog missing), got %d", len(drifted))
+	}
+
+	found := map[string]bool{}
+	for _, d := range drifted {
+		found[d.BeadsDir] = true
+	}
+	if !found[deaconBeads] {
+		t.Errorf("deacon beads dir not in drifted list")
+	}
+	if !found[dogBeads] {
+		t.Errorf("dog beads dir not in drifted list")
+	}
+}
+
+func TestSyncPortFiles_NoDeaconDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create rigs.json but no deacon dir — should not error
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte(`{"version":1,"rigs":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SyncPortFiles(tmpDir, 3307); err != nil {
+		t.Fatalf("SyncPortFiles should not error without deacon dir: %v", err)
+	}
+}
