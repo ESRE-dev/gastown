@@ -770,7 +770,7 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 		if status.AttachedAt != "" {
 			fmt.Printf("   Attached: %s\n", status.AttachedAt)
 		}
-	} else {
+	} else if status.AttachedFormula == "" {
 		fmt.Printf("%s\n", style.Dim.Render("No molecule attached (hooked bead still triggers autonomous work)"))
 	}
 

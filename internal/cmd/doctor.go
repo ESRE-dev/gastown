@@ -175,8 +175,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewBootHealthCheck())
 	d.Register(doctor.NewTownBeadsConfigCheck())
 	d.Register(doctor.NewCustomTypesCheck())
+	d.Register(doctor.NewCustomStatusesCheck())
 	d.Register(doctor.NewRoleLabelCheck())
 	d.Register(doctor.NewFormulaCheck())
+	d.Register(doctor.NewRigsJSONCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
 	d.Register(doctor.NewRigNameMismatchCheck())
 	d.Register(doctor.NewPrefixMismatchCheck())
@@ -252,6 +254,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewHooksSyncCheck())
 
 	// Dolt data health checks (binary + server reachability moved to top as prerequisites)
+	d.Register(doctor.NewDoltPortFileCheck())
 	d.Register(doctor.NewDoltMetadataCheck())
 	d.Register(doctor.NewDoltOrphanedDatabaseCheck())
 	d.Register(doctor.NewUnregisteredBeadsDirsCheck())
