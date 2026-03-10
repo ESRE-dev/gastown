@@ -533,10 +533,11 @@ func IsRunning(townRoot string) (bool, int, error) {
 
 	// Last resort: TCP reachability check. This handles Docker containers
 	// and other setups where no local dolt process is visible (e.g., the
-	// port is forwarded by a Docker proxy). Only used when GT_DOLT_PORT
-	// overrides the default port, to avoid false positives from other
-	// services on 3307.
-	if config.Port != DefaultPort {
+	// port is forwarded by a Docker proxy). On Unix, only used when
+	// GT_DOLT_PORT overrides the default port, to avoid false positives
+	// from other services on 3307. On Windows, always used because
+	// Signal(0) and lsof are not available for process detection.
+	if config.Port != DefaultPort || runtime.GOOS == "windows" {
 		conn, err := net.DialTimeout("tcp", config.HostPort(), 2*time.Second)
 		if err == nil {
 			_ = conn.Close()
@@ -1052,7 +1053,7 @@ behavior:
 		maxConnLine,
 		readTimeoutLine,
 		writeTimeoutLine,
-		config.DataDir,
+		filepath.ToSlash(config.DataDir),
 	)
 
 	return os.WriteFile(configPath, []byte(content), 0600)
