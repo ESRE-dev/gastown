@@ -641,6 +641,10 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync hooks for new rig: %v\n", err)
 	}
 
+	// Commit town-level config changes (rigs.json, daemon.json, routes.jsonl)
+	// so they aren't reverted by git restore/checkout operations.
+	commitTownConfigChanges(townRoot, name)
+
 	// Refresh tmux cycle bindings on all running sessions so the new rig's
 	// prefix is recognized by C-b n/p. Without this, existing sessions have
 	// a stale grep pattern that doesn't include the new prefix.
@@ -1053,6 +1057,10 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			fmt.Printf("  %s Could not update routes.jsonl: %v\n", style.Warning.Render("!"), err)
 		}
 	}
+
+	// Commit town-level config changes (rigs.json, daemon.json, routes.jsonl)
+	// so they aren't reverted by git restore/checkout operations.
+	commitTownConfigChanges(townRoot, name)
 
 	// Check for tracked beads and initialize database if missing (Issue #72)
 	rigPath := filepath.Join(townRoot, name)
@@ -2216,6 +2224,44 @@ func findRigSessions(t *tmux.Tmux, rigName string) ([]string, error) {
 		}
 	}
 	return matches, nil
+}
+
+// commitTownConfigChanges commits town-level config files (rigs.json, daemon.json,
+// routes.jsonl) to the town repo after rig add/adopt. Without this commit, changes
+// are silently reverted by any process that does a git restore/checkout.
+func commitTownConfigChanges(townRoot, rigName string) {
+	g := git.NewGit(townRoot)
+
+	// Collect the town-level files that rig add/adopt modifies.
+	files := []string{
+		filepath.Join("mayor", "rigs.json"),
+		filepath.Join("mayor", "daemon.json"),
+		filepath.Join(".beads", "routes.jsonl"),
+	}
+
+	// Only stage files that actually exist (adopt may not touch all of them).
+	var toAdd []string
+	for _, f := range files {
+		if _, err := os.Stat(filepath.Join(townRoot, f)); err == nil {
+			toAdd = append(toAdd, f)
+		}
+	}
+	if len(toAdd) == 0 {
+		return
+	}
+
+	if err := g.Add(toAdd...); err != nil {
+		fmt.Fprintf(os.Stderr, "  Warning: could not stage town config files: %v\n", err)
+		return
+	}
+
+	msg := fmt.Sprintf("chore: register rig %s in town config", rigName)
+	if err := g.Commit(msg); err != nil {
+		// If nothing changed (already committed), git commit returns an error — that's fine.
+		if !strings.Contains(err.Error(), "nothing to commit") {
+			fmt.Fprintf(os.Stderr, "  Warning: could not commit town config files: %v\n", err)
+		}
+	}
 }
 
 // isGitRemoteURL returns true if s looks like a remote git URL rather than a
