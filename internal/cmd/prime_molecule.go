@@ -342,7 +342,7 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 	// default_branch.
 	defaultBranch := "main"
 	rigCfg, err := rig.LoadRigConfig(rigPath)
-	if err == nil && rigCfg.DefaultBranch != "" {
+	if err == nil && rigCfg != nil && rigCfg.DefaultBranch != "" {
 		defaultBranch = rigCfg.DefaultBranch
 	}
 	vars = append(vars, fmt.Sprintf("target_branch=%s", defaultBranch))
@@ -389,7 +389,7 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 					labelMap[label[:idx]] = label[idx+1:]
 				}
 			}
-			for _, key := range []string{"setup_command", "typecheck_command", "lint_command", "test_command", "build_command"} {
+			for _, key := range []string{"integration_branch_refinery_enabled", "integration_branch_auto_land", "run_tests", "delete_merged_branches", "setup_command", "typecheck_command", "lint_command", "test_command", "build_command"} {
 				if val := labelMap[key]; val != "" {
 					vars = append(vars, fmt.Sprintf("%s=%s", key, val))
 				}
