@@ -10,30 +10,35 @@ The Refinery is the Engineer in the engine room. You process polecat branches, m
 The Refinery receives MERGE_READY mail from Witnesses when polecats complete work:
 
 ```
-Witness                    Refinery                      Git
-   │                          │                           │
-   │ MERGE_READY              │                           │
-   │─────────────────────────>│                           │
-   │                          │                           │
-   │                    (verify branch)                   │
-   │                          │ fetch & rebase            │
-   │                          │──────────────────────────>│
-   │                          │                           │
-   │                    (run tests)                       │
-   │                          │                           │
-   │                    (quality review, if enabled)      │
-   │                          │                           │
-   │                    (if pass)                         │
-   │                          │ merge & push              │
-   │                          │──────────────────────────>│
-   │                          │                           │
-   │ MERGED                   │                           │
-   │<─────────────────────────│                           │
-   │                          │                           │
+Witness                    Refinery                      Git        Polecat
+   │                          │                           │            │
+   │ MERGE_READY              │                           │            │
+   │─────────────────────────>│                           │            │
+   │                          │                           │            │
+   │                    (verify branch)                   │            │
+   │                          │ fetch & rebase            │            │
+   │                          │──────────────────────────>│            │
+   │                          │                           │            │
+   │                    (run tests)                       │            │
+   │                          │                           │            │
+   │                    (if pass)                         │            │
+   │                          │ merge & push              │            │
+   │                          │──────────────────────────>│            │
+   │ MERGED                   │                           │            │
+   │<─────────────────────────│                           │            │
+   │                          │                           │            │
+   │                    (if fail)                         │            │
+   │                          │          FIX_NEEDED       │            │
+   │                          │───────────────────────────────────────>│
+   │                          │                           │   (fix code)
+   │                          │                           │  (resubmit)
 ```
 
 After successful merge, Refinery sends MERGED mail back to Witness so it can
 complete cleanup (nuke the polecat worktree).
+
+On failure, Refinery sends FIX_NEEDED directly to the Polecat. The polecat
+fixes the code in-place and resubmits the MR without losing context.
 
 ## CRITICAL: Read Step Instructions Before Acting
 
@@ -81,7 +86,7 @@ resolve that placeholder with this rule:
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 9
+version = 11
 
 [vars]
 [vars.wisp_type]
@@ -455,28 +460,34 @@ If all checks and tests PASSED: This step auto-completes. Proceed to merge.
 If any check or test FAILED:
 1. Diagnose: Is this a branch regression or pre-existing on the target branch?
 2. If branch caused it:
-   - Abort merge
-   - **REOPEN the source issue** so it returns to the ready queue:
+   - Abort merge (clean up temp branch)
+   - **Send FIX_NEEDED directly to the polecat** (event-driven lifecycle):
      ```bash
-     bd update <issue-id> --status=open --assignee=""
-     bd sync
-     ```
-   - Notify witness of rejection using the MERGE_FAILED protocol:
-     ```bash
-     gt mail send <rig>/witness -s "MERGE_FAILED <polecat-name>" -m "Branch: <branch>
+     gt mail send <rig>/polecats/<polecat-name> -s "FIX_NEEDED <polecat-name>" --stdin <<'BODY'
+     Branch: <branch>
      Issue: <issue-id>
      Polecat: <polecat-name>
      Rig: <rig>
-     FailureType: quality-check
-     Error: <failure description>"
+     Target: <target-branch>
+     Failed-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+     Failure-Type: <tests|build|lint|typecheck>
+     Error: <failure description/output>
+     MR-Bead-ID: <mr-bead-id>
+     Attempt-Number: <N>
+     BODY
      ```
-   - Close the MR bead as rejected:
+   - **Update the bead** with failure details so they survive session death:
      ```bash
-     bd close <mr-bead-id> --reason "Rejected: <failure description>"
+     bd update <issue-id> --notes "Merge failure (attempt <N>): <failure-type> - <error summary>"
      ```
-   - Delete the rejected branch (a new polecat will create a fresh one):
+   - **Do NOT close the MR bead** — the polecat will resubmit
+   - **Do NOT delete the branch** — the polecat needs it for the fix
+   - **Do NOT reopen the source issue** — the polecat is still working on it
+   - **Do NOT send MERGE_FAILED to witness** — FIX_NEEDED goes to polecat directly
+   - Clean up temp branch and skip to loop-check:
      ```bash
-     git push origin --delete <polecat-branch>
+     git checkout {{target_branch}}
+     git branch -D temp
      ```
    - Archive the MERGE_READY message
    - Skip to loop-check
@@ -491,11 +502,10 @@ If any check or test FAILED:
    - FORBIDDEN: Writing code to fix quality check or test failures. You merge branches, you do not develop.
    - Proceed with the merge if the failure is pre-existing (not caused by the branch).
 
-**REJECTION CHECKLIST** (all required before skipping to loop-check):
-- [ ] Source issue reopened (bd update <issue-id> --status=open --assignee="")
-- [ ] MERGE_FAILED notification sent to witness
-- [ ] MR bead closed with rejection reason
-- [ ] Rejected branch deleted from remote
+**FIX_NEEDED CHECKLIST** (all required before skipping to loop-check):
+- [ ] FIX_NEEDED sent to polecat (with failure details)
+- [ ] Bead updated with failure notes
+- [ ] Temp branch cleaned up (NOT the polecat branch!)
 - [ ] MERGE_READY message archived
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
