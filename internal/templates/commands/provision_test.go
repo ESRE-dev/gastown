@@ -1,13 +1,17 @@
 package commands
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
 
 func TestBuildCommand_Claude(t *testing.T) {
-	cmd := Commands[0] // handoff
-	content, err := BuildCommand(cmd, "claude")
+	cmd := FindByName("handoff")
+	if cmd == nil {
+		t.Fatal("handoff command not found")
+	}
+	content, err := BuildCommand(*cmd, "claude")
 	if err != nil {
 		t.Fatalf("BuildCommand failed: %v", err)
 	}
@@ -30,8 +34,11 @@ func TestBuildCommand_Claude(t *testing.T) {
 }
 
 func TestBuildCommand_OpenCode(t *testing.T) {
-	cmd := Commands[0] // handoff
-	content, err := BuildCommand(cmd, "opencode")
+	cmd := FindByName("handoff")
+	if cmd == nil {
+		t.Fatal("handoff command not found")
+	}
+	content, err := BuildCommand(*cmd, "opencode")
 	if err != nil {
 		t.Fatalf("BuildCommand failed: %v", err)
 	}
@@ -54,8 +61,11 @@ func TestBuildCommand_OpenCode(t *testing.T) {
 }
 
 func TestBuildCommand_Copilot(t *testing.T) {
-	cmd := Commands[0] // handoff
-	content, err := BuildCommand(cmd, "copilot")
+	cmd := FindByName("handoff")
+	if cmd == nil {
+		t.Fatal("handoff command not found")
+	}
+	content, err := BuildCommand(*cmd, "copilot")
 	if err != nil {
 		t.Fatalf("BuildCommand failed: %v", err)
 	}
@@ -78,8 +88,11 @@ func TestBuildCommand_Copilot(t *testing.T) {
 }
 
 func TestBuildCommand_Review_Claude(t *testing.T) {
-	cmd := Commands[1] // review
-	content, err := BuildCommand(cmd, "claude")
+	cmd := FindByName("review")
+	if cmd == nil {
+		t.Fatal("review command not found")
+	}
+	content, err := BuildCommand(*cmd, "claude")
 	if err != nil {
 		t.Fatalf("BuildCommand failed: %v", err)
 	}
@@ -112,10 +125,10 @@ func TestNames(t *testing.T) {
 	if len(names) < 2 {
 		t.Errorf("expected at least 2 commands, got %d", len(names))
 	}
-	if names[0] != "handoff" {
-		t.Errorf("expected handoff, got %s", names[0])
+	if !slices.Contains(names, "handoff") {
+		t.Error("missing handoff command")
 	}
-	if names[1] != "review" {
-		t.Errorf("expected review, got %s", names[1])
+	if !slices.Contains(names, "review") {
+		t.Error("missing review command")
 	}
 }

@@ -25,7 +25,7 @@ DIFF=$(git diff; git diff --staged)
 DIFF=$(git diff --staged)
 
 # --branch: branch diff (detect base branch)
-BASE=$(git rev-parse --abbrev-ref HEAD@{upstream} 2>/dev/null | sed 's|origin/||' || echo "main")
+BASE=$(git rev-parse --abbrev-ref HEAD@{upstream} 2>/dev/null | sed 's|origin/||' || git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo "main")
 DIFF=$(git diff origin/$BASE...HEAD)
 
 # --pr <url>: PR diff

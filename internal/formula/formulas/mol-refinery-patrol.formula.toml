@@ -141,7 +141,7 @@ description = "Review depth: quick, standard, or deep"
 default = "standard"
 
 [vars.review_enabled]
-description = "Enable /review code review gating for merges (true/false). Supersedes judgment_enabled when true."
+description = "Enable /review code review gating for merges (true/false). Takes priority over judgment_enabled when true."
 default = "false"
 
 [vars.review_blocking]

@@ -140,6 +140,16 @@ func MissingFor(workspacePath, agent string) []string {
 	return missing
 }
 
+// FindByName returns the command with the given name, or nil if not found.
+func FindByName(name string) *Command {
+	for i := range Commands {
+		if Commands[i].Name == name {
+			return &Commands[i]
+		}
+	}
+	return nil
+}
+
 // Names returns the names of all registered commands.
 func Names() []string {
 	names := make([]string, len(Commands))
