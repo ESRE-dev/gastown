@@ -777,6 +777,20 @@ func TestRuntimeLabelFromConfig(t *testing.T) {
 			fallback: "",
 			want:     "claude",
 		},
+		{
+			name:     "model equals form long flag",
+			command:  "claude",
+			args:     []string{"--dangerously-skip-permissions", "--model=sonnet"},
+			fallback: "claude-sonnet",
+			want:     "claude/sonnet",
+		},
+		{
+			name:     "model equals form short flag",
+			command:  "opencode",
+			args:     []string{"-m=gpt-5"},
+			fallback: "custom",
+			want:     "opencode/gpt-5",
+		},
 	}
 
 	for _, tt := range tests {

@@ -1544,6 +1544,16 @@ func runtimeLabelFromConfig(command string, args []string, fallback string) stri
 		if (arg == "--model" || arg == "-m") && i+1 < len(args) && strings.TrimSpace(args[i+1]) != "" {
 			return cmd + "/" + strings.TrimSpace(args[i+1])
 		}
+		if strings.HasPrefix(arg, "--model=") {
+			if v := strings.TrimSpace(strings.TrimPrefix(arg, "--model=")); v != "" {
+				return cmd + "/" + v
+			}
+		}
+		if strings.HasPrefix(arg, "-m=") {
+			if v := strings.TrimSpace(strings.TrimPrefix(arg, "-m=")); v != "" {
+				return cmd + "/" + v
+			}
+		}
 	}
 
 	return cmd
