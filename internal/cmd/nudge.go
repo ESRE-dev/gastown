@@ -187,6 +187,14 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 					}})
 					return t.NudgeSession(sessionName, formatted)
 				}
+				// Ensure a nudge-poller is running so the queue actually drains.
+				// The poller is normally started by gt crew start, but if the
+				// session was started manually (or the poller crashed), queued
+				// nudges sit undelivered forever. StartPoller is idempotent —
+				// it no-ops if a poller is already alive for this session.
+				if _, pollerErr := nudge.StartPoller(townRoot, sessionName); pollerErr != nil {
+					fmt.Fprintf(os.Stderr, "wait-idle: could not start nudge poller for %s: %v\n", sessionName, pollerErr)
+				}
 				return nil
 			}
 		}
