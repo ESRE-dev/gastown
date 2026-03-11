@@ -208,6 +208,22 @@ func IsAgentBead(issue *Issue) bool {
 	return HasLabel(issue, "gt:agent")
 }
 
+// IsProtectedBead checks if a bead has any protection labels that should
+// prevent automated status changes (AutoClose, unassign on polecat removal, etc.).
+// Protected labels: gt:standing-orders, gt:keep, gt:role, gt:rig.
+func IsProtectedBead(issue *Issue) bool {
+	if issue == nil {
+		return false
+	}
+	for _, l := range issue.Labels {
+		switch l {
+		case "gt:standing-orders", "gt:keep", "gt:role", "gt:rig":
+			return true
+		}
+	}
+	return false
+}
+
 // IssueDep represents a dependency or dependent issue with its relation.
 type IssueDep struct {
 	ID             string `json:"id"`
