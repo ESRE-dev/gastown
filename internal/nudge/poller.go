@@ -22,6 +22,7 @@ import (
 	"syscall"
 
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Poller tuning defaults (overridable via flags or tests).
@@ -68,9 +69,7 @@ func StartPoller(townRoot, session string) (int, error) {
 	cmd.Dir = townRoot
 	cmd.Stdout = nil // discard
 	cmd.Stderr = nil // discard
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // detach from parent process group
-	}
+	util.SetProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("starting nudge-poller: %w", err)
