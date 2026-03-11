@@ -1,5 +1,3 @@
-//go:build unix
-
 package acp
 
 import (
@@ -14,11 +12,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/util"
 )
 
 type handshakeState int
@@ -172,7 +168,8 @@ func (p *Proxy) Start(ctx context.Context, agentPath string, agentArgs []string,
 	p.cmd = exec.CommandContext(childCtx, agentPath, agentArgs...)
 	p.cmd.Dir = cwd
 
-	util.SetProcessGroup(p.cmd)
+	// Platform-specific process group setup
+	p.setupProcessGroup()
 
 	var err error
 	p.stdin, err = p.cmd.StdinPipe()
@@ -224,14 +221,6 @@ func (p *Proxy) Start(ctx context.Context, agentPath string, agentArgs []string,
 	go p.forwardAgentStderr()
 
 	return nil
-}
-
-func (p *Proxy) isProcessAlive() bool {
-	if p.cmd == nil || p.cmd.Process == nil {
-		return false
-	}
-	err := p.cmd.Process.Signal(syscall.Signal(0))
-	return err == nil
 }
 
 func (p *Proxy) writeToAgent(msg any) error {
@@ -295,7 +284,7 @@ func (p *Proxy) writeToAgent(msg any) error {
 
 func (p *Proxy) Forward() error {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	signal.Notify(sigChan, signalsToHandle()...)
 	defer signal.Stop(sigChan)
 
 	defer p.Shutdown()
@@ -712,7 +701,7 @@ func (p *Proxy) trackPromptResponse(msg *JSONRPCMessage) {
 	if idStr == p.activePromptID {
 		debugLog(p.townRoot, "[Proxy] trackPromptResponse: prompt completed (id=%s)", idStr)
 		p.activePromptID = ""
-		
+
 		if idStr == "gastown-startup-prompt" {
 			p.setStartupPromptState(startupPromptStateComplete)
 		}
@@ -915,7 +904,6 @@ func (p *Proxy) WaitForSessionID(ctx context.Context) error {
 		p.sessionMux.RUnlock()
 
 		if sid != "" {
-			debugLog(p.townRoot, "[Proxy] WaitForSessionID: sessionID available: %s", sid)
 			return nil
 		}
 
@@ -1036,28 +1024,8 @@ func (p *Proxy) Shutdown() {
 			p.stdout.Close()
 		}
 
-		if p.cmd != nil && p.cmd.Process != nil {
-			debugLog(p.townRoot, "[Proxy] Shutdown: sending SIGTERM to agent process (pid=%d)", p.cmd.Process.Pid)
-			pgid, err := syscall.Getpgid(p.cmd.Process.Pid)
-			if err == nil {
-				_ = syscall.Kill(-pgid, syscall.SIGTERM)
-			} else {
-				_ = syscall.Kill(p.cmd.Process.Pid, syscall.SIGTERM)
-			}
-
-			time.AfterFunc(2*time.Second, func() {
-				if p.cmd.ProcessState == nil || !p.cmd.ProcessState.Exited() {
-					if pgid == 0 {
-						pgid, _ = syscall.Getpgid(p.cmd.Process.Pid)
-					}
-					if pgid > 0 {
-						_ = syscall.Kill(-pgid, syscall.SIGKILL)
-					} else {
-						_ = syscall.Kill(p.cmd.Process.Pid, syscall.SIGKILL)
-					}
-				}
-			})
-		}
+		// Platform-specific process termination
+		p.terminateProcess()
 	})
 }
 
@@ -1116,9 +1084,6 @@ func truncateStr(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-// isRedactedThought checks if a message is a session/update with an agent_thought_chunk
-// that contains "[REDACTED]" text. These should be filtered out to avoid confusing the UI
-// with a "Thinking" state when the agent has actually finished its turn.
 func isRedactedThought(msg *JSONRPCMessage) bool {
 	if msg.Method != "session/update" {
 		return false
