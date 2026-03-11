@@ -18,7 +18,7 @@ The new preset should:
 - Use the same underlying `codex` binary and the same general Codex runtime shape as the current preset.
 - Set `SupportsHooks: true`.
 - Set `PromptMode: "arg"`.
-- Point `HooksProvider` at a new Codex provider.
+- Set `HooksProvider: "codex"` so the preset reuses the existing Codex agent/provider identity for template lookup and related runtime plumbing.
 - Point `HooksDir` at `.codex`.
 - Point `HooksSettingsFile` at `hooks.json`.
 - Leave the existing `codex` preset unchanged.
@@ -31,7 +31,7 @@ This follows Gastown's existing preset model rather than introducing a new produ
 
 Reuse the existing generic hook installer in `internal/hooks/installer.go`. No new installer mechanism should be added.
 
-Add provider templates under `internal/hooks/templates/codex/`:
+Add provider templates under `internal/hooks/templates/codex/` and keep the provider key as `codex` rather than introducing a separate provider namespace:
 - `hooks-interactive.json`
 - `hooks-autonomous.json`
 
@@ -49,6 +49,7 @@ Do not add special-case runtime logic for Codex in the first pass.
 The feature should work through the existing runtime and fallback model:
 - `internal/runtime/runtime.go` already suppresses startup fallback commands when a preset has a non-informational hooks provider.
 - With `PromptMode: "arg"`, the new `codex-hooks` preset follows Gastown's `hooks + prompt` startup path: native `SessionStart` handles priming and the initial beacon/work instructions can be delivered as the startup prompt.
+- Prompt delivery should reuse Gastown's existing prompt plumbing in `BuildArgsWithPrompt` / `BuildCommandWithPrompt`, which appends the initial prompt positionally for Codex rather than requiring a new Codex-specific prompt flag or runtime branch.
 - The existing `codex` preset will continue to use today's non-hook fallback path because it remains hook-disabled.
 
 This keeps the rollout safe: users who select the existing `codex` preset get current behavior, while users who select `codex-hooks` are explicitly choosing the experimental path and are responsible for enabling Codex's upstream hook feature.
@@ -134,6 +135,7 @@ Out:
 - Add installer tests covering interactive and autonomous Codex template selection in `internal/hooks/installer_test.go`.
 - Verify the new preset points at `.codex/hooks.json` and uses the existing provider installer path.
 - Verify `codex-hooks` resolves to `PromptMode: "arg"` so startup follows the `hooks + prompt` path.
+- Verify prompt delivery for `codex-hooks` uses Gastown's existing positional prompt path rather than introducing a new Codex-specific prompt flag branch.
 - Run targeted Go tests for hook installer coverage.
 - Manually inspect generated docs text to confirm the opt-in and feature-flag prerequisites are clear.
 
