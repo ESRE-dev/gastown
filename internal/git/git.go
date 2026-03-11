@@ -1119,14 +1119,15 @@ func (g *Git) WorktreeAddExistingForce(path, branch string) error {
 // submoduleReferencePath returns the mayor/rig path to use as --reference
 // for submodule init. For bare repos (.repo.git), this resolves to the
 // sibling mayor/rig directory which contains the initialized submodules.
-// Returns empty string if no suitable reference path exists.
+// Returns empty string if no suitable reference path exists or if the
+// reference repo is a shallow clone (git rejects shallow references).
 func (g *Git) submoduleReferencePath() string {
 	// For bare repos, the gitDir is <rig>/.repo.git
 	// The reference clone is at <rig>/mayor/rig/
 	if g.gitDir != "" {
 		rigDir := filepath.Dir(g.gitDir)
 		mayorRig := filepath.Join(rigDir, "mayor", "rig")
-		if _, err := os.Stat(filepath.Join(mayorRig, ".gitmodules")); err == nil {
+		if isValidSubmoduleReference(mayorRig) {
 			return mayorRig
 		}
 	}
@@ -1143,10 +1144,8 @@ func (g *Git) submoduleReferencePath() string {
 			}
 			if _, err := os.Stat(filepath.Join(parent, ".repo.git")); err == nil {
 				mayorRig := filepath.Join(parent, "mayor", "rig")
-				if mayorRig != g.workDir {
-					if _, err := os.Stat(filepath.Join(mayorRig, ".gitmodules")); err == nil {
-						return mayorRig
-					}
+				if mayorRig != g.workDir && isValidSubmoduleReference(mayorRig) {
+					return mayorRig
 				}
 				break
 			}
@@ -1155,6 +1154,22 @@ func (g *Git) submoduleReferencePath() string {
 	}
 
 	return ""
+}
+
+// isValidSubmoduleReference checks if a path is suitable as a --reference
+// for git submodule update. It must have .gitmodules and not be a shallow clone
+// (git rejects shallow repos as references).
+func isValidSubmoduleReference(repoPath string) bool {
+	if _, err := os.Stat(filepath.Join(repoPath, ".gitmodules")); err != nil {
+		return false
+	}
+	// Check if shallow — git rev-parse --is-shallow-repository
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--is-shallow-repository")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != "true"
 }
 
 // IsSparseCheckoutConfigured checks if sparse checkout is enabled for a given repo/worktree.
