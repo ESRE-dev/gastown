@@ -328,6 +328,13 @@ func isIssueStillOpen(workDir, id string) (bool, error) {
 // shouldBeWisp checks if an issue has characteristics indicating it should be a wisp.
 // Returns the reason string if it should be a wisp, empty string otherwise.
 func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labels []string) string {
+	// Never reclassify beads with protection labels.
+	for _, label := range labels {
+		if label == "gt:standing-orders" || label == "gt:keep" || label == "gt:role" || label == "gt:rig" {
+			return ""
+		}
+	}
+
 	// Check for merge-request type - these should always be wisps
 	if issueType == "merge-request" {
 		return "merge-request type should be ephemeral"
