@@ -470,7 +470,17 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			// reject startup (nested session detection) when inherited from
 			// tmux server environment. NODE_OPTIONS can contain debugger flags
 			// that crash Claude's Node.js runtime.
-			cmd = "env -u CLAUDECODE NODE_OPTIONS='' " + cmd
+			//
+			// The start_command may begin with "exec " (a shell builtin). Since
+			// env(1) treats its first non-option argument as the binary to run,
+			// "env ... exec claude" fails (exec is not a binary). We strip the
+			// "exec " prefix and re-add it before env so the shell processes it:
+			//   exec env -u CLAUDECODE NODE_OPTIONS='' claude ...
+			if strings.HasPrefix(cmd, "exec ") {
+				cmd = "exec env -u CLAUDECODE NODE_OPTIONS='' " + cmd[len("exec "):]
+			} else {
+				cmd = "env -u CLAUDECODE NODE_OPTIONS='' " + cmd
+			}
 			return cmd
 		}
 	}
