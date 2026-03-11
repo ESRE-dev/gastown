@@ -192,6 +192,32 @@ func TestInstallForRole_GeminiRoleAware(t *testing.T) {
 	}
 }
 
+func TestInstallForRole_CodexRoleAware(t *testing.T) {
+	dir := t.TempDir()
+	err := InstallForRole("codex", dir, dir, "crew", ".codex", "hooks.json", false)
+	if err != nil {
+		t.Fatalf("InstallForRole(codex, crew): %v", err)
+	}
+
+	got, _ := os.ReadFile(filepath.Join(dir, ".codex", "hooks.json"))
+	want, _ := templateFS.ReadFile("templates/codex/hooks-interactive.json")
+	if string(got) != string(want) {
+		t.Error("codex interactive: content mismatch")
+	}
+
+	dir2 := t.TempDir()
+	err = InstallForRole("codex", dir2, dir2, "polecat", ".codex", "hooks.json", false)
+	if err != nil {
+		t.Fatalf("InstallForRole(codex, polecat): %v", err)
+	}
+
+	got, _ = os.ReadFile(filepath.Join(dir2, ".codex", "hooks.json"))
+	want, _ = templateFS.ReadFile("templates/codex/hooks-autonomous.json")
+	if string(got) != string(want) {
+		t.Error("codex autonomous: content mismatch")
+	}
+}
+
 func TestInstallForRole_CopilotRoleAware(t *testing.T) {
 	// Copilot uses gastown-autonomous.json / gastown-interactive.json naming
 	dir := t.TempDir()

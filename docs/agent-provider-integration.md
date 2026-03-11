@@ -430,6 +430,23 @@ exec codex "$@"
 The wrapper runs `gt prime` before `exec`-ing the real agent binary. Users
 install it as `gt-codex` in their PATH.
 
+### Experimental Codex hooks preset
+
+Gas Town also supports an experimental opt-in preset named `codex-hooks`.
+
+Use `codex-hooks` only when both of these are true:
+- You explicitly select the `codex-hooks` preset in Gastown config or with `--agent codex-hooks`
+- Codex has its upstream hooks feature enabled via `[features].codex_hooks = true`
+
+`codex-hooks` installs `.codex/hooks.json` through the existing provider installer path and keeps the implementation intentionally small:
+- `SessionStart` runs `gt prime --hook`
+- Autonomous `SessionStart` also runs `gt mail check --inject`
+- `Stop` runs `gt costs record`
+
+This preset does not attempt broader hook parity such as tool guards, prompt-submit hooks, or pre-compact behavior.
+
+The default `codex` preset does not change. It remains on the no-hooks fallback path, and the `gt-codex` wrapper guidance above still applies to that default path.
+
 ### Slash commands
 
 Gas Town provisions slash commands (like `/commit`, `/handoff`) into agent
@@ -447,6 +464,7 @@ Current agent capabilities at a glance:
 | Claude | Yes (settings.json) | `--resume` (flag) | Native | Yes | arg | node, claude |
 | Gemini | Yes | `--resume` (flag) | `-p` | No | arg | gemini |
 | Codex | No | `resume` (subcmd) | `exec` subcmd | No | none | codex |
+| Codex Hooks | Yes (`.codex/hooks.json`, experimental opt-in) | `resume` (subcmd) | `exec` subcmd | No | arg | codex |
 | Cursor | No | `--resume` (flag) | `-p` | No | arg | cursor-agent |
 | Auggie | No | `--resume` (flag) | No | No | arg | auggie |
 | AMP | No | `threads continue` (subcmd) | No | No | arg | amp |
