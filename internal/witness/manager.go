@@ -307,7 +307,13 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 		// BuildStartupCommandFromConfig so the correct agent command is built.
 		rc := config.ResolveRoleAgentConfig("witness", townRoot, rigPath)
 		if config.IsResolvedAgentClaude(rc) {
-			return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName)), nil
+			cmd := beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName))
+			// Prepend env sanitization: CLAUDECODE causes Claude Code to
+			// reject startup (nested session detection) when inherited from
+			// tmux server environment. NODE_OPTIONS can contain debugger flags
+			// that crash Claude's Node.js runtime.
+			cmd = "env -u CLAUDECODE NODE_OPTIONS='' " + cmd
+			return cmd, nil
 		}
 	}
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{

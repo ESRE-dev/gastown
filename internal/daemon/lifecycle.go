@@ -465,7 +465,13 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		}
 		rc := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
 		if config.IsResolvedAgentClaude(rc) {
-			return beads.ExpandRolePattern(roleConfig.StartCommand, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
+			cmd := beads.ExpandRolePattern(roleConfig.StartCommand, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
+			// Prepend env sanitization: CLAUDECODE causes Claude Code to
+			// reject startup (nested session detection) when inherited from
+			// tmux server environment. NODE_OPTIONS can contain debugger flags
+			// that crash Claude's Node.js runtime.
+			cmd = "env -u CLAUDECODE NODE_OPTIONS='' " + cmd
+			return cmd
 		}
 	}
 

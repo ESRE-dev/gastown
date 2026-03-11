@@ -302,6 +302,13 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 		return err
 	}
 
+	// Defense-in-depth: remove CLAUDECODE from the tmux server's global
+	// environment so new sessions don't inherit it. Claude Code sets this
+	// variable on startup and the tmux server inherits it if started from
+	// within a Claude Code session. This causes nested-session detection
+	// failures in all subsequently created sessions.
+	_, _ = t.run("set-environment", "-g", "-u", "CLAUDECODE")
+
 	// Two-step creation: create session with default shell first, configure
 	// remain-on-exit, then replace the shell with the actual command. This
 	// eliminates the race between command exit and health check setup.
