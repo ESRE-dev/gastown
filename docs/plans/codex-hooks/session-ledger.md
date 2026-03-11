@@ -7,7 +7,7 @@
 - Selected profiles: `general`, `go-development`
 - Tracking: milestone mode
 - Milestone status: `codex-hooks: implementation complete` in progress
-- Review monitoring: `furiosa` progressing, `rictus` startup failed after retry, `dementus` startup failed before session came up
+- Review monitoring: hooked review workers exist, but parent verification found no live sessions and no completed review reports
 - Final verification: targeted config/hooks/runtime checks passed; external sidecar review degraded with zero completed report artifacts
 
 ## Implementation Checklist
@@ -40,13 +40,13 @@
 - **Remaining risk:** Full-package `internal/config` still has the unrelated `TestAgentEnv_Dog` failure from earlier; feature-specific checks are green.
 
 ### Slice 3
-- **Goal:** Create a stable review checkpoint and launch the required final review workers against shared inputs.
-- **Spec coverage:** Review readiness, verification, and end-of-session review workflow.
-- **Proof model:** Alternate proof model: checkpoint commit + pushed branch + shared review bundle + attached review hooks.
+- **Goal:** Verify the review-handoff state on the branch and record what is actually true from the parent session.
+- **Spec coverage:** Review readiness, verification, and end-of-session review bookkeeping.
+- **Proof model:** Alternate proof model: direct inspection of branch state, hook state, and the review artifact directory.
 - **Status:** complete
-- **What changed:** Created checkpoint commit `3bf15d97`, pushed `integration/codex-hooks`, materialized shared review inputs under `.runtime`, and launched three review runs: Codex general, Claude general, and Codex `go-development`.
-- **Evidence:** `gt hook show gastown/furiosa`, `gt hook show gastown/rictus`, and `gt hook show gastown/dementus` all show hooked `mol-review-implementation` work; review bundle exists under the recorded review directory.
-- **Remaining risk:** Review workers are hooked, but at least some spawned sessions were still deferred at launch time; Stage 7 needs to monitor for actual report file creation before synthesis.
+- **What changed:** Verified that a checkpoint/review handoff exists on the branch, then corrected the ledger to distinguish hooked review work from completed review output.
+- **Evidence:** `gt hook show gastown/furiosa`, `gt hook show gastown/rictus`, and `gt hook show gastown/dementus` show hooked review work; `gt peek` returned `session not found` for all three; `/Users/chall/gt/gastown/.runtime/reviews/codex-hooks/20260311-062955` contains only shared inputs with no review markdown outputs.
+- **Remaining risk:** External review coverage is degraded; no sidecar review report exists yet, so final review synthesis cannot rely on reviewer findings.
 
 ## Commands Run + Outcomes
 
@@ -65,6 +65,8 @@
 - `gt sling mol-review-implementation gastown --agent claude ...` -> spawned `rictus` for Claude general review
 - `gt sling mol-review-implementation gastown --agent codex --var review_profile=\"go-development\" ...` -> spawned `dementus` for specialist review
 - `gt hook show gastown/furiosa` / `gt hook show gastown/rictus` / `gt hook show gastown/dementus` -> review wisps attached
+- `find /Users/chall/gt/gastown/.runtime/reviews/codex-hooks -maxdepth 3 -type f | sort` -> review directory contains only shared inputs (`spec.md`, `session-context.md`, `session-ledger.md`)
+- `gt peek gastown/polecats/furiosa` / `gt peek gastown/polecats/rictus` / `gt peek gastown/polecats/dementus` -> all returned `session not found`
 - `go test ./internal/config -run 'TestBuiltinPresets|TestGetAgentPresetByName|TestRuntimeConfigFromPreset|TestIsKnownPreset|TestSupportsSessionResume|TestGetSessionIDEnvVar|TestGetProcessNames|TestListAgentPresetsMatchesConstants|TestAgentCommandGeneration|TestCodexHooksAgentPreset' && go test ./internal/hooks -run 'TestInstallForRole_CodexRoleAware' && go test ./internal/runtime && rg -n "codex-hooks|codex_hooks|gt-codex|Codex Hooks" docs/agent-provider-integration.md` -> all passed / matched during final verification
 
 ## Files Changed
@@ -87,21 +89,22 @@
 
 ### Review Workers
 
-- `gastown/furiosa` -> Codex general review -> `/Users/chall/gt/gastown/.runtime/reviews/codex-hooks/20260311-062955/codex-review.md`
-- `gastown/rictus` -> Claude general review -> `/Users/chall/gt/gastown/.runtime/reviews/codex-hooks/20260311-062955/claude-review.md`
-- `gastown/dementus` -> Codex `go-development` review -> `/Users/chall/gt/gastown/.runtime/reviews/codex-hooks/20260311-062955/go-development-review.md`
+- `gastown/furiosa` -> Codex general review hook present; no live session found during parent verification
+- `gastown/rictus` -> Claude general review hook present; no live session found during parent verification
+- `gastown/dementus` -> Codex `go-development` review hook present; no live session found during parent verification
 
 ## Open Risks / Blockers
 
 - Need to verify the Codex hook JSON shape matches the runtime's current expectations while keeping the template intentionally minimal.
-- `docs/plans/codex-hooks/session-context.md` remains untracked until a later cleanup step explicitly stages it.
-- Final review coverage is degraded: only the Codex general reviewer (`furiosa`) is actively progressing; Claude general (`rictus`) and Codex specialist (`dementus`) both failed to start within the retry window.
+- Final review coverage is degraded: the review hooks exist, but no reviewer session/report was available when verified from the parent session.
 
 ## Review Monitoring Notes
 
-- `gastown/furiosa`: stalled/failed. `gt peek` showed it progressed into implementation-review and report-writing wisps, but no report file ever materialized and `gt polecat status` showed no session activity for 5 minutes.
-- `gastown/rictus`: startup failed. After the retry nudge, `gt peek` still showed the initial assigned prompt and no review progress; report file absent.
-- `gastown/dementus`: startup failed. Hook was attached, but no live session/report materialized during the second wait window.
+- Parent verification timestamp: 2026-03-11
+- `gastown/furiosa`: `gt hook show` reports hooked work; `gt peek` returned `session not found`.
+- `gastown/rictus`: `gt hook show` reports hooked work; `gt peek` returned `session not found`.
+- `gastown/dementus`: `gt hook show` reports hooked work; `gt peek` returned `session not found`.
+- Review directory currently contains only `spec.md`, `session-context.md`, and `session-ledger.md`; no review markdown outputs were present.
 
 ## Review Synthesis
 
@@ -111,7 +114,7 @@
   - `/Users/chall/gt/gastown/.runtime/reviews/codex-hooks/20260311-062955/go-development-review.md`
 - Actual review reports produced: none
 - Terminal reviewer states:
-  - `gastown/furiosa`: stalled before writing report
-  - `gastown/rictus`: startup failed after retry
-  - `gastown/dementus`: startup failed before session came up
+  - `gastown/furiosa`: hook present, no live session found during parent verification
+  - `gastown/rictus`: hook present, no live session found during parent verification
+  - `gastown/dementus`: hook present, no live session found during parent verification
 - Synthesis outcome: external review coverage is degraded to zero report artifacts. No reviewer findings can be deduplicated or compared, so Stage 8 must rely on the local proof model evidence already captured in this ledger and explicitly report the failed sidecar review runs.
