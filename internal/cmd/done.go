@@ -901,6 +901,14 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				}
 			}
 
+			// GH#2599: Back-link source issue to MR bead for discoverability.
+			if issueID != "" {
+				comment := fmt.Sprintf("MR created: %s", mrID)
+				if _, err := bd.Run("comments", "add", issueID, comment); err != nil {
+					style.PrintWarning("could not back-link source issue %s to MR %s: %v", issueID, mrID, err)
+				}
+			}
+
 			// Success output
 			fmt.Printf("%s Work submitted to merge queue (verified)\n", style.Bold.Render("✓"))
 			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
