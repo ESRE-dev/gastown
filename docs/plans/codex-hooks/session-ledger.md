@@ -2,11 +2,11 @@
 
 ## Current Status
 
-- Phase: Stage 5 implementation
+- Phase: delivery complete
 - Branch: `integration/codex-hooks`
 - Selected profiles: `general`, `go-development`
 - Tracking: milestone mode
-- Milestone status: `codex-hooks: implementation complete` in progress
+- Milestone status: implementation, verification, and ship milestones closed
 - Review monitoring: hooked review workers exist, but parent verification found no live sessions and no completed review reports
 - Final verification: targeted config/hooks/runtime checks passed; external sidecar review degraded with zero completed report artifacts
 
