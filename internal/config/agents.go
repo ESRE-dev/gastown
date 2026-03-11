@@ -21,8 +21,6 @@ const (
 	AgentGemini AgentPreset = "gemini"
 	// AgentCodex is OpenAI Codex.
 	AgentCodex AgentPreset = "codex"
-	// AgentCodexHooks is OpenAI Codex with experimental native hooks enabled.
-	AgentCodexHooks AgentPreset = "codex-hooks"
 	// AgentCursor is Cursor Agent.
 	AgentCursor AgentPreset = "cursor"
 	// AgentAuggie is Auggie CLI.
@@ -242,28 +240,6 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		PromptMode:       "none",
 		ReadyDelayMs:     3000,
 		InstructionsFile: "AGENTS.md",
-	},
-	AgentCodexHooks: {
-		Name:                AgentCodexHooks,
-		Command:             "codex",
-		Args:                []string{"--dangerously-bypass-approvals-and-sandbox"},
-		ProcessNames:        []string{"codex"}, // Codex CLI binary
-		SessionIDEnv:        "",                // Codex captures from JSONL output
-		ResumeFlag:          "resume",
-		ResumeStyle:         "subcommand",
-		SupportsHooks:       true,
-		SupportsForkSession: false,
-		NonInteractive: &NonInteractiveConfig{
-			Subcommand: "exec",
-			OutputFlag: "--json",
-		},
-		// Runtime defaults
-		PromptMode:        "arg",
-		HooksProvider:     "codex",
-		HooksDir:          ".codex",
-		HooksSettingsFile: "hooks.json",
-		ReadyDelayMs:      3000,
-		InstructionsFile:  "AGENTS.md",
 	},
 	AgentCursor: {
 		Name:                AgentCursor,

@@ -19,7 +19,7 @@ func isClaudeCmd(cmd string) bool {
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCodexHooks, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode, AgentCopilot, AgentPi, AgentOmp}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode, AgentCopilot, AgentPi, AgentOmp}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -49,7 +49,6 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"claude", AgentClaude, false},
 		{"gemini", AgentGemini, false},
 		{"codex", AgentCodex, false},
-		{"codex-hooks", AgentCodexHooks, false},
 		{"cursor", AgentCursor, false},
 		{"auggie", AgentAuggie, false},
 		{"amp", AgentAmp, false},
@@ -86,7 +85,6 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentClaude, "claude"}, // Note: claude may resolve to full path
 		{AgentGemini, "gemini"},
 		{AgentCodex, "codex"},
-		{AgentCodexHooks, "codex"},
 		{AgentCursor, "cursor-agent"},
 		{AgentAuggie, "auggie"},
 		{AgentAmp, "amp"},
@@ -134,7 +132,6 @@ func TestIsKnownPreset(t *testing.T) {
 		{"claude", true},
 		{"gemini", true},
 		{"codex", true},
-		{"codex-hooks", true},
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
@@ -557,7 +554,6 @@ func TestSupportsSessionResume(t *testing.T) {
 		{"claude", true},
 		{"gemini", true},
 		{"codex", true},
-		{"codex-hooks", true},
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
@@ -582,8 +578,7 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 	}{
 		{"claude", "CLAUDE_SESSION_ID"},
 		{"gemini", "GEMINI_SESSION_ID"},
-		{"codex", ""}, // Codex uses JSONL output instead
-		{"codex-hooks", ""},
+		{"codex", ""},   // Codex uses JSONL output instead
 		{"cursor", ""},  // Cursor uses --resume with chatId directly
 		{"auggie", ""},  // Auggie uses --resume directly
 		{"amp", ""},     // AMP uses 'threads continue' subcommand
@@ -609,7 +604,6 @@ func TestGetProcessNames(t *testing.T) {
 		{"claude", []string{"node", "claude"}},
 		{"gemini", []string{"gemini"}},
 		{"codex", []string{"codex"}},
-		{"codex-hooks", []string{"codex"}},
 		{"cursor", []string{"cursor-agent"}},
 		{"auggie", []string{"auggie"}},
 		{"amp", []string{"amp"}},
@@ -638,7 +632,7 @@ func TestGetProcessNames(t *testing.T) {
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCodexHooks, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode, AgentCopilot, AgentPi, AgentOmp}
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode, AgentCopilot, AgentPi, AgentOmp}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -682,11 +676,6 @@ func TestAgentCommandGeneration(t *testing.T) {
 		},
 		{
 			preset:       AgentCodex,
-			wantCommand:  "codex",
-			wantContains: []string{"--dangerously-bypass-approvals-and-sandbox"},
-		},
-		{
-			preset:       AgentCodexHooks,
 			wantCommand:  "codex",
 			wantContains: []string{"--dangerously-bypass-approvals-and-sandbox"},
 		},
@@ -958,43 +947,6 @@ func TestOpenCodeAgentPreset(t *testing.T) {
 	}
 	if info.NonInteractive.OutputFlag != "--format json" {
 		t.Errorf("opencode NonInteractive.OutputFlag = %q, want --format json", info.NonInteractive.OutputFlag)
-	}
-}
-
-func TestCodexHooksAgentPreset(t *testing.T) {
-	t.Parallel()
-
-	info := GetAgentPreset(AgentCodexHooks)
-	if info == nil {
-		t.Fatal("codex-hooks preset not found")
-	}
-
-	if info.Command != "codex" {
-		t.Errorf("codex-hooks command = %q, want codex", info.Command)
-	}
-	if !info.SupportsHooks {
-		t.Error("codex-hooks should support hooks")
-	}
-	if info.PromptMode != "arg" {
-		t.Errorf("codex-hooks PromptMode = %q, want arg", info.PromptMode)
-	}
-	if info.HooksProvider != "codex" {
-		t.Errorf("codex-hooks HooksProvider = %q, want codex", info.HooksProvider)
-	}
-	if info.HooksDir != ".codex" {
-		t.Errorf("codex-hooks HooksDir = %q, want .codex", info.HooksDir)
-	}
-	if info.HooksSettingsFile != "hooks.json" {
-		t.Errorf("codex-hooks HooksSettingsFile = %q, want hooks.json", info.HooksSettingsFile)
-	}
-
-	rc := RuntimeConfigFromPreset(AgentCodexHooks)
-	if rc == nil {
-		t.Fatal("RuntimeConfigFromPreset(codex-hooks) returned nil")
-	}
-	args := rc.BuildArgsWithPrompt("start here")
-	if len(args) == 0 || args[len(args)-1] != "start here" {
-		t.Fatalf("BuildArgsWithPrompt should append prompt positionally, got %v", args)
 	}
 }
 
