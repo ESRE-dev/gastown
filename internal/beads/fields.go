@@ -2,6 +2,7 @@
 package beads
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,12 +17,14 @@ type AttachmentFields struct {
 	AttachedFormula  string // Formula name (e.g., "mol-polecat-work") for inline step display
 	AttachedAt       string // ISO 8601 timestamp when attached
 	AttachedArgs     string // Natural language args passed via gt sling --args (no-tmux mode)
+	AttachedVars     []string // Formula variables passed via gt sling --var
 	DispatchedBy     string // Agent ID that dispatched this work (for completion notification)
 	NoMerge          bool   // If true, gt done skips merge queue (for upstream PRs/human review)
 	Mode             string // Execution mode: "" (normal) or "ralph" (Ralph Wiggum loop)
 	ConvoyID         string // Convoy bead ID tracking this issue (e.g., "hq-cv-abc")
 	MergeStrategy    string // Convoy merge strategy: "direct", "mr", "local", or "" (default = mr)
 	ConvoyOwned      bool   // If true, convoy has gt:owned label (caller-managed lifecycle)
+	FormulaVars      string // Newline-separated key=value pairs for formula template substitution
 }
 
 // ParseAttachmentFields extracts attachment fields from an issue's description.
@@ -66,6 +69,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 		case "attached_args", "attached-args", "attachedargs":
 			fields.AttachedArgs = value
 			hasFields = true
+		case "attached_vars", "attached-vars", "attachedvars":
+			fields.AttachedVars = parseAttachedVars(value)
+			hasFields = true
 		case "dispatched_by", "dispatched-by", "dispatchedby":
 			fields.DispatchedBy = value
 			hasFields = true
@@ -83,6 +89,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 			hasFields = true
 		case "convoy_owned", "convoy-owned", "convoyowned":
 			fields.ConvoyOwned = strings.ToLower(value) == "true"
+			hasFields = true
+		case "formula_vars", "formula-vars", "formulavars":
+			fields.FormulaVars = value
 			hasFields = true
 		}
 	}
@@ -114,6 +123,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	if fields.AttachedArgs != "" {
 		lines = append(lines, "attached_args: "+fields.AttachedArgs)
 	}
+	if len(fields.AttachedVars) > 0 {
+		lines = append(lines, "attached_vars: "+formatAttachedVars(fields.AttachedVars))
+	}
 	if fields.DispatchedBy != "" {
 		lines = append(lines, "dispatched_by: "+fields.DispatchedBy)
 	}
@@ -131,6 +143,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	}
 	if fields.ConvoyOwned {
 		lines = append(lines, "convoy_owned: true")
+	}
+	if fields.FormulaVars != "" {
+		lines = append(lines, "formula_vars: "+fields.FormulaVars)
 	}
 
 	return strings.Join(lines, "\n")
@@ -154,6 +169,9 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"attached_args":     true,
 		"attached-args":     true,
 		"attachedargs":      true,
+		"attached_vars":     true,
+		"attached-vars":     true,
+		"attachedvars":      true,
 		"dispatched_by":     true,
 		"dispatched-by":     true,
 		"dispatchedby":      true,
@@ -171,6 +189,9 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"convoy_owned":      true,
 		"convoy-owned":      true,
 		"convoyowned":       true,
+		"formula_vars":      true,
+		"formula-vars":      true,
+		"formulavars":       true,
 	}
 
 	// Collect non-attachment lines from existing description
@@ -319,6 +340,30 @@ func FormatConvoyFields(fields *ConvoyFields) string {
 	return strings.Join(lines, "\n")
 }
 
+func formatAttachedVars(vars []string) string {
+	if len(vars) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(vars)
+	if err != nil {
+		return strings.Join(vars, ", ")
+	}
+	return string(encoded)
+}
+
+func parseAttachedVars(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var vars []string
+	if strings.HasPrefix(raw, "[") {
+		if err := json.Unmarshal([]byte(raw), &vars); err == nil {
+			return vars
+		}
+	}
+	return []string{raw}
+}
+
 // SetConvoyFields updates an issue's description with the given convoy fields.
 // Existing convoy field lines are replaced; other content is preserved.
 // Returns the new description string.
@@ -400,6 +445,13 @@ type MRFields struct {
 	// Convoy tracking (for priority scoring - convoy starvation prevention)
 	ConvoyID        string // Parent convoy ID if part of a convoy
 	ConvoyCreatedAt string // Convoy creation time (ISO 8601) for starvation prevention
+
+	// Pre-verification fields (Phase 3: polecat-owned rebasing)
+	// When a polecat rebases onto the target and runs gates before submission,
+	// these fields allow the refinery to fast-path merge without re-running gates.
+	PreVerified     bool   // Polecat ran full gates after rebasing onto target
+	PreVerifiedAt   string // ISO 8601 timestamp when verification completed
+	PreVerifiedBase string // Target branch SHA at verification time
 }
 
 // ParseMRFields extracts structured merge-request fields from an issue's description.
@@ -474,6 +526,15 @@ func ParseMRFields(issue *Issue) *MRFields {
 		case "convoy_created_at", "convoy-created-at", "convoycreatedat":
 			fields.ConvoyCreatedAt = value
 			hasFields = true
+		case "pre_verified", "pre-verified", "preverified":
+			fields.PreVerified = strings.ToLower(value) == "true"
+			hasFields = true
+		case "pre_verified_at", "pre-verified-at", "preverifiedat":
+			fields.PreVerifiedAt = value
+			hasFields = true
+		case "pre_verified_base", "pre-verified-base", "preverifiedbase":
+			fields.PreVerifiedBase = value
+			hasFields = true
 		}
 	}
 
@@ -538,6 +599,15 @@ func FormatMRFields(fields *MRFields) string {
 	if fields.ConvoyCreatedAt != "" {
 		lines = append(lines, "convoy_created_at: "+fields.ConvoyCreatedAt)
 	}
+	if fields.PreVerified {
+		lines = append(lines, "pre_verified: true")
+	}
+	if fields.PreVerifiedAt != "" {
+		lines = append(lines, "pre_verified_at: "+fields.PreVerifiedAt)
+	}
+	if fields.PreVerifiedBase != "" {
+		lines = append(lines, "pre_verified_base: "+fields.PreVerifiedBase)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -584,6 +654,15 @@ func SetMRFields(issue *Issue, fields *MRFields) string {
 		"convoy_created_at":  true,
 		"convoy-created-at":  true,
 		"convoycreatedat":    true,
+		"pre_verified":       true,
+		"pre-verified":       true,
+		"preverified":        true,
+		"pre_verified_at":    true,
+		"pre-verified-at":    true,
+		"preverifiedat":      true,
+		"pre_verified_base":  true,
+		"pre-verified-base":  true,
+		"preverifiedbase":    true,
 	}
 
 	// Collect non-MR lines from existing description

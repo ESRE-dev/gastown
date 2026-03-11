@@ -122,7 +122,8 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		// GT_ROLE must be set so startup command resolution can honor role_agents.dog.
 		env["GT_ROLE"] = "dog"
 		if cfg.AgentName != "" {
-			env["BD_ACTOR"] = fmt.Sprintf("dog/%s", cfg.AgentName)
+			env["GT_DOG_NAME"] = cfg.AgentName
+			env["BD_ACTOR"] = fmt.Sprintf("deacon/dogs/%s", cfg.AgentName)
 			env["GIT_AUTHOR_NAME"] = cfg.AgentName
 		} else {
 			env["BD_ACTOR"] = "dog"
@@ -260,6 +261,23 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		if len(attrs) > 0 {
 			env["OTEL_RESOURCE_ATTRIBUTES"] = strings.Join(attrs, ",")
 		}
+	}
+
+	// Propagate Dolt server port so bd subprocesses connect to the centralized
+	// Dolt server instead of auto-starting rogue instances. GT_DOLT_PORT is the
+	// Gas Town canonical var; BEADS_DOLT_PORT is what bd reads. Both must be
+	// set for the full gt→bd chain to work. (GH#2412)
+	if port := os.Getenv("GT_DOLT_PORT"); port != "" {
+		env["GT_DOLT_PORT"] = port
+		// Also set BEADS_DOLT_PORT unless already explicitly set in the
+		// environment (e.g., test overrides).
+		if os.Getenv("BEADS_DOLT_PORT") != "" {
+			env["BEADS_DOLT_PORT"] = os.Getenv("BEADS_DOLT_PORT")
+		} else {
+			env["BEADS_DOLT_PORT"] = port
+		}
+	} else if port := os.Getenv("BEADS_DOLT_PORT"); port != "" {
+		env["BEADS_DOLT_PORT"] = port
 	}
 
 	// Pass through cloud API credentials and provider configuration from the parent shell.

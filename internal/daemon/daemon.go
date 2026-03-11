@@ -20,6 +20,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/doltserver"
@@ -173,6 +174,25 @@ func New(config *Config) (*Daemon, error) {
 		doltServer = NewDoltServerManager(config.TownRoot, patrolConfig.Patrols.DoltServer, logger.Printf)
 		if doltServer.IsEnabled() {
 			logger.Printf("Dolt server management enabled (port %d)", patrolConfig.Patrols.DoltServer.Port)
+			// Propagate Dolt port to process env so AgentEnv() passes it to
+			// all spawned agent sessions. Without this, bd in agent sessions
+			// auto-starts rogue Dolt instances. (GH#2412)
+			portStr := strconv.Itoa(patrolConfig.Patrols.DoltServer.Port)
+			os.Setenv("GT_DOLT_PORT", portStr)
+			os.Setenv("BEADS_DOLT_PORT", portStr)
+		}
+	}
+
+	// Fallback: if GT_DOLT_PORT still isn't set (no DoltServerManager, daemon
+	// started independently of gt up), detect the port from dolt config.
+	// This ensures AgentEnv() always has the port for spawned sessions. (GH#2412)
+	if os.Getenv("GT_DOLT_PORT") == "" {
+		doltCfg := doltserver.DefaultConfig(config.TownRoot)
+		if doltCfg.Port > 0 {
+			portStr := strconv.Itoa(doltCfg.Port)
+			os.Setenv("GT_DOLT_PORT", portStr)
+			os.Setenv("BEADS_DOLT_PORT", portStr)
+			logger.Printf("Set GT_DOLT_PORT=%s from Dolt config (fallback)", portStr)
 		}
 	}
 
@@ -1435,20 +1455,35 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 	// Check rig bead labels (global/synced docked status)
 	// This is the persistent docked state set by 'gt rig dock'
 	rigPath := filepath.Join(d.config.TownRoot, rigName)
+	
+	// Try to get prefix from rig config.json, fall back to rigs.json registry
+	var prefix string
 	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.Beads != nil {
-		rigBeadID := fmt.Sprintf("%s-rig-%s", rigCfg.Beads.Prefix, rigName)
-		rigBeadsDir := beads.ResolveBeadsDir(rigPath)
-		bd := beads.NewWithBeadsDir(rigPath, rigBeadsDir)
-		if issue, err := bd.Show(rigBeadID); err == nil {
-			for _, label := range issue.Labels {
-				if label == "status:docked" {
-					return false, "rig is docked (global)"
-				}
-				if label == "status:parked" {
-					return false, "rig is parked (global)"
-				}
+		prefix = rigCfg.Beads.Prefix
+	} else {
+		// Fall back to registry (mayor/rigs.json) when config.json is missing
+		prefix = config.GetRigPrefix(d.config.TownRoot, rigName)
+	}
+	
+	rigBeadID := fmt.Sprintf("%s-rig-%s", prefix, rigName)
+	rigBeadsDir := beads.ResolveBeadsDir(rigPath)
+	bd := beads.NewWithBeadsDir(rigPath, rigBeadsDir)
+	if issue, err := bd.Show(rigBeadID); err == nil {
+		for _, label := range issue.Labels {
+			if label == "status:docked" {
+				return false, "rig is docked (global)"
+			}
+			if label == "status:parked" {
+				return false, "rig is parked (global)"
 			}
 		}
+	} else {
+		// Log when rig bead lookup fails - this helps debug transient Dolt issues
+		// FAIL-SAFE: When we can't verify docked status (Dolt down, network issue, etc.),
+		// assume the rig is NOT operational. This prevents wasting API credits starting
+		// witnesses that might be docked. Better to delay work than burn credits unnecessarily.
+		d.logger.Printf("Warning: failed to check rig bead %s for docked/parked status: %v (assuming not operational)", rigBeadID, err)
+		return false, "cannot verify rig status (Dolt unavailable)"
 	}
 
 	// Check auto_restart config
