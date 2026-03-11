@@ -558,7 +558,8 @@ func purgeOldMail(db *sql.DB, dbName string, mailDeleteAge time.Duration, dryRun
 }
 
 // AutoClose closes issues that have been open with no updates past staleAge.
-// Excludes P0/P1 priority, epics, and issues with active dependencies.
+// Excludes P0/P1 priority, epics, hooked/pinned issues, standing-order labels,
+// and issues with active dependencies.
 func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (*AutoCloseResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
 	defer cancel()
@@ -572,6 +573,10 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 		AND i.priority > 1
 		AND i.issue_type != 'epic'
 		AND i.id NOT IN (
+			SELECT DISTINCT l.issue_id FROM `+"`%s`"+`.labels l
+			WHERE l.label IN ('gt:standing-orders', 'gt:keep')
+		)
+		AND i.id NOT IN (
 			SELECT DISTINCT d.issue_id FROM `+"`%s`"+`.dependencies d
 			INNER JOIN `+"`%s`"+`.issues dep ON d.depends_on_id = dep.id
 			WHERE dep.status IN ('open', 'in_progress')
@@ -580,7 +585,7 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 			SELECT DISTINCT d.depends_on_id FROM `+"`%s`"+`.dependencies d
 			INNER JOIN `+"`%s`"+`.issues blocker ON d.issue_id = blocker.id
 			WHERE blocker.status IN ('open', 'in_progress')
-		)`, dbName, dbName, dbName, dbName)
+		)`, dbName, dbName, dbName, dbName, dbName)
 
 	// Two-step SELECT-then-UPDATE to avoid self-referencing subquery in UPDATE,
 	// which is not valid MySQL (Error 1093) and fragile in Dolt (dolthub/dolt#10600).
