@@ -22,6 +22,7 @@ import (
 	"syscall"
 
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Poller tuning defaults (overridable via flags or tests).
@@ -68,9 +69,7 @@ func StartPoller(townRoot, session string) (int, error) {
 	cmd.Dir = townRoot
 	cmd.Stdout = nil // discard
 	cmd.Stderr = nil // discard
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // detach from parent process group
-	}
+	util.SetProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("starting nudge-poller: %w", err)
@@ -109,15 +108,14 @@ func StopPoller(townRoot, session string) error {
 		return nil // corrupt PID file, clean up
 	}
 
-	proc, err := os.FindProcess(pid)
-	if err != nil {
+	if !pollerProcessAlive(pid) {
+		// Process already dead.
 		_ = os.Remove(pidPath)
 		return nil
 	}
 
-	// Check if alive via signal 0.
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		// Process already dead.
+	proc, err := os.FindProcess(pid)
+	if err != nil {
 		_ = os.Remove(pidPath)
 		return nil
 	}
@@ -147,12 +145,7 @@ func pollerAlive(townRoot, session string) (int, bool) {
 		return 0, false
 	}
 
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return 0, false
-	}
-
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
+	if !pollerProcessAlive(pid) {
 		// Stale PID file — clean up.
 		_ = os.Remove(pidPath)
 		return 0, false
