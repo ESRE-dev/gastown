@@ -1541,8 +1541,8 @@ func TestResolveRoleAgentConfig_FallsBackOnInvalidAgent(t *testing.T) {
 
 	// Should fall back to default (claude) when agent is invalid
 	rc := ResolveRoleAgentConfig(constants.RoleRefinery, townRoot, rigPath)
-	// Command can be "claude" or full path to claude
-	if rc.Command != "claude" && !strings.HasSuffix(rc.Command, "/claude") {
+	// Command can be "claude" or a resolved platform-specific claude binary path.
+	if !isClaudeCommand(rc.Command) {
 		t.Errorf("expected fallback to claude or path ending in /claude, got: %s", rc.Command)
 	}
 }
@@ -3656,8 +3656,8 @@ func TestResolveRoleAgentConfig(t *testing.T) {
 
 	t.Run("town-level role (no rigPath) uses town RoleAgents", func(t *testing.T) {
 		rc := ResolveRoleAgentConfig("mayor", townRoot, "")
-		// mayor is in town's RoleAgents - command can be "claude" or full path to claude
-		if rc.Command != "claude" && !strings.HasSuffix(rc.Command, "/claude") {
+		// mayor is in town's RoleAgents and may resolve to a platform-specific claude binary path.
+		if !isClaudeCommand(rc.Command) {
 			t.Errorf("Command = %q, want claude or path ending in /claude", rc.Command)
 		}
 	})
