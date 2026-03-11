@@ -302,7 +302,7 @@ func TestEnsureGitignorePatterns_AppendsToExisting(t *testing.T) {
 	}
 
 	// Should add required patterns (.beads/ intentionally excluded — see overlay.go)
-	patterns := []string{".runtime/", ".claude/", ".logs/", "__pycache__/"}
+	patterns := []string{".runtime/", ".claude/", ".logs/", "__pycache__/", "state.json"}
 	for _, pattern := range patterns {
 		if !containsLine(string(content), pattern) {
 			t.Errorf(".gitignore missing pattern %q", pattern)
@@ -349,6 +349,9 @@ func TestEnsureGitignorePatterns_SkipsExistingPatterns(t *testing.T) {
 	}
 	if !containsLine(string(content), "__pycache__/") {
 		t.Error(".gitignore missing pattern __pycache__/")
+	}
+	if !containsLine(string(content), "state.json") {
+		t.Error(".gitignore missing pattern state.json")
 	}
 
 	// Regression guard: .beads/ must NOT be in required patterns.
