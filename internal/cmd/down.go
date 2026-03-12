@@ -772,8 +772,9 @@ func findIdleMonitorProcesses(townRoot string) []int {
 			continue
 		}
 
-		// Scope to this town: match by path or by explicit --port argument
-		matchesTown := strings.Contains(line, absRoot) || strings.Contains(line, townRoot)
+		// Scope to this town: match by path (with boundary check to avoid
+		// false matches on sibling paths like /tmp/gt matching /tmp/gt-old)
+		matchesTown := containsPathBoundary(line, absRoot) || containsPathBoundary(line, townRoot)
 		if !matchesTown {
 			// Check for --port <portStr> as a discrete argument
 			args := strings.Fields(line)
@@ -874,8 +875,11 @@ func findOrphanDoltServers(townRoot string) []int {
 		}
 
 		cwdAbs, _ := filepath.Abs(cwd)
-		// Only target processes rooted in our town but NOT in canonical data dir
-		if strings.HasPrefix(cwdAbs, townAbs) && !strings.HasPrefix(cwdAbs, canonicalDir) {
+		// Only target processes rooted in our town but NOT in canonical data dir.
+		// Use path-boundary check to avoid false matches on sibling paths.
+		inTown := cwdAbs == townAbs || strings.HasPrefix(cwdAbs, townAbs+string(filepath.Separator))
+		notCanonical := !strings.HasPrefix(cwdAbs, canonicalDir)
+		if inTown && notCanonical {
 			pids = append(pids, pid)
 		}
 	}
@@ -996,5 +1000,30 @@ func isSafeToRemoveBeadsDolt(dir string) bool {
 	}
 
 	return true
+}
+
+// containsPathBoundary checks whether line contains path as a complete path
+// (not a prefix of a longer path). The character after the match must be a
+// path separator, whitespace, or end-of-string.
+func containsPathBoundary(line, path string) bool {
+	if path == "" {
+		return false
+	}
+	for start := 0; start < len(line); {
+		idx := strings.Index(line[start:], path)
+		if idx < 0 {
+			return false
+		}
+		end := start + idx + len(path)
+		if end >= len(line) {
+			return true
+		}
+		c := line[end]
+		if c == filepath.Separator || c == ' ' || c == '\t' {
+			return true
+		}
+		start = start + idx + 1
+	}
+	return false
 }
 
