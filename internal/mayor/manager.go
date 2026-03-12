@@ -115,11 +115,12 @@ func (m *Manager) mayorDir() string {
 func (m *Manager) Start(agentOverride string) error {
 	status, err := m.CombinedStatus()
 	if err == nil && status.Active {
-		// If ACP is active, we return ErrAlreadyRunning to satisfy the daemon.
+		// If ACP is active, return ErrACPActive so callers can distinguish
+		// ACP mode from a regular tmux session already running.
 		// If only TMUX is active, we fall through to StartTMUX which handles
 		// the healthy vs zombie check.
 		if status.Mode == ModeACP || status.Mode == ModeBoth {
-			return ErrAlreadyRunning
+			return ErrACPActive
 		}
 	}
 	return m.StartTMUX(agentOverride)

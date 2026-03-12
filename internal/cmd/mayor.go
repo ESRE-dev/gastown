@@ -460,7 +460,9 @@ func runMayorAcp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	ensureMayorInfra(townRoot)
+	if err := ensureMayorInfra(townRoot); err != nil {
+		return err
+	}
 
 	rigName := acpRigOverride
 	if rigName == "" {

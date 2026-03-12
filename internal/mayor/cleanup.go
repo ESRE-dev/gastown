@@ -65,7 +65,7 @@ func GetACPPid(townRoot string) (int, error) {
 
 // ACP agent name persistence functions
 
-func ACAgentFilePath(townRoot string) string {
+func ACPAgentFilePath(townRoot string) string {
 	return filepath.Join(townRoot, "mayor", acpAgentFileName)
 }
 
@@ -75,7 +75,7 @@ func WriteACPAgent(townRoot, agentName string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
-	agentPath := ACAgentFilePath(townRoot)
+	agentPath := ACPAgentFilePath(townRoot)
 	if err := os.WriteFile(agentPath, []byte(agentName), 0644); err != nil {
 		return fmt.Errorf("writing ACP agent file: %w", err)
 	}
@@ -83,7 +83,7 @@ func WriteACPAgent(townRoot, agentName string) error {
 }
 
 func RemoveACPAgent(townRoot string) error {
-	agentPath := ACAgentFilePath(townRoot)
+	agentPath := ACPAgentFilePath(townRoot)
 	if _, err := os.Stat(agentPath); os.IsNotExist(err) {
 		return nil
 	}
@@ -91,7 +91,7 @@ func RemoveACPAgent(townRoot string) error {
 }
 
 func GetACPAgent(townRoot string) (string, error) {
-	agentPath := ACAgentFilePath(townRoot)
+	agentPath := ACPAgentFilePath(townRoot)
 	data, err := os.ReadFile(agentPath)
 	if err != nil {
 		return "", err
