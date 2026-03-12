@@ -244,6 +244,19 @@ func TestForwardFromAgent_PropulsionTriggers(t *testing.T) {
 		}
 	}
 
+	// Test multi-line trigger split across writes
+	p.Propelled.Store(false)
+	agentStdoutWriter.Write([]byte("AUTONOMOUS\n"))
+	time.Sleep(100 * time.Millisecond)
+	if p.Propelled.Load() {
+		t.Error("Propelled was set prematurely")
+	}
+	agentStdoutWriter.Write([]byte("WORK MODE\n"))
+	time.Sleep(100 * time.Millisecond)
+	if !p.Propelled.Load() {
+		t.Error("Multi-line trigger split across writes failed to set Propelled to true")
+	}
+
 	// Test JSON notification trigger
 	p.Propelled.Store(false)
 	jsonTrigger := JSONRPCMessage{

@@ -74,7 +74,8 @@ type Proxy struct {
 	heartbeatMethod    string // "custom_ping", "set_mode", or "disabled"
 	heartbeatSupported atomic.Bool
 	// Propulsion state
-	Propelled atomic.Bool
+	Propelled        atomic.Bool
+	propulsionBuffer string
 	// Stderr monitoring for pipe saturation
 	stderrBytesDropped   atomic.Int64
 	stderrLinesTruncated atomic.Int64
@@ -463,9 +464,15 @@ func (p *Proxy) forwardFromAgent() {
 		var msg JSONRPCMessage
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
 			// Check for raw propulsion triggers if not valid JSON
-			if isPropulsionTrigger(line) {
+			p.propulsionBuffer += line
+			if len(p.propulsionBuffer) > 2000 {
+				p.propulsionBuffer = p.propulsionBuffer[len(p.propulsionBuffer)-2000:]
+			}
+
+			if isPropulsionTrigger(p.propulsionBuffer) {
 				debugLog(p.townRoot, "[Proxy] forwardFromAgent: propulsion trigger detected in raw output")
 				p.SetPropelled(true)
+				p.propulsionBuffer = "" // Reset after detection
 			}
 			debugLog(p.townRoot, "[Proxy] forwardFromAgent: failed to parse JSON (size=%d): %v", len(line), err)
 			continue
@@ -739,8 +746,9 @@ func (p *Proxy) trackPromptResponse(msg *JSONRPCMessage) {
 
 		// Reset propulsion mode when a prompt completes (Turn ends)
 		if p.Propelled.Load() {
-			debugLog(p.townRoot, "[Proxy] trackPromptResponse: resetting Propelled flag")
+			debugLog(p.townRoot, "[Proxy] trackPromptResponse: resetting Propelled flag and buffer")
 			p.SetPropelled(false)
+			p.propulsionBuffer = ""
 		}
 
 		if idStr == "gastown-startup-prompt" {
@@ -1186,8 +1194,13 @@ func isPropulsionTrigger(line string) bool {
 		"EXECUTE THIS STEP NOW.",
 	}
 
+	upperLine := strings.ToUpper(line)
+	// Replace any sequence of whitespace characters (including newlines) with a single space
+	// to handle multi-line triggers within a single read buffer.
+	normalizedLine := strings.Join(strings.Fields(upperLine), " ")
+
 	for _, trigger := range triggers {
-		if strings.Contains(line, trigger) {
+		if strings.Contains(normalizedLine, strings.ToUpper(trigger)) {
 			return true
 		}
 	}
