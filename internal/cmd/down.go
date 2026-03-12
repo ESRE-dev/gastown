@@ -238,7 +238,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	// These background processes respawn per-agent Dolt servers after they're
 	// terminated, creating a race condition where rogues grab the port before
 	// the canonical server can restart. Must be stopped BEFORE Dolt shutdown.
-	idleMonitors := findIdleMonitorProcesses()
+	idleMonitors := findIdleMonitorProcesses(townRoot)
 	if len(idleMonitors) > 0 {
 		if downDryRun {
 			printDownStatus("Dolt idle-monitors", true, fmt.Sprintf("%d would stop", len(idleMonitors)))
@@ -283,6 +283,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	if !downDryRun {
 		if err := doltserver.KillImposters(townRoot); err != nil {
 			printDownStatus("Dolt imposters", false, err.Error())
+			allOK = false
 		}
 		orphanDolts := findOrphanDoltServers(townRoot)
 		if len(orphanDolts) > 0 {
@@ -577,7 +578,7 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 	}
 
 	// Check for respawned idle-monitors
-	if pids := findIdleMonitorProcesses(); len(pids) > 0 {
+	if pids := findIdleMonitorProcesses(townRoot); len(pids) > 0 {
 		respawned = append(respawned, fmt.Sprintf("bd dolt idle-monitor processes (PIDs: %v)", pids))
 	}
 
@@ -742,10 +743,17 @@ func countLegacyBaseSocketSessions(townRoot string) int {
 	return count
 }
 
-// findIdleMonitorProcesses finds all bd dolt idle-monitor processes.
-// These background processes respawn per-agent Dolt servers and must be
-// stopped before Dolt shutdown to prevent a respawn race.
-func findIdleMonitorProcesses() []int {
+// findIdleMonitorProcesses finds bd dolt idle-monitor processes scoped to
+// this town. Matches by town root path in the process args, or by the
+// town's configured Dolt port. Processes from other towns are not matched.
+func findIdleMonitorProcesses(townRoot string) []int {
+	absRoot, _ := filepath.Abs(townRoot)
+	if absRoot == "" {
+		return nil
+	}
+	config := doltserver.DefaultConfig(townRoot)
+	portStr := strconv.Itoa(config.Port)
+
 	out, err := exec.Command("ps", "-eo", "pid,args").Output()
 	if err != nil {
 		return nil
@@ -757,9 +765,33 @@ func findIdleMonitorProcesses() []int {
 		if line == "" {
 			continue
 		}
-		if !strings.Contains(line, "bd dolt idle-monitor") || strings.Contains(line, "grep") {
+		if !strings.Contains(line, "idle-monitor") || !strings.Contains(line, "dolt") {
 			continue
 		}
+		if strings.Contains(line, "grep") {
+			continue
+		}
+
+		// Scope to this town: match by path or by explicit --port argument
+		matchesTown := strings.Contains(line, absRoot) || strings.Contains(line, townRoot)
+		if !matchesTown {
+			// Check for --port <portStr> as a discrete argument
+			args := strings.Fields(line)
+			for i, arg := range args {
+				if (arg == "--port" || arg == "-p") && i+1 < len(args) && args[i+1] == portStr {
+					matchesTown = true
+					break
+				}
+				if strings.HasPrefix(arg, "--port="+portStr) {
+					matchesTown = true
+					break
+				}
+			}
+		}
+		if !matchesTown {
+			continue
+		}
+
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -915,14 +947,54 @@ func findBeadsDoltDirs(townRoot string) []string {
 	return dirs
 }
 
-// removeBeadsDoltDirs removes legacy .beads/dolt directories. Returns count removed.
+// removeBeadsDoltDirs removes legacy .beads/dolt directories that are safe to
+// delete. A directory is safe if it is empty or contains only Dolt metadata
+// (no .dolt subdirectory with actual database content). Directories with
+// unmigrated database data are skipped to avoid data loss.
+// Returns count removed.
 func removeBeadsDoltDirs(dirs []string) int {
 	var removed int
 	for _, dir := range dirs {
+		if !isSafeToRemoveBeadsDolt(dir) {
+			fmt.Fprintf(os.Stderr, "Warning: skipping %s — may contain unmigrated data\n", dir)
+			continue
+		}
 		if err := os.RemoveAll(dir); err == nil {
 			removed++
 		}
 	}
 	return removed
+}
+
+// isSafeToRemoveBeadsDolt checks if a .beads/dolt directory can be safely
+// removed. Safe means: empty, or contains no actual database content
+// (no .dolt subdirectory with working data). Unmigrated databases have
+// a .dolt/ directory inside with noms/manifest files.
+func isSafeToRemoveBeadsDolt(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false // can't read it, don't remove it
+	}
+	if len(entries) == 0 {
+		return true // empty dir is safe
+	}
+
+	// Check if any subdirectory contains a .dolt directory (unmigrated DB)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dotDolt := filepath.Join(dir, entry.Name(), ".dolt")
+		if _, err := os.Stat(dotDolt); err == nil {
+			return false // has unmigrated database data
+		}
+	}
+
+	// Also check if .dolt exists directly in this dir
+	if _, err := os.Stat(filepath.Join(dir, ".dolt")); err == nil {
+		return false
+	}
+
+	return true
 }
 
