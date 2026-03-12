@@ -254,7 +254,11 @@ func (s *Scanner) GetExecWrapper(name string) (*Plugin, error) {
 		return nil, err
 	}
 	if !p.IsExecWrapper() {
-		return nil, fmt.Errorf("plugin %q is not an exec-wrapper (type=%s)", name, p.Execution.Type)
+		execType := ExecutionType("none")
+		if p.Execution != nil {
+			execType = p.Execution.Type
+		}
+		return nil, fmt.Errorf("plugin %q is not an exec-wrapper (type=%s)", name, execType)
 	}
 	return p, nil
 }
