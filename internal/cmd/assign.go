@@ -73,7 +73,11 @@ func runAssign(_ *cobra.Command, args []string) error {
 	if rigName == "" {
 		rigName, err = inferRigFromCwd(townRoot)
 		if err != nil {
-			return fmt.Errorf("inferring rig (use --rig to specify): %w", err)
+			// Fallback: scan all rigs for a crew member with this name
+			rigName, err = inferRigFromCrewName(townRoot, crewName)
+			if err != nil {
+				return fmt.Errorf("inferring rig (use --rig to specify): %w", err)
+			}
 		}
 	}
 
