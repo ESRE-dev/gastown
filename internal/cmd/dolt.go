@@ -840,7 +840,10 @@ func runDoltInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find workspaces with broken Dolt configuration
-	broken := doltserver.FindBrokenWorkspaces(townRoot)
+	broken, verifyWarning := doltserver.FindBrokenWorkspaces(townRoot)
+	if verifyWarning != "" {
+		fmt.Printf("  %s %s\n\n", style.Bold.Render("⚠"), verifyWarning)
+	}
 
 	// Check for orphaned databases regardless of broken workspaces
 	orphans, orphanErr := doltserver.FindOrphanedDatabases(townRoot)

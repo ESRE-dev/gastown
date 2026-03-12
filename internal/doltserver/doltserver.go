@@ -2349,8 +2349,9 @@ func databaseHasUserTables(townRoot, dbName string) (bool, error) {
 // or exists on disk but isn't served by the running Dolt server.
 // These workspaces are broken: bd commands will fail or silently create
 // isolated local databases instead of connecting to the centralized server.
-func FindBrokenWorkspaces(townRoot string) []BrokenWorkspace {
+func FindBrokenWorkspaces(townRoot string) ([]BrokenWorkspace, string) {
 	var broken []BrokenWorkspace
+	var warning string
 
 	// Query the running server once for all served databases.
 	// If the server isn't running, servedDBs will be nil and we
@@ -2362,6 +2363,9 @@ func FindBrokenWorkspaces(townRoot string) []BrokenWorkspace {
 			for _, db := range served {
 				servedDBs[strings.ToLower(db)] = true
 			}
+		} else {
+			warning = fmt.Sprintf("Warning: Dolt server is running but could not verify databases: %v\n"+
+				"Server-aware checks are disabled; only filesystem checks will be performed.", err)
 		}
 	}
 
@@ -2375,13 +2379,13 @@ func FindBrokenWorkspaces(townRoot string) []BrokenWorkspace {
 	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
 	data, err := os.ReadFile(rigsPath)
 	if err != nil {
-		return broken
+		return broken, warning
 	}
 	var config struct {
 		Rigs map[string]interface{} `json:"rigs"`
 	}
 	if err := json.Unmarshal(data, &config); err != nil {
-		return broken
+		return broken, warning
 	}
 
 	for rigName := range config.Rigs {
@@ -2394,7 +2398,7 @@ func FindBrokenWorkspaces(townRoot string) []BrokenWorkspace {
 		}
 	}
 
-	return broken
+	return broken, warning
 }
 
 // checkWorkspace checks a single rig's metadata.json for broken Dolt configuration.
