@@ -311,7 +311,10 @@ func (p *Proxy) Forward() error {
 	p.wg.Add(3)
 	go p.forwardToAgent()
 	go p.forwardFromAgent()
-	go p.runKeepAlive()
+
+	keepAliveTicker := time.NewTicker(30 * time.Second)
+	defer keepAliveTicker.Stop()
+	go p.runKeepAlive(keepAliveTicker.C)
 
 	if p.pidFilePath != "" {
 		p.wg.Add(1)
@@ -620,11 +623,8 @@ func (p *Proxy) forwardAgentStderr() {
 	}
 }
 
-func (p *Proxy) runKeepAlive() {
+func (p *Proxy) runKeepAlive(tickerChan <-chan time.Time) {
 	defer p.wg.Done()
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
 	debugLog(p.townRoot, "[Proxy] runKeepAlive: loop started")
 
 	for {
@@ -632,10 +632,15 @@ func (p *Proxy) runKeepAlive() {
 		case <-p.done:
 			debugLog(p.townRoot, "[Proxy] runKeepAlive: done channel closed, exiting loop")
 			return
-		case <-ticker.C:
+		case <-tickerChan:
 			if p.isShuttingDown.Load() {
 				debugLog(p.townRoot, "[Proxy] runKeepAlive: skipping (shutting down)")
 				return
+			}
+
+			if p.Propelled.Load() {
+				debugLog(p.townRoot, "[Proxy] runKeepAlive: skipping heartbeat (propelled=true)")
+				continue
 			}
 
 			// Don't send heartbeat if we're currently in a turn
