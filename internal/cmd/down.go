@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -233,7 +234,23 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 4b: Stop Dolt server
+	// Phase 4b-i: Stop bd dolt idle-monitor processes.
+	// These background processes respawn per-agent Dolt servers after they're
+	// terminated, creating a race condition where rogues grab the port before
+	// the canonical server can restart. Must be stopped BEFORE Dolt shutdown.
+	idleMonitors := findIdleMonitorProcesses()
+	if len(idleMonitors) > 0 {
+		if downDryRun {
+			printDownStatus("Dolt idle-monitors", true, fmt.Sprintf("%d would stop", len(idleMonitors)))
+		} else {
+			stopped := stopIdleMonitors(idleMonitors)
+			if stopped > 0 {
+				printDownStatus("Dolt idle-monitors", true, fmt.Sprintf("stopped %d", stopped))
+			}
+		}
+	}
+
+	// Phase 4b-ii: Stop Dolt server
 	doltCfg := doltserver.DefaultConfig(townRoot)
 	if _, statErr := os.Stat(doltCfg.DataDir); statErr == nil {
 		doltRunning, doltPid, doltErr := doltserver.IsRunning(townRoot)
@@ -254,6 +271,49 @@ func runDown(cmd *cobra.Command, args []string) error {
 				}
 			} else {
 				printDownStatus("Dolt", true, "not running")
+			}
+		}
+	}
+
+	// Phase 4b-iii: Stop imposter Dolt servers.
+	// After stopping the canonical server, rogue Dolt servers spawned by bd
+	// from .beads/dolt/ directories may still be running. KillImposters only
+	// catches servers on our port, so also scan for any dolt sql-server
+	// processes rooted in this town's directory tree.
+	if !downDryRun {
+		if err := doltserver.KillImposters(townRoot); err != nil {
+			printDownStatus("Dolt imposters", false, err.Error())
+		}
+		orphanDolts := findOrphanDoltServers(townRoot)
+		if len(orphanDolts) > 0 {
+			stopped := stopOrphanDoltServers(orphanDolts)
+			if stopped > 0 {
+				printDownStatus("Dolt orphans", true, fmt.Sprintf("stopped %d rogue server(s)", stopped))
+			}
+		}
+	} else {
+		conflictPID, _ := doltserver.CheckPortConflict(townRoot)
+		if conflictPID > 0 {
+			printDownStatus("Dolt imposters", true, fmt.Sprintf("would stop imposter (PID %d)", conflictPID))
+		}
+		orphanDolts := findOrphanDoltServers(townRoot)
+		if len(orphanDolts) > 0 {
+			printDownStatus("Dolt orphans", true, fmt.Sprintf("%d rogue server(s) would stop", len(orphanDolts)))
+		}
+	}
+
+	// Phase 4b-iv: Remove .beads/dolt directories.
+	// These legacy per-agent data directories trigger bd to auto-spawn local
+	// Dolt servers. Removing them prevents rogue respawn on next gt up.
+	// Data has already been migrated to .dolt-data/ by gt dolt migrate.
+	beadsDoltDirs := findBeadsDoltDirs(townRoot)
+	if len(beadsDoltDirs) > 0 {
+		if downDryRun {
+			printDownStatus("Beads dolt dirs", true, fmt.Sprintf("%d would remove", len(beadsDoltDirs)))
+		} else {
+			removed := removeBeadsDoltDirs(beadsDoltDirs)
+			if removed > 0 {
+				printDownStatus("Beads dolt dirs", true, fmt.Sprintf("removed %d", removed))
 			}
 		}
 	}
@@ -516,6 +576,16 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 		respawned = append(respawned, fmt.Sprintf("orphaned Claude processes (PIDs: %v)", pids))
 	}
 
+	// Check for respawned idle-monitors
+	if pids := findIdleMonitorProcesses(); len(pids) > 0 {
+		respawned = append(respawned, fmt.Sprintf("bd dolt idle-monitor processes (PIDs: %v)", pids))
+	}
+
+	// Check for orphan Dolt servers from .beads/dolt directories
+	if pids := findOrphanDoltServers(townRoot); len(pids) > 0 {
+		respawned = append(respawned, fmt.Sprintf("orphan Dolt servers (PIDs: %v)", pids))
+	}
+
 	return respawned
 }
 
@@ -670,5 +740,189 @@ func countLegacyBaseSocketSessions(townRoot string) int {
 		}
 	}
 	return count
+}
+
+// findIdleMonitorProcesses finds all bd dolt idle-monitor processes.
+// These background processes respawn per-agent Dolt servers and must be
+// stopped before Dolt shutdown to prevent a respawn race.
+func findIdleMonitorProcesses() []int {
+	out, err := exec.Command("ps", "-eo", "pid,args").Output()
+	if err != nil {
+		return nil
+	}
+
+	var pids []int
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(line, "bd dolt idle-monitor") || strings.Contains(line, "grep") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+// stopIdleMonitors terminates idle-monitor processes.
+// Returns the number of processes successfully stopped.
+func stopIdleMonitors(pids []int) int {
+	var stopped int
+	for _, pid := range pids {
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		if err := proc.Signal(os.Interrupt); err != nil {
+			// Process may have already exited
+			continue
+		}
+		// Brief wait for graceful exit
+		time.Sleep(200 * time.Millisecond)
+		if !isProcessRunning(pid) {
+			stopped++
+			continue
+		}
+		_ = proc.Kill()
+		stopped++
+	}
+	return stopped
+}
+
+// findOrphanDoltServers finds dolt sql-server processes whose working
+// directory is within the town root but NOT the canonical .dolt-data/ dir.
+// These are rogues spawned by bd from .beads/dolt/ directories.
+func findOrphanDoltServers(townRoot string) []int {
+	out, err := exec.Command("ps", "-eo", "pid,args").Output()
+	if err != nil {
+		return nil
+	}
+
+	canonicalDir, _ := filepath.Abs(filepath.Join(townRoot, ".dolt-data"))
+	townAbs, _ := filepath.Abs(townRoot)
+
+	var pids []int
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "dolt") || !strings.Contains(line, "sql-server") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+
+		// Check the process's working directory via lsof
+		cwdOut, err := exec.Command("lsof", "-p", strconv.Itoa(pid), "-Fn", "-d", "cwd").Output()
+		if err != nil {
+			continue
+		}
+		cwd := ""
+		for _, cwdLine := range strings.Split(string(cwdOut), "\n") {
+			if strings.HasPrefix(cwdLine, "n") {
+				cwd = cwdLine[1:]
+				break
+			}
+		}
+		if cwd == "" {
+			continue
+		}
+
+		cwdAbs, _ := filepath.Abs(cwd)
+		// Only target processes rooted in our town but NOT in canonical data dir
+		if strings.HasPrefix(cwdAbs, townAbs) && !strings.HasPrefix(cwdAbs, canonicalDir) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+// stopOrphanDoltServers terminates orphan Dolt servers.
+// Returns the number of processes stopped.
+func stopOrphanDoltServers(pids []int) int {
+	var stopped int
+	for _, pid := range pids {
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		if err := proc.Signal(os.Interrupt); err != nil {
+			continue
+		}
+		// Wait up to 3s for Dolt to flush and exit
+		for i := 0; i < 6; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if !isProcessRunning(pid) {
+				break
+			}
+		}
+		if isProcessRunning(pid) {
+			_ = proc.Kill()
+		}
+		stopped++
+	}
+	return stopped
+}
+
+// findBeadsDoltDirs finds .beads/dolt directories that trigger bd auto-spawning.
+// These are legacy per-agent data directories that should have been migrated
+// to .dolt-data/ by gt dolt migrate.
+func findBeadsDoltDirs(townRoot string) []string {
+	var dirs []string
+	townAbs, _ := filepath.Abs(townRoot)
+
+	_ = filepath.WalkDir(townAbs, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() {
+			return nil
+		}
+
+		// Skip .dolt-data (canonical data), .git, node_modules, etc.
+		name := d.Name()
+		if name == ".dolt-data" || name == ".git" || name == "node_modules" || name == ".repo.git" {
+			return filepath.SkipDir
+		}
+
+		// Limit depth to avoid deep traversal
+		rel, _ := filepath.Rel(townAbs, path)
+		if strings.Count(rel, string(filepath.Separator)) > 5 {
+			return filepath.SkipDir
+		}
+
+		// Match .beads/dolt directories
+		if name == "dolt" && strings.HasSuffix(filepath.Dir(path), ".beads") {
+			dirs = append(dirs, path)
+			return filepath.SkipDir
+		}
+
+		return nil
+	})
+	return dirs
+}
+
+// removeBeadsDoltDirs removes legacy .beads/dolt directories. Returns count removed.
+func removeBeadsDoltDirs(dirs []string) int {
+	var removed int
+	for _, dir := range dirs {
+		if err := os.RemoveAll(dir); err == nil {
+			removed++
+		}
+	}
+	return removed
 }
 
