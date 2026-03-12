@@ -41,9 +41,11 @@ const startupPromptTimeout = 60 * time.Second
 
 type Proxy struct {
 	cmd                *exec.Cmd
-	stdin              io.WriteCloser
-	stdout             io.ReadCloser
-	stderr             io.ReadCloser
+	agentStdin         io.WriteCloser
+	agentStdout        io.ReadCloser
+	agentStderr        io.ReadCloser
+	stdin              io.Reader
+	stdout             io.Writer
 	sessionID          string
 	sessionMux         sync.RWMutex
 	done               chan struct{}
@@ -120,10 +122,19 @@ func NewProxy() *Proxy {
 	p := &Proxy{
 		done:           make(chan struct{}),
 		handshakeState: handshakeInit,
-		uiEncoder:      json.NewEncoder(os.Stdout),
+		stdin:          os.Stdin,
+		stdout:         os.Stdout,
 	}
+	p.uiEncoder = json.NewEncoder(p.stdout)
 	p.lastActivity.Store(time.Now().UnixNano())
 	return p
+}
+
+// setStreams sets the standard streams for the proxy.
+func (p *Proxy) setStreams(in io.Reader, out io.Writer) {
+	p.stdin = in
+	p.stdout = out
+	p.uiEncoder = json.NewEncoder(out)
 }
 
 // SetPIDFilePath sets the path to the PID file for monitoring.
@@ -172,19 +183,19 @@ func (p *Proxy) Start(ctx context.Context, agentPath string, agentArgs []string,
 	p.setupProcessGroup()
 
 	var err error
-	p.stdin, err = p.cmd.StdinPipe()
+	p.agentStdin, err = p.cmd.StdinPipe()
 	if err != nil {
 		cancel()
 		return fmt.Errorf("creating stdin pipe: %w", err)
 	}
 
-	p.stdout, err = p.cmd.StdoutPipe()
+	p.agentStdout, err = p.cmd.StdoutPipe()
 	if err != nil {
 		cancel()
 		p.stdinMux.Lock()
-		if p.stdin != nil {
-			p.stdin.Close()
-			p.stdin = nil
+		if p.agentStdin != nil {
+			p.agentStdin.Close()
+			p.agentStdin = nil
 		}
 		p.stdinMux.Unlock()
 		p.cmd.Wait()
@@ -192,25 +203,25 @@ func (p *Proxy) Start(ctx context.Context, agentPath string, agentArgs []string,
 	}
 
 	// Capture agent stderr for debugging when GT_ACP_DEBUG=1
-	p.stderr, err = p.cmd.StderrPipe()
+	p.agentStderr, err = p.cmd.StderrPipe()
 	if err != nil {
 		cancel()
 		p.stdinMux.Lock()
-		if p.stdin != nil {
-			p.stdin.Close()
-			p.stdin = nil
+		if p.agentStdin != nil {
+			p.agentStdin.Close()
+			p.agentStdin = nil
 		}
 		p.stdinMux.Unlock()
-		p.stdout.Close()
+		p.agentStdout.Close()
 		return fmt.Errorf("creating stderr pipe: %w", err)
 	}
 
 	if err := p.cmd.Start(); err != nil {
 		cancel()
 		p.stdinMux.Lock()
-		if p.stdin != nil {
-			p.stdin.Close()
-			p.stdin = nil
+		if p.agentStdin != nil {
+			p.agentStdin.Close()
+			p.agentStdin = nil
 		}
 		p.stdinMux.Unlock()
 		return fmt.Errorf("starting agent: %w", err)
@@ -243,7 +254,7 @@ func (p *Proxy) writeToAgent(msg any) error {
 		return fmt.Errorf("proxy is shutting down")
 	}
 
-	if p.stdin == nil {
+	if p.agentStdin == nil {
 		return fmt.Errorf("agent stdin is nil")
 	}
 
@@ -268,7 +279,7 @@ func (p *Proxy) writeToAgent(msg any) error {
 	p.lastActivity.Store(time.Now().UnixNano())
 	debugLog(p.townRoot, "[Proxy] writeToAgent: encoding message (method=%s id=%v)", method, id)
 
-	err := json.NewEncoder(p.stdin).Encode(msg)
+	err := json.NewEncoder(p.agentStdin).Encode(msg)
 	if err != nil {
 		debugLog(p.townRoot, "[Proxy] writeToAgent: encode failed: %v", err)
 		if isPrompt {
@@ -348,7 +359,7 @@ func (p *Proxy) forwardToAgent() {
 		p.Shutdown()
 	}()
 
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(p.stdin)
 	receivedInput := false
 
 	for {
@@ -410,7 +421,7 @@ func (p *Proxy) forwardFromAgent() {
 	defer p.wg.Done()
 
 	// Use large buffer to handle bursts of large JSON messages (e.g. build logs)
-	reader := bufio.NewReaderSize(p.stdout, 1024*1024)
+	reader := bufio.NewReaderSize(p.agentStdout, 1024*1024)
 
 	for {
 		select {
@@ -504,7 +515,7 @@ func (p *Proxy) forwardFromAgent() {
 
 func (p *Proxy) forwardAgentStderr() {
 	defer p.wg.Done()
-	reader := bufio.NewReader(p.stderr)
+	reader := bufio.NewReader(p.agentStderr)
 
 	// Log stderr statistics periodically to detect pipe saturation
 	statsTicker := time.NewTicker(30 * time.Second)
@@ -1014,14 +1025,14 @@ func (p *Proxy) Shutdown() {
 		}
 
 		p.stdinMux.Lock()
-		if p.stdin != nil {
-			p.stdin.Close()
-			p.stdin = nil
+		if p.agentStdin != nil {
+			p.agentStdin.Close()
+			p.agentStdin = nil
 		}
 		p.stdinMux.Unlock()
 
-		if p.stdout != nil {
-			p.stdout.Close()
+		if p.agentStdout != nil {
+			p.agentStdout.Close()
 		}
 
 		// Platform-specific process termination

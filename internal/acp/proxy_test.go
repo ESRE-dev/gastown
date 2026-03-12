@@ -104,13 +104,8 @@ func TestProxy_InjectNotification(t *testing.T) {
 	}
 	defer r.Close()
 
-	// Redirect os.Stdout for the duration of the test
-	oldStdout := os.Stdout
-	os.Stdout = w
-	defer func() { os.Stdout = oldStdout }()
-
-	// Update the encoder to use our pipe
-	p.uiEncoder = json.NewEncoder(w)
+	// Use setStreams to inject our pipe
+	p.setStreams(nil, w)
 
 	p.sessionMux.Lock()
 	p.sessionID = "test-session"
@@ -306,11 +301,8 @@ func TestProxy_InjectNotification_NoSessionID(t *testing.T) {
 	}
 	defer r.Close()
 
-	// Redirect os.Stdout
-	oldStdout := os.Stdout
-	os.Stdout = w
-	defer func() { os.Stdout = oldStdout }()
-	p.uiEncoder = json.NewEncoder(w)
+	// Use setStreams to inject our pipe
+	p.setStreams(nil, w)
 
 	go func() {
 		_ = p.InjectNotificationToUI("test/notification", nil)
@@ -343,11 +335,8 @@ func TestProxy_InjectNotification_WithParams(t *testing.T) {
 	}
 	defer r.Close()
 
-	// Redirect os.Stdout
-	oldStdout := os.Stdout
-	os.Stdout = w
-	defer func() { os.Stdout = oldStdout }()
-	p.uiEncoder = json.NewEncoder(w)
+	// Use setStreams to inject our pipe
+	p.setStreams(nil, w)
 
 	p.sessionMux.Lock()
 	p.sessionID = "sess-test"
@@ -502,11 +491,8 @@ func TestIntegration_PropulsionNotificationFormat(t *testing.T) {
 	}
 	defer r.Close()
 
-	// Redirect os.Stdout
-	oldStdout := os.Stdout
-	os.Stdout = w
-	defer func() { os.Stdout = oldStdout }()
-	p.uiEncoder = json.NewEncoder(w)
+	// Use setStreams to inject our pipe
+	p.setStreams(nil, w)
 
 	p.sessionMux.Lock()
 	p.sessionID = "test-session-propulsion"
