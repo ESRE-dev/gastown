@@ -17,7 +17,9 @@ package wasteland
 import (
 	"encoding/csv"
 	"fmt"
+	"math"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -199,14 +201,15 @@ func RunSpiderDetection(doltPath, forkDir string, cfg SpiderConfig) ([]FraudSign
 	// Run each detector independently. A failure in one detector shouldn't
 	// prevent others from running — partial results are better than none.
 	detectors := []struct {
-		name  string
-		kind  FraudSignalKind
-		query string
+		name    string
+		kind    FraudSignalKind
+		query   string
+		scorer  func([]string) (float64, int, string)
 	}{
-		{"collusion", SignalCollusion, collusionQuery(cfg)},
-		{"rubber_stamp", SignalRubberStamp, rubberStampQuery(cfg)},
-		{"confidence_inflation", SignalConfidenceInflation, confidenceInflationQuery(cfg)},
-		{"self_loop", SignalSelfLoop, selfLoopQuery()},
+		{"collusion", SignalCollusion, collusionQuery(cfg), scoreCollusion},
+		{"rubber_stamp", SignalRubberStamp, rubberStampQuery(cfg), scoreRubberStamp},
+		{"confidence_inflation", SignalConfidenceInflation, confidenceInflationQuery(cfg), scoreConfidenceInflation},
+		{"self_loop", SignalSelfLoop, selfLoopQuery(), scoreSelfLoop},
 	}
 
 	var lastErr error
@@ -218,12 +221,14 @@ func RunSpiderDetection(doltPath, forkDir string, cfg SpiderConfig) ([]FraudSign
 		}
 
 		for _, row := range rows {
+			score, sampleSize, detail := d.scorer(row)
 			signals = append(signals, FraudSignal{
-				Kind:     d.kind,
-				Rigs:     extractRigs(row),
-				Score:    0.5, // TODO: derive from query ratios (e.g., a_to_b_ratio for collusion)
-				Detail:   fmt.Sprintf("%s detector matched", d.name),
-				Evidence: strings.Join(row, " | "),
+				Kind:       d.kind,
+				Rigs:       extractRigs(row),
+				Score:      score,
+				Detail:     detail,
+				Evidence:   strings.Join(row, " | "),
+				SampleSize: sampleSize,
 			})
 		}
 	}
@@ -234,6 +239,86 @@ func RunSpiderDetection(doltPath, forkDir string, cfg SpiderConfig) ([]FraudSign
 	}
 
 	return signals, nil
+}
+
+// scoreCollusion derives a severity score from collusion query results.
+// Row columns: rig_a, rig_b, a_to_b_count, a_total, b_to_a_count, a_to_b_ratio
+// Score is the a_to_b_ratio (already 0.0–1.0). Higher ratio = more suspicious.
+func scoreCollusion(row []string) (float64, int, string) {
+	ratio := parseFloatColumn(row, 5, 0.5)
+	count := parseIntColumn(row, 2, 0)
+	total := parseIntColumn(row, 3, 0)
+	return ratio, total, fmt.Sprintf("collusion: %d/%d stamps (%.0f%%) go to one partner", count, total, ratio*100)
+}
+
+// scoreRubberStamp derives severity from rubber-stamp query results.
+// Row columns: author, valence_pattern, identical_count, total_stamps, uniformity_ratio
+// Score is the uniformity_ratio (0.0–1.0). 1.0 = every stamp has identical valence.
+func scoreRubberStamp(row []string) (float64, int, string) {
+	ratio := parseFloatColumn(row, 4, 0.5)
+	identical := parseIntColumn(row, 2, 0)
+	total := parseIntColumn(row, 3, 0)
+	return ratio, total, fmt.Sprintf("rubber-stamp: %d/%d stamps have identical valence (%.0f%%)", identical, total, ratio*100)
+}
+
+// scoreConfidenceInflation derives severity from confidence inflation results.
+// Row columns: author, stamp_count, avg_confidence, min_confidence, max_confidence, confidence_spread
+// Score maps avg_confidence from [0.95, 1.0] to [0.5, 1.0]. A rig averaging
+// 0.95 confidence gets 0.5; averaging 1.0 gets 1.0. The narrow spread
+// (always near-max) is what makes this suspicious, not high confidence per se.
+func scoreConfidenceInflation(row []string) (float64, int, string) {
+	avgConf := parseFloatColumn(row, 2, 0.95)
+	spread := parseFloatColumn(row, 5, 0)
+	count := parseIntColumn(row, 1, 0)
+	// Map [0.95, 1.0] → [0.5, 1.0]
+	score := 0.5 + (avgConf-0.95)*10.0
+	score = math.Min(1.0, math.Max(0.5, score))
+	return score, count, fmt.Sprintf("confidence-inflation: avg=%.3f spread=%.3f across %d stamps", avgConf, spread, count)
+}
+
+// scoreSelfLoop derives severity from self-loop query results.
+// Row columns: rig_1, rig_2, forward_count, reverse_count, loop_total
+// Score is based on loop symmetry: perfectly balanced loops (forward ≈ reverse)
+// are more suspicious than lopsided ones. Minimum 0.5 since the detector
+// already filters for >= 2 in each direction.
+func scoreSelfLoop(row []string) (float64, int, string) {
+	forward := parseIntColumn(row, 2, 0)
+	reverse := parseIntColumn(row, 3, 0)
+	total := parseIntColumn(row, 4, 0)
+	if total == 0 {
+		return 0.5, 0, "self-loop detected"
+	}
+	// Symmetry ratio: min/max → 1.0 when perfectly balanced
+	minDir := math.Min(float64(forward), float64(reverse))
+	maxDir := math.Max(float64(forward), float64(reverse))
+	symmetry := minDir / maxDir
+	// Map symmetry [0, 1] → score [0.5, 1.0]
+	score := 0.5 + symmetry*0.5
+	return score, total, fmt.Sprintf("self-loop: %d↔%d stamps (%.0f%% symmetric)", forward, reverse, symmetry*100)
+}
+
+// parseFloatColumn safely extracts a float64 from a CSV row at the given index.
+func parseFloatColumn(row []string, idx int, fallback float64) float64 {
+	if idx >= len(row) {
+		return fallback
+	}
+	v, err := strconv.ParseFloat(strings.TrimSpace(row[idx]), 64)
+	if err != nil {
+		return fallback
+	}
+	return v
+}
+
+// parseIntColumn safely extracts an int from a CSV row at the given index.
+func parseIntColumn(row []string, idx int, fallback int) int {
+	if idx >= len(row) {
+		return fallback
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(row[idx]))
+	if err != nil {
+		return fallback
+	}
+	return v
 }
 
 // runDoltQuery executes a SQL query against a local dolt database and returns
