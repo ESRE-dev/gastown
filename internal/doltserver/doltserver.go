@@ -2032,6 +2032,11 @@ type BrokenWorkspace struct {
 
 	// LocalDataPath is the path to local Dolt data, if present.
 	LocalDataPath string
+
+	// NotServed is true when the database exists on the filesystem but the
+	// running Dolt server is not serving it. This typically means the server
+	// needs a restart or was started from a different data directory.
+	NotServed bool
 }
 
 // OrphanedDatabase represents a database in .dolt-data/ that is not referenced
@@ -2340,15 +2345,29 @@ func databaseHasUserTables(townRoot, dbName string) (bool, error) {
 }
 
 // FindBrokenWorkspaces scans all rig metadata.json files for Dolt server
-// configuration where the referenced database doesn't exist in .dolt-data/.
+// configuration where the referenced database doesn't exist in .dolt-data/
+// or exists on disk but isn't served by the running Dolt server.
 // These workspaces are broken: bd commands will fail or silently create
 // isolated local databases instead of connecting to the centralized server.
 func FindBrokenWorkspaces(townRoot string) []BrokenWorkspace {
 	var broken []BrokenWorkspace
 
+	// Query the running server once for all served databases.
+	// If the server isn't running, servedDBs will be nil and we
+	// fall back to filesystem-only checks (previous behavior).
+	var servedDBs map[string]bool
+	if running, _, _ := IsRunning(townRoot); running {
+		if served, _, err := VerifyDatabases(townRoot); err == nil {
+			servedDBs = make(map[string]bool, len(served))
+			for _, db := range served {
+				servedDBs[db] = true
+			}
+		}
+	}
+
 	// Check town-level beads (hq)
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-	if ws := checkWorkspace(townRoot, "hq", townBeadsDir); ws != nil {
+	if ws := checkWorkspace(townRoot, "hq", townBeadsDir, servedDBs); ws != nil {
 		broken = append(broken, *ws)
 	}
 
@@ -2370,7 +2389,7 @@ func FindBrokenWorkspaces(townRoot string) []BrokenWorkspace {
 		if beadsDir == "" {
 			continue
 		}
-		if ws := checkWorkspace(townRoot, rigName, beadsDir); ws != nil {
+		if ws := checkWorkspace(townRoot, rigName, beadsDir, servedDBs); ws != nil {
 			broken = append(broken, *ws)
 		}
 	}
@@ -2380,7 +2399,7 @@ func FindBrokenWorkspaces(townRoot string) []BrokenWorkspace {
 
 // checkWorkspace checks a single rig's metadata.json for broken Dolt configuration.
 // Returns nil if the workspace is healthy or not configured for Dolt server mode.
-func checkWorkspace(townRoot, rigName, beadsDir string) *BrokenWorkspace {
+func checkWorkspace(townRoot, rigName, beadsDir string, servedDBs map[string]bool) *BrokenWorkspace {
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
@@ -2406,9 +2425,22 @@ func checkWorkspace(townRoot, rigName, beadsDir string) *BrokenWorkspace {
 		dbName = rigName
 	}
 
-	// Check if the database actually exists
-	if DatabaseExists(townRoot, dbName) {
-		return nil // healthy
+	existsOnDisk := DatabaseExists(townRoot, dbName)
+
+	// If the server is running (servedDBs != nil), also check that the
+	// database is actually being served. A database can exist on disk but
+	// not be served if the server was started from a different data
+	// directory or needs a restart after migration.
+	if existsOnDisk {
+		if servedDBs != nil && !servedDBs[dbName] {
+			return &BrokenWorkspace{
+				RigName:      rigName,
+				BeadsDir:     beadsDir,
+				ConfiguredDB: dbName,
+				NotServed:    true,
+			}
+		}
+		return nil // healthy: exists on disk and (served or server not checked)
 	}
 
 	ws := &BrokenWorkspace{
