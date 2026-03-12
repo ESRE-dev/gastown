@@ -76,6 +76,17 @@ validate_name() {
   return 0
 }
 
+# Validate that a value looks like a Dolt commit hash (hex string).
+validate_hash() {
+  local hash="$1"
+  local context="$2"
+  if [[ ! "$hash" =~ ^[a-fA-F0-9]+$ ]]; then
+    log "ERROR: Unsafe $context hash rejected: '$hash'"
+    return 1
+  fi
+  return 0
+}
+
 # Run a SQL query against the Dolt server, returning CSV without header.
 # Global flags (--host, --port, --no-tls, -u, -p) must go BEFORE the sql subcommand.
 # Use --use-db for database selection.
@@ -252,6 +263,12 @@ for entry in "${CANDIDATES[@]}"; do
   HAS_REMOTE=false
   REMOTE_NAME=$(dolt_query "$DB" "SELECT name FROM dolt_remotes LIMIT 1" 2>/dev/null | head -1)
   if [[ -n "$REMOTE_NAME" ]]; then
+    if ! validate_name "$REMOTE_NAME" "remote"; then
+      log "  WARNING: Skipping remote with unsafe name: '$REMOTE_NAME'"
+      REMOTE_NAME=""
+    fi
+  fi
+  if [[ -n "$REMOTE_NAME" ]]; then
     HAS_REMOTE=true
     log "  Remote detected ('$REMOTE_NAME'). Fetching to check for divergence..."
     if ! dolt_exec "$DB" "CALL DOLT_FETCH('$REMOTE_NAME')"; then
@@ -264,6 +281,9 @@ for entry in "${CANDIDATES[@]}"; do
     # If remote has commits we don't have, compaction would lose them.
     LOCAL_HEAD=$(dolt_query "$DB" "SELECT commit_hash FROM dolt_log ORDER BY date DESC LIMIT 1" 2>/dev/null | head -1)
     REMOTE_HEAD=$(dolt_query "$DB" "SELECT commit_hash FROM dolt_remote_branches WHERE name = '${REMOTE_NAME}/main'" 2>/dev/null | head -1)
+    # Validate hashes before using in SQL
+    [[ -n "$LOCAL_HEAD" ]] && ! validate_hash "$LOCAL_HEAD" "local HEAD" && LOCAL_HEAD=""
+    [[ -n "$REMOTE_HEAD" ]] && ! validate_hash "$REMOTE_HEAD" "remote HEAD" && REMOTE_HEAD=""
     if [[ -n "$REMOTE_HEAD" && -n "$LOCAL_HEAD" && "$REMOTE_HEAD" != "$LOCAL_HEAD" ]]; then
       # Check if remote HEAD is an ancestor of local HEAD (local is ahead — safe)
       IS_ANCESTOR=$(dolt_query "$DB" "SELECT COUNT(*) FROM dolt_log WHERE commit_hash = '$REMOTE_HEAD'" 2>/dev/null | head -1)
@@ -285,6 +305,11 @@ for entry in "${CANDIDATES[@]}"; do
     log "  ERROR: Could not find root commit for $DB"
     ERRORS=$((ERRORS + 1))
     ERROR_DETAILS="${ERROR_DETAILS}${DB}: no root commit\n"
+    continue
+  fi
+  if ! validate_hash "$ROOT_HASH" "root commit"; then
+    ERRORS=$((ERRORS + 1))
+    ERROR_DETAILS="${ERROR_DETAILS}${DB}: invalid root commit hash\n"
     continue
   fi
   log "  Root commit: ${ROOT_HASH:0:8}"
