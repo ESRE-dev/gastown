@@ -26,13 +26,19 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+var convoyIDEntropy io.Reader = rand.Reader
+
 // generateShortID generates a collision-resistant convoy ID suffix using base36.
 // 5 chars of base36 gives ~60M possible values (36^5 = 60,466,176).
 // Birthday paradox: ~1% collision at ~1,100 IDs — safe for convoy volumes. (#2063)
 func generateShortID() string {
+	return generateShortIDFromReader(convoyIDEntropy)
+}
+
+func generateShortIDFromReader(r io.Reader) string {
 	const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
 	b := make([]byte, 5)
-	_, _ = rand.Read(b)
+	_, _ = io.ReadFull(r, b)
 	for i := range b {
 		b[i] = alphabet[int(b[i])%len(alphabet)]
 	}
