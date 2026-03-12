@@ -854,6 +854,101 @@ func TestProxy_HandshakeWithMockAgent(t *testing.T) {
 	p.Shutdown()
 }
 
+func TestIntegration_FullLoop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	mockAgent := createMockACPAgent(t, true)
+	defer os.Remove(mockAgent)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	p := NewProxy()
+
+	// Capture proxy's stdout (UI side)
+	var uiStdout bytes.Buffer
+	p.stdoutMux.Lock()
+	p.setStreams(nil, &uiStdout)
+	p.stdoutMux.Unlock()
+
+	// Input from UI side - using a pipe to control EOF
+	uiStdinR, uiStdinW := io.Pipe()
+	p.stdin = uiStdinR
+
+	tmpDir := t.TempDir()
+	if err := p.Start(ctx, mockAgent, nil, tmpDir); err != nil {
+		t.Fatalf("failed to start proxy: %v", err)
+	}
+
+	// 1. Send messages from the UI
+	go func() {
+		defer uiStdinW.Close()
+		messages := []string{
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}`,
+			`{"jsonrpc":"2.0","id":2,"method":"session/new"}`,
+			`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"prompt":[{"type":"text","text":"hello"}]}}`,
+		}
+		for _, m := range messages {
+			fmt.Fprintln(uiStdinW, m)
+			time.Sleep(50 * time.Millisecond) // Give time for processing
+		}
+
+		// Wait for session ID to be set (completes handshake)
+		waitCtx, waitCancel := context.WithTimeout(ctx, 2*time.Second)
+		defer waitCancel()
+		if err := p.WaitForSessionID(waitCtx); err != nil {
+			t.Errorf("failed to get session ID: %v", err)
+			p.Shutdown()
+			return
+		}
+
+		// Wait a bit more for the prompt response to flow through
+		time.Sleep(500 * time.Millisecond)
+		p.Shutdown()
+	}()
+
+	err := p.Forward()
+	if err != nil && !strings.Contains(err.Error(), "signal: killed") && !strings.Contains(err.Error(), "context canceled") {
+		t.Logf("Forward() returned error (expected during shutdown): %v", err)
+	}
+
+	// Verify outputs
+	output := uiStdout.String()
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+
+	// We expect 3 responses: initialize, session/new, session/prompt
+	if len(lines) < 3 {
+		t.Errorf("expected at least 3 responses, got %d. Output:\n%s", len(lines), output)
+	}
+
+	// Verify all responses reached the UI
+	expectedIDs := map[float64]bool{1: false, 2: false, 3: false}
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		var msg JSONRPCMessage
+		if err := json.Unmarshal([]byte(line), &msg); err == nil {
+			if id, ok := msg.ID.(float64); ok {
+				expectedIDs[id] = true
+			}
+		}
+	}
+
+	for id, found := range expectedIDs {
+		if !found {
+			t.Errorf("did not find response for ID %.0f in output:\n%s", id, output)
+		}
+	}
+
+	// Verify session ID was captured
+	if sid := p.SessionID(); sid != "test-session-12345" {
+		t.Errorf("expected session ID test-session-12345, got %q", sid)
+	}
+}
+
 func createTempScript(t *testing.T, content string) string {
 	t.Helper()
 
