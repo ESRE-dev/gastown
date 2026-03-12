@@ -81,6 +81,12 @@ func runAssign(_ *cobra.Command, args []string) error {
 		}
 	}
 
+	// Validate crew member exists
+	crewDir := filepath.Join(townRoot, rigName, "crew", crewName)
+	if _, err := os.Stat(crewDir); os.IsNotExist(err) {
+		return fmt.Errorf("crew member %q not found in rig %q (no directory %s)", crewName, rigName, crewDir)
+	}
+
 	agentID := rigName + "/crew/" + crewName
 
 	if assignDryRun {
