@@ -106,16 +106,16 @@ SELECT
     a.author AS rig_a,
     a.subject AS rig_b,
     COUNT(*) AS a_to_b_count,
-    (SELECT COUNT(*) FROM stamps WHERE author = a.author) AS a_total,
-    (SELECT COUNT(*) FROM stamps WHERE author = a.subject AND subject = a.author) AS b_to_a_count,
-    ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM stamps WHERE author = a.author), 3) AS a_to_b_ratio
+    MAX((SELECT COUNT(*) FROM stamps WHERE author = a.author)) AS a_total,
+    MAX((SELECT COUNT(*) FROM stamps WHERE author = a.subject AND subject = a.author)) AS b_to_a_count,
+    ROUND(COUNT(*) * 1.0 / MAX((SELECT COUNT(*) FROM stamps WHERE author = a.author)), 3) AS a_to_b_ratio
 FROM stamps a
 GROUP BY a.author, a.subject
 HAVING
-    a_to_b_count >= %d
-    AND a_to_b_ratio >= %f
-    AND b_to_a_count >= %d
-ORDER BY a_to_b_ratio DESC`,
+    COUNT(*) >= %d
+    AND ROUND(COUNT(*) * 1.0 / MAX((SELECT COUNT(*) FROM stamps WHERE author = a.author)), 3) >= %f
+    AND MAX((SELECT COUNT(*) FROM stamps WHERE author = a.subject AND subject = a.author)) >= %d
+ORDER BY ROUND(COUNT(*) * 1.0 / MAX((SELECT COUNT(*) FROM stamps WHERE author = a.author)), 3) DESC`,
 		cfg.MinStampsForCollusion,
 		cfg.CollusionRatioThreshold,
 		cfg.MinStampsForCollusion,
@@ -131,12 +131,12 @@ SELECT
     author,
     JSON_EXTRACT(valence, '$') AS valence_pattern,
     COUNT(*) AS identical_count,
-    (SELECT COUNT(*) FROM stamps s2 WHERE s2.author = stamps.author) AS total_stamps,
-    ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM stamps s2 WHERE s2.author = stamps.author), 3) AS uniformity_ratio
+    MAX((SELECT COUNT(*) FROM stamps s2 WHERE s2.author = stamps.author)) AS total_stamps,
+    ROUND(COUNT(*) * 1.0 / MAX((SELECT COUNT(*) FROM stamps s2 WHERE s2.author = stamps.author)), 3) AS uniformity_ratio
 FROM stamps
 GROUP BY author, JSON_EXTRACT(valence, '$')
-HAVING identical_count >= %d
-ORDER BY uniformity_ratio DESC`,
+HAVING COUNT(*) >= %d
+ORDER BY ROUND(COUNT(*) * 1.0 / MAX((SELECT COUNT(*) FROM stamps s2 WHERE s2.author = stamps.author)), 3) DESC`,
 		cfg.RubberStampMinCount,
 	)
 }
@@ -156,9 +156,9 @@ SELECT
 FROM stamps
 GROUP BY author
 HAVING
-    stamp_count >= %d
-    AND avg_confidence >= %f
-ORDER BY avg_confidence DESC`,
+    COUNT(*) >= %d
+    AND ROUND(AVG(confidence), 3) >= %f
+ORDER BY ROUND(AVG(confidence), 3) DESC`,
 		cfg.ConfidenceMinStamps,
 		cfg.ConfidenceFloor,
 	)
@@ -326,9 +326,11 @@ func parseIntColumn(row []string, idx int, fallback int) int {
 func runDoltQuery(doltPath, forkDir, query string) ([][]string, error) {
 	cmd := exec.Command(doltPath, "sql", "-r", "csv", "-q", query) //nolint:gosec // doltPath is a trusted internal binary
 	cmd.Dir = forkDir
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("dolt sql: %w", err)
+		return nil, fmt.Errorf("dolt sql: %w (stderr: %s)", err, stderr.String())
 	}
 
 	reader := csv.NewReader(strings.NewReader(strings.TrimSpace(string(out))))
