@@ -136,6 +136,28 @@ func TestDeliveryStatusJSONContainsPartialFailure(t *testing.T) {
 	}
 }
 
+func TestDeliveryStatusJSONContainsSuccessfulMailPathDetails(t *testing.T) {
+	statuses := []deliveryStatus{{Channel: "bead", Created: true, Severity: "critical"}, {Channel: "mail", Target: "mayor", Persisted: true, RuntimeNotified: true, Annotated: true, Severity: "critical", NotificationRoute: "mail+nudge"}}
+	result := map[string]interface{}{
+		"id":       "hq-esc2",
+		"severity": "critical",
+		"actions":  []string{"bead", "mail:mayor"},
+		"targets":  []string{"mayor"},
+		"delivery": statuses,
+		"status":   "ok",
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{"\"status\":\"ok\"", "\"runtime_notified\":true", "\"annotated\":true", "\"notification_route\":\"mail+nudge\""} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("json output missing %q: %s", want, text)
+		}
+	}
+}
+
 func TestSeverityEmoji(t *testing.T) {
 	tests := []struct {
 		severity string

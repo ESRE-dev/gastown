@@ -189,3 +189,68 @@ func TestNotifyWithMetaInjectsEscalationMetadataToUI(t *testing.T) {
 		t.Fatalf("unexpected injected _meta: %#v", metaAny)
 	}
 }
+
+func TestACPAttachedMayorEscalationPath_MetadataAndUrgencyEndToEnd(t *testing.T) {
+	townRoot := t.TempDir()
+	if err := nudge.Enqueue(townRoot, "hq-mayor", nudge.QueuedNudge{
+		Sender:   "gastown/witness",
+		Message:  "Escalation mail from gastown/witness. ID: hq-esc-end2end. Severity: critical. Run 'gt mail read hq-esc-end2end' or 'gt escalate ack hq-esc-end2end'.",
+		Priority: nudge.PriorityUrgent,
+		Kind:     "escalation",
+		ThreadID: "hq-esc-end2end",
+		Severity: "critical",
+	}); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	p := NewProxy()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe: %v", err)
+	}
+	defer r.Close()
+	p.setStreams(nil, w)
+	p.sessionMux.Lock()
+	p.sessionID = "attached-session"
+	p.sessionMux.Unlock()
+
+	prop := NewPropeller(p, townRoot, "hq-mayor")
+	go func() {
+		prop.deliverNudges()
+		w.Close()
+	}()
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("ReadFrom: %v", err)
+	}
+	var msg JSONRPCMessage
+	if err := json.Unmarshal(buf.Bytes(), &msg); err != nil {
+		t.Fatalf("json.Unmarshal message: %v", err)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		t.Fatalf("json.Unmarshal params: %v", err)
+	}
+	update := params["update"].(map[string]any)
+	content, ok := update["content"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured content payload, got %#v", update["content"])
+	}
+	if text, ok := content["text"].(string); !ok || !bytes.Contains([]byte(text), []byte("hq-esc-end2end")) {
+		t.Fatalf("session/update content missing escalation id: %#v", content)
+	}
+	meta := update["_meta"].(map[string]any)
+	for key, want := range map[string]string{"gt/escalation": "true", "gt/threadID": "hq-esc-end2end", "gt/severity": "critical", "gt/kind": "escalation", "gt/urgent": "1"} {
+		if meta[key] != want {
+			t.Fatalf("_meta[%s] = %#v, want %q", key, meta[key], want)
+		}
+	}
+	remaining, err := nudge.Pending(townRoot, "hq-mayor")
+	if err != nil {
+		t.Fatalf("Pending: %v", err)
+	}
+	if remaining != 1 {
+		t.Fatalf("expected only deferred prompt reminder to remain after successful attached delivery, got %d", remaining)
+	}
+}
