@@ -132,6 +132,74 @@ func TestForwardFromAgent_StandardForwarding(t *testing.T) {
 	if !foundStringID {
 		t.Errorf("string-id message not found")
 	}
+}
+
+func TestForwardFromAgent_PropulsionSuppression(t *testing.T) {
+	p := NewProxy()
+	p.done = make(chan struct{})
+	p.Propelled.Store(true)
+
+	// Pipes for agent output and proxy output
+	agentStdoutReader, agentStdoutWriter, _ := os.Pipe()
+	stdoutReader, stdoutWriter, _ := os.Pipe()
+
+	p.agentStdout = agentStdoutReader
+	p.stdout = stdoutWriter
+	p.uiEncoder = json.NewEncoder(stdoutWriter)
+
+	// Start forwarding
+	p.wg.Add(1)
+	go func() {
+		p.forwardFromAgent()
+		stdoutWriter.Close()
+	}()
+
+	// Standard message (should be suppressed because Propelled is true)
+	standardMsg := JSONRPCMessage{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "test/standard",
+		Params:  json.RawMessage(`{"foo":"bar"}`),
+	}
+	standardMsgJSON, _ := json.Marshal(standardMsg)
+	standardMsgJSON = append(standardMsgJSON, '\n')
+
+	go func() {
+		agentStdoutWriter.Write(standardMsgJSON)
+		time.Sleep(100 * time.Millisecond)
+		agentStdoutWriter.Close()
+	}()
+
+	// Read received messages
+	receivedMsgs := []JSONRPCMessage{}
+	decoder := json.NewDecoder(stdoutReader)
+
+	// Use a timeout
+	done := make(chan bool)
+	go func() {
+		for {
+			var msg JSONRPCMessage
+			if err := decoder.Decode(&msg); err != nil {
+				break
+			}
+			receivedMsgs = append(receivedMsgs, msg)
+		}
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// Reading complete
+	case <-time.After(3 * time.Second):
+		t.Errorf("timeout waiting for messages")
+	}
+
+	if len(receivedMsgs) != 0 {
+		t.Errorf("expected 0 messages when propelled, got %d", len(receivedMsgs))
+		for i, msg := range receivedMsgs {
+			t.Logf("msg[%d]: method=%q id=%v", i, msg.Method, msg.ID)
+		}
+	}
 
 	p.markDone()
 }

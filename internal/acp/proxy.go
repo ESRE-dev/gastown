@@ -73,6 +73,8 @@ type Proxy struct {
 	modeMux            sync.RWMutex
 	heartbeatMethod    string // "custom_ping", "set_mode", or "disabled"
 	heartbeatSupported atomic.Bool
+	// Propulsion state
+	Propelled atomic.Bool
 	// Stderr monitoring for pipe saturation
 	stderrBytesDropped   atomic.Int64
 	stderrLinesTruncated atomic.Int64
@@ -82,6 +84,10 @@ type Proxy struct {
 // SetTownRoot sets the town root for logging important events to town.log.
 func (p *Proxy) SetTownRoot(townRoot string) {
 	p.townRoot = townRoot
+}
+
+func (p *Proxy) SetPropelled(propelled bool) {
+	p.Propelled.Store(propelled)
 }
 
 type JSONRPCMessage struct {
@@ -500,7 +506,7 @@ func (p *Proxy) forwardFromAgent() {
 			continue
 		}
 
-		if !isInjectedResponse {
+		if !isInjectedResponse && !p.Propelled.Load() {
 			p.stdoutMux.Lock()
 			err = p.uiEncoder.Encode(&msg)
 			p.stdoutMux.Unlock()
