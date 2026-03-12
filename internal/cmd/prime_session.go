@@ -262,10 +262,10 @@ func outputSessionMetadata(ctx RoleContext) {
 	fmt.Println(formatSessionMetadataLine(actor, sessionID))
 }
 
-// formatSessionMetadataLine keeps the long-standing "[GAS TOWN]" banner for
-// human-facing output, but drops the leading brackets for structured
-// SessionStart hook output so hook consumers can parse a plain metadata record
-// without treating it as an auxiliary beacon line.
+// formatSessionMetadataLine keeps the bracketed "[GAS TOWN]" banner for normal
+// human-facing output, but removes the leading brackets during structured
+// SessionStart hooks because Codex will see '[' and try to parse the line as
+// JSON instead of treating it as plain text session metadata.
 func formatSessionMetadataLine(actor, sessionID string) string {
 	if primeStructuredSessionStartOutput {
 		return fmt.Sprintf("GAS TOWN role:%s pid:%d session:%s", actor, os.Getpid(), sessionID)

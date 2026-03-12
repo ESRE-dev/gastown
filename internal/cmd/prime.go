@@ -298,10 +298,10 @@ func handlePrimeHookMode(townRoot, cwd string) {
 	}
 }
 
-// hookSessionBeaconLines returns the legacy hook beacon lines for runtimes that
-// still expect the bracketed session/source markers. Structured SessionStart
-// hooks consume JSONL-style output instead, so we suppress the extra beacons to
-// keep the startup stream machine-readable.
+// hookSessionBeaconLines returns the bracketed session/source markers used by
+// the normal hook path. Structured SessionStart output skips them because Codex
+// tries to auto-detect JSON, sees the leading '[', and misclassifies the startup
+// stream as JSON instead of plain text metadata.
 func hookSessionBeaconLines(sessionID, source string) []string {
 	if primeStructuredSessionStartOutput {
 		return nil
