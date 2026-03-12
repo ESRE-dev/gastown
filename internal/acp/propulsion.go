@@ -2,13 +2,10 @@ package acp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -120,16 +117,6 @@ func logEvent(townRoot, eventType, context string) {
 	debugLog(townRoot, "[%s] %s", eventType, context)
 }
 
-const pollInterval = 30 * time.Second
-
-type mailMessage struct {
-	ID       string
-	Subject  string
-	From     string
-	Read     bool
-	Escalate bool
-}
-
 type Propeller struct {
 	proxy       *Proxy
 	townRoot    string
@@ -137,10 +124,6 @@ type Propeller struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
-	mailIDs     map[string]mailMessage
-	mailMu      sync.RWMutex
-	hookState   string
-	hookMu      sync.RWMutex
 	warnedNoSID bool
 }
 
@@ -149,7 +132,6 @@ func NewPropeller(proxy *Proxy, townRoot, session string) *Propeller {
 		proxy:    proxy,
 		townRoot: townRoot,
 		session:  session,
-		mailIDs:  make(map[string]mailMessage),
 	}
 }
 
@@ -157,14 +139,16 @@ func (p *Propeller) Start(ctx context.Context) {
 	debugLog(p.townRoot, "[Propeller] Starting for session %q in town %q", p.session, p.townRoot)
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.wg.Add(1)
-	go p.waitForSessionAndPoll()
+	go p.waitForSessionAndStart()
 }
 
 // waitForSessionAndPoll waits for the ACP handshake to complete (sessionID available)
 // before starting the poll loop. This ensures the proxy is ready to inject prompts.
-// If no IDE connects within the timeout, polling continues with degraded functionality
+// waitForSessionAndStart waits for the ACP handshake to complete (sessionID available)
+// before starting the event-driven loop. This ensures the proxy is ready to inject prompts.
+// If no IDE connects within the timeout, event loop continues with degraded functionality
 // (notifications will be skipped since there's no session to inject into).
-func (p *Propeller) waitForSessionAndPoll() {
+func (p *Propeller) waitForSessionAndStart() {
 	defer p.wg.Done()
 
 	// Wait for sessionID with a timeout
@@ -179,11 +163,80 @@ func (p *Propeller) waitForSessionAndPoll() {
 			debugLog(p.townRoot, "[Propeller] Continuing with degraded mode - mail/hook detection will work but notifications will be skipped")
 			debugLog(p.townRoot, "[Propeller] This is expected if no ACP client (IDE) is connected to the proxy")
 		} else {
-			debugLog(p.townRoot, "[Propeller] SessionID available, starting poll loop with full notification support")
+			debugLog(p.townRoot, "[Propeller] SessionID available, starting event-driven loop with full notification support")
 		}
 	}
 
-	p.pollLoop()
+	p.eventLoop()
+}
+
+// eventLoop drives event-driven propulsion by listening to the nudge queue watcher.
+// It drains queued nudges and injects them immediately when the watcher signals.
+func (p *Propeller) eventLoop() {
+	// Create watcher for the nudge queue
+	watcher, err := nudge.WatcherForSession(p.townRoot, p.session)
+	if err != nil {
+		debugLog(p.townRoot, "[Propeller] Failed to create nudge watcher: %v", err)
+		// If we can't watch, we can't deliver nudges. Log and exit.
+		logEvent(p.townRoot, "acp_error", fmt.Sprintf("failed to create nudge watcher: %v", err))
+		return
+	}
+	defer watcher.Close()
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-watcher.Events():
+			p.deliverNudges()
+		}
+	}
+}
+
+// deliverNudges drains queued nudges and injects them into the ACP session.
+func (p *Propeller) deliverNudges() {
+	nudges, err := nudge.Drain(p.townRoot, p.session)
+	if err != nil {
+		debugLog(p.townRoot, "[Propeller] deliverNudges: Drain error: %v", err)
+		return
+	}
+	if len(nudges) == 0 {
+		return
+	}
+
+	debugLog(p.townRoot, "[Propeller] deliverNudges: drained %d nudge(s)", len(nudges))
+
+	// Use the shared formatter from nudge package
+	text := nudge.FormatForInjection(nudges)
+
+	// Determine urgency
+	urgent := false
+	for _, n := range nudges {
+		if n.Priority == nudge.PriorityUrgent {
+			urgent = true
+			break
+		}
+	}
+
+	meta := map[string]string{
+		"gt/eventType": "nudge",
+		"gt/count":     strconv.Itoa(len(nudges)),
+		"gt/urgent":    strconv.Itoa(len(nudges) - len(nudges)), // count of urgent? No, just flag it.
+		"gt/drained":   "true",
+		"gt/session":   p.session,
+	}
+	// Actually, let's count urgent
+	urgentCount := 0
+	for _, n := range nudges {
+		if n.Priority == nudge.PriorityUrgent {
+			urgentCount++
+		}
+	}
+	meta["gt/urgent"] = strconv.Itoa(urgentCount)
+
+	if err := p.notify(text, meta, urgent); err != nil {
+		style.PrintWarning("ACP Propeller failed to deliver nudge: %v", err)
+	}
 }
 
 func (p *Propeller) Stop() {
@@ -195,184 +248,6 @@ func (p *Propeller) Stop() {
 		p.cancel()
 	}
 	p.wg.Wait()
-}
-
-func (p *Propeller) pollLoop() {
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	p.pollOnce()
-
-	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		case <-ticker.C:
-			p.pollOnce()
-		}
-	}
-}
-
-func (p *Propeller) pollOnce() {
-	debugLog(p.townRoot, "[Propeller] polling...")
-	ctx := p.ctx
-
-	p.detectMailChanges(ctx)
-	p.detectHookChanges(ctx)
-	p.detectNudges(ctx)
-}
-
-func (p *Propeller) detectMailChanges(ctx context.Context) {
-	cmd := exec.CommandContext(ctx, "gt", "mail", "inbox", "--identity", "mayor/", "--json")
-	cmd.Env = append(cmd.Environ(), "GT_TOWN_ROOT="+p.townRoot)
-	output, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			debugLog(p.townRoot, "[Propeller] detectMailChanges: command error: %v, stderr: %s", err, string(exitErr.Stderr))
-		} else {
-			debugLog(p.townRoot, "[Propeller] detectMailChanges: command error: %v", err)
-		}
-		return
-	}
-
-	var messages []struct {
-		ID      string `json:"id"`
-		Subject string `json:"subject"`
-		From    string `json:"from"`
-		Read    bool   `json:"read"`
-	}
-
-	if err := json.Unmarshal(output, &messages); err != nil {
-		debugLog(p.townRoot, "[Propeller] detectMailChanges: JSON parse error: %v", err)
-		return
-	}
-
-	p.mailMu.Lock()
-	defer p.mailMu.Unlock()
-
-	newMailIDs := make(map[string]mailMessage)
-	unreadCount := 0
-	escalationCount := 0
-	newCount := 0
-
-	for _, msg := range messages {
-		newMailIDs[msg.ID] = mailMessage{
-			ID:      msg.ID,
-			Subject: msg.Subject,
-			From:    msg.From,
-			Read:    msg.Read,
-		}
-
-		isNew := false
-		if _, exists := p.mailIDs[msg.ID]; !exists {
-			isNew = true
-			newCount++
-		}
-
-		if isNew || !msg.Read {
-			unreadCount++
-		}
-
-		isEscalation := strings.Contains(strings.ToLower(msg.Subject), "escalation") ||
-			strings.Contains(strings.ToLower(msg.Subject), "help") ||
-			strings.Contains(strings.ToLower(msg.Subject), "urgent")
-		if isEscalation && (isNew || !msg.Read) {
-			escalationCount++
-		}
-	}
-
-	debugLog(p.townRoot, "[Propeller] detectMailChanges: total=%d old=%d new=%d unread=%d", len(newMailIDs), len(p.mailIDs), newCount, unreadCount)
-	if newCount > 0 && unreadCount > 0 {
-		p.notifyMailEvent(unreadCount, escalationCount)
-	}
-
-	p.mailIDs = newMailIDs
-}
-
-func (p *Propeller) notifyMailEvent(count, escalationCount int) {
-	if p.proxy == nil {
-		style.PrintWarning("ACP Propeller cannot notify: proxy is nil")
-		return
-	}
-
-	debugLog(p.townRoot, "[Propeller] notifyMailEvent: count=%d escalation=%d", count, escalationCount)
-
-	text := "📬 You have new mail. Run 'gt mail inbox --identity mayor/' to read."
-	if escalationCount > 0 {
-		text = fmt.Sprintf("🚨 URGENT: You have %d new escalation/urgent messages in your inbox. Please run 'gt mail inbox --identity mayor/' and handle them immediately.", escalationCount)
-	}
-
-	meta := map[string]string{
-		"gt/eventType": "mail",
-		"gt/count":     strconv.Itoa(count),
-	}
-	if escalationCount > 0 {
-		meta["gt/escalationCount"] = strconv.Itoa(escalationCount)
-	}
-
-	if err := p.notify(text, meta, escalationCount > 0); err != nil {
-		style.PrintWarning("ACP Propeller failed to deliver mail notification: %v", err)
-	}
-}
-
-func (p *Propeller) detectHookChanges(ctx context.Context) {
-	cmd := exec.CommandContext(ctx, "gt", "hook", "show", "mayor", "--json")
-	cmd.Env = append(cmd.Environ(), "GT_TOWN_ROOT="+p.townRoot)
-	output, err := cmd.Output()
-	if err != nil {
-		return
-	}
-
-	var hookResp struct {
-		HasWork  bool   `json:"hasWork"`
-		Title    string `json:"title"`
-		Molecule string `json:"molecule"`
-	}
-
-	if err := json.Unmarshal(output, &hookResp); err != nil {
-		return
-	}
-
-	newState := "idle"
-	if hookResp.HasWork {
-		newState = "working"
-	}
-
-	p.hookMu.Lock()
-	oldState := p.hookState
-	if oldState != newState {
-		p.hookState = newState
-		p.hookMu.Unlock()
-		p.notifyHookChange(oldState, newState, hookResp.Title)
-	} else {
-		p.hookMu.Unlock()
-	}
-}
-
-func (p *Propeller) notifyHookChange(oldState, newState, title string) {
-	if p.proxy == nil {
-		style.PrintWarning("ACP Propeller cannot notify: proxy is nil")
-		return
-	}
-
-	meta := map[string]string{
-		"gt/eventType": "hook",
-		"gt/oldState":  oldState,
-		"gt/newState":  newState,
-	}
-
-	text := "⚓ Hook status changed"
-	if newState == "working" && title != "" {
-		text = fmt.Sprintf("⚓ NEW WORK HOOKED: %s\n\nPlease run 'gt hook' to see your assignment and begin work.", title)
-		if err := p.notify(text, meta, false); err != nil {
-			style.PrintWarning("ACP Propeller failed to deliver hook notification: %v", err)
-		}
-		return
-	} else if newState == "idle" {
-		text = "⚓ Mayor hook cleared"
-	}
-
-	p.notifyWithMeta(text, meta)
 }
 
 func (p *Propeller) notifyWithMeta(text string, meta map[string]string) {
@@ -441,67 +316,4 @@ func (p *Propeller) notify(text string, meta map[string]string, urgent bool) err
 		}
 	}
 	return nil
-}
-
-func (p *Propeller) detectNudges(ctx context.Context) {
-	if p.townRoot == "" || p.session == "" {
-		debugLog(p.townRoot, "[Propeller] detectNudges: early return - townRoot=%q session=%q", p.townRoot, p.session)
-		return
-	}
-
-	nudges, err := nudge.Drain(p.townRoot, p.session)
-	if err != nil {
-		debugLog(p.townRoot, "[Propeller] detectNudges: Drain error: %v", err)
-		return
-	}
-	if len(nudges) == 0 {
-		return
-	}
-
-	debugLog(p.townRoot, "[Propeller] detectNudges: drained %d nudge(s)", len(nudges))
-
-	var urgent, normal []nudge.QueuedNudge
-	for _, n := range nudges {
-		if n.Priority == nudge.PriorityUrgent {
-			urgent = append(urgent, n)
-		} else {
-			normal = append(normal, n)
-		}
-	}
-
-	var promptBuilder strings.Builder
-	if len(urgent) > 0 {
-		promptBuilder.WriteString(fmt.Sprintf("🚨 URGENT NUDGE RECEIVED (%d messages):\n", len(urgent)))
-		for _, n := range urgent {
-			msg := fmt.Sprintf("[%s] %s", n.Sender, n.Message)
-			promptBuilder.WriteString(fmt.Sprintf("- %s\n", msg))
-		}
-		if len(normal) > 0 {
-			promptBuilder.WriteString(fmt.Sprintf("\nPlus %d non-urgent nudge(s):\n", len(normal)))
-			for _, n := range normal {
-				msg := fmt.Sprintf("[%s] %s", n.Sender, n.Message)
-				promptBuilder.WriteString(fmt.Sprintf("- %s\n", msg))
-			}
-		}
-	} else {
-		promptBuilder.WriteString(fmt.Sprintf("📨 NUDGE RECEIVED (%d messages):\n", len(normal)))
-		for _, n := range normal {
-			msg := fmt.Sprintf("[%s] %s", n.Sender, n.Message)
-			promptBuilder.WriteString(fmt.Sprintf("- %s\n", msg))
-		}
-	}
-
-	text := promptBuilder.String()
-
-	meta := map[string]string{
-		"gt/eventType": "nudge",
-		"gt/count":     strconv.Itoa(len(nudges)),
-		"gt/urgent":    strconv.Itoa(len(urgent)),
-		"gt/drained":   "true",
-		"gt/session":   p.session,
-	}
-
-	if err := p.notify(text, meta, len(urgent) > 0); err != nil {
-		style.PrintWarning("ACP Propeller failed to deliver nudge: %v", err)
-	}
 }
