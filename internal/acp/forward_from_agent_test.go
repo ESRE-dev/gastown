@@ -287,6 +287,47 @@ func TestForwardFromAgent_PropulsionTriggers(t *testing.T) {
 		t.Error("Propelled was not reset after prompt response")
 	}
 
+	// 1. Verify that output is forwarded again after reset
+	p.activePromptID = "test-prompt-2"
+	msgAfterReset := JSONRPCMessage{
+		JSONRPC: "2.0",
+		Method:  "test/after-reset",
+	}
+	msgAfterResetBytes, _ := json.Marshal(msgAfterReset)
+	msgAfterResetBytes = append(msgAfterResetBytes, '\n')
+	agentStdoutWriter.Write(msgAfterResetBytes)
+	time.Sleep(100 * time.Millisecond)
+
+	// Read received messages to verify forwarding
+	receivedMsgs := []JSONRPCMessage{}
+	decoder := json.NewDecoder(stdoutReader)
+
+	// We need to read everything that was sent to stdoutWriter
+	// Note: previous messages in this test were also written to agentStdoutWriter
+	// but many were suppressed.
+
+	go func() {
+		for {
+			var msg JSONRPCMessage
+			if err := decoder.Decode(&msg); err != nil {
+				return
+			}
+			receivedMsgs = append(receivedMsgs, msg)
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	foundAfterReset := false
+	for _, m := range receivedMsgs {
+		if m.Method == "test/after-reset" {
+			foundAfterReset = true
+			break
+		}
+	}
+	if !foundAfterReset {
+		t.Error("Message after propulsion reset was not forwarded")
+	}
+
 	p.markDone()
 	agentStdoutWriter.Close()
 
