@@ -462,6 +462,11 @@ func (p *Proxy) forwardFromAgent() {
 
 		var msg JSONRPCMessage
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			// Check for raw propulsion triggers if not valid JSON
+			if isPropulsionTrigger(line) {
+				debugLog(p.townRoot, "[Proxy] forwardFromAgent: propulsion trigger detected in raw output")
+				p.SetPropelled(true)
+			}
 			debugLog(p.townRoot, "[Proxy] forwardFromAgent: failed to parse JSON (size=%d): %v", len(line), err)
 			continue
 		}
@@ -475,6 +480,12 @@ func (p *Proxy) forwardFromAgent() {
 		p.extractSessionID(&msg)
 		shouldInjectPrompt := p.trackHandshakeResponse(&msg)
 		p.trackPromptResponse(&msg)
+
+		// Check for propulsion triggers in JSON messages (e.g. session/update)
+		if checkPropulsionTrigger(&msg) {
+			debugLog(p.townRoot, "[Proxy] forwardFromAgent: propulsion trigger detected in JSON message")
+			p.SetPropelled(true)
+		}
 
 		// Filter out responses to injected prompts so the UI doesn't get confused
 		isInjectedResponse := false
@@ -725,6 +736,12 @@ func (p *Proxy) trackPromptResponse(msg *JSONRPCMessage) {
 	if idStr == p.activePromptID {
 		debugLog(p.townRoot, "[Proxy] trackPromptResponse: prompt completed (id=%s)", idStr)
 		p.activePromptID = ""
+
+		// Reset propulsion mode when a prompt completes (Turn ends)
+		if p.Propelled.Load() {
+			debugLog(p.townRoot, "[Proxy] trackPromptResponse: resetting Propelled flag")
+			p.SetPropelled(false)
+		}
 
 		if idStr == "gastown-startup-prompt" {
 			p.setStartupPromptState(startupPromptStateComplete)
@@ -1145,4 +1162,34 @@ func isRedactedThought(msg *JSONRPCMessage) bool {
 	}
 
 	return text == "[REDACTED]"
+}
+
+// checkPropulsionTrigger checks if the given JSON-RPC message contains
+// a propulsion trigger in its params.
+func checkPropulsionTrigger(msg *JSONRPCMessage) bool {
+	if msg.Method != "session/update" || len(msg.Params) == 0 {
+		return false
+	}
+
+	// Triggers only make sense in session/update messages where the agent
+	// is sending text or thought chunks to the UI.
+	return isPropulsionTrigger(string(msg.Params))
+}
+
+// isPropulsionTrigger checks if the given line of agent output should
+// trigger autonomous propulsion mode (suppressing output to UI).
+func isPropulsionTrigger(line string) bool {
+	// Standard GUPP propulsion triggers from prime_output.go and prime_molecule.go
+	triggers := []string{
+		"AUTONOMOUS WORK MODE",
+		"PROPULSION PRINCIPLE: Work is on your hook. RUN IT.",
+		"EXECUTE THIS STEP NOW.",
+	}
+
+	for _, trigger := range triggers {
+		if strings.Contains(line, trigger) {
+			return true
+		}
+	}
+	return false
 }

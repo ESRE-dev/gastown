@@ -203,3 +203,86 @@ func TestForwardFromAgent_PropulsionSuppression(t *testing.T) {
 
 	p.markDone()
 }
+
+func TestForwardFromAgent_PropulsionTriggers(t *testing.T) {
+	p := NewProxy()
+	p.done = make(chan struct{})
+
+	// Pipes for agent output and proxy output
+	agentStdoutReader, agentStdoutWriter, _ := os.Pipe()
+	stdoutReader, stdoutWriter, _ := os.Pipe()
+
+	p.agentStdout = agentStdoutReader
+	p.stdout = stdoutWriter
+	p.uiEncoder = json.NewEncoder(stdoutWriter)
+
+	// Start forwarding
+	p.wg.Add(1)
+	go func() {
+		p.forwardFromAgent()
+		stdoutWriter.Close()
+	}()
+
+	// Triggers
+	triggers := []string{
+		"## 🚨 AUTONOMOUS WORK MODE 🚨\n",
+		"→ PROPULSION PRINCIPLE: Work is on your hook. RUN IT.\n",
+		"→ EXECUTE THIS STEP NOW.\n",
+	}
+
+	for _, trigger := range triggers {
+		// Reset Propelled for each trigger to test them independently
+		p.Propelled.Store(false)
+
+		agentStdoutWriter.Write([]byte(trigger))
+
+		// Give it a moment to process
+		time.Sleep(100 * time.Millisecond)
+
+		if !p.Propelled.Load() {
+			t.Errorf("trigger %q did not set Propelled to true", trigger)
+		}
+	}
+
+	// Test JSON notification trigger
+	p.Propelled.Store(false)
+	jsonTrigger := JSONRPCMessage{
+		JSONRPC: "2.0",
+		Method:  "session/update",
+		Params:  json.RawMessage(`{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"## 🚨 AUTONOMOUS WORK MODE 🚨"}}}`),
+	}
+	jsonTriggerBytes, _ := json.Marshal(jsonTrigger)
+	jsonTriggerBytes = append(jsonTriggerBytes, '\n')
+	agentStdoutWriter.Write(jsonTriggerBytes)
+	time.Sleep(100 * time.Millisecond)
+	if !p.Propelled.Load() {
+		t.Error("JSON notification trigger did not set Propelled to true")
+	}
+
+	// Test reset on prompt response
+	p.activePromptID = "test-prompt"
+	responseMsg := JSONRPCMessage{
+		JSONRPC: "2.0",
+		ID:      "test-prompt",
+		Result:  json.RawMessage(`{}`),
+	}
+	responseBytes, _ := json.Marshal(responseMsg)
+	responseBytes = append(responseBytes, '\n')
+	agentStdoutWriter.Write(responseBytes)
+	time.Sleep(100 * time.Millisecond)
+	if p.Propelled.Load() {
+		t.Error("Propelled was not reset after prompt response")
+	}
+
+	p.markDone()
+	agentStdoutWriter.Close()
+
+	// Clean up reader
+	var buf [1024]byte
+	for {
+		_, err := stdoutReader.Read(buf[:])
+		if err != nil {
+			break
+		}
+	}
+}
