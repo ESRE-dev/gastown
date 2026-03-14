@@ -1355,6 +1355,20 @@ func Start(townRoot string) error {
 		return err
 	}
 
+	// Clean stale Unix socket from prior crash. Dolt creates /tmp/mysql.sock by
+	// default (or a port-specific variant). If the server crashed, the socket file
+	// persists and Dolt warns "unix socket set up failed: file already in use".
+	// Safe to remove: if a Dolt server were actually running, IsRunning() above
+	// would have detected it and we'd have returned already. (gh-2687)
+	socketPath := "/tmp/mysql.sock"
+	if config.Port != 3306 {
+		socketPath = fmt.Sprintf("/tmp/mysql.%d.sock", config.Port)
+	}
+	if _, statErr := os.Stat(socketPath); statErr == nil {
+		fmt.Fprintf(os.Stderr, "Removing stale Unix socket: %s\n", socketPath)
+		_ = os.Remove(socketPath)
+	}
+
 	// Always write a managed config.yaml from the Config struct before starting.
 	// This ensures critical settings (especially read/write timeouts) are always
 	// present, preventing CLOSE_WAIT accumulation from abandoned connections.
