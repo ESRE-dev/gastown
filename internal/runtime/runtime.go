@@ -62,23 +62,37 @@ type startupPromptSession interface {
 }
 
 // SessionIDFromEnv returns the runtime session ID, if present.
-// It checks GT_SESSION_ID_ENV first, then resolves from the current agent's preset,
-// and falls back to CLAUDE_SESSION_ID for backwards compatibility.
+//
+// Resolution order:
+//  1. GT_SESSION_ID — direct session ID, any runtime
+//  2. GT_SESSION_ID_ENV — meta env var naming another env var
+//  3. GT_AGENT preset's SessionIDEnv (e.g., OPENCODE_SESSION_ID, CLAUDE_SESSION_ID)
+//  4. CLAUDE_SESSION_ID — backwards-compatible fallback ONLY when GT_AGENT is not set
+//
+// When GT_AGENT is set, the fallback to CLAUDE_SESSION_ID is skipped to prevent
+// cross-agent contamination (e.g., an OpenCode agent picking up a stale Claude session ID).
 func SessionIDFromEnv() string {
+	// 1. Direct session ID (highest priority, any runtime)
+	if id := os.Getenv("GT_SESSION_ID"); id != "" {
+		return id
+	}
+	// 2. Meta env var (GT_SESSION_ID_ENV names another env var)
 	if envName := os.Getenv("GT_SESSION_ID_ENV"); envName != "" {
 		if sessionID := os.Getenv(envName); sessionID != "" {
 			return sessionID
 		}
 	}
-	// Use the current agent's session ID env var from its preset
+	// 3. Current agent's preset SessionIDEnv
 	if agentName := os.Getenv("GT_AGENT"); agentName != "" {
 		if preset := config.GetAgentPresetByName(agentName); preset != nil && preset.SessionIDEnv != "" {
 			if sessionID := os.Getenv(preset.SessionIDEnv); sessionID != "" {
 				return sessionID
 			}
 		}
+		// GT_AGENT is set — don't fall back to another agent's env var
+		return ""
 	}
-	// Backwards-compatible fallback for sessions without GT_AGENT
+	// 4. Backwards-compatible fallback for sessions without GT_AGENT
 	return os.Getenv("CLAUDE_SESSION_ID")
 }
 

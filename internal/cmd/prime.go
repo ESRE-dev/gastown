@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -292,6 +293,14 @@ func handlePrimeHookMode(townRoot, cwd string) {
 	}
 	_ = os.Setenv("GT_SESSION_ID", sessionID)
 	_ = os.Setenv("CLAUDE_SESSION_ID", sessionID) // Legacy compatibility
+	// Also set the current agent's own session ID env var if configured,
+	// so downstream tools (e.g., gt costs) can discover the session ID
+	// via the preset's canonical env var.
+	if agentName := os.Getenv("GT_AGENT"); agentName != "" {
+		if preset := config.GetAgentPresetByName(agentName); preset != nil && preset.SessionIDEnv != "" {
+			_ = os.Setenv(preset.SessionIDEnv, sessionID)
+		}
+	}
 
 	// ZFC: Signal agent readiness via tmux env var (gt-sk5u).
 	// WaitForCommand polls for this instead of probing the process tree.
@@ -453,7 +462,7 @@ var memoryTypeLabels = map[string]string{
 	"feedback":  "Behavioral Rules (from user feedback)",
 	"user":      "User Context",
 	"project":   "Project Context",
-	"reference":  "Reference Links",
+	"reference": "Reference Links",
 	"general":   "General",
 }
 

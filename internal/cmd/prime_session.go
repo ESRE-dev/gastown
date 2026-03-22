@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/runtime"
@@ -30,13 +31,15 @@ type hookInput struct {
 // readHookSessionID reads session ID from available sources in hook mode.
 //
 // Priority (env vars first so non-Claude runtimes skip the stdin read entirely):
-//  1. GT_SESSION_ID / CLAUDE_SESSION_ID env var  — set by the hook command
-//  2. Stdin JSON (Claude Code format)            — Claude sends {"session_id":…,"source":…}
-//  3. Persisted .runtime/session_id              — written by a prior SessionStart hook
-//  4. Auto-generate UUID
+//  1. GT_SESSION_ID env var             — set by the hook command (any runtime)
+//  2. GT_AGENT preset's SessionIDEnv    — e.g., OPENCODE_SESSION_ID, CLAUDE_SESSION_ID
+//  3. CLAUDE_SESSION_ID env var         — backwards-compatible fallback ONLY when GT_AGENT unset
+//  4. Stdin JSON (Claude Code format)   — Claude sends {"session_id":…,"source":…}
+//  5. Persisted .runtime/session_id     — written by a prior SessionStart hook
+//  6. Auto-generate UUID
 //
 // Source is resolved from GT_HOOK_SOURCE env, stdin JSON, or empty.
-// Non-Claude runtimes (Gemini CLI, etc.) should set GT_SESSION_ID and
+// Non-Claude runtimes (Gemini CLI, OpenCode, etc.) should set GT_SESSION_ID and
 // GT_HOOK_SOURCE in their hook commands to get full --hook behavior with
 // zero stdin delay. Example:
 //
@@ -48,14 +51,26 @@ func readHookSessionID() (sessionID, source string) {
 	// Check env first so it's available even when stdin provides the session ID.
 	source = os.Getenv("GT_HOOK_SOURCE")
 
-	// 1. Environment variables (fast path — skips stdin read entirely)
+	// 1. GT_SESSION_ID (fast path — any runtime)
 	if id := os.Getenv("GT_SESSION_ID"); id != "" {
 		return id, source
 	}
-	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
-		return id, source
+
+	// 2. Current agent's preset SessionIDEnv (e.g., OPENCODE_SESSION_ID)
+	if agentName := os.Getenv("GT_AGENT"); agentName != "" {
+		if preset := config.GetAgentPresetByName(agentName); preset != nil && preset.SessionIDEnv != "" {
+			if id := os.Getenv(preset.SessionIDEnv); id != "" {
+				return id, source
+			}
+		}
+		// GT_AGENT set — skip Claude fallback, fall through to stdin/persisted/auto
+	} else {
+		// 3. No GT_AGENT — backwards-compatible Claude fallback
+		if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
+			return id, source
+		}
 	}
-	// 2. Try reading stdin JSON (Claude Code format).
+	// 4. Try reading stdin JSON (Claude Code format).
 	//    Checked before persisted file so a fresh Claude session always wins
 	//    over a potentially stale .runtime/session_id from a previous session.
 	if input := readStdinJSON(); input != nil {
@@ -69,13 +84,13 @@ func readHookSessionID() (sessionID, source string) {
 		}
 	}
 
-	// 3. Persisted session ID from a prior hook invocation (e.g., PreCompress
+	// 5. Persisted session ID from a prior hook invocation (e.g., PreCompress
 	//    reusing the session ID that SessionStart wrote to .runtime/session_id)
 	if id := ReadPersistedSessionID(); id != "" {
 		return id, source
 	}
 
-	// 4. Auto-generate
+	// 6. Auto-generate
 	return uuid.New().String(), source
 }
 

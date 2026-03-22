@@ -686,12 +686,18 @@ func TestBuildResumeArgs(t *testing.T) {
 			sessionID: "chat-789",
 			wantArgs:  "--resume chat-789",
 		},
-		// OpenCode: no resume support at all
+		// OpenCode: supports resume via --session and --continue
 		{
-			name:      "opencode rejected no resume support",
+			name:      "opencode last uses --continue",
 			agent:     "opencode",
 			sessionID: "last",
-			wantErr:   "does not support session resume",
+			wantArgs:  "--continue",
+		},
+		{
+			name:      "opencode specific ID uses --session with ID",
+			agent:     "opencode",
+			sessionID: "sess-abc123",
+			wantArgs:  "--session sess-abc123",
 		},
 		// Unknown agent
 		{

@@ -1142,7 +1142,7 @@ func resolveAgentConfigInternal(townRoot, rigPath string) *RuntimeConfig {
 	} else if townSettings.DefaultAgent != "" {
 		agentName = townSettings.DefaultAgent
 	} else {
-		agentName = "claude" // ultimate fallback
+		agentName = string(DefaultAgentPreset()) // ultimate fallback
 	}
 
 	rc := lookupAgentConfig(agentName, townSettings, rigSettings)
@@ -1207,7 +1207,7 @@ func resolveAgentConfigWithOverrideInternal(townRoot, rigPath, agentOverride str
 	} else if townSettings.DefaultAgent != "" {
 		agentName = townSettings.DefaultAgent
 	} else {
-		agentName = "claude" // ultimate fallback
+		agentName = string(DefaultAgentPreset()) // ultimate fallback
 	}
 
 	// If an override is requested, validate it exists
@@ -1390,9 +1390,12 @@ func ResolveWorkerAgentConfig(workerName, townRoot, rigPath string) *RuntimeConf
 // IsResolvedAgentClaude returns true if the RuntimeConfig represents a Claude agent.
 // Exported for use in witness/daemon code that needs to skip hardcoded
 // Claude start commands when a non-Claude agent is configured.
+// NOTE: nil consults DefaultAgentPreset() so that towns with a non-Claude
+// default agent get correct behavior even when callers pass nil (e.g. from
+// ResolveRoleAgentConfig returning nil on failure).
 func IsResolvedAgentClaude(rc *RuntimeConfig) bool {
 	if rc == nil {
-		return true // Default to Claude when config is unavailable
+		return DefaultAgentPreset() == AgentClaude
 	}
 	return isClaudeAgent(rc)
 }

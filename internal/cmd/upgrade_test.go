@@ -26,7 +26,6 @@ func TestGenerateCLAUDEMD(t *testing.T) {
 	}
 }
 
-
 func TestUpgradeCLAUDEMD_CreatesMissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -53,24 +52,36 @@ func TestUpgradeCLAUDEMD_CreatesMissingFile(t *testing.T) {
 		t.Error("CLAUDE.md content doesn't match expected template")
 	}
 
-	// Verify AGENTS.md symlink was created
+	// Verify AGENTS.md was created as a real file with same content
 	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
-	target, err := os.Readlink(agentsPath)
+	agentsData, err := os.ReadFile(agentsPath)
 	if err != nil {
-		t.Fatalf("AGENTS.md symlink not created: %v", err)
+		t.Fatalf("AGENTS.md not created: %v", err)
 	}
-	if target != "CLAUDE.md" {
-		t.Errorf("AGENTS.md symlink target = %q, want %q", target, "CLAUDE.md")
+	if string(agentsData) != expected {
+		t.Error("AGENTS.md content doesn't match CLAUDE.md template")
+	}
+	// Verify it's not a symlink
+	fi, err := os.Lstat(agentsPath)
+	if err != nil {
+		t.Fatalf("AGENTS.md Lstat failed: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("AGENTS.md should be a real file, not a symlink")
 	}
 }
 
 func TestUpgradeCLAUDEMD_UpToDate(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Write the expected content
+	// Write the expected content for both files
 	expected := generateCLAUDEMD()
 	claudePath := filepath.Join(tmpDir, "CLAUDE.md")
 	if err := os.WriteFile(claudePath, []byte(expected), 0644); err != nil {
+		t.Fatal(err)
+	}
+	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+	if err := os.WriteFile(agentsPath, []byte(expected), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,7 +91,7 @@ func TestUpgradeCLAUDEMD_UpToDate(t *testing.T) {
 	result := upgradeCLAUDEMD(tmpDir)
 
 	if result.changed != 0 {
-		t.Errorf("expected 0 changes for up-to-date CLAUDE.md, got %d", result.changed)
+		t.Errorf("expected 0 changes for up-to-date CLAUDE.md + AGENTS.md, got %d", result.changed)
 	}
 }
 
@@ -183,6 +194,123 @@ func TestUpgradeBeadsExempt(t *testing.T) {
 func TestUpgradeBranchCheckExempt(t *testing.T) {
 	if !branchCheckExemptCommands["upgrade"] {
 		t.Error("upgrade should be in branchCheckExemptCommands")
+	}
+}
+
+// TestUpgradeCLAUDEMD_MigratesAgentsSymlink verifies that an old AGENTS.md
+// symlink is replaced by a real file containing the expected CLAUDE.md content.
+func TestUpgradeCLAUDEMD_MigratesAgentsSymlink(t *testing.T) {
+
+	tmpDir := t.TempDir()
+
+	// Write CLAUDE.md with stale content so upgrade will rewrite it.
+	claudePath := filepath.Join(tmpDir, "CLAUDE.md")
+	if err := os.WriteFile(claudePath, []byte("stale content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create AGENTS.md as a symlink pointing to CLAUDE.md.
+	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+	if err := os.Symlink(claudePath, agentsPath); err != nil {
+		t.Fatal(err)
+	}
+
+	upgradeDryRun = false
+	upgradeVerbose = false
+	result := upgradeCLAUDEMD(tmpDir)
+
+	// Expect 2 changes: CLAUDE.md updated + AGENTS.md migrated from symlink.
+	if result.changed != 2 {
+		t.Errorf("expected 2 changes (CLAUDE.md update + AGENTS.md migrate), got %d", result.changed)
+	}
+
+	expected := generateCLAUDEMD()
+
+	// CLAUDE.md must be a real file with expected content.
+	claudeData, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("CLAUDE.md unreadable: %v", err)
+	}
+	if string(claudeData) != expected {
+		t.Errorf("CLAUDE.md content mismatch: want %q, got %q", expected, string(claudeData))
+	}
+
+	// AGENTS.md must be a real file (not a symlink) with expected content.
+	fi, err := os.Lstat(agentsPath)
+	if err != nil {
+		t.Fatalf("AGENTS.md Lstat failed: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("AGENTS.md should be a real file after migration, not a symlink")
+	}
+	agentsData, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("AGENTS.md unreadable: %v", err)
+	}
+	if string(agentsData) != expected {
+		t.Errorf("AGENTS.md content mismatch after migrate: want %q, got %q", expected, string(agentsData))
+	}
+}
+
+// TestUpgradeCLAUDEMD_UpToDate_CreatesAgentsMD verifies that when CLAUDE.md is
+// already up-to-date but AGENTS.md is absent, the upgrade creates AGENTS.md.
+func TestUpgradeCLAUDEMD_UpToDate_CreatesAgentsMD(t *testing.T) {
+
+	tmpDir := t.TempDir()
+
+	// Write CLAUDE.md with the expected (up-to-date) content but no AGENTS.md.
+	expected := generateCLAUDEMD()
+	claudePath := filepath.Join(tmpDir, "CLAUDE.md")
+	if err := os.WriteFile(claudePath, []byte(expected), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	upgradeDryRun = false
+	upgradeVerbose = false
+	result := upgradeCLAUDEMD(tmpDir)
+
+	// CLAUDE.md was up-to-date (no change for it), but AGENTS.md was created.
+	if result.changed != 1 {
+		t.Errorf("expected 1 change (AGENTS.md created), got %d", result.changed)
+	}
+
+	// AGENTS.md must exist as a real file with expected content.
+	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+	fi, err := os.Lstat(agentsPath)
+	if err != nil {
+		t.Fatalf("AGENTS.md not created: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("AGENTS.md should be a real file, not a symlink")
+	}
+	agentsData, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("AGENTS.md unreadable: %v", err)
+	}
+	if string(agentsData) != expected {
+		t.Errorf("AGENTS.md content mismatch: want %q, got %q", expected, string(agentsData))
+	}
+}
+
+// TestUpgradeCLAUDEMD_DryRun_NoAgentsMDCreated verifies that in dry-run mode
+// neither CLAUDE.md nor AGENTS.md is created on disk.
+func TestUpgradeCLAUDEMD_DryRun_NoAgentsMDCreated(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	upgradeDryRun = true
+	upgradeVerbose = false
+	defer func() { upgradeDryRun = false }()
+
+	_ = upgradeCLAUDEMD(tmpDir)
+
+	claudePath := filepath.Join(tmpDir, "CLAUDE.md")
+	if _, err := os.Stat(claudePath); !os.IsNotExist(err) {
+		t.Error("dry-run should not create CLAUDE.md on disk")
+	}
+
+	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+	if _, err := os.Stat(agentsPath); !os.IsNotExist(err) {
+		t.Error("dry-run should not create AGENTS.md on disk")
 	}
 }
 

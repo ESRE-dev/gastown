@@ -1,4 +1,8 @@
 // Package commands provides agent-agnostic command provisioning.
+//
+// Claude Code commands go to <configDir>/commands/<name>.md with YAML frontmatter
+// (description, allowed-tools, argument-hint). OpenCode commands go to
+// .opencode/skills/<name>/SKILL.md as auto-discoverable skills.
 package commands
 
 import (
@@ -12,6 +16,7 @@ import (
 )
 
 //go:embed bodies/*.md
+
 var bodiesFS embed.FS
 
 // Field represents a frontmatter key-value pair.
@@ -27,16 +32,6 @@ type Command struct {
 	AgentFields map[string][]Field
 }
 
-// getAgentConfigDir returns the config directory for an agent from the preset registry.
-// Returns empty string if the agent has no config directory.
-func getAgentConfigDir(agent string) string {
-	preset := config.GetAgentPresetByName(agent)
-	if preset == nil {
-		return ""
-	}
-	return preset.ConfigDir
-}
-
 // Commands is the registry of available commands.
 var Commands = []Command{
 	{
@@ -47,7 +42,7 @@ var Commands = []Command{
 				{"allowed-tools", "Bash(gt handoff:*)"},
 				{"argument-hint", "[message]"},
 			},
-			// opencode: no extra fields, just description
+			// opencode: no extra fields needed — uses skill format
 		},
 	},
 	{
@@ -62,7 +57,21 @@ var Commands = []Command{
 	},
 }
 
+// commandPath returns the filesystem path where a command file should be written
+// for a given agent. OpenCode uses skills; others use commands.
+func commandPath(workspacePath string, preset *config.AgentPresetInfo, name string) string {
+	if preset.Name == config.AgentOpenCode {
+		// OpenCode: skills at .opencode/skills/<name>/SKILL.md
+		// These are auto-discovered and available as slash commands.
+		return filepath.Join(workspacePath, ".opencode", "skills", name, "SKILL.md")
+	}
+	// Claude and others: <configDir>/commands/<name>.md
+	return filepath.Join(workspacePath, preset.ConfigDir, "commands", name+".md")
+}
+
 // BuildCommand assembles frontmatter + body for an agent.
+// OpenCode uses a simpler skill frontmatter (name + description only).
+// Claude uses the full frontmatter (description + allowed-tools + argument-hint).
 func BuildCommand(cmd Command, agent string) (string, error) {
 	body, err := bodiesFS.ReadFile("bodies/" + cmd.Name + ".md")
 	if err != nil {
@@ -71,11 +80,18 @@ func BuildCommand(cmd Command, agent string) (string, error) {
 
 	var b strings.Builder
 	b.WriteString("---\n")
-	b.WriteString(fmt.Sprintf("description: %s\n", cmd.Description))
 
-	if fields, ok := cmd.AgentFields[agent]; ok {
-		for _, f := range fields {
-			b.WriteString(fmt.Sprintf("%s: %s\n", f.Key, f.Value))
+	if strings.ToLower(agent) == string(config.AgentOpenCode) {
+		// OpenCode skill frontmatter: just name + description.
+		b.WriteString(fmt.Sprintf("name: %s\n", cmd.Name))
+		b.WriteString(fmt.Sprintf("description: %s\n", cmd.Description))
+	} else {
+		// Claude-style frontmatter.
+		b.WriteString(fmt.Sprintf("description: %s\n", cmd.Description))
+		if fields, ok := cmd.AgentFields[agent]; ok {
+			for _, f := range fields {
+				b.WriteString(fmt.Sprintf("%s: %s\n", f.Key, f.Value))
+			}
 		}
 	}
 
@@ -88,22 +104,22 @@ func BuildCommand(cmd Command, agent string) (string, error) {
 // ProvisionFor provisions commands for an agent.
 func ProvisionFor(workspacePath, agent string) error {
 	agent = strings.ToLower(agent)
-	configDir := getAgentConfigDir(agent)
-	if configDir == "" {
+	preset := config.GetAgentPresetByName(agent)
+	if preset == nil || preset.ConfigDir == "" {
 		return fmt.Errorf("unknown agent or no config dir: %s", agent)
 	}
 
-	dir := filepath.Join(workspacePath, configDir, "commands")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating dir: %w", err)
-	}
-
 	for _, cmd := range Commands {
-		path := filepath.Join(dir, cmd.Name+".md")
+		path := commandPath(workspacePath, preset, cmd.Name)
 
-		// Don't overwrite existing
+		// Don't overwrite existing.
 		if _, err := os.Stat(path); err == nil {
 			continue
+		}
+
+		// Ensure parent directory exists.
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return fmt.Errorf("creating dir for %s: %w", cmd.Name, err)
 		}
 
 		content, err := BuildCommand(cmd, agent)
@@ -122,16 +138,14 @@ func ProvisionFor(workspacePath, agent string) error {
 // MissingFor returns commands missing for an agent.
 func MissingFor(workspacePath, agent string) []string {
 	agent = strings.ToLower(agent)
-	configDir := getAgentConfigDir(agent)
-	if configDir == "" {
+	preset := config.GetAgentPresetByName(agent)
+	if preset == nil || preset.ConfigDir == "" {
 		return nil
 	}
 
-	dir := filepath.Join(workspacePath, configDir, "commands")
 	var missing []string
-
 	for _, cmd := range Commands {
-		path := filepath.Join(dir, cmd.Name+".md")
+		path := commandPath(workspacePath, preset, cmd.Name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			missing = append(missing, cmd.Name)
 		}
@@ -159,7 +173,8 @@ func Names() []string {
 	return names
 }
 
-// IsKnownAgent returns true if the agent has a config directory for command provisioning.
+// IsKnownAgent returns true if the agent has a preset with a config directory.
 func IsKnownAgent(agent string) bool {
-	return getAgentConfigDir(strings.ToLower(agent)) != ""
+	preset := config.GetAgentPresetByName(strings.ToLower(agent))
+	return preset != nil && preset.ConfigDir != ""
 }

@@ -502,3 +502,121 @@ func TestResolveSessionPrefix(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildSeanceForkArgs(t *testing.T) {
+	t.Run("claude fork args", func(t *testing.T) {
+		preset := config.GetAgentPresetByName(string(config.AgentClaude))
+		if preset == nil {
+			t.Fatal("claude preset not found")
+		}
+
+		args := buildSeanceForkArgs(preset, "session-abc123", "")
+		// Claude: --fork-session --resume session-abc123
+		expected := []string{"--fork-session", "--resume", "session-abc123"}
+		if len(args) != len(expected) {
+			t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+		}
+		for i, want := range expected {
+			if args[i] != want {
+				t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+			}
+		}
+	})
+
+	t.Run("claude fork args with prompt", func(t *testing.T) {
+		preset := config.GetAgentPresetByName(string(config.AgentClaude))
+		if preset == nil {
+			t.Fatal("claude preset not found")
+		}
+
+		args := buildSeanceForkArgs(preset, "session-abc123", "Where is X?")
+		// Claude: --fork-session --resume session-abc123 -p "Where is X?"
+		expected := []string{"--fork-session", "--resume", "session-abc123", "-p", "Where is X?"}
+		if len(args) != len(expected) {
+			t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+		}
+		for i, want := range expected {
+			if args[i] != want {
+				t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+			}
+		}
+	})
+
+	t.Run("opencode fork args", func(t *testing.T) {
+		preset := config.GetAgentPresetByName(string(config.AgentOpenCode))
+		if preset == nil {
+			t.Fatal("opencode preset not found")
+		}
+
+		args := buildSeanceForkArgs(preset, "ses_abc123", "")
+		// OpenCode: run --fork --session ses_abc123
+		expected := []string{"run", "--fork", "--session", "ses_abc123"}
+		if len(args) != len(expected) {
+			t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+		}
+		for i, want := range expected {
+			if args[i] != want {
+				t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+			}
+		}
+	})
+
+	t.Run("opencode fork args with prompt", func(t *testing.T) {
+		preset := config.GetAgentPresetByName(string(config.AgentOpenCode))
+		if preset == nil {
+			t.Fatal("opencode preset not found")
+		}
+
+		args := buildSeanceForkArgs(preset, "ses_abc123", "Where did you put X?")
+		// OpenCode: run --fork --session ses_abc123 "Where did you put X?"
+		expected := []string{"run", "--fork", "--session", "ses_abc123", "Where did you put X?"}
+		if len(args) != len(expected) {
+			t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+		}
+		for i, want := range expected {
+			if args[i] != want {
+				t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+			}
+		}
+	})
+
+	t.Run("agent without subcommand or fork flag", func(t *testing.T) {
+		preset := &config.AgentPresetInfo{
+			Name:       "test-agent",
+			ResumeFlag: "--resume",
+		}
+
+		args := buildSeanceForkArgs(preset, "session-123", "")
+		// Just: --resume session-123
+		expected := []string{"--resume", "session-123"}
+		if len(args) != len(expected) {
+			t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+		}
+		for i, want := range expected {
+			if args[i] != want {
+				t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+			}
+		}
+	})
+}
+
+func TestResolveSeanceCommand(t *testing.T) {
+	t.Run("returns preset with fork support", func(t *testing.T) {
+		preset, cmdPath, err := resolveSeanceCommand()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if preset == nil {
+			t.Fatal("expected non-nil preset")
+		}
+		if !preset.SupportsForkSession {
+			t.Error("returned preset does not support fork session")
+		}
+		if preset.ForkFlag == "" {
+			t.Error("returned preset has empty ForkFlag")
+		}
+		if cmdPath == "" {
+			t.Error("expected non-empty command path")
+		}
+	})
+}

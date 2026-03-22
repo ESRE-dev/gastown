@@ -105,11 +105,14 @@ type TownSettings struct {
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
+// The DefaultAgent is set from DefaultAgentPreset() so tests
+// (and future multi-runtime deployments) can override it via
+// SetDefaultAgentPreset without patching disk config.
 func NewTownSettings() *TownSettings {
 	return &TownSettings{
 		Type:         "town-settings",
 		Version:      CurrentTownSettingsVersion,
-		DefaultAgent: "claude",
+		DefaultAgent: string(DefaultAgentPreset()),
 		Agents:       make(map[string]*RuntimeConfig),
 		RoleAgents:   make(map[string]string),
 	}
@@ -881,7 +884,7 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 	}
 
 	if rc.Provider == "" {
-		rc.Provider = "claude"
+		rc.Provider = string(DefaultAgentPreset())
 	}
 
 	if rc.Command == "" {

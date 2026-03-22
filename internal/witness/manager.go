@@ -317,8 +317,8 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 		// start_command ("exec claude --dangerously-skip-permissions") strips
 		// these flags, breaking per-role model selection.
 		rc := config.ResolveRoleAgentConfig("witness", townRoot, rigPath)
-		if !config.IsResolvedAgentClaude(rc) || !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
-			// Non-Claude agent OR custom start_command: use TOML pattern
+		if !config.IsResolvedAgentClaude(rc) && !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
+			// Non-Claude agent AND custom start_command: use TOML pattern
 			// with template expansion.
 			cmd := beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName))
 			if strings.HasPrefix(cmd, "exec ") {

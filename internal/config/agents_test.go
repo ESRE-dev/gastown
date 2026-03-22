@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -933,9 +934,23 @@ func TestOpenCodeAgentPreset(t *testing.T) {
 		t.Error("opencode should support hooks")
 	}
 
-	// Check fork session (not supported)
-	if info.SupportsForkSession {
-		t.Error("opencode should not support fork session")
+	// Check fork session (supported via --fork flag)
+	if !info.SupportsForkSession {
+		t.Error("opencode should support fork session (--fork flag)")
+	}
+	if info.ForkFlag != "--fork" {
+		t.Errorf("opencode ForkFlag = %q, want --fork", info.ForkFlag)
+	}
+
+	// Check resume flags
+	if info.ResumeFlag != "--session" {
+		t.Errorf("opencode ResumeFlag = %q, want --session", info.ResumeFlag)
+	}
+	if info.ContinueFlag != "--continue" {
+		t.Errorf("opencode ContinueFlag = %q, want --continue", info.ContinueFlag)
+	}
+	if info.ResumeStyle != "flag" {
+		t.Errorf("opencode ResumeStyle = %q, want flag", info.ResumeStyle)
 	}
 
 	// Check NonInteractive config
@@ -1449,12 +1464,12 @@ func TestACPModes(t *testing.T) {
 	t.Cleanup(ResetRegistryForTesting)
 
 	tests := []struct {
-		name      string
-		rc        *RuntimeConfig
-		wantACP   bool
-		wantMode  string
-		wantCmd   string
-		wantArgs  []string
+		name     string
+		rc       *RuntimeConfig
+		wantACP  bool
+		wantMode string
+		wantCmd  string
+		wantArgs []string
 	}{
 		{
 			name: "native mode - claude-agent-acp",
@@ -1597,4 +1612,183 @@ func TestACPModeConstants(t *testing.T) {
 	if ACPModeFlag != "flag" {
 		t.Errorf("ACPModeFlag = %q, want flag", ACPModeFlag)
 	}
+}
+
+// TestDefaultAgentPreset_Initial verifies that the zero-value default is AgentClaude.
+// Cannot be parallel: reads/writes the package-level defaultPresetOverride.
+func TestDefaultAgentPreset_Initial(t *testing.T) {
+	// Reset to zero-value so we test the true default.
+	SetDefaultAgentPreset("")
+	defer SetDefaultAgentPreset("")
+
+	got := DefaultAgentPreset()
+	if got != AgentClaude {
+		t.Errorf("DefaultAgentPreset() with no override = %q, want %q", got, AgentClaude)
+	}
+}
+
+// TestSetDefaultAgentPreset exercises set/get round-trips via a table-driven approach.
+// Cannot be parallel: mutates a package-level global.
+func TestSetDefaultAgentPreset(t *testing.T) {
+	// Always leave the global in a clean state.
+	defer SetDefaultAgentPreset("")
+
+	tests := []struct {
+		name string
+		set  AgentPreset
+		want AgentPreset
+	}{
+		{
+			name: "default is AgentClaude when nothing is set",
+			set:  "",
+			want: AgentClaude,
+		},
+		{
+			name: "set to AgentOpenCode changes the default",
+			set:  AgentOpenCode,
+			want: AgentOpenCode,
+		},
+		{
+			name: "set to AgentGemini",
+			set:  AgentGemini,
+			want: AgentGemini,
+		},
+		{
+			name: "set to AgentCopilot",
+			set:  AgentCopilot,
+			want: AgentCopilot,
+		},
+		{
+			name: "empty string resets to AgentClaude",
+			set:  "",
+			want: AgentClaude,
+		},
+		{
+			name: "set back to AgentClaude explicitly",
+			set:  AgentClaude,
+			want: AgentClaude,
+		},
+	}
+
+	for _, tt := range tests {
+		// Subtests are sequential (not parallel) because they share global state.
+		t.Run(tt.name, func(t *testing.T) {
+			SetDefaultAgentPreset(tt.set)
+			got := DefaultAgentPreset()
+			if got != tt.want {
+				t.Errorf("after SetDefaultAgentPreset(%q): DefaultAgentPreset() = %q, want %q",
+					tt.set, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDefaultAgentPreset_SetThenReset ensures that setting a non-Claude preset
+// and then resetting with "" returns to AgentClaude.
+func TestDefaultAgentPreset_SetThenReset(t *testing.T) {
+	defer SetDefaultAgentPreset("")
+
+	SetDefaultAgentPreset(AgentOpenCode)
+	if got := DefaultAgentPreset(); got != AgentOpenCode {
+		t.Fatalf("after Set(AgentOpenCode): got %q, want %q", got, AgentOpenCode)
+	}
+
+	SetDefaultAgentPreset("")
+	if got := DefaultAgentPreset(); got != AgentClaude {
+		t.Fatalf("after Set(\"\"): got %q, want %q", got, AgentClaude)
+	}
+
+	// Set to Claude explicitly, then back to a different preset and reset again.
+	SetDefaultAgentPreset(AgentClaude)
+	if got := DefaultAgentPreset(); got != AgentClaude {
+		t.Fatalf("after Set(AgentClaude): got %q, want %q", got, AgentClaude)
+	}
+
+	SetDefaultAgentPreset(AgentAmp)
+	if got := DefaultAgentPreset(); got != AgentAmp {
+		t.Fatalf("after Set(AgentAmp): got %q, want %q", got, AgentAmp)
+	}
+
+	SetDefaultAgentPreset("")
+	if got := DefaultAgentPreset(); got != AgentClaude {
+		t.Fatalf("final reset: got %q, want %q", got, AgentClaude)
+	}
+}
+
+// TestDefaultAgentPreset_ConsistentReads verifies that multiple consecutive reads
+// without an intervening write always return the same value.
+func TestDefaultAgentPreset_ConsistentReads(t *testing.T) {
+	defer SetDefaultAgentPreset("")
+
+	SetDefaultAgentPreset(AgentGemini)
+
+	first := DefaultAgentPreset()
+	for i := 0; i < 100; i++ {
+		got := DefaultAgentPreset()
+		if got != first {
+			t.Fatalf("inconsistent read on iteration %d: got %q, want %q", i, got, first)
+		}
+	}
+}
+
+// TestDefaultAgentPreset_RapidSetGet exercises many sequential set/get cycles
+// to verify the mechanism stays consistent under rapid mutation.
+//
+// NOTE: defaultPresetOverride is a bare package-level variable with no mutex,
+// so truly concurrent set/get is racy by design (callers are expected to call
+// SetDefaultAgentPreset only at startup). This test therefore stays sequential
+// but does a high iteration count to surface any single-goroutine consistency
+// issues.
+func TestDefaultAgentPreset_RapidSetGet(t *testing.T) {
+	defer SetDefaultAgentPreset("")
+
+	presets := []AgentPreset{
+		AgentClaude, AgentOpenCode, AgentGemini,
+		AgentCopilot, AgentAmp, AgentPi, "",
+	}
+
+	for i := 0; i < 500; i++ {
+		p := presets[i%len(presets)]
+		SetDefaultAgentPreset(p)
+
+		want := p
+		if want == "" {
+			want = AgentClaude
+		}
+
+		got := DefaultAgentPreset()
+		if got != want {
+			t.Fatalf("iteration %d: Set(%q) then Get() = %q, want %q", i, p, got, want)
+		}
+	}
+}
+
+// TestDefaultAgentPreset_ConcurrentReadsOnly verifies that concurrent readers
+// see a consistent value when no writer is active. This is safe because a
+// single preset string is written once before the goroutines start.
+func TestDefaultAgentPreset_ConcurrentReadsOnly(t *testing.T) {
+	defer SetDefaultAgentPreset("")
+
+	SetDefaultAgentPreset(AgentOpenCode)
+
+	const goroutines = 20
+	const iterations = 200
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				got := DefaultAgentPreset()
+				if got != AgentOpenCode {
+					t.Errorf("concurrent read returned %q, want %q", got, AgentOpenCode)
+					return
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
 }

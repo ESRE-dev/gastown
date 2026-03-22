@@ -54,7 +54,9 @@ THE SEANCE (talk to predecessor):
   gt seance --talk <session-id>              # Interactive conversation
   gt seance --talk <id> -p "Where is X?"     # One-shot question
 
-The --talk flag spawns: claude --fork-session --resume <id>
+The --talk flag forks the session using the first agent that supports it:
+  - Claude: claude --fork-session --resume <id>
+  - OpenCode: opencode run --fork --session <id>
 This loads the predecessor's full context without modifying their session.
 
 Sessions are discovered from:
@@ -191,31 +193,43 @@ func runSeanceList() error {
 	return nil
 }
 
-// resolveSeanceCommand finds the command for an agent that supports --fork-session.
-// Returns the resolved command path, or error if no agent supports fork session.
-func resolveSeanceCommand() (string, error) {
+// resolveSeanceCommand finds the preset for an agent that supports fork session.
+// Returns the preset info and resolved command path, or error if no agent supports forking.
+func resolveSeanceCommand() (*config.AgentPresetInfo, string, error) {
+	// Prefer the configured default agent if it supports forking.
+	defaultPreset := config.GetAgentPreset(config.DefaultAgentPreset())
+	if defaultPreset != nil && defaultPreset.SupportsForkSession {
+		rc := config.RuntimeConfigFromPreset(defaultPreset.Name)
+		return defaultPreset, rc.Command, nil
+	}
+
+	// Fall back to the first fork-capable agent from the full preset list.
 	for _, name := range config.ListAgentPresets() {
 		preset := config.GetAgentPresetByName(name)
 		if preset != nil && preset.SupportsForkSession {
 			// Use RuntimeConfigFromPreset to resolve the actual command path
 			rc := config.RuntimeConfigFromPreset(preset.Name)
-			return rc.Command, nil
+			return preset, rc.Command, nil
 		}
 	}
-	return "", fmt.Errorf("no agent supports fork session (seance requires --fork-session)")
+	return nil, "", fmt.Errorf("no agent supports fork session (seance requires fork support)")
 }
 
 func runSeanceTalk(sessionID, prompt string) error {
-	// Resolve the agent command that supports fork session
-	agentCmd, err := resolveSeanceCommand()
+	// Resolve the agent that supports fork session
+	preset, agentCmd, err := resolveSeanceCommand()
 	if err != nil {
 		return err
 	}
 
-	// Clean up any orphaned symlinks from previous interrupted sessions
-	cleanupOrphanedSessionSymlinks()
+	isClaude := preset.Name == config.AgentClaude
 
-	// Find workspace root (needed for both prefix resolution and session symlinks)
+	// Claude-specific: clean up any orphaned symlinks from previous interrupted sessions
+	if isClaude {
+		cleanupOrphanedSessionSymlinks()
+	}
+
+	// Find workspace root (needed for prefix resolution and Claude session symlinks)
 	townRoot, _ := workspace.FindFromCwd()
 
 	// Resolve prefix to full session ID if needed
@@ -232,28 +246,30 @@ func runSeanceTalk(sessionID, prompt string) error {
 	}
 
 	fmt.Printf("%s Summoning session %s...\n\n", style.Bold.Render("🔮"), sessionID)
-	cleanup, err := symlinkSessionToCurrentAccount(townRoot, sessionID)
-	if err != nil {
-		// Not fatal - session might already be in current account
-		fmt.Printf("%s\n", style.Dim.Render("Note: "+err.Error()))
-	}
-	if cleanup != nil {
-		defer cleanup()
+
+	// Claude-specific: symlink session to current account for cross-account access
+	if isClaude {
+		cleanup, err := symlinkSessionToCurrentAccount(townRoot, sessionID)
+		if err != nil {
+			// Not fatal - session might already be in current account
+			fmt.Printf("%s\n", style.Dim.Render("Note: "+err.Error()))
+		}
+		if cleanup != nil {
+			defer cleanup()
+		}
 	}
 
-	// Build the command
-	args := []string{"--fork-session", "--resume", sessionID}
+	// Build fork args from preset info
+	args := buildSeanceForkArgs(preset, sessionID, prompt)
 
-	// Clear CLAUDECODE env var so the subprocess doesn't trigger the nested
-	// session guard. Seance is intentionally spawning a new Claude Code
-	// instance to read a predecessor's context — not a true nested session.
-	env := clearClaudeCodeEnv(os.Environ())
+	// Build environment — clear agent-specific nesting env vars
+	env := os.Environ()
+	if isClaude {
+		env = clearClaudeCodeEnv(env)
+	}
 
 	if prompt != "" {
-		// One-shot mode: -p flag (boolean) makes claude print and exit,
-		// prompt is a positional argument at the end.
-		args = append(args, "-p", prompt)
-
+		// One-shot mode
 		cmd := exec.Command(agentCmd, args...)
 		cmd.Env = env
 		cmd.Stdout = os.Stdout
@@ -286,6 +302,42 @@ func runSeanceTalk(sessionID, prompt string) error {
 	}
 
 	return nil
+}
+
+// buildSeanceForkArgs constructs the command-line arguments for forking a session.
+// The args vary by agent:
+//   - Claude: --fork-session --resume <id> [-p <prompt>]
+//   - OpenCode: run --fork --session <id> [<prompt>]
+func buildSeanceForkArgs(preset *config.AgentPresetInfo, sessionID, prompt string) []string {
+	var args []string
+
+	// Add subcommand if the agent requires one (e.g., "run" for opencode)
+	if preset.NonInteractive != nil && preset.NonInteractive.Subcommand != "" {
+		args = append(args, preset.NonInteractive.Subcommand)
+	}
+
+	// Add fork flag (e.g., "--fork-session" for Claude, "--fork" for OpenCode)
+	if preset.ForkFlag != "" {
+		args = append(args, preset.ForkFlag)
+	}
+
+	// Add session ID via resume flag (e.g., "--resume <id>" for Claude, "--session <id>" for OpenCode)
+	if preset.ResumeFlag != "" {
+		args = append(args, preset.ResumeFlag, sessionID)
+	}
+
+	// Add prompt for one-shot mode
+	if prompt != "" {
+		if preset.Name == config.AgentClaude {
+			// Claude uses -p flag for print-and-exit mode
+			args = append(args, "-p", prompt)
+		} else {
+			// Other agents: pass prompt as positional arg
+			args = append(args, prompt)
+		}
+	}
+
+	return args
 }
 
 // clearClaudeCodeEnv returns a copy of the environment with Claude Code

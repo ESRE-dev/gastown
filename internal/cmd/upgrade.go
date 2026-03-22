@@ -169,7 +169,7 @@ func upgradeDoctor(townRoot string) upgradeResult {
 	return result
 }
 
-// upgradeCLAUDEMD syncs the town root CLAUDE.md from the embedded template.
+// upgradeCLAUDEMD syncs the town root CLAUDE.md and AGENTS.md from the embedded template.
 func upgradeCLAUDEMD(townRoot string) upgradeResult {
 	result := upgradeResult{step: "CLAUDE.md sync"}
 
@@ -185,41 +185,70 @@ func upgradeCLAUDEMD(townRoot string) upgradeResult {
 		return result
 	}
 
-	if string(current) == expected {
-		fmt.Printf("     %s CLAUDE.md %s\n", style.SuccessPrefix, style.Dim.Render("up-to-date"))
-		return result
-	}
+	claudeUpToDate := string(current) == expected
 
-	if upgradeDryRun {
+	if claudeUpToDate {
+		fmt.Printf("     %s CLAUDE.md %s\n", style.SuccessPrefix, style.Dim.Render("up-to-date"))
+	} else if upgradeDryRun {
 		if os.IsNotExist(err) {
 			fmt.Printf("     %s CLAUDE.md %s\n", style.WarningPrefix, style.Dim.Render("would create"))
 		} else {
 			fmt.Printf("     %s CLAUDE.md %s\n", style.WarningPrefix, style.Dim.Render("would update"))
 		}
 		result.changed = 1
-		return result
-	}
-
-	if err := os.WriteFile(claudePath, []byte(expected), 0644); err != nil {
-		result.details = append(result.details, fmt.Sprintf("error writing: %v", err))
-		fmt.Printf("     %s Could not write CLAUDE.md: %v\n", style.ErrorPrefix, err)
-		return result
-	}
-
-	if os.IsNotExist(err) {
-		fmt.Printf("     %s CLAUDE.md %s\n", style.SuccessPrefix, style.Dim.Render("created"))
 	} else {
-		fmt.Printf("     %s CLAUDE.md %s\n", style.SuccessPrefix, style.Dim.Render("updated"))
-	}
-	result.changed = 1
+		if writeErr := os.WriteFile(claudePath, []byte(expected), 0644); writeErr != nil {
+			result.details = append(result.details, fmt.Sprintf("error writing: %v", writeErr))
+			fmt.Printf("     %s Could not write CLAUDE.md: %v\n", style.ErrorPrefix, writeErr)
+			return result
+		}
 
-	// Also ensure AGENTS.md symlink
-	agentsPath := filepath.Join(townRoot, "AGENTS.md")
-	if _, err := os.Lstat(agentsPath); os.IsNotExist(err) {
-		if err := os.Symlink("CLAUDE.md", agentsPath); err != nil {
-			result.details = append(result.details, fmt.Sprintf("AGENTS.md symlink error: %v", err))
+		if os.IsNotExist(err) {
+			fmt.Printf("     %s CLAUDE.md %s\n", style.SuccessPrefix, style.Dim.Render("created"))
 		} else {
-			fmt.Printf("     %s AGENTS.md %s\n", style.SuccessPrefix, style.Dim.Render("symlink created"))
+			fmt.Printf("     %s CLAUDE.md %s\n", style.SuccessPrefix, style.Dim.Render("updated"))
+		}
+		result.changed = 1
+	}
+
+	// Also ensure AGENTS.md is a real file with same content (not a symlink).
+	// OpenCode and other runtimes read AGENTS.md natively.
+	agentsPath := filepath.Join(townRoot, "AGENTS.md")
+	agentsFi, agentsErr := os.Lstat(agentsPath)
+	writeAgents := false
+	agentsDoneVerb := "synced"
+	agentsDryVerb := "sync"
+
+	if os.IsNotExist(agentsErr) {
+		writeAgents = true
+		agentsDoneVerb = "created"
+		agentsDryVerb = "create"
+	} else if agentsErr == nil && agentsFi.Mode()&os.ModeSymlink != 0 {
+		// Migrate old symlink to real file.
+		if !upgradeDryRun {
+			os.Remove(agentsPath)
+		}
+		writeAgents = true
+		agentsDoneVerb = "migrated from symlink"
+		agentsDryVerb = "migrate from symlink"
+	} else if agentsErr == nil {
+		// Real file exists — check if content matches.
+		agentsCurrent, readErr := os.ReadFile(agentsPath)
+		if readErr == nil && string(agentsCurrent) != expected {
+			writeAgents = true
+			agentsDoneVerb = "updated"
+			agentsDryVerb = "update"
+		}
+	}
+
+	if writeAgents {
+		if upgradeDryRun {
+			fmt.Printf("     %s AGENTS.md %s\n", style.WarningPrefix, style.Dim.Render("would "+agentsDryVerb))
+		} else if err := os.WriteFile(agentsPath, []byte(expected), 0644); err != nil {
+			result.details = append(result.details, fmt.Sprintf("AGENTS.md write error: %v", err))
+			fmt.Printf("     %s Could not write AGENTS.md: %v\n", style.ErrorPrefix, err)
+		} else {
+			fmt.Printf("     %s AGENTS.md %s\n", style.SuccessPrefix, style.Dim.Render(agentsDoneVerb))
 			result.changed++
 		}
 	}

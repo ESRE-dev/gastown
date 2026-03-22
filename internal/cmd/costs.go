@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agentlog"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
@@ -39,7 +40,6 @@ var (
 	digestYesterday bool
 	digestDate      string
 	digestDryRun    bool
-
 )
 
 var costsCmd = &cobra.Command{
@@ -171,8 +171,8 @@ type TranscriptMessage struct {
 
 // TranscriptMessageBody contains the message content and usage info.
 type TranscriptMessageBody struct {
-	Model string          `json:"model"`
-	Role  string          `json:"role"`
+	Model string           `json:"model"`
+	Role  string           `json:"role"`
 	Usage *TranscriptUsage `json:"usage,omitempty"`
 }
 
@@ -963,9 +963,20 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Extract cost from Claude transcript
+	// Extract cost from agent transcript/database.
+	// OpenCode stores per-message costs in its SQLite DB; Claude uses JSONL transcripts.
 	var cost float64
-	if workDir != "" {
+	agentName := strings.ToLower(os.Getenv("GT_AGENT"))
+	if agentName == string(config.AgentOpenCode) {
+		var err error
+		cost, err = agentlog.OpenCodeSessionCost(workDir)
+		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not extract OpenCode cost: %v\n", err)
+			}
+			cost = 0.0
+		}
+	} else if workDir != "" {
 		var err error
 		cost, err = extractCostFromWorkDir(workDir)
 		if err != nil {
@@ -1394,4 +1405,3 @@ func deleteSessionCostEntries(targetDate time.Time) (int, error) {
 
 	return deletedCount, nil
 }
-

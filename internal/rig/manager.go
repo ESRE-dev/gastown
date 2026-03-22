@@ -14,11 +14,11 @@ import (
 	"unicode"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -227,16 +227,16 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 
 // AddRigOptions configures rig creation.
 type AddRigOptions struct {
-	Name            string   // Rig name (directory name)
-	GitURL          string   // Repository URL (fetch/pull)
-	PushURL         string   // Optional push URL (fork for read-only upstreams)
-	UpstreamURL     string   // Optional upstream URL (for fork workflows)
-	BeadsPrefix     string   // Beads issue prefix (defaults to derived from name)
-	LocalRepo       string   // Optional local repo for reference clones
-	DefaultBranch   string   // Default branch (defaults to auto-detected from remote)
-	SkipDoltCheck   bool     // Skip Dolt server availability check (for tests with mocked beads)
-	CloneFilter     string   // Git clone filter spec (e.g. "blob:none", "tree:0") for partial clones
-	SparseCheckout  []string // Sparse checkout paths (cone mode); empty means no sparse checkout
+	Name           string   // Rig name (directory name)
+	GitURL         string   // Repository URL (fetch/pull)
+	PushURL        string   // Optional push URL (fork for read-only upstreams)
+	UpstreamURL    string   // Optional upstream URL (for fork workflows)
+	BeadsPrefix    string   // Beads issue prefix (defaults to derived from name)
+	LocalRepo      string   // Optional local repo for reference clones
+	DefaultBranch  string   // Default branch (defaults to auto-detected from remote)
+	SkipDoltCheck  bool     // Skip Dolt server availability check (for tests with mocked beads)
+	CloneFilter    string   // Git clone filter spec (e.g. "blob:none", "tree:0") for partial clones
+	SparseCheckout []string // Sparse checkout paths (cone mode); empty means no sparse checkout
 }
 
 func resolveLocalRepo(path, gitURL string) (string, string) {
@@ -751,7 +751,11 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 			fmt.Printf("  %s Could not scaffold polecat settings: %v\n", "!", err)
 		}
 	}
-	if err := commands.ProvisionFor(polecatsPath, "claude"); err != nil {
+	provisionAgent := "claude" // fallback
+	if defaultPreset != nil {
+		provisionAgent = string(defaultPreset.Name)
+	}
+	if err := commands.ProvisionFor(polecatsPath, provisionAgent); err != nil {
 		// Non-fatal: commands are convenience, not critical
 		fmt.Printf("  %s Could not scaffold polecat commands: %v\n", "!", err)
 	}

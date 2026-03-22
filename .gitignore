@@ -77,3 +77,13 @@ result
 
 # Gas Town (added by gt)
 __pycache__/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
+
+# Symlinked repos
+opencode
+
+# Scratch directory for investigation notes
+scratch/

@@ -1990,6 +1990,35 @@ func TestIsClaudeAgent(t *testing.T) {
 	}
 }
 
+func TestIsResolvedAgentClaude_NilRespectsDefault(t *testing.T) {
+	// NOT parallel: mutates global defaultPresetOverride.
+
+	// Save and restore the default preset override.
+	original := DefaultAgentPreset()
+	t.Cleanup(func() { SetDefaultAgentPreset(original) })
+
+	// When the default is Claude, nil should return true.
+	SetDefaultAgentPreset(AgentClaude)
+	if got := IsResolvedAgentClaude(nil); !got {
+		t.Errorf("IsResolvedAgentClaude(nil) with default=claude: got %v, want true", got)
+	}
+
+	// When the default is a non-Claude agent, nil should return false.
+	SetDefaultAgentPreset(AgentCodex)
+	if got := IsResolvedAgentClaude(nil); got {
+		t.Errorf("IsResolvedAgentClaude(nil) with default=codex: got %v, want false", got)
+	}
+
+	// Non-nil still delegates to isClaudeAgent regardless of default.
+	SetDefaultAgentPreset(AgentCodex)
+	if got := IsResolvedAgentClaude(&RuntimeConfig{Provider: "claude"}); !got {
+		t.Errorf("IsResolvedAgentClaude(claude provider) with default=codex: got %v, want true", got)
+	}
+	if got := IsResolvedAgentClaude(&RuntimeConfig{Provider: "codex"}); got {
+		t.Errorf("IsResolvedAgentClaude(codex provider) with default=codex: got %v, want false", got)
+	}
+}
+
 func TestWithRoleSettingsFlag_SkipsNonClaude(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()

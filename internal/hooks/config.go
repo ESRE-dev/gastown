@@ -379,6 +379,10 @@ func ComputeExpected(target string) (*HooksConfig, error) {
 	return result, nil
 }
 
+// Deprecated: use HookInstaller.DiscoverTargets() instead. This standalone function
+// only discovers Claude Code .claude/settings.json targets. The HookInstaller interface
+// method handles all agent runtimes (OpenCode plugins, Copilot hooks, etc.).
+//
 // DiscoverTargets finds all managed .claude/settings.json locations in the workspace.
 // Settings are installed in gastown-managed parent directories and passed to Claude Code
 // via --settings flag. Crew members in a rig share one settings file, as do polecats.

@@ -97,54 +97,97 @@ func (c *TownCLAUDEmdCheck) Run(ctx *CheckContext) *CheckResult {
 
 // Fix updates the town-root CLAUDE.md with missing sections from the
 // embedded template while preserving user customizations.
+// It also ensures AGENTS.md exists as a real file (not a symlink) with matching content.
 func (c *TownCLAUDEmdCheck) Fix(ctx *CheckContext) error {
 	claudePath := filepath.Join(ctx.TownRoot, "CLAUDE.md")
 	canonical := templates.TownRootCLAUDEmd()
 
+	var finalContent string
+
 	// If file is missing, create it from the canonical template
 	if c.fileMissing {
-		return os.WriteFile(claudePath, []byte(canonical), 0644)
-	}
+		finalContent = canonical
+		if err := os.WriteFile(claudePath, []byte(finalContent), 0644); err != nil {
+			return err
+		}
+	} else if len(c.missingSections) > 0 {
+		// File exists but is missing sections — append them
+		data, err := os.ReadFile(claudePath)
+		if err != nil {
+			return fmt.Errorf("reading CLAUDE.md: %w", err)
+		}
+		current := string(data)
 
-	// File exists but is missing sections — append them
-	if len(c.missingSections) == 0 {
-		return nil
-	}
+		// Parse canonical content into H2 sections
+		canonicalSections := parseH2Sections(canonical)
 
-	// Read current content
-	data, err := os.ReadFile(claudePath)
-	if err != nil {
-		return fmt.Errorf("reading CLAUDE.md: %w", err)
-	}
-	current := string(data)
+		// For each missing section, find it in the canonical and append
+		var toAppend strings.Builder
+		for _, missing := range c.missingSections {
+			for _, cs := range canonicalSections {
+				if strings.Contains(cs.content, missing.Heading) {
+					toAppend.WriteString("\n")
+					toAppend.WriteString(cs.content)
+					break
+				}
+			}
+		}
 
-	// Parse canonical content into H2 sections
-	canonicalSections := parseH2Sections(canonical)
-
-	// For each missing section, find it in the canonical and append
-	var toAppend strings.Builder
-	for _, missing := range c.missingSections {
-		// Find the H2 section that contains this heading
-		for _, cs := range canonicalSections {
-			if strings.Contains(cs.content, missing.Heading) {
-				toAppend.WriteString("\n")
-				toAppend.WriteString(cs.content)
-				break
+		if toAppend.Len() > 0 {
+			if !strings.HasSuffix(current, "\n") {
+				current += "\n"
+			}
+			finalContent = current + toAppend.String()
+			if err := os.WriteFile(claudePath, []byte(finalContent), 0644); err != nil {
+				return err
 			}
 		}
 	}
 
-	if toAppend.Len() == 0 {
-		return nil
+	// Ensure AGENTS.md is a real file (not a symlink) with matching content.
+	// Read whatever CLAUDE.md now contains as the source of truth.
+	if finalContent == "" {
+		data, err := os.ReadFile(claudePath)
+		if err != nil {
+			return fmt.Errorf("reading CLAUDE.md for AGENTS.md sync: %w", err)
+		}
+		finalContent = string(data)
 	}
 
-	// Ensure current content ends with a newline before appending
-	if !strings.HasSuffix(current, "\n") {
-		current += "\n"
+	return syncAgentsMD(ctx.TownRoot, finalContent)
+}
+
+// syncAgentsMD ensures AGENTS.md exists as a real file with the given content.
+// Replaces old symlinks with real files for OpenCode compatibility.
+func syncAgentsMD(townRoot, content string) error {
+	agentsPath := filepath.Join(townRoot, "AGENTS.md")
+
+	fi, err := os.Lstat(agentsPath)
+	if os.IsNotExist(err) {
+		return os.WriteFile(agentsPath, []byte(content), 0644)
+	}
+	if err != nil {
+		return fmt.Errorf("checking AGENTS.md: %w", err)
 	}
 
-	updated := current + toAppend.String()
-	return os.WriteFile(claudePath, []byte(updated), 0644)
+	// Replace old symlink with real file.
+	if fi.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(agentsPath); err != nil {
+			return fmt.Errorf("removing AGENTS.md symlink: %w", err)
+		}
+		return os.WriteFile(agentsPath, []byte(content), 0644)
+	}
+
+	// Real file exists — update if content differs.
+	existing, err := os.ReadFile(agentsPath)
+	if err != nil {
+		return fmt.Errorf("reading AGENTS.md: %w", err)
+	}
+	if string(existing) != content {
+		return os.WriteFile(agentsPath, []byte(content), 0644)
+	}
+
+	return nil
 }
 
 // h2Section represents a section of markdown delimited by H2 headings.

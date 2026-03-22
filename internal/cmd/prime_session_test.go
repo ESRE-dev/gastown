@@ -77,7 +77,65 @@ func TestReadHookSessionID_SourceFromEnv(t *testing.T) {
 	}
 }
 
-// TestReadHookSessionID_AutoGeneratesFallback verifies a UUID is generated
+// TestReadHookSessionID_PresetSessionIDEnv verifies OPENCODE_SESSION_ID is used
+// when GT_AGENT=opencode and GT_SESSION_ID is unset.
+func TestReadHookSessionID_PresetSessionIDEnv(t *testing.T) {
+	want := "oc-hook-abc"
+	t.Setenv("GT_AGENT", "opencode")
+	t.Setenv("OPENCODE_SESSION_ID", want)
+	t.Setenv("GT_SESSION_ID", "")
+	t.Setenv("CLAUDE_SESSION_ID", "")
+
+	id, _ := readHookSessionID()
+	if id != want {
+		t.Errorf("readHookSessionID() = %q, want %q (OPENCODE_SESSION_ID should be used for opencode agent)", id, want)
+	}
+}
+
+// TestReadHookSessionID_GTAgentBlocksClaudeFallback verifies that when GT_AGENT=opencode,
+// CLAUDE_SESSION_ID is NOT used even as a fallback. The function should auto-generate a UUID.
+func TestReadHookSessionID_GTAgentBlocksClaudeFallback(t *testing.T) {
+	t.Setenv("GT_AGENT", "opencode")
+	t.Setenv("CLAUDE_SESSION_ID", "claude-should-not-use")
+	t.Setenv("GT_SESSION_ID", "")
+	t.Setenv("OPENCODE_SESSION_ID", "")
+
+	// Change to a temp dir without .runtime/session_id so persisted file doesn't interfere
+	dir := t.TempDir()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	id, _ := readHookSessionID()
+	if id == "claude-should-not-use" {
+		t.Error("readHookSessionID() returned CLAUDE_SESSION_ID but GT_AGENT=opencode — cross-agent contamination")
+	}
+	// Should be an auto-generated UUID (36 chars)
+	if len(id) != 36 {
+		t.Errorf("auto-generated id %q doesn't look like a UUID (len=%d), want 36", id, len(id))
+	}
+}
+
+// TestReadHookSessionID_GTSessionIDOverridesPreset verifies GT_SESSION_ID takes priority
+// over the agent preset's SessionIDEnv.
+func TestReadHookSessionID_GTSessionIDOverridesPreset(t *testing.T) {
+	want := "direct-id"
+	t.Setenv("GT_SESSION_ID", want)
+	t.Setenv("GT_AGENT", "opencode")
+	t.Setenv("OPENCODE_SESSION_ID", "oc-id")
+	t.Setenv("CLAUDE_SESSION_ID", "")
+
+	id, _ := readHookSessionID()
+	if id != want {
+		t.Errorf("readHookSessionID() = %q, want %q (GT_SESSION_ID should override preset)", id, want)
+	}
+}
+
 // when no env vars, stdin, or persisted file are available.
 func TestReadHookSessionID_AutoGeneratesFallback(t *testing.T) {
 	t.Setenv("GT_SESSION_ID", "")

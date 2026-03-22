@@ -52,19 +52,19 @@ type Templates struct {
 
 // RoleData contains information for rendering role contexts.
 type RoleData struct {
-	Role           string   // mayor, witness, refinery, polecat, crew, deacon
-	RigName        string   // e.g., "greenplace"
-	TownRoot       string   // e.g., "/Users/steve/ai"
-	TownName       string   // e.g., "ai" - the town identifier for session names
-	WorkDir        string   // current working directory
-	DefaultBranch  string   // default branch for merges (e.g., "main", "develop")
-	Polecat        string   // polecat name (for polecat role)
-	Polecats       []string // list of polecats (for witness role)
-	DogName        string   // dog name (for dog role)
-	BeadsDir       string   // BEADS_DIR path
-	IssuePrefix    string   // beads issue prefix
-	MayorSession   string   // e.g., "gt-ai-mayor" - dynamic mayor session name
-	DeaconSession  string   // e.g., "gt-ai-deacon" - dynamic deacon session name
+	Role          string   // mayor, witness, refinery, polecat, crew, deacon
+	RigName       string   // e.g., "greenplace"
+	TownRoot      string   // e.g., "/Users/steve/ai"
+	TownName      string   // e.g., "ai" - the town identifier for session names
+	WorkDir       string   // current working directory
+	DefaultBranch string   // default branch for merges (e.g., "main", "develop")
+	Polecat       string   // polecat name (for polecat role)
+	Polecats      []string // list of polecats (for witness role)
+	DogName       string   // dog name (for dog role)
+	BeadsDir      string   // BEADS_DIR path
+	IssuePrefix   string   // beads issue prefix
+	MayorSession  string   // e.g., "gt-ai-mayor" - dynamic mayor session name
+	DeaconSession string   // e.g., "gt-ai-deacon" - dynamic deacon session name
 }
 
 // SpawnData contains information for spawn assignment messages.
@@ -178,12 +178,29 @@ func (t *Templates) MessageNames() []string {
 // Existing files are preserved to respect user customizations.
 func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSession string) (bool, error) {
 	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
+	agentsPath := filepath.Join(mayorDir, "AGENTS.md")
 
-	// Check if file already exists - preserve user customizations
+	// Check if both files already exist - preserve user customizations.
+	claudeExists := false
 	if _, err := os.Stat(claudePath); err == nil {
-		return false, nil // File exists, preserve it
+		claudeExists = true
 	} else if !os.IsNotExist(err) {
-		return false, err // Unexpected error
+		return false, err
+	}
+	agentsExists := false
+	if fi, err := os.Lstat(agentsPath); err == nil {
+		// A symlink counts as "not existing" for our purposes — we'll replace it.
+		if fi.Mode()&os.ModeSymlink != 0 {
+			os.Remove(agentsPath)
+		} else {
+			agentsExists = true
+		}
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+
+	if claudeExists && agentsExists {
+		return false, nil // Both exist, preserve them
 	}
 
 	tmpl, err := New()
@@ -205,7 +222,21 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 		return false, err
 	}
 
-	return true, os.WriteFile(claudePath, []byte(content), 0644)
+	anyCreated := false
+	if !claudeExists {
+		if err := os.WriteFile(claudePath, []byte(content), 0644); err != nil {
+			return false, err
+		}
+		anyCreated = true
+	}
+	if !agentsExists {
+		if err := os.WriteFile(agentsPath, []byte(content), 0644); err != nil {
+			return anyCreated, err
+		}
+		anyCreated = true
+	}
+
+	return anyCreated, nil
 }
 
 // ProvisionCommands creates the .claude/commands/ directory with standard slash commands.

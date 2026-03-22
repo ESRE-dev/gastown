@@ -22,6 +22,11 @@ type AgentEvent struct {
 	Content         string    // text content; empty for "usage" events
 	Timestamp       time.Time // original timestamp from the conversation log
 
+	// Model identification — populated by adapters that have this info (e.g. OpenCode).
+	// Empty for adapters that don't expose model metadata (e.g. Claude Code JSONL).
+	ModelID    string // model identifier (e.g. "claude-sonnet-4-20250514")
+	ProviderID string // provider identifier (e.g. "anthropic")
+
 	// Token usage fields — non-zero only for EventType == "usage".
 	// One "usage" event is emitted per assistant turn (not per content block).
 	InputTokens         int // input_tokens from Claude API usage

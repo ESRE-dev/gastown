@@ -317,3 +317,103 @@ This is a regular project CLAUDE.md, not Gas Town.
 		t.Error("non-Gas Town file should not be recognized as identity anchor")
 	}
 }
+
+// TestTownCLAUDEmdCheck_Fix_SyncsAgentsMD verifies that Fix creates both
+// CLAUDE.md and AGENTS.md when CLAUDE.md is missing.
+func TestTownCLAUDEmdCheck_Fix_SyncsAgentsMD(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	check := NewTownCLAUDEmdCheck()
+	result := check.Run(ctx)
+	if result.Status != StatusError {
+		t.Fatalf("expected StatusError for missing CLAUDE.md, got %v", result.Status)
+	}
+
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix returned error: %v", err)
+	}
+
+	// CLAUDE.md must exist.
+	claudePath := filepath.Join(tmpDir, "CLAUDE.md")
+	claudeData, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("CLAUDE.md not created by Fix: %v", err)
+	}
+	if len(claudeData) == 0 {
+		t.Fatal("CLAUDE.md is empty after Fix")
+	}
+
+	// AGENTS.md must exist as a real file with the same content.
+	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+	fi, err := os.Lstat(agentsPath)
+	if err != nil {
+		t.Fatalf("AGENTS.md not created by Fix: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("AGENTS.md should be a real file, not a symlink")
+	}
+	agentsData, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("reading AGENTS.md: %v", err)
+	}
+	if string(agentsData) != string(claudeData) {
+		t.Error("AGENTS.md content should match CLAUDE.md content after Fix")
+	}
+}
+
+// TestSyncAgentsMD_ReplacesSymlink verifies that syncAgentsMD replaces an
+// existing AGENTS.md symlink with a real file containing the given content.
+func TestSyncAgentsMD_ReplacesSymlink(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create a target file so the symlink is valid.
+	targetPath := filepath.Join(tmpDir, "CLAUDE.md")
+	if err := os.WriteFile(targetPath, []byte("original content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create AGENTS.md as a symlink (old behaviour).
+	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+	if err := os.Symlink(targetPath, agentsPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Confirm it is a symlink before calling syncAgentsMD.
+	if fi, err := os.Lstat(agentsPath); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("precondition: AGENTS.md should be a symlink")
+	}
+
+	newContent := "new synced content\n"
+	if err := syncAgentsMD(tmpDir, newContent); err != nil {
+		t.Fatalf("syncAgentsMD returned error: %v", err)
+	}
+
+	// AGENTS.md must now be a real file.
+	fi, err := os.Lstat(agentsPath)
+	if err != nil {
+		t.Fatalf("AGENTS.md Lstat after sync: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("AGENTS.md should be a real file after syncAgentsMD, not a symlink")
+	}
+
+	// Content must be the new content.
+	data, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("reading AGENTS.md after sync: %v", err)
+	}
+	if string(data) != newContent {
+		t.Errorf("AGENTS.md content = %q, want %q", string(data), newContent)
+	}
+
+	// The original target file must be untouched.
+	origData, _ := os.ReadFile(targetPath)
+	if string(origData) != "original content\n" {
+		t.Error("syncAgentsMD should not modify the symlink's original target file")
+	}
+}

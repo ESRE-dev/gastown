@@ -148,3 +148,133 @@ func TestEnsureBeadsConfigYAML_AddsMissingIssuePrefixKey(t *testing.T) {
 		t.Fatalf("config.yaml missing issue-prefix: %q", text)
 	}
 }
+
+// TestCreateTownRootAgentMDs_CreatesRealFiles verifies that in a fresh directory
+// both CLAUDE.md and AGENTS.md are created as regular files with identical content.
+func TestCreateTownRootAgentMDs_CreatesRealFiles(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	created, err := createTownRootAgentMDs(tmpDir)
+	if err != nil {
+		t.Fatalf("createTownRootAgentMDs: %v", err)
+	}
+	if !created {
+		t.Error("expected created=true for a fresh directory")
+	}
+
+	claudePath := filepath.Join(tmpDir, "CLAUDE.md")
+	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+
+	claudeData, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("CLAUDE.md not created: %v", err)
+	}
+	agentsData, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("AGENTS.md not created: %v", err)
+	}
+
+	if string(claudeData) != string(agentsData) {
+		t.Error("CLAUDE.md and AGENTS.md should have identical content")
+	}
+
+	// Both must be real files, not symlinks.
+	for _, path := range []string{claudePath, agentsPath} {
+		fi, err := os.Lstat(path)
+		if err != nil {
+			t.Fatalf("Lstat %s: %v", path, err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			t.Errorf("%s should be a real file, not a symlink", path)
+		}
+	}
+}
+
+// TestCreateTownRootAgentMDs_MigratesSymlink verifies that an existing AGENTS.md
+// symlink is replaced by a real file with the same content as CLAUDE.md.
+func TestCreateTownRootAgentMDs_MigratesSymlink(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Pre-create CLAUDE.md so the function won't create it anew.
+	claudePath := filepath.Join(tmpDir, "CLAUDE.md")
+	existingContent := "existing claude content\n"
+	if err := os.WriteFile(claudePath, []byte(existingContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create AGENTS.md as a symlink pointing to CLAUDE.md (old behaviour).
+	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+	if err := os.Symlink(claudePath, agentsPath); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := createTownRootAgentMDs(tmpDir)
+	if err != nil {
+		t.Fatalf("createTownRootAgentMDs: %v", err)
+	}
+	if !created {
+		t.Error("expected created=true when migrating symlink to real file")
+	}
+
+	// AGENTS.md must now be a real file, not a symlink.
+	fi, err := os.Lstat(agentsPath)
+	if err != nil {
+		t.Fatalf("AGENTS.md Lstat: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("AGENTS.md should be a real file after symlink migration")
+	}
+
+	// Content should match what the function writes (the embedded template content,
+	// not the pre-existing CLAUDE.md content which was set before the function ran).
+	agentsData, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("reading AGENTS.md: %v", err)
+	}
+	if len(agentsData) == 0 {
+		t.Error("AGENTS.md is empty after migration")
+	}
+}
+
+// TestCreateTownRootAgentMDs_PreservesExistingRealFile verifies that when both
+// CLAUDE.md and AGENTS.md already exist as real files they are not overwritten.
+func TestCreateTownRootAgentMDs_PreservesExistingRealFile(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	claudePath := filepath.Join(tmpDir, "CLAUDE.md")
+	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+
+	claudeContent := "custom claude content\n"
+	agentsContent := "custom agents content\n"
+
+	if err := os.WriteFile(claudePath, []byte(claudeContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentsPath, []byte(agentsContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := createTownRootAgentMDs(tmpDir)
+	if err != nil {
+		t.Fatalf("createTownRootAgentMDs: %v", err)
+	}
+	if created {
+		t.Error("expected created=false when both files already exist as real files")
+	}
+
+	// Existing content must not be overwritten.
+	claudeData, _ := os.ReadFile(claudePath)
+	if string(claudeData) != claudeContent {
+		t.Errorf("CLAUDE.md was overwritten; got %q, want %q", string(claudeData), claudeContent)
+	}
+	agentsData, _ := os.ReadFile(agentsPath)
+	if string(agentsData) != agentsContent {
+		t.Errorf("AGENTS.md was overwritten; got %q, want %q", string(agentsData), agentsContent)
+	}
+}

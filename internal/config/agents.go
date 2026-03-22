@@ -88,6 +88,10 @@ type AgentPresetInfo struct {
 	// Used by the seance command for session forking.
 	SupportsForkSession bool `json:"supports_fork_session,omitempty"`
 
+	// ForkFlag is the flag that enables session forking (read-only resume).
+	// Used by the seance command. E.g., "--fork-session" for Claude, "--fork" for OpenCode.
+	ForkFlag string `json:"fork_flag,omitempty"`
+
 	// NonInteractive contains settings for non-interactive mode.
 	NonInteractive *NonInteractiveConfig `json:"non_interactive,omitempty"`
 
@@ -180,8 +184,8 @@ type ACPConfig struct {
 // ACP mode constants.
 const (
 	ACPModeSubcommand = "subcommand" // Agent has ACP as subcommand (e.g., "opencode acp")
-	ACPModeNative      = "native"    // Agent is native ACP binary (e.g., "claude-agent-acp")
-	ACPModeFlag        = "flag"      // Agent uses flag to enable ACP (e.g., "gemini --acp")
+	ACPModeNative     = "native"     // Agent is native ACP binary (e.g., "claude-agent-acp")
+	ACPModeFlag       = "flag"       // Agent uses flag to enable ACP (e.g., "gemini --acp")
 )
 
 // NonInteractiveConfig contains settings for running agents non-interactively.
@@ -223,6 +227,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeStyle:         "flag",
 		SupportsHooks:       true,
 		SupportsForkSession: true,
+		ForkFlag:            "--fork-session",
 		NonInteractive:      nil, // Claude is native non-interactive
 		// Runtime defaults
 		PromptMode:             "arg",
@@ -253,11 +258,11 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			OutputFlag: "--output-format json",
 		},
 		// Runtime defaults
-		PromptMode:        "arg",
-		ConfigDir:         ".gemini",
-		HooksProvider:     "gemini",
-		HooksDir:          ".gemini",
-		HooksSettingsFile: "settings.json",
+		PromptMode:           "arg",
+		ConfigDir:            ".gemini",
+		HooksProvider:        "gemini",
+		HooksDir:             ".gemini",
+		HooksSettingsFile:    "settings.json",
 		ReadyDelayMs:         5000,
 		InstructionsFile:     "AGENTS.md",
 		EscapeCancelsRequest: true, // Gemini CLI uses Escape to abort active generation
@@ -339,12 +344,15 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			// Auto-approve all tool calls (equivalent to --dangerously-skip-permissions)
 			"OPENCODE_PERMISSION": `{"*":"allow"}`,
 		},
-		ProcessNames:        []string{"opencode", "node", "bun"}, // Runs as Node.js or Bun
-		SessionIDEnv:        "",                                  // OpenCode manages sessions internally
-		ResumeFlag:          "",                                  // No resume support yet
-		ResumeStyle:         "",
-		SupportsHooks:       true, // Uses .opencode/plugins/gastown.js
-		SupportsForkSession: false,
+		ProcessNames:         []string{"opencode", "node", "bun"}, // Runs as Node.js or Bun
+		SessionIDEnv:         "OPENCODE_SESSION_ID",               // Ready for passthrough (opencode-krh.3 tracks OpenCode-side)
+		ResumeFlag:           "--session",                         // opencode run --session <id>
+		ContinueFlag:         "--continue",                        // opencode run --continue (resumes last session)
+		ResumeStyle:          "flag",
+		SupportsHooks:        true, // Uses .opencode/plugins/gastown.js
+		SupportsForkSession:  true, // opencode run --fork (requires --continue or --session)
+		ForkFlag:             "--fork",
+		HasTurnBoundaryDrain: true, // chat.message hook in gastown.js drains mail on every user message
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "run",
 			OutputFlag: "--format json",
@@ -370,7 +378,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SessionIDEnv:        "",                  // Session IDs stored on disk, not in env
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
-		SupportsHooks:       true,  // Copilot CLI supports .github/hooks/*.json lifecycle hooks
+		SupportsHooks:       true, // Copilot CLI supports .github/hooks/*.json lifecycle hooks
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",
@@ -552,9 +560,26 @@ func ListAgentPresets() []string {
 	return names
 }
 
-// DefaultAgentPreset returns the default agent preset (Claude).
+// defaultPresetOverride holds a configurable default agent preset.
+// Set via SetDefaultAgentPreset during startup when TownSettings is loaded.
+// Zero value means AgentClaude (backward compat).
+var defaultPresetOverride AgentPreset
+
+// DefaultAgentPreset returns the configured default agent preset.
+// If SetDefaultAgentPreset has been called with a valid preset, returns that.
+// Otherwise returns AgentClaude for backward compatibility.
 func DefaultAgentPreset() AgentPreset {
+	if defaultPresetOverride != "" {
+		return defaultPresetOverride
+	}
 	return AgentClaude
+}
+
+// SetDefaultAgentPreset overrides the default agent preset.
+// Call this during startup after loading TownSettings.DefaultAgent.
+// Passing an empty string resets to the built-in default (AgentClaude).
+func SetDefaultAgentPreset(preset AgentPreset) {
+	defaultPresetOverride = preset
 }
 
 // RuntimeConfigFromPreset creates a RuntimeConfig from an agent preset.
@@ -640,11 +665,16 @@ func GetSessionIDEnvVar(agentName string) string {
 
 // GetProcessNames returns the process names used to detect if an agent is running.
 // Used by tmux.IsAgentRunning to check pane_current_command.
-// Returns ["node"] for Claude (default) if agent is not found or has no ProcessNames.
+// Falls back to the default agent preset's process names if agent is not found.
 func GetProcessNames(agentName string) []string {
 	info := GetAgentPresetByName(agentName)
 	if info == nil || len(info.ProcessNames) == 0 {
-		// Default to Claude's process names for backwards compatibility
+		// Fall back to the default agent preset's process names
+		defaultInfo := GetAgentPreset(DefaultAgentPreset())
+		if defaultInfo != nil && len(defaultInfo.ProcessNames) > 0 {
+			return defaultInfo.ProcessNames
+		}
+		// Ultimate fallback if default preset also has no process names
 		return []string{"node", "claude"}
 	}
 	return info.ProcessNames
@@ -869,12 +899,12 @@ func GetACPArgs(agentName string) []string {
 // Returns true if the RuntimeConfig has ACP configured.
 //
 // ACP can be configured in three ways:
-// 1. Native mode: { "command": "claude-agent-acp", "acp": { "mode": "native" } }
-//    The binary is already an ACP adapter, no transformation needed.
-// 2. Subcommand pattern: { "command": "opencode", "acp": { "command": "acp" } }
-//    Results in: opencode acp
-// 3. Flag pattern: { "command": "gemini", "acp": { "args": ["--acp"] } }
-//    Results in: gemini --acp
+//  1. Native mode: { "command": "claude-agent-acp", "acp": { "mode": "native" } }
+//     The binary is already an ACP adapter, no transformation needed.
+//  2. Subcommand pattern: { "command": "opencode", "acp": { "command": "acp" } }
+//     Results in: opencode acp
+//  3. Flag pattern: { "command": "gemini", "acp": { "args": ["--acp"] } }
+//     Results in: gemini --acp
 func RuntimeConfigSupportsACP(rc *RuntimeConfig) bool {
 	if rc == nil {
 		return false
@@ -907,12 +937,12 @@ func RuntimeConfigSupportsACP(rc *RuntimeConfig) bool {
 // Returns nil if the RuntimeConfig doesn't support ACP.
 //
 // ACP can be configured in three ways:
-// 1. Native mode: { "command": "claude-agent-acp", "acp": { "mode": "native" } }
-//    The binary is already an ACP adapter, no transformation needed.
-// 2. Subcommand pattern: { "command": "opencode", "acp": { "command": "acp" } }
-//    Results in: opencode acp
-// 3. Flag pattern: { "command": "gemini", "acp": { "args": ["--experimental-acp"] } }
-//    Results in: gemini --experimental-acp
+//  1. Native mode: { "command": "claude-agent-acp", "acp": { "mode": "native" } }
+//     The binary is already an ACP adapter, no transformation needed.
+//  2. Subcommand pattern: { "command": "opencode", "acp": { "command": "acp" } }
+//     Results in: opencode acp
+//  3. Flag pattern: { "command": "gemini", "acp": { "args": ["--experimental-acp"] } }
+//     Results in: gemini --experimental-acp
 func GetACPConfigFromRuntime(rc *RuntimeConfig) *ACPConfig {
 	if rc == nil {
 		return nil

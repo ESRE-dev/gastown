@@ -5,10 +5,17 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
-	t.Parallel()
+	// Cannot be parallel: modifies global default agent preset.
+	// With the && fix (qnp.1), custom TOML start commands are only used
+	// for non-Claude agents. Set default to opencode so the resolved
+	// config is non-Claude, enabling the custom command path.
+	config.SetDefaultAgentPreset(config.AgentOpenCode)
+	defer config.SetDefaultAgentPreset("")
+
 	roleCfg := &beads.RoleConfig{
 		StartCommand: "exec run --town {town} --rig {rig} --role {role}",
 	}

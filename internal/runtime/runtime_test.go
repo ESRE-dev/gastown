@@ -694,6 +694,70 @@ func TestRuntimeConfigWithMinDelay_AboveMin(t *testing.T) {
 	}
 }
 
+func TestSessionIDFromEnv_GTSessionID(t *testing.T) {
+	t.Setenv("GT_SESSION_ID", "direct-123")
+	t.Setenv("CLAUDE_SESSION_ID", "claude-456")
+	t.Setenv("GT_SESSION_ID_ENV", "")
+	t.Setenv("GT_AGENT", "")
+
+	got := SessionIDFromEnv()
+	if got != "direct-123" {
+		t.Errorf("SessionIDFromEnv() = %q, want %q (GT_SESSION_ID should take priority)", got, "direct-123")
+	}
+}
+
+func TestSessionIDFromEnv_GTSessionIDOverridesPreset(t *testing.T) {
+	t.Setenv("GT_SESSION_ID", "direct-123")
+	t.Setenv("GT_AGENT", "opencode")
+	t.Setenv("OPENCODE_SESSION_ID", "oc-456")
+	t.Setenv("GT_SESSION_ID_ENV", "")
+
+	got := SessionIDFromEnv()
+	if got != "direct-123" {
+		t.Errorf("SessionIDFromEnv() = %q, want %q (GT_SESSION_ID should beat preset)", got, "direct-123")
+	}
+}
+
+func TestSessionIDFromEnv_PresetSessionIDEnv(t *testing.T) {
+	t.Setenv("GT_AGENT", "opencode")
+	t.Setenv("OPENCODE_SESSION_ID", "oc-session-789")
+	t.Setenv("GT_SESSION_ID", "")
+	t.Setenv("GT_SESSION_ID_ENV", "")
+
+	got := SessionIDFromEnv()
+	if got != "oc-session-789" {
+		t.Errorf("SessionIDFromEnv() = %q, want %q (preset SessionIDEnv should be used)", got, "oc-session-789")
+	}
+}
+
+func TestSessionIDFromEnv_GTAgentBlocksClaudeFallback(t *testing.T) {
+	t.Setenv("GT_AGENT", "opencode")
+	t.Setenv("CLAUDE_SESSION_ID", "claude-should-not-use")
+	t.Setenv("GT_SESSION_ID", "")
+	t.Setenv("GT_SESSION_ID_ENV", "")
+	t.Setenv("OPENCODE_SESSION_ID", "")
+
+	got := SessionIDFromEnv()
+	if got == "claude-should-not-use" {
+		t.Error("SessionIDFromEnv() returned CLAUDE_SESSION_ID but GT_AGENT is set — cross-agent contamination")
+	}
+	if got != "" {
+		t.Errorf("SessionIDFromEnv() = %q, want empty string (GT_AGENT blocks Claude fallback)", got)
+	}
+}
+
+func TestSessionIDFromEnv_NoGTAgentFallsBackToClaude(t *testing.T) {
+	t.Setenv("GT_AGENT", "")
+	t.Setenv("GT_SESSION_ID", "")
+	t.Setenv("GT_SESSION_ID_ENV", "")
+	t.Setenv("CLAUDE_SESSION_ID", "claude-fallback")
+
+	got := SessionIDFromEnv()
+	if got != "claude-fallback" {
+		t.Errorf("SessionIDFromEnv() = %q, want %q (no GT_AGENT should fall back to CLAUDE_SESSION_ID)", got, "claude-fallback")
+	}
+}
+
 func TestRuntimeConfigWithMinDelay_ZeroMin(t *testing.T) {
 	rc := &config.RuntimeConfig{
 		Tmux: &config.RuntimeTmuxConfig{
