@@ -31,7 +31,7 @@ func HealthCheckWithContext(ctx context.Context, port int) error {
 		return fmt.Errorf("creating health request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
@@ -105,7 +105,7 @@ func GetSessionStatus(ctx context.Context, port int) (*SessionStatus, error) {
 		return nil, fmt.Errorf("creating status request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("session status request failed: %w", err)
 	}

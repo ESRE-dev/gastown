@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1429,6 +1430,8 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 		if found && sessionID != "" {
 			if err := opencode.NudgeViaHTTP(context.Background(), port, sessionID, message); err == nil {
 				return nil
+			} else {
+				slog.Debug("opencode HTTP nudge failed, falling back to tmux", "session", session, "err", err)
 			}
 		}
 	}
@@ -2492,6 +2495,8 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 			defer cancel()
 			if err := opencode.WaitForIdle(ctx, port); err == nil {
 				return nil
+			} else {
+				slog.Debug("opencode HTTP idle poll failed, falling back to tmux", "session", session, "err", err)
 			}
 		}
 	}
@@ -2614,6 +2619,19 @@ func (t *Tmux) IsAtPrompt(session string, rc *config.RuntimeConfig) bool {
 // Detection is agent-specific: Claude Code uses the ⏵⏵ status bar,
 // while OpenCode uses keybind hint text and spinner absence.
 func (t *Tmux) IsIdle(session string) bool {
+	// OpenCode agents: try HTTP status check first, matching WaitForIdle's pattern.
+	// HTTP provides structured "idle"/"running" status without pane scraping.
+	// If HTTP fails, fall through to the existing pane-based detection.
+	if opencode.IsOpenCodeSession(t, session) {
+		if port, ok := opencode.DiscoverPort(t, session); ok {
+			status, err := opencode.GetSessionStatus(context.Background(), port)
+			if err == nil {
+				return status.Status.Type == "idle"
+			}
+			// HTTP failed — fall through to pane scraping
+		}
+	}
+
 	lines, err := t.CapturePaneLines(session, 5)
 	if err != nil {
 		return false

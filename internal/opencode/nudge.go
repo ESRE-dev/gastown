@@ -53,7 +53,7 @@ func NudgeViaHTTP(ctx context.Context, port int, sessionID, message string) erro
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("nudge HTTP request failed: %w", err)
 	}

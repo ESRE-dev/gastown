@@ -452,13 +452,20 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// OpenCode agents: try HTTP health endpoint first (typically ready in 2-3s),
 	// falling back to pane polling if the health check fails (gastown-p6k.3).
 	if assignedPort > 0 {
-		healthCtx, healthCancel := context.WithTimeout(context.Background(), constants.ClaudeStartTimeout)
+		// Cap the health check timeout so that if it fails, the fallback
+		// pane-polling path still has most of the original timeout budget.
+		// WaitForHealthy typically completes in 2-3s; 30s is generous.
+		healthTimeout := 30 * time.Second
+		if constants.ClaudeStartTimeout < healthTimeout {
+			healthTimeout = constants.ClaudeStartTimeout / 2
+		}
+		healthCtx, healthCancel := context.WithTimeout(context.Background(), healthTimeout)
+		defer healthCancel()
 		if err := opencode.WaitForHealthy(healthCtx, assignedPort); err != nil {
 			// Health check failed — fall through to pane-based detection
 			debugSession("WaitForHealthy", err)
 			debugSession("WaitForRuntimeReady (fallback)", m.tmux.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout))
 		}
-		healthCancel()
 	} else {
 		debugSession("WaitForRuntimeReady", m.tmux.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout))
 	}
