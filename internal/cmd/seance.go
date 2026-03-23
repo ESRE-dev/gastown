@@ -215,24 +215,34 @@ func resolveSeanceCommand() (*config.AgentPresetInfo, string, error) {
 	return nil, "", fmt.Errorf("no agent supports fork session (seance requires fork support)")
 }
 
+// resolveSeanceCommandForSession looks up the agent_type from the session's
+// event payload and routes to the correct fork-capable agent. Falls back to
+// resolveSeanceCommand for old events without agent_type.
+func resolveSeanceCommandForSession(townRoot, sessionID string) (*config.AgentPresetInfo, string, error) {
+	if townRoot != "" && sessionID != "" {
+		sessions, _ := discoverSessions(townRoot)
+		for _, s := range sessions {
+			if getPayloadString(s.Payload, "session_id") == sessionID {
+				if at := getPayloadString(s.Payload, "agent_type"); at != "" {
+					preset := config.GetAgentPresetByName(at)
+					if preset != nil && preset.SupportsForkSession {
+						rc := config.RuntimeConfigFromPreset(preset.Name)
+						return preset, rc.Command, nil
+					}
+					fmt.Fprintf(os.Stderr, "Warning: session agent %q doesn't support fork; using default\n", at)
+				}
+				break
+			}
+		}
+	}
+	return resolveSeanceCommand() // fallback for old events without agent_type
+}
+
 func runSeanceTalk(sessionID, prompt string) error {
-	// Resolve the agent that supports fork session
-	preset, agentCmd, err := resolveSeanceCommand()
-	if err != nil {
-		return err
-	}
-
-	isClaude := preset.Name == config.AgentClaude
-
-	// Claude-specific: clean up any orphaned symlinks from previous interrupted sessions
-	if isClaude {
-		cleanupOrphanedSessionSymlinks()
-	}
-
-	// Find workspace root (needed for prefix resolution and Claude session symlinks)
+	// Find workspace root (needed for prefix resolution, agent-type lookup, and session symlinks)
 	townRoot, _ := workspace.FindFromCwd()
 
-	// Resolve prefix to full session ID if needed
+	// Resolve prefix to full session ID if needed (before agent lookup)
 	if len(sessionID) < 36 {
 		sessionID = strings.TrimSuffix(sessionID, "…")
 		sessionID = strings.TrimSuffix(sessionID, "...")
@@ -243,6 +253,20 @@ func runSeanceTalk(sessionID, prompt string) error {
 			}
 			sessionID = resolved
 		}
+	}
+
+	// Resolve the agent that created this session (falls back to default agent
+	// for old events without agent_type).
+	preset, agentCmd, err := resolveSeanceCommandForSession(townRoot, sessionID)
+	if err != nil {
+		return err
+	}
+
+	isClaude := preset.Name == config.AgentClaude
+
+	// Claude-specific: clean up any orphaned symlinks from previous interrupted sessions
+	if isClaude {
+		cleanupOrphanedSessionSymlinks()
 	}
 
 	fmt.Printf("%s Summoning session %s...\n\n", style.Bold.Render("🔮"), sessionID)

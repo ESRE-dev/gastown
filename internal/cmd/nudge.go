@@ -187,8 +187,9 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 			return fmt.Errorf("--mode=wait-idle requires a Gas Town workspace")
 		}
 		// Check if the target agent supports prompt-based idle detection.
-		// WaitForIdle uses Claude Code's prompt pattern (❯) and status bar (⏵⏵).
-		// Non-Claude agents (Gemini, Codex, etc.) have no ReadyPromptPrefix,
+		// WaitForIdle uses agent-specific idle patterns (Claude: ❯/⏵⏵,
+		// OpenCode: "/ commands" keybind hints). Agents without a configured
+		// ReadyPromptPrefix (Gemini, Codex, etc.) have no idle detection,
 		// so WaitForIdle produces false positives — it sees no busy indicator
 		// and matches stale prompt characters in the pane buffer. (GH#gt-5ey3)
 		// Degrade to queue mode for agents without prompt-based detection.

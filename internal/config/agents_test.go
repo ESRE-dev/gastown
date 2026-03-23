@@ -970,8 +970,8 @@ func TestOpenCodeProviderDefaults(t *testing.T) {
 
 	// Test defaultReadyDelayMs for opencode
 	delay := defaultReadyDelayMs("opencode")
-	if delay != 8000 {
-		t.Errorf("defaultReadyDelayMs(opencode) = %d, want 8000", delay)
+	if delay != 5000 {
+		t.Errorf("defaultReadyDelayMs(opencode) = %d, want 5000", delay)
 	}
 
 	// Test defaultProcessNames for opencode (from preset: opencode, node, bun)

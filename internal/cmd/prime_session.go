@@ -248,7 +248,11 @@ func emitSessionEvent(ctx RoleContext) {
 	}
 
 	// Emit the event
-	payload := events.SessionPayload(sessionID, actor, topic, ctx.WorkDir)
+	agentType := os.Getenv("GT_AGENT")
+	if agentType == "" {
+		agentType = string(config.DefaultAgentPreset())
+	}
+	payload := events.SessionPayload(sessionID, actor, topic, ctx.WorkDir, agentType)
 	_ = events.LogFeed(events.TypeSessionStart, actor, payload)
 }
 

@@ -133,6 +133,7 @@ type SessionCost struct {
 	Role    string  `json:"role"`
 	Rig     string  `json:"rig,omitempty"`
 	Worker  string  `json:"worker,omitempty"`
+	Agent   string  `json:"agent,omitempty"`
 	Cost    float64 `json:"cost_usd"`
 	Running bool    `json:"running"`
 }
@@ -251,15 +252,8 @@ func runLiveCosts() error {
 			continue
 		}
 
-		// Extract cost from Claude transcript
-		cost, err := extractCostFromWorkDir(workDir)
-		if err != nil {
-			if costsVerbose {
-				fmt.Fprintf(os.Stderr, "[costs] could not extract cost for %s: %v\n", sess, err)
-			}
-			// Still include the session with zero cost
-			cost = 0.0
-		}
+		// Extract cost based on agent type (OpenCode vs Claude)
+		cost, agentName := extractCostForSession(t, sess, workDir)
 
 		// Check if an agent appears to be running
 		running := t.IsAgentRunning(sess)
@@ -269,6 +263,7 @@ func runLiveCosts() error {
 			Role:    role,
 			Rig:     rig,
 			Worker:  worker,
+			Agent:   agentName,
 			Cost:    cost,
 			Running: running,
 		})
@@ -811,6 +806,38 @@ func extractCostFromWorkDir(workDir string) (float64, error) {
 	}
 
 	return calculateCost(usage), nil
+}
+
+// extractCostForSession dispatches cost extraction based on the agent type
+// running in a tmux session. Reads GT_AGENT from the session's environment
+// to determine whether to use OpenCode's SQLite DB or Claude's JSONL transcripts.
+func extractCostForSession(t *tmux.Tmux, sess, workDir string) (float64, string) {
+	agentName, _ := t.GetEnvironment(sess, "GT_AGENT")
+	agentName = strings.ToLower(agentName)
+
+	switch agentName {
+	case string(config.AgentOpenCode):
+		cost, err := agentlog.OpenCodeSessionCost(workDir)
+		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] opencode cost extraction failed for %s: %v\n", sess, err)
+			}
+			return 0.0, agentName
+		}
+		return cost, agentName
+	default:
+		if workDir == "" {
+			return 0.0, agentName
+		}
+		cost, err := extractCostFromWorkDir(workDir)
+		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] cost extraction failed for %s: %v\n", sess, err)
+			}
+			return 0.0, agentName
+		}
+		return cost, agentName
+	}
 }
 
 // getTmuxSessionWorkDir gets the current working directory of a tmux session.

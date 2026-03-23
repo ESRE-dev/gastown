@@ -363,7 +363,8 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		HooksProvider:     "opencode",
 		HooksDir:          ".opencode/plugins",
 		HooksSettingsFile: "gastown.js",
-		ReadyDelayMs:      8000,
+		ReadyPromptPrefix: "/ commands", // Keybind hint text visible when OpenCode TUI is idle
+		ReadyDelayMs:      5000,         // Timeout cap; prompt-based polling ("/ commands") fires earlier
 		InstructionsFile:  "AGENTS.md",
 		// ACP support
 		ACP: &ACPConfig{

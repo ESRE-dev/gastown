@@ -830,48 +830,51 @@ func buildRestartCommandWithOpts(sessionName string, opts buildRestartCommandOpt
 			currentAgent = val
 		}
 	}
+	// Resolve runtime command AND config together — we need the config both for
+	// the agent-specific --continue flag and for environment exports below.
 	var runtimeCmd string
+	var runtimeConfig *config.RuntimeConfig
 	if currentAgent != "" {
-		var err error
-		runtimeCmd, err = config.GetRuntimeCommandWithPromptAndAgentOverride(rigPath, beacon, currentAgent)
+		rc, _, err := config.ResolveAgentConfigWithOverride(townRoot, rigPath, currentAgent)
 		if err != nil {
 			return "", fmt.Errorf("resolving agent config: %w", err)
 		}
+		runtimeCmd = rc.BuildCommandWithPrompt(beacon)
+		runtimeConfig = rc
 	} else if simpleRole != "" {
 		// Preserve role_agents model selection across self-handoff by resolving
 		// runtime command via role-aware config (instead of default-agent lookup).
-		runtimeCmd = config.ResolveRoleAgentConfig(simpleRole, townRoot, rigPath).BuildCommandWithPrompt(beacon)
+		rc := config.ResolveRoleAgentConfig(simpleRole, townRoot, rigPath)
+		runtimeCmd = rc.BuildCommandWithPrompt(beacon)
+		runtimeConfig = rc
 	} else {
-		runtimeCmd = config.GetRuntimeCommandWithPrompt(rigPath, beacon)
+		rc := config.ResolveAgentConfig(townRoot, rigPath)
+		runtimeCmd = rc.BuildCommandWithPrompt(beacon)
+		runtimeConfig = rc
 	}
 
 	// Add --continue flag to resume the most recent session.
-	// Note: runtimeCmd starts with the command name (e.g., "claude --settings ..."),
-	// not "exec claude" — the "exec" prefix is added later in the Sprintf.
+	// Uses the agent preset's ContinueFlag and Command so this works for
+	// any agent (claude, opencode, copilot, etc.), not just "claude".
 	if opts.ContinueSession {
-		runtimeCmd = strings.Replace(runtimeCmd, "claude ", "claude --continue ", 1)
+		provider := runtimeConfig.Provider
+		if provider == "" {
+			provider = string(config.DefaultAgentPreset())
+		}
+		if preset := config.GetAgentPresetByName(provider); preset != nil && preset.ContinueFlag != "" {
+			cmd := runtimeConfig.Command
+			if cmd == "" {
+				cmd = preset.Command
+			}
+			runtimeCmd = strings.Replace(runtimeCmd, cmd+" ", cmd+" "+preset.ContinueFlag+" ", 1)
+		}
 	}
 
-	// Build environment exports - role vars first, then Claude vars
+	// Build environment exports - role vars first, then agent env vars.
+	// runtimeConfig was already resolved above — reuse it.
 	var exports []string
 	var agentEnv map[string]string // agent config Env (rc.toml [agents.X.env])
 	if gtRole != "" {
-		// When GT_AGENT is set, resolve config with the override so we pick up
-		// the active agent's env (e.g., NODE_OPTIONS from [agents.X.env]).
-		// Otherwise, fall back to role-based resolution.
-		var runtimeConfig *config.RuntimeConfig
-		if currentAgent != "" {
-			rc, _, err := config.ResolveAgentConfigWithOverride(townRoot, rigPath, currentAgent)
-			if err == nil {
-				runtimeConfig = rc
-			} else {
-				runtimeConfig = config.ResolveRoleAgentConfig(simpleRole, townRoot, rigPath)
-			}
-		} else if simpleRole != "" {
-			runtimeConfig = config.ResolveRoleAgentConfig(simpleRole, townRoot, rigPath)
-		} else {
-			runtimeConfig = config.ResolveAgentConfig(townRoot, rigPath)
-		}
 		agentEnv = runtimeConfig.Env
 		exports = append(exports, "GT_ROLE="+gtRole)
 		exports = append(exports, "BD_ACTOR="+gtRole)

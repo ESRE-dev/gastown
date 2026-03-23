@@ -965,29 +965,35 @@ Skips automatically if this week's rollup was already sent.
 
 [[steps]]
 id = "costs-digest"
-title = "Aggregate daily costs [DISABLED]"
+title = "Aggregate daily costs"
 needs = ["compact-report"]
 description = """
-**⚠️ DISABLED** - Skip this step entirely.
+**DAILY DIGEST** - Aggregate yesterday's session cost log entries into a
+permanent daily digest bead.
 
-Cost tracking is temporarily disabled because Claude Code does not expose
-session costs in a way that can be captured programmatically.
+`gt costs record` writes to `~/.gt/costs.jsonl` for both Claude and OpenCode
+sessions. This step aggregates those entries into a single daily cost report.
 
-**Why disabled:**
-- The `gt costs` command uses tmux capture-pane to find costs
-- Claude Code displays costs in the TUI status bar, not in scrollback
-- All sessions show $0.00 because capture-pane can't see TUI chrome
-- The infrastructure is sound but has no data source
+**Step 1: Check if digest is needed**
+```bash
+# Preview yesterday's cost entries (dry run)
+gt costs digest --yesterday --dry-run
+```
 
-**What we need from Claude Code:**
-- Stop hook env var (e.g., `$CLAUDE_SESSION_COST`)
-- Or queryable file/API endpoint
+If output shows "No session cost entries found", skip to Step 3.
 
-**Re-enable when:** Claude Code exposes cost data via API or environment.
+**Step 2: Create the digest**
+```bash
+gt costs digest --yesterday
+```
 
-See: GH#24, gt-7awfj
+This reads entries from `~/.gt/costs.jsonl` for yesterday's date, aggregates
+by role and rig, and creates a permanent "Cost Report YYYY-MM-DD" bead.
+Idempotent — skips if the digest bead already exists for that date.
 
-**Exit criteria:** Skip this step - proceed to next."""
+**Step 3: Done**
+
+**Exit criteria:** Yesterday's cost entries aggregated (or none to aggregate)."""
 
 [[steps]]
 id = "patrol-digest"

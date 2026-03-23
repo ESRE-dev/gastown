@@ -233,7 +233,7 @@ func TestMassDeathPayload_NoCause(t *testing.T) {
 }
 
 func TestSessionPayload_Full(t *testing.T) {
-	p := SessionPayload("uuid-123", "gastown/crew/tester", "fixing bugs", "/some/dir")
+	p := SessionPayload("uuid-123", "gastown/crew/tester", "fixing bugs", "/some/dir", "opencode")
 	if p["session_id"] != "uuid-123" {
 		t.Errorf("session_id = %v", p["session_id"])
 	}
@@ -246,14 +246,20 @@ func TestSessionPayload_Full(t *testing.T) {
 	if p["cwd"] != "/some/dir" {
 		t.Errorf("cwd = %v", p["cwd"])
 	}
+	if p["agent_type"] != "opencode" {
+		t.Errorf("agent_type = %v", p["agent_type"])
+	}
 }
 
 func TestSessionPayload_Minimal(t *testing.T) {
-	p := SessionPayload("uuid-456", "deacon", "", "")
+	p := SessionPayload("uuid-456", "deacon", "", "", "")
 	if _, ok := p["topic"]; ok {
 		t.Error("expected no topic key when empty")
 	}
 	if _, ok := p["cwd"]; ok {
 		t.Error("expected no cwd key when empty")
+	}
+	if _, ok := p["agent_type"]; ok {
+		t.Error("expected no agent_type key when empty")
 	}
 }

@@ -55,9 +55,9 @@ const (
 	TypeMassDeath    = "mass_death"    // Multiple sessions died in short window
 
 	// Witness patrol events
-	TypePatrolStarted   = "patrol_started"
-	TypePolecatChecked  = "polecat_checked"
-	TypePolecatNudged   = "polecat_nudged"
+	TypePatrolStarted    = "patrol_started"
+	TypePolecatChecked   = "polecat_checked"
+	TypePolecatNudged    = "polecat_nudged"
 	TypeEscalationSent   = "escalation_sent"
 	TypeEscalationAcked  = "escalation_acked"
 	TypeEscalationClosed = "escalation_closed"
@@ -328,7 +328,7 @@ func MassDeathPayload(count int, window string, sessions []string, possibleCause
 // role: Gas Town role (e.g., "gastown/crew/joe", "deacon")
 // topic: What the session is working on
 // cwd: Working directory
-func SessionPayload(sessionID, role, topic, cwd string) map[string]interface{} {
+func SessionPayload(sessionID, role, topic, cwd, agentType string) map[string]interface{} {
 	p := map[string]interface{}{
 		"session_id": sessionID,
 		"role":       role,
@@ -339,6 +339,9 @@ func SessionPayload(sessionID, role, topic, cwd string) map[string]interface{} {
 	}
 	if cwd != "" {
 		p["cwd"] = cwd
+	}
+	if agentType != "" {
+		p["agent_type"] = agentType
 	}
 	return p
 }

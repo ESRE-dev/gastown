@@ -2468,12 +2468,20 @@ const DefaultReadyPromptPrefix = "❯ "
 // Returns nil if the agent becomes idle within the timeout.
 // Returns an error if the timeout expires while the agent is still busy.
 func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
+	// Resolve per-session agent configuration for idle detection.
+	// Done once before the polling loop to avoid repeated tmux env lookups.
 	promptPrefix := DefaultReadyPromptPrefix
+	agentName, _ := t.GetEnvironment(session, "GT_AGENT")
+	preset := config.GetAgentPresetByName(agentName)
+	if preset != nil && preset.ReadyPromptPrefix != "" {
+		promptPrefix = preset.ReadyPromptPrefix
+	}
 	prefix := strings.TrimSpace(promptPrefix)
+	isOpenCode := preset != nil && preset.Name == config.AgentOpenCode
 
 	// Require 2 consecutive idle polls to filter out transient states.
 	// During inter-tool-call gaps (~500ms), the prompt may briefly appear
-	// in the pane buffer while Claude Code is still actively working.
+	// in the pane buffer while the agent is still actively working.
 	// Two polls 200ms apart (400ms window) confirms genuine idle state.
 	consecutiveIdle := 0
 	const requiredConsecutive = 2
@@ -2493,17 +2501,26 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 			continue
 		}
 
-		// Check the status bar first: if "esc to interrupt" is visible,
-		// Claude Code is actively running a tool call — NOT idle,
-		// regardless of whether the prompt prefix is also visible.
+		// Phase 1: Check for busy indicators (agent-specific).
 		statusBarBusy := false
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.Contains(trimmed, "\u23F5\u23F5") || strings.Contains(trimmed, "⏵⏵") {
-				if strings.Contains(trimmed, "esc to interrupt") {
+		if isOpenCode {
+			// OpenCode: spinner blocks (■) indicate active generation.
+			for _, line := range lines {
+				if strings.Contains(line, "■") {
 					statusBarBusy = true
+					break
 				}
-				break
+			}
+		} else {
+			// Claude Code: status bar with ⏵⏵ + "esc to interrupt" = busy.
+			for _, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if strings.Contains(trimmed, "\u23F5\u23F5") || strings.Contains(trimmed, "⏵⏵") {
+					if strings.Contains(trimmed, "esc to interrupt") {
+						statusBarBusy = true
+					}
+					break
+				}
 			}
 		}
 		if statusBarBusy {
@@ -2512,9 +2529,7 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 			continue
 		}
 
-		// Scan all captured lines for the prompt prefix.
-		// Claude Code renders a status bar below the prompt line,
-		// so the prompt may not be the last non-empty line.
+		// Phase 2: Check for idle prompt/indicator using agent-specific prefix.
 		promptFound := false
 		for _, line := range lines {
 			trimmed := strings.TrimSpace(line)
@@ -2563,25 +2578,32 @@ func (t *Tmux) IsAtPrompt(session string, rc *config.RuntimeConfig) bool {
 	return false
 }
 
-// IsIdle checks whether a session is currently at the idle input prompt (❯)
+// IsIdle checks whether a session is currently at the idle input prompt
 // with no active work in progress.
 // Returns true if idle, false if the agent is busy or the check fails.
 // This is a point-in-time snapshot, not a poll.
 //
-// Detection strategy: check the Claude Code status bar (bottom line of the
-// pane starting with ⏵⏵). When the agent is actively working, the status
-// bar contains "esc to interrupt". When idle, it does not.
+// Detection is agent-specific: Claude Code uses the ⏵⏵ status bar,
+// while OpenCode uses keybind hint text and spinner absence.
 func (t *Tmux) IsIdle(session string) bool {
 	lines, err := t.CapturePaneLines(session, 5)
 	if err != nil {
 		return false
 	}
 
+	// Resolve per-session agent type for agent-specific detection.
+	agentName, _ := t.GetEnvironment(session, "GT_AGENT")
+	preset := config.GetAgentPresetByName(agentName)
+
+	if preset != nil && preset.Name == config.AgentOpenCode {
+		return isOpenCodeIdle(lines)
+	}
+
+	// Claude Code: check status bar for ⏵⏵.
+	// When busy: "⏵⏵ bypass permissions on ... · esc to interrupt"
+	// When idle: "⏵⏵ bypass permissions on (shift+tab to cycle) · 1 file ..."
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// The status bar starts with ⏵⏵ (double play symbols).
-		// When the agent is busy: "⏵⏵ bypass permissions on ... · esc to interrupt"
-		// When the agent is idle: "⏵⏵ bypass permissions on (shift+tab to cycle) · 1 file ..."
 		if strings.Contains(trimmed, "⏵⏵") || strings.Contains(trimmed, "\u23F5\u23F5") {
 			if strings.Contains(trimmed, "esc to interrupt") {
 				return false
@@ -2590,6 +2612,21 @@ func (t *Tmux) IsIdle(session string) bool {
 		}
 	}
 	return false
+}
+
+// isOpenCodeIdle checks if an OpenCode TUI session is idle by looking for
+// keybind hint text (visible when idle) and absence of spinner blocks (visible when busy).
+func isOpenCodeIdle(lines []string) bool {
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "/ commands") {
+			return true // keybind hints visible = idle
+		}
+		if strings.Contains(trimmed, "■") {
+			return false // spinner blocks = busy
+		}
+	}
+	return false // unknown state = not idle (safe default)
 }
 
 // GetSessionInfo returns detailed information about a session.

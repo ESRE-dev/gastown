@@ -1607,10 +1607,10 @@ func (r *Router) notifyRecipient(msg *Message) error {
 		priority := nudgePriorityForMailPriority(msg.Priority)
 
 		// Wait-idle-first delivery: try direct nudge if the agent is idle,
-		// fall back to cooperative queue if busy. WaitForIdle requires 2
-		// consecutive idle polls (prompt visible + no "esc to interrupt"
-		// in the status bar) to distinguish genuine idle from brief
-		// inter-tool-call gaps. See: https://github.com/steveyegge/gastown/issues/2032
+		// fall back to cooperative queue if busy. WaitForIdle uses agent-specific
+		// idle detection (Claude: ⏵⏵ status bar + ❯ prompt; OpenCode: "/ commands"
+		// keybind hints) with 2 consecutive idle polls to distinguish genuine idle
+		// from brief inter-tool-call gaps. See: https://github.com/steveyegge/gastown/issues/2032
 		waitErr := r.tmux.WaitForIdle(sessionID, timeout)
 		if waitErr == nil {
 			// Agent is idle — deliver directly for immediate wakeup.

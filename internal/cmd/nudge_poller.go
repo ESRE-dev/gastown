@@ -104,11 +104,11 @@ func runNudgePoller(cmd *cobra.Command, args []string) error {
 			}
 
 			// Best-effort idle check: try to wait for the agent to become idle.
-			// WaitForIdle is designed for Claude Code's ⏵⏵ status bar and ❯ prompt.
-			// For other agents (Gemini, Codex, etc.) it will always time out because
-			// their TUI doesn't match Claude's idle patterns. In that case we drain
-			// anyway — delivering a nudge mid-work is better than never delivering it.
-			// The poll interval (10s) provides natural rate limiting.
+			// WaitForIdle detects agent-specific idle patterns (Claude: ⏵⏵ status
+			// bar + ❯ prompt; OpenCode: "/ commands" keybind hints). If detection
+			// times out we drain anyway — delivering a nudge mid-work is better
+			// than never delivering it. The poll interval (10s) provides natural
+			// rate limiting.
 			_ = t.WaitForIdle(sessionName, idleTimeout)
 
 			// Drain and inject.
