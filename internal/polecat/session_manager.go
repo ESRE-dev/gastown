@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/opencode"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -30,7 +31,6 @@ func debugSession(context string, err error) {
 		fmt.Fprintf(os.Stderr, "[session-debug] %s: %v\n", context, err)
 	}
 }
-
 
 // Session errors
 var (
@@ -305,6 +305,16 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 			return fmt.Errorf("building startup command: %w", err)
 		}
 	}
+	// Inject --port flag for OpenCode agents so each instance binds to a
+	// unique HTTP server port (BasePort + slot). This enables HTTP-based
+	// nudge delivery, idle detection, and readiness checks (gastown-p6k).
+	var assignedPort int
+	if runtimeConfig.ResolvedAgent == string(config.AgentOpenCode) {
+		slot := m.polecatSlot(polecat)
+		assignedPort = opencode.AssignPort(slot)
+		command = opencode.InjectPortFlag(command, assignedPort)
+	}
+
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
 		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
@@ -341,6 +351,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}
 	if polecatGitBranch != "" {
 		envVarsToInject["GT_BRANCH"] = polecatGitBranch
+	}
+	if assignedPort > 0 {
+		envVarsToInject[opencode.PortEnvKey] = fmt.Sprintf("%d", assignedPort)
 	}
 	command = config.PrependEnv(command, envVarsToInject)
 
@@ -404,6 +417,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		debugSession("SetEnvironment GT_PANE_ID", m.tmux.SetEnvironment(sessionID, "GT_PANE_ID", paneID))
 	}
 
+	// Persist OpenCode HTTP port in tmux session table so nudge, idle-detect,
+	// and readiness components can discover it via GetEnvironment (gastown-p6k).
+	if assignedPort > 0 {
+		debugSession("SetEnvironment "+opencode.PortEnvKey, m.tmux.SetEnvironment(sessionID, opencode.PortEnvKey, fmt.Sprintf("%d", assignedPort)))
+	}
+
 	// Hook the issue to the polecat if provided via --issue flag
 	if opts.Issue != "" {
 		agentID := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
@@ -429,7 +448,20 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Wait for runtime to be fully ready at the prompt (not just started).
 	// Uses prompt-based polling for agents with ReadyPromptPrefix (e.g., Claude "❯ "),
 	// falling back to ReadyDelayMs sleep for agents without prompt detection.
-	debugSession("WaitForRuntimeReady", m.tmux.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout))
+	//
+	// OpenCode agents: try HTTP health endpoint first (typically ready in 2-3s),
+	// falling back to pane polling if the health check fails (gastown-p6k.3).
+	if assignedPort > 0 {
+		healthCtx, healthCancel := context.WithTimeout(context.Background(), constants.ClaudeStartTimeout)
+		if err := opencode.WaitForHealthy(healthCtx, assignedPort); err != nil {
+			// Health check failed — fall through to pane-based detection
+			debugSession("WaitForHealthy", err)
+			debugSession("WaitForRuntimeReady (fallback)", m.tmux.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout))
+		}
+		healthCancel()
+	} else {
+		debugSession("WaitForRuntimeReady", m.tmux.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout))
+	}
 
 	// Handle fallback nudges for non-hook agents.
 	// See StartupFallbackInfo in runtime package for the fallback matrix.

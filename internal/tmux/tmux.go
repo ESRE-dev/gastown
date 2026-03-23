@@ -18,6 +18,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/opencode"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
@@ -1419,6 +1420,19 @@ type NudgeOpts struct {
 // NudgeSessionWithOpts is like NudgeSession but accepts delivery options.
 // See NudgeOpts for available options.
 func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) error {
+	// OpenCode agents: try HTTP delivery first (gastown-p6k.1).
+	// HTTP is faster (<100ms vs ~1.5s) and more reliable than tmux send-keys.
+	// If HTTP fails, fall through to the existing tmux path silently.
+	if opencode.IsOpenCodeSession(t, session) {
+		port, found := opencode.DiscoverPort(t, session)
+		sessionID, _ := t.GetEnvironment(session, opencode.SessionIDEnvKey)
+		if found && sessionID != "" {
+			if err := opencode.NudgeViaHTTP(context.Background(), port, sessionID, message); err == nil {
+				return nil
+			}
+		}
+	}
+
 	// Serialize nudges to this session to prevent interleaving.
 	// Use a timed lock to avoid permanent blocking if a previous nudge hung.
 	if !acquireNudgeLock(session, nudgeLockTimeout) {
@@ -2468,6 +2482,20 @@ const DefaultReadyPromptPrefix = "❯ "
 // Returns nil if the agent becomes idle within the timeout.
 // Returns an error if the timeout expires while the agent is still busy.
 func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
+	// OpenCode agents: try HTTP status polling first (gastown-p6k.2).
+	// HTTP provides structured "idle"/"running" status without pane scraping.
+	// If HTTP fails, fall through to the existing pane-based detection.
+	if opencode.IsOpenCodeSession(t, session) {
+		port, found := opencode.DiscoverPort(t, session)
+		if found {
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			if err := opencode.WaitForIdle(ctx, port); err == nil {
+				return nil
+			}
+		}
+	}
+
 	// Resolve per-session agent configuration for idle detection.
 	// Done once before the polling loop to avoid repeated tmux env lookups.
 	promptPrefix := DefaultReadyPromptPrefix

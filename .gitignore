@@ -83,7 +83,7 @@ __pycache__/
 *.db
 
 # Symlinked repos
-opencode
+/opencode
 
 # Scratch directory for investigation notes
 scratch/
