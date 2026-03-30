@@ -2,6 +2,9 @@
 dolt/
 dolt-access.lock
 
+# JSONL backup files (Dolt auto-push is the backup mechanism, not git)
+backup/
+
 # Runtime files
 bd.sock
 bd.sock.startlock
