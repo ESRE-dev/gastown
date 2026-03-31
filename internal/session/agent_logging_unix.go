@@ -13,7 +13,7 @@ import (
 )
 
 // ActivateAgentLogging spawns a detached `gt agent-log` process to stream the
-// session's Claude Code JSONL conversation log to VictoriaLogs.
+// session's agent conversation log to VictoriaLogs via the --agent flag.
 //
 // The process is started with Setsid so it survives the parent's exit.
 // A PID file at /tmp/gt-agentlog-<session>.pid ensures only one watcher
@@ -28,7 +28,7 @@ import (
 // carries the same run.id for waterfall correlation. Pass "" to omit.
 //
 // Opt-in: caller must check GT_LOG_AGENT_OUTPUT=true before calling.
-func ActivateAgentLogging(sessionID, workDir, runID string) error {
+func ActivateAgentLogging(sessionID, workDir, runID, agentName string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolving executable: %w", err)
@@ -47,14 +47,7 @@ func ActivateAgentLogging(sessionID, workDir, runID string) error {
 	// filtering out older sessions from unrelated Claude instances.
 	since := time.Now().Add(-60 * time.Second).UTC().Format(time.RFC3339)
 
-	args := []string{"agent-log",
-		"--session", sessionID,
-		"--work-dir", workDir,
-		"--since", since,
-	}
-	if runID != "" {
-		args = append(args, "--run-id", runID)
-	}
+	args := buildAgentLogArgs(sessionID, workDir, since, runID, agentName)
 	cmd := exec.Command(exe, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	env := append(os.Environ(),
@@ -87,6 +80,22 @@ func ActivateAgentLogging(sessionID, workDir, runID string) error {
 // Safe to call even when no watcher is running (no-op in that case).
 func DeactivateAgentLogging(sessionID string) {
 	killPreviousAgentLogger(agentLogPIDFile(sessionID))
+}
+
+// buildAgentLogArgs constructs the argument slice for the gt agent-log subprocess.
+func buildAgentLogArgs(sessionID, workDir, since, runID, agentName string) []string {
+	args := []string{"agent-log",
+		"--session", sessionID,
+		"--work-dir", workDir,
+		"--since", since,
+	}
+	if runID != "" {
+		args = append(args, "--run-id", runID)
+	}
+	if agentName != "" {
+		args = append(args, "--agent", agentName)
+	}
+	return args
 }
 
 // agentLogPIDFile returns the PID file path for a session's agent-log watcher.

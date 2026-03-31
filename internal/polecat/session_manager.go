@@ -536,7 +536,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Stream polecat's Claude Code JSONL conversation log to VictoriaLogs (opt-in).
 	if os.Getenv("GT_LOG_AGENT_OUTPUT") == "true" && os.Getenv("GT_OTEL_LOGS_URL") != "" {
-		if err := session.ActivateAgentLogging(sessionID, workDir, runID); err != nil {
+		if err := session.ActivateAgentLogging(sessionID, workDir, runID, runtimeConfig.ResolvedAgent); err != nil {
 			// Non-fatal: observability failure must never block agent startup.
 			debugSession("ActivateAgentLogging", err)
 		}
