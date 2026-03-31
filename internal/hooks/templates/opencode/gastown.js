@@ -1,6 +1,8 @@
 // Gas Town OpenCode plugin: hooks SessionStart/Compaction via events,
 // injects gt prime context into system prompt, drains inter-agent mail
 // at turn boundaries, and propagates GasTown env vars to bash tool calls.
+// TODO(test-debt): No JS test harness yet — add integration tests for
+// cost-recording idempotency and env-var propagation (see bead gastown-eyx.4).
 export const GasTown = async ({ $, directory }) => {
   const role = (process.env.GT_ROLE || "").toLowerCase();
   const autonomousRoles = new Set(["polecat", "witness", "refinery", "deacon"]);
@@ -53,12 +55,13 @@ export const GasTown = async ({ $, directory }) => {
         primePromise = loadPrime();
       }
       if (event?.type === "session.deleted") {
-        const sessionID = event.properties?.info?.id || "default";
-        await recordCostOnce(sessionID);
+        // Use fixed key — only one session per plugin instance, and both
+        // session.deleted and server.instance.disposed must share the same
+        // key so the Set dedup ensures exactly-once cost recording.
+        await recordCostOnce("session");
       }
       if (event?.type === "server.instance.disposed") {
-        const sessionID = event.properties?.directory || "disposed";
-        await recordCostOnce(sessionID);
+        await recordCostOnce("session");
       }
     },
     "experimental.chat.system.transform": async (input, output) => {
