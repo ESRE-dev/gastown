@@ -5,6 +5,7 @@ export const GasTown = async ({ $, directory }) => {
   const role = (process.env.GT_ROLE || "").toLowerCase();
   const autonomousRoles = new Set(["polecat", "witness", "refinery", "deacon"]);
   let didInit = false;
+  const costRecordedSessions = new Set();
 
   // Promise-based context loading ensures the system transform hook can
   // await the result even if session.created hasn't resolved yet.
@@ -33,6 +34,12 @@ export const GasTown = async ({ $, directory }) => {
     return context;
   };
 
+  const recordCostOnce = async (sessionId) => {
+    if (!sessionId || costRecordedSessions.has(sessionId)) return;
+    costRecordedSessions.add(sessionId);
+    await captureRun("gt costs record");
+  };
+
   return {
     event: async ({ event }) => {
       if (event?.type === "session.created") {
@@ -46,10 +53,12 @@ export const GasTown = async ({ $, directory }) => {
         primePromise = loadPrime();
       }
       if (event?.type === "session.deleted") {
-        const sessionID = event.properties?.info?.id;
-        if (sessionID) {
-          await captureRun(`gt costs record --session ${sessionID}`);
-        }
+        const sessionID = event.properties?.info?.id || "default";
+        await recordCostOnce(sessionID);
+      }
+      if (event?.type === "server.instance.disposed") {
+        const sessionID = event.properties?.directory || "disposed";
+        await recordCostOnce(sessionID);
       }
     },
     "experimental.chat.system.transform": async (input, output) => {
@@ -66,6 +75,10 @@ export const GasTown = async ({ $, directory }) => {
       }
     },
     "experimental.session.compacting": async ({ sessionID }, output) => {
+      if (role === "crew") {
+        await captureRun("gt handoff --cycle --reason compaction");
+        return;
+      }
       const roleDisplay = role || "unknown";
       output.context.push(`
 ## Gas Town Multi-Agent System
@@ -102,6 +115,22 @@ export const GasTown = async ({ $, directory }) => {
       if (input.tool !== "bash" || !output.args?.command) return;
 
       const cmd = output.args.command;
+
+      // Patrol formula guards: block persistent molecule commands for
+      // witness/deacon/refinery roles (must use wisps instead).
+      const patrolRestrictedRoles = new Set(["witness", "deacon", "refinery"]);
+      if (patrolRestrictedRoles.has(role)) {
+        const patrolPatterns = [
+          /bd\s+mol\s+pour\s+.*patrol/i,
+          /mol-witness/i,
+          /mol-deacon/i,
+          /mol-refinery/i,
+        ];
+        if (patrolPatterns.some((p) => p.test(cmd))) {
+          output.args.command = `printf 'BLOCKED by GasTown guard: patrol formula commands are restricted for this role'; exit 1`;
+          return;
+        }
+      }
 
       // pr-workflow guards (Claude: Bash(gh pr create*), Bash(git checkout -b*), etc.)
       const prWorkflow = ["gh pr create", "git checkout -b", "git switch -c"];
