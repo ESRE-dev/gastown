@@ -251,17 +251,17 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 // This enables a single read-modify-write cycle instead of sequential independent updates,
 // eliminating the race condition where concurrent writers could overwrite each other's fields.
 type beadFieldUpdates struct {
-	Dispatcher       string // Agent that dispatched the work
-	Args             string // Natural language instructions
+	Dispatcher       string   // Agent that dispatched the work
+	Args             string   // Natural language instructions
 	Vars             []string // Formula variables (key=value pairs)
-	AttachedMolecule string // Wisp root ID
-	AttachedFormula  string // Formula name (e.g., "mol-polecat-work") for inline step display
-	NoMerge          bool   // Skip merge queue on completion
-	Mode             string // Execution mode: "" (normal) or "ralph"
-	ConvoyID         string // Convoy bead ID (e.g., "hq-cv-abc")
-	MergeStrategy    string // Convoy merge strategy: "direct", "mr", "local"
-	ConvoyOwned      bool   // Convoy has gt:owned label (caller-managed lifecycle)
-	FormulaVars      string // Newline-separated key=value pairs for formula template substitution
+	AttachedMolecule string   // Wisp root ID
+	AttachedFormula  string   // Formula name (e.g., "mol-polecat-work") for inline step display
+	NoMerge          bool     // Skip merge queue on completion
+	Mode             string   // Execution mode: "" (normal) or "ralph"
+	ConvoyID         string   // Convoy bead ID (e.g., "hq-cv-abc")
+	MergeStrategy    string   // Convoy merge strategy: "direct", "mr", "local"
+	ConvoyOwned      bool     // Convoy has gt:owned label (caller-managed lifecycle)
+	FormulaVars      string   // Newline-separated key=value pairs for formula template substitution
 }
 
 // storeFieldsInBead performs a single read-modify-write to update all attachment fields
@@ -444,7 +444,7 @@ func ensureAgentReady(sessionName string) error {
 	// ensureAgentReady lacks rig/town context — only has the session name.
 	effectiveName := agentName
 	if effectiveName == "" {
-		effectiveName = "claude" // Default sessions without GT_AGENT are Claude
+		effectiveName = string(config.DefaultAgentPreset())
 	}
 	var rc *config.RuntimeConfig
 	if preset := config.GetAgentPreset(config.AgentPreset(effectiveName)); preset != nil {
@@ -696,7 +696,7 @@ func InstantiateFormulaOnBead(ctx context.Context, formulaName, beadID, title, h
 		if err := BdCmd("cook", formulaName).
 			Dir(formulaWorkDir).
 			WithGTRoot(townRoot).
-				Run(); err != nil {
+			Run(); err != nil {
 			// Retry with embedded formula
 			resolvedFormula, formulaCleanup = resolveFormulaToTempFile(formulaName)
 			if formulaCleanup != nil {
@@ -1142,7 +1142,7 @@ func loadRigCommandVars(townRoot, rig string) []string {
 // warning on startup that needs to be acknowledged via tmux.
 func shouldAcceptPermissionWarning(agentName string) bool {
 	if agentName == "" {
-		agentName = "claude" // Default sessions without GT_AGENT are Claude
+		agentName = string(config.DefaultAgentPreset())
 	}
 	preset := config.GetAgentPresetByName(agentName)
 	if preset == nil {

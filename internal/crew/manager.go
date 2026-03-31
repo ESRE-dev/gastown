@@ -754,13 +754,13 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		}
 
 		// Determine agent preset for resume flag.
-		// Try worker-level agent config first, fall back to "claude".
+		// Try worker-level agent config first, fall back to configured default.
 		agentName := opts.AgentOverride
 		if agentName == "" {
 			if rc := config.ResolveWorkerAgentConfig(name, townRoot, m.rig.Path); rc != nil && rc.Provider != "" {
 				agentName = rc.Provider
 			} else {
-				agentName = "claude"
+				agentName = string(config.DefaultAgentPreset())
 			}
 		}
 		resumeArgs, err := buildResumeArgs(agentName, opts.ResumeSessionID)
@@ -862,7 +862,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 			if rc := config.ResolveWorkerAgentConfig(name, townRoot, m.rig.Path); rc != nil && rc.Provider != "" {
 				agentName = rc.Provider
 			} else {
-				agentName = "claude"
+				agentName = string(config.DefaultAgentPreset())
 			}
 		}
 		preset := config.GetAgentPresetByName(agentName)

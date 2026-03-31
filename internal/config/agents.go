@@ -676,7 +676,7 @@ func GetProcessNames(agentName string) []string {
 			return defaultInfo.ProcessNames
 		}
 		// Ultimate fallback if default preset also has no process names
-		return []string{"node", "claude"}
+		return []string{string(DefaultAgentPreset())}
 	}
 	return info.ProcessNames
 }
@@ -726,8 +726,11 @@ func ResolveProcessNames(agentName, command string) []string {
 		return []string{cmdBase}
 	}
 
-	// No command provided, agent not in registry — Claude defaults
-	return []string{"node", "claude"}
+	// No command provided, agent not in registry — fall back to default preset
+	if defaultInfo, ok := globalRegistry.Agents[string(DefaultAgentPreset())]; ok && len(defaultInfo.ProcessNames) > 0 {
+		return defaultInfo.ProcessNames
+	}
+	return []string{string(DefaultAgentPreset())}
 }
 
 // MergeWithPreset applies preset defaults to a RuntimeConfig.

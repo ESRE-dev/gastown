@@ -1792,3 +1792,78 @@ func TestDefaultAgentPreset_ConcurrentReadsOnly(t *testing.T) {
 
 	wg.Wait()
 }
+
+// TestAgentResolutionRespectsDefaultPreset verifies that fallback paths in
+// GetProcessNames and ResolveProcessNames use DefaultAgentPreset() instead
+// of hardcoded "claude". Cannot be parallel: mutates package-level global.
+func TestAgentResolutionRespectsDefaultPreset(t *testing.T) {
+	defer SetDefaultAgentPreset("")
+
+	tests := []struct {
+		name              string
+		defaultPreset     AgentPreset
+		wantProcessNames  []string
+		wantResolveNames  []string
+		wantDefaultString string
+	}{
+		{
+			name:              "GT_AGENT unset falls back to claude",
+			defaultPreset:     "",
+			wantProcessNames:  []string{"node", "claude"},
+			wantResolveNames:  []string{"node", "claude"},
+			wantDefaultString: "claude",
+		},
+		{
+			name:              "GT_AGENT=opencode uses opencode process names",
+			defaultPreset:     AgentOpenCode,
+			wantProcessNames:  []string{"opencode", "node", "bun"},
+			wantResolveNames:  []string{"opencode", "node", "bun"},
+			wantDefaultString: "opencode",
+		},
+		{
+			name:              "GT_AGENT=gemini uses gemini process names",
+			defaultPreset:     AgentGemini,
+			wantProcessNames:  []string{"gemini"},
+			wantResolveNames:  []string{"gemini"},
+			wantDefaultString: "gemini",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			SetDefaultAgentPreset(tt.defaultPreset)
+
+			// DefaultAgentPreset().String() should return expected agent name.
+			got := string(DefaultAgentPreset())
+			if got != tt.wantDefaultString {
+				t.Errorf("string(DefaultAgentPreset()) = %q, want %q", got, tt.wantDefaultString)
+			}
+
+			// GetProcessNames for an unknown agent should fall through to the
+			// default preset's process names, not hardcoded "claude".
+			gotNames := GetProcessNames("nonexistent-agent-xyz")
+			if len(gotNames) != len(tt.wantProcessNames) {
+				t.Errorf("GetProcessNames(unknown) = %v, want %v", gotNames, tt.wantProcessNames)
+			} else {
+				for i := range gotNames {
+					if gotNames[i] != tt.wantProcessNames[i] {
+						t.Errorf("GetProcessNames(unknown)[%d] = %q, want %q", i, gotNames[i], tt.wantProcessNames[i])
+					}
+				}
+			}
+
+			// ResolveProcessNames with no command and unknown agent should use
+			// DefaultAgentPreset() name, not hardcoded "claude".
+			gotResolve := ResolveProcessNames("nonexistent-agent-xyz", "")
+			if len(gotResolve) != len(tt.wantResolveNames) {
+				t.Errorf("ResolveProcessNames(unknown, \"\") = %v, want %v", gotResolve, tt.wantResolveNames)
+			} else {
+				for i := range gotResolve {
+					if gotResolve[i] != tt.wantResolveNames[i] {
+						t.Errorf("ResolveProcessNames(unknown, \"\")[%d] = %q, want %q", i, gotResolve[i], tt.wantResolveNames[i])
+					}
+				}
+			}
+		})
+	}
+}
