@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1016,4 +1017,150 @@ func TestOpenCodeSessionCost_DBNotFound(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for nonexistent DB, got nil")
 	}
+}
+
+// ── openCodeDBPath tests ──────────────────────────────────────────────────────
+
+func TestOpenCodeDBPath(t *testing.T) {
+	// Cannot be parallel: subtests use t.Setenv which modifies process env.
+	tests := []struct {
+		name     string
+		files    map[string]time.Duration // filename → age (negative = in the past)
+		wantBase string                   // expected basename of returned path
+		wantErr  bool
+	}{
+		{
+			name:     "single default db",
+			files:    map[string]time.Duration{"opencode.db": 0},
+			wantBase: "opencode.db",
+		},
+		{
+			name:     "single channel db",
+			files:    map[string]time.Duration{"opencode-dev.db": 0},
+			wantBase: "opencode-dev.db",
+		},
+		{
+			name: "multiple channel dbs picks most recent",
+			files: map[string]time.Duration{
+				"opencode-dev.db":  -2 * time.Hour,
+				"opencode-beta.db": -1 * time.Hour,
+				"opencode-prod.db": 0,
+			},
+			wantBase: "opencode-prod.db",
+		},
+		{
+			name:    "no dbs returns error",
+			files:   nil,
+			wantErr: true,
+		},
+		{
+			name: "channel db takes priority over default",
+			files: map[string]time.Duration{
+				"opencode.db":     0,
+				"opencode-dev.db": 0,
+			},
+			wantBase: "opencode-dev.db",
+		},
+		{
+			name:     "arbitrary channel name",
+			files:    map[string]time.Duration{"opencode-my-custom-channel.db": 0},
+			wantBase: "opencode-my-custom-channel.db",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			ocDir := filepath.Join(tmpDir, openCodeDataSubdir)
+			if err := os.MkdirAll(ocDir, 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+
+			now := time.Now()
+			for name, age := range tt.files {
+				p := filepath.Join(ocDir, name)
+				if err := os.WriteFile(p, []byte{}, 0o644); err != nil {
+					t.Fatalf("write %s: %v", name, err)
+				}
+				mtime := now.Add(age)
+				if err := os.Chtimes(p, mtime, mtime); err != nil {
+					t.Fatalf("chtimes %s: %v", name, err)
+				}
+			}
+
+			t.Setenv("XDG_DATA_HOME", tmpDir)
+
+			got, err := openCodeDBPath()
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if filepath.Base(got) != tt.wantBase {
+				t.Errorf("got basename %q, want %q", filepath.Base(got), tt.wantBase)
+			}
+		})
+	}
+}
+
+// ── mostRecentFile tests ──────────────────────────────────────────────────────
+
+func TestMostRecentFile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns most recent", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+
+		old := filepath.Join(tmpDir, "old.db")
+		newer := filepath.Join(tmpDir, "newer.db")
+		if err := os.WriteFile(old, []byte{}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(newer, []byte{}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		pastTime := time.Now().Add(-time.Hour)
+		if err := os.Chtimes(old, pastTime, pastTime); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := mostRecentFile([]string{old, newer})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != newer {
+			t.Errorf("got %q, want %q", got, newer)
+		}
+	})
+
+	t.Run("skips unreadable files", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+
+		good := filepath.Join(tmpDir, "good.db")
+		if err := os.WriteFile(good, []byte{}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := mostRecentFile([]string{"/nonexistent/bad.db", good})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != good {
+			t.Errorf("got %q, want %q", got, good)
+		}
+	})
+
+	t.Run("all unreadable returns error", func(t *testing.T) {
+		t.Parallel()
+		_, err := mostRecentFile([]string{"/nonexistent/a.db", "/nonexistent/b.db"})
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
 }

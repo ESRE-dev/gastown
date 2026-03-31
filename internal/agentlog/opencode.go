@@ -78,7 +78,10 @@ func (a *OpenCodeAdapter) Watch(ctx context.Context, sessionID, workDir string, 
 }
 
 // openCodeDBPath returns the path to OpenCode's SQLite database.
-// Respects XDG_DATA_HOME; falls back to ~/.local/share/opencode/opencode.db.
+// It checks for channel-specific databases (opencode-*.db) first, falling
+// back to the default opencode.db. When multiple channel DBs exist, the
+// most recently modified one wins.
+// Respects XDG_DATA_HOME; falls back to ~/.local/share/opencode/.
 func openCodeDBPath() (string, error) {
 	dataDir := os.Getenv("XDG_DATA_HOME")
 	if dataDir == "" {
@@ -88,11 +91,44 @@ func openCodeDBPath() (string, error) {
 		}
 		dataDir = filepath.Join(home, ".local", "share")
 	}
-	dbPath := filepath.Join(dataDir, openCodeDataSubdir, openCodeDBName)
+	ocDir := filepath.Join(dataDir, openCodeDataSubdir)
+
+	// Look for channel-specific DBs (e.g., opencode-dev.db, opencode-beta.db).
+	matches, _ := filepath.Glob(filepath.Join(ocDir, "opencode-*.db"))
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return mostRecentFile(matches)
+	}
+
+	// No channel-specific DB found; fall back to the default.
+	dbPath := filepath.Join(ocDir, openCodeDBName)
 	if _, err := os.Stat(dbPath); err != nil {
-		return "", fmt.Errorf("db not found at %s: %w", dbPath, err)
+		return "", fmt.Errorf("no opencode database found in %s: %w", ocDir, err)
 	}
 	return dbPath, nil
+}
+
+// mostRecentFile returns the path with the latest modification time.
+// Files that cannot be stat'd are skipped.
+func mostRecentFile(paths []string) (string, error) {
+	var best string
+	var bestTime time.Time
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(bestTime) {
+			best = p
+			bestTime = info.ModTime()
+		}
+	}
+	if best == "" {
+		return "", fmt.Errorf("no valid db files found")
+	}
+	return best, nil
 }
 
 // openCodeOpen opens the OpenCode SQLite database in read-only mode.
