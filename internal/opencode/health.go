@@ -87,17 +87,28 @@ func WaitForHealthy(ctx context.Context, port int) error {
 	}
 }
 
-// SessionStatus represents the status of an OpenCode session.
-type SessionStatus struct {
-	SessionID string `json:"sessionID"`
-	Status    struct {
-		Type string `json:"type"` // "idle", "running", etc.
-	} `json:"status"`
+// StatusInfo represents a single session's status from OpenCode's GET /session/status.
+// The "retry" variant carries additional fields beyond Type.
+type StatusInfo struct {
+	Type    string `json:"type"`              // "idle", "busy", or "retry"
+	Attempt int    `json:"attempt,omitempty"` // retry-only: attempt number
+	Message string `json:"message,omitempty"` // retry-only: retry reason
+	Next    int64  `json:"next,omitempty"`    // retry-only: next retry timestamp
 }
 
-// GetSessionStatus queries the current session status via the HTTP API.
-// Returns the status or an error if the request fails.
-func GetSessionStatus(ctx context.Context, port int) (*SessionStatus, error) {
+// IsIdle returns true if the session is idle.
+func (s StatusInfo) IsIdle() bool {
+	return s.Type == "idle"
+}
+
+// IsBusy returns true if the session is busy or retrying.
+func (s StatusInfo) IsBusy() bool {
+	return s.Type == "busy" || s.Type == "retry"
+}
+
+// GetSessionStatus fetches the full status map from OpenCode.
+// Returns a map of session ID → StatusInfo. An empty map means all sessions are idle.
+func GetSessionStatus(ctx context.Context, port int) (map[string]StatusInfo, error) {
 	url := fmt.Sprintf("http://127.0.0.1:%d/session/status", port)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -115,17 +126,21 @@ func GetSessionStatus(ctx context.Context, port int) (*SessionStatus, error) {
 		return nil, fmt.Errorf("session status returned status %d", resp.StatusCode)
 	}
 
-	var status SessionStatus
+	var status map[string]StatusInfo
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 		return nil, fmt.Errorf("decoding session status: %w", err)
 	}
 
-	return &status, nil
+	return status, nil
 }
 
 // WaitForIdle polls the session status endpoint until the agent reports idle
-// or the context is cancelled. This replaces pane-buffer regex matching with
+// or the context is canceled. This replaces pane-buffer regex matching with
 // structured status detection (gastown-p6k.2).
+//
+// A poll is considered idle when the status map is empty (all sessions idle)
+// or every session in the map has type "idle". Sessions absent from the map
+// are idle by definition.
 //
 // Uses 2 consecutive idle polls (matching tmux.WaitForIdle's strategy) to
 // filter transient idle states during inter-tool-call gaps.
@@ -145,7 +160,7 @@ func WaitForIdle(ctx context.Context, port int) error {
 		default:
 		}
 
-		status, err := GetSessionStatus(ctx, port)
+		statusMap, err := GetSessionStatus(ctx, port)
 		if err != nil {
 			consecutiveIdle = 0
 			select {
@@ -156,7 +171,15 @@ func WaitForIdle(ctx context.Context, port int) error {
 			continue
 		}
 
-		if status.Status.Type == "idle" {
+		allIdle := true
+		for _, info := range statusMap {
+			if !info.IsIdle() {
+				allIdle = false
+				break
+			}
+		}
+
+		if allIdle {
 			consecutiveIdle++
 			if consecutiveIdle >= requiredConsecutive {
 				return nil

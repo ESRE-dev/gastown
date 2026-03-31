@@ -285,55 +285,132 @@ func TestWaitForHealthy(t *testing.T) {
 }
 
 func TestGetSessionStatus(t *testing.T) {
-	t.Run("idle_session", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/session/status" {
-				http.NotFound(w, r)
+	tests := []struct {
+		name       string
+		response   string
+		statusCode int
+		wantErr    bool
+		wantMap    map[string]StatusInfo
+	}{
+		{
+			name:       "busy_session",
+			response:   `{"abc-123": {"type": "busy"}}`,
+			statusCode: http.StatusOK,
+			wantMap:    map[string]StatusInfo{"abc-123": {Type: "busy"}},
+		},
+		{
+			name:       "idle_session_present",
+			response:   `{"abc-123": {"type": "idle"}}`,
+			statusCode: http.StatusOK,
+			wantMap:    map[string]StatusInfo{"abc-123": {Type: "idle"}},
+		},
+		{
+			name:       "empty_map",
+			response:   `{}`,
+			statusCode: http.StatusOK,
+			wantMap:    map[string]StatusInfo{},
+		},
+		{
+			name:       "multiple_sessions",
+			response:   `{"sess-1": {"type": "busy"}, "sess-2": {"type": "idle"}}`,
+			statusCode: http.StatusOK,
+			wantMap: map[string]StatusInfo{
+				"sess-1": {Type: "busy"},
+				"sess-2": {Type: "idle"},
+			},
+		},
+		{
+			name:       "retry_variant",
+			response:   `{"sess-1": {"type": "retry", "attempt": 3, "message": "rate limited", "next": 1700000000}}`,
+			statusCode: http.StatusOK,
+			wantMap: map[string]StatusInfo{
+				"sess-1": {Type: "retry", Attempt: 3, Message: "rate limited", Next: 1700000000},
+			},
+		},
+		{
+			name:       "non_200_status",
+			response:   `{}`,
+			statusCode: http.StatusInternalServerError,
+			wantErr:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/session/status" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.statusCode)
+				fmt.Fprint(w, tt.response)
+			}))
+			defer srv.Close()
+
+			port := extractPort(t, srv.URL)
+			ctx := context.Background()
+			got, err := GetSessionStatus(ctx, port)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("GetSessionStatus() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"sessionID":"abc-123","status":{"type":"idle"}}`)
-		}))
-		defer srv.Close()
+			if len(got) != len(tt.wantMap) {
+				t.Fatalf("GetSessionStatus() returned %d entries, want %d", len(got), len(tt.wantMap))
+			}
+			for k, wantInfo := range tt.wantMap {
+				gotInfo, ok := got[k]
+				if !ok {
+					t.Errorf("GetSessionStatus() missing key %q", k)
+					continue
+				}
+				if gotInfo.Type != wantInfo.Type {
+					t.Errorf("key %q: Type = %q, want %q", k, gotInfo.Type, wantInfo.Type)
+				}
+				if gotInfo.Attempt != wantInfo.Attempt {
+					t.Errorf("key %q: Attempt = %d, want %d", k, gotInfo.Attempt, wantInfo.Attempt)
+				}
+				if gotInfo.Message != wantInfo.Message {
+					t.Errorf("key %q: Message = %q, want %q", k, gotInfo.Message, wantInfo.Message)
+				}
+				if gotInfo.Next != wantInfo.Next {
+					t.Errorf("key %q: Next = %d, want %d", k, gotInfo.Next, wantInfo.Next)
+				}
+			}
+		})
+	}
+}
 
-		port := extractPort(t, srv.URL)
-		ctx := context.Background()
-		status, err := GetSessionStatus(ctx, port)
-		if err != nil {
-			t.Fatalf("GetSessionStatus() error: %v", err)
-		}
-		if status.SessionID != "abc-123" {
-			t.Errorf("SessionID = %q, want %q", status.SessionID, "abc-123")
-		}
-		if status.Status.Type != "idle" {
-			t.Errorf("Status.Type = %q, want %q", status.Status.Type, "idle")
-		}
-	})
-
-	t.Run("running_session", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"sessionID":"def-456","status":{"type":"running"}}`)
-		}))
-		defer srv.Close()
-
-		port := extractPort(t, srv.URL)
-		ctx := context.Background()
-		status, err := GetSessionStatus(ctx, port)
-		if err != nil {
-			t.Fatalf("GetSessionStatus() error: %v", err)
-		}
-		if status.Status.Type != "running" {
-			t.Errorf("Status.Type = %q, want %q", status.Status.Type, "running")
-		}
-	})
+func TestStatusInfoMethods(t *testing.T) {
+	tests := []struct {
+		name     string
+		info     StatusInfo
+		wantIdle bool
+		wantBusy bool
+	}{
+		{name: "idle", info: StatusInfo{Type: "idle"}, wantIdle: true, wantBusy: false},
+		{name: "busy", info: StatusInfo{Type: "busy"}, wantIdle: false, wantBusy: true},
+		{name: "retry", info: StatusInfo{Type: "retry", Attempt: 2}, wantIdle: false, wantBusy: true},
+		{name: "unknown_type", info: StatusInfo{Type: "unknown"}, wantIdle: false, wantBusy: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.info.IsIdle(); got != tt.wantIdle {
+				t.Errorf("IsIdle() = %v, want %v", got, tt.wantIdle)
+			}
+			if got := tt.info.IsBusy(); got != tt.wantBusy {
+				t.Errorf("IsBusy() = %v, want %v", got, tt.wantBusy)
+			}
+		})
+	}
 }
 
 func TestWaitForIdle(t *testing.T) {
-	t.Run("immediately idle", func(t *testing.T) {
+	t.Run("immediately_idle_empty_map", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"sessionID":"abc","status":{"type":"idle"}}`)
+			fmt.Fprint(w, `{}`)
 		}))
 		defer srv.Close()
 
@@ -346,10 +423,26 @@ func TestWaitForIdle(t *testing.T) {
 		}
 	})
 
-	t.Run("timeout while busy", func(t *testing.T) {
+	t.Run("immediately_idle_session_absent", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"sessionID":"abc","status":{"type":"running"}}`)
+			fmt.Fprint(w, `{"other-session": {"type": "idle"}}`)
+		}))
+		defer srv.Close()
+
+		port := extractPort(t, srv.URL)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := WaitForIdle(ctx, port); err != nil {
+			t.Fatalf("WaitForIdle() unexpected error: %v", err)
+		}
+	})
+
+	t.Run("timeout_while_busy", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"abc": {"type": "busy"}}`)
 		}))
 		defer srv.Close()
 
@@ -363,15 +456,32 @@ func TestWaitForIdle(t *testing.T) {
 		}
 	})
 
-	t.Run("becomes idle after busy", func(t *testing.T) {
+	t.Run("timeout_while_retry", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"abc": {"type": "retry", "attempt": 1, "message": "rate limit", "next": 1700000000}}`)
+		}))
+		defer srv.Close()
+
+		port := extractPort(t, srv.URL)
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		err := WaitForIdle(ctx, port)
+		if err == nil {
+			t.Fatal("expected timeout error for retry status")
+		}
+	})
+
+	t.Run("becomes_idle_after_busy", func(t *testing.T) {
 		callCount := 0
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			callCount++
 			w.Header().Set("Content-Type", "application/json")
 			if callCount <= 3 {
-				fmt.Fprint(w, `{"sessionID":"abc","status":{"type":"running"}}`)
+				fmt.Fprint(w, `{"abc": {"type": "busy"}}`)
 			} else {
-				fmt.Fprint(w, `{"sessionID":"abc","status":{"type":"idle"}}`)
+				fmt.Fprint(w, `{}`)
 			}
 		}))
 		defer srv.Close()
@@ -386,6 +496,31 @@ func TestWaitForIdle(t *testing.T) {
 		// Should have polled at least 3 (busy) + 2 (consecutive idle) = 5 times
 		if callCount < 5 {
 			t.Errorf("expected at least 5 calls, got %d", callCount)
+		}
+	})
+
+	t.Run("multiple_sessions_one_busy", func(t *testing.T) {
+		callCount := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			w.Header().Set("Content-Type", "application/json")
+			if callCount <= 2 {
+				fmt.Fprint(w, `{"sess-1": {"type": "idle"}, "sess-2": {"type": "busy"}}`)
+			} else {
+				fmt.Fprint(w, `{"sess-1": {"type": "idle"}}`)
+			}
+		}))
+		defer srv.Close()
+
+		port := extractPort(t, srv.URL)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := WaitForIdle(ctx, port); err != nil {
+			t.Fatalf("WaitForIdle() unexpected error: %v", err)
+		}
+		if callCount < 4 {
+			t.Errorf("expected at least 4 calls, got %d", callCount)
 		}
 	})
 }

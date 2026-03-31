@@ -2486,7 +2486,7 @@ const DefaultReadyPromptPrefix = "❯ "
 // Returns an error if the timeout expires while the agent is still busy.
 func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 	// OpenCode agents: try HTTP status polling first (gastown-p6k.2).
-	// HTTP provides structured "idle"/"running" status without pane scraping.
+	// HTTP provides structured "idle"/"busy"/"retry" status without pane scraping.
 	// If HTTP fails, fall through to the existing pane-based detection.
 	if opencode.IsOpenCodeSession(t, session) {
 		port, found := opencode.DiscoverPort(t, session)
@@ -2620,13 +2620,18 @@ func (t *Tmux) IsAtPrompt(session string, rc *config.RuntimeConfig) bool {
 // while OpenCode uses keybind hint text and spinner absence.
 func (t *Tmux) IsIdle(session string) bool {
 	// OpenCode agents: try HTTP status check first, matching WaitForIdle's pattern.
-	// HTTP provides structured "idle"/"running" status without pane scraping.
+	// HTTP provides structured "idle"/"busy"/"retry" status without pane scraping.
 	// If HTTP fails, fall through to the existing pane-based detection.
 	if opencode.IsOpenCodeSession(t, session) {
 		if port, ok := opencode.DiscoverPort(t, session); ok {
 			status, err := opencode.GetSessionStatus(context.Background(), port)
 			if err == nil {
-				return status.Status.Type == "idle"
+				for _, info := range status {
+					if !info.IsIdle() {
+						return false
+					}
+				}
+				return true
 			}
 			// HTTP failed — fall through to pane scraping
 		}
