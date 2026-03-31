@@ -8,6 +8,8 @@ This file exists for compatibility with tools that look for AGENTS.md.
 
 Full context is injected by `gt prime` at session start.
 
+`/Users/EHMKIE/Code/gastown/opencode` is just there for reference. IT MUST NOT BE TOUCHED.
+
 <!-- beads-agent-instructions-v2 -->
 
 ---
